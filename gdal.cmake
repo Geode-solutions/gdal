@@ -49,6 +49,15 @@ option(CSHARP_MONO "Whether to force the C# compiler to be Mono" OFF)
 # this file is populated only be scripts/install_bash_completions.cmake.in
 install(CODE "file(REMOVE \"${PROJECT_BINARY_DIR}/install_manifest_extra.txt\")")
 
+if(APPLE)
+    set(OS_RPATH "@executable_path")
+else()
+    set(OS_RPATH "$ORIGIN")
+endif()
+set(CMAKE_MACOSX_RPATH ON)
+set(CMAKE_INSTALL_RPATH "${OS_RPATH}")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
+
 # ######################################################################################################################
 # Detect available warning flags
 
