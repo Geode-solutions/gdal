@@ -503,7 +503,7 @@ endif ()
 
 gdal_check_package(SQLite3 "Enable SQLite3 support (used by SQLite/Spatialite, GPKG, Rasterlite, MBTiles, etc.)"
                    CAN_DISABLE RECOMMENDED)
-if (SQLite3_FOUND)
+if (GDAL_USE_SQLITE3 AND SQLite3_FOUND)
   if (NOT DEFINED SQLite3_HAS_COLUMN_METADATA)
     message(FATAL_ERROR "missing SQLite3_HAS_COLUMN_METADATA")
   endif ()
