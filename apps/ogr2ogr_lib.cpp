@@ -633,7 +633,7 @@ static std::unique_ptr<OGRGeometry> LoadGeometry(const std::string &osDS,
     if (!osSQL.empty())
         poDS->ReleaseResultSet(poLyr);
 
-    return poMP;
+    return std::unique_ptr<OGRGeometry>{poMP.release()};
 }
 
 /************************************************************************/
