@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -71,12 +55,13 @@ class GDALOverviewDataset final : public GDALDataset
     GDALOverviewBand *m_poMaskBand = nullptr;
 
     static void Rescale(char **&papszMD, const char *pszItem, double dfRatio,
-                        double dfDefaultVal);
+                        double dfDefaultVal, double dfPreShift = 0,
+                        double dfPostShift = 0);
 
   protected:
     CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                     GDALDataType, int, int *, GSpacing, GSpacing, GSpacing,
-                     GDALRasterIOExtraArg *psExtraArg) override;
+                     GDALDataType, int, BANDMAP_TYPE, GSpacing, GSpacing,
+                     GSpacing, GDALRasterIOExtraArg *psExtraArg) override;
 
   public:
     GDALOverviewDataset(GDALDataset *poMainDS, int nOvrLevel,
@@ -84,7 +69,7 @@ class GDALOverviewDataset final : public GDALDataset
     ~GDALOverviewDataset() override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
@@ -200,6 +185,14 @@ GDALOverviewDataset::GDALOverviewDataset(GDALDataset *poMainDSIn,
     nBands = poMainDS->GetRasterCount();
     for (int i = 0; i < nBands; ++i)
     {
+        if (poOvrDS)
+        {
+            // Check that all overview bands belong to the same dataset
+            auto poOvrBand =
+                GetOverviewEx(poMainDS->GetRasterBand(i + 1), nOvrLevel);
+            if (poOvrBand->GetDataset() != poOvrDS)
+                poOvrDS = nullptr;
+        }
         SetBand(i + 1, new GDALOverviewBand(this, i + 1));
     }
 
@@ -223,9 +216,6 @@ GDALOverviewDataset::GDALOverviewDataset(GDALDataset *poMainDSIn,
         poDriver->SetDescription(poMainDS->GetDriver()->GetDescription());
         poDriver->SetMetadata(poMainDS->GetDriver()->GetMetadata());
     }
-
-    if (poOvrDS)
-        poOvrDS->SetEnableOverviews(false);
 
     SetDescription(poMainDS->GetDescription());
 
@@ -271,9 +261,6 @@ int GDALOverviewDataset::CloseDependentDatasets()
 {
     bool bRet = false;
 
-    if (poOvrDS)
-        poOvrDS->SetEnableOverviews(true);
-
     if (poMainDS)
     {
         for (int i = 0; i < nBands; ++i)
@@ -305,13 +292,11 @@ int GDALOverviewDataset::CloseDependentDatasets()
 /*      appropriate arguments.                                          */
 /************************************************************************/
 
-CPLErr GDALOverviewDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
-                                      int nXSize, int nYSize, void *pData,
-                                      int nBufXSize, int nBufYSize,
-                                      GDALDataType eBufType, int nBandCount,
-                                      int *panBandMap, GSpacing nPixelSpace,
-                                      GSpacing nLineSpace, GSpacing nBandSpace,
-                                      GDALRasterIOExtraArg *psExtraArg)
+CPLErr GDALOverviewDataset::IRasterIO(
+    GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize, int nYSize,
+    void *pData, int nBufXSize, int nBufYSize, GDALDataType eBufType,
+    int nBandCount, BANDMAP_TYPE panBandMap, GSpacing nPixelSpace,
+    GSpacing nLineSpace, GSpacing nBandSpace, GDALRasterIOExtraArg *psExtraArg)
 
 {
     // Try to pass the request to the most appropriate overview dataset.
@@ -328,12 +313,16 @@ CPLErr GDALOverviewDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
 
     // In case the overview bands are really linked to a dataset, then issue
     // the request to that dataset.
-    if (nOvrLevel != -1 && poOvrDS != nullptr)
+    if (poOvrDS != nullptr)
     {
-        return poOvrDS->RasterIO(eRWFlag, nXOff, nYOff, nXSize, nYSize, pData,
-                                 nBufXSize, nBufYSize, eBufType, nBandCount,
-                                 panBandMap, nPixelSpace, nLineSpace,
-                                 nBandSpace, psExtraArg);
+        const bool bEnabledOverviews = poOvrDS->AreOverviewsEnabled();
+        poOvrDS->SetEnableOverviews(false);
+        CPLErr eErr = poOvrDS->RasterIO(eRWFlag, nXOff, nYOff, nXSize, nYSize,
+                                        pData, nBufXSize, nBufYSize, eBufType,
+                                        nBandCount, panBandMap, nPixelSpace,
+                                        nLineSpace, nBandSpace, psExtraArg);
+        poOvrDS->SetEnableOverviews(bEnabledOverviews);
+        return eErr;
     }
 
     GDALProgressFunc pfnProgressGlobal = psExtraArg->pfnProgress;
@@ -380,23 +369,17 @@ const OGRSpatialReference *GDALOverviewDataset::GetSpatialRef() const
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GDALOverviewDataset::GetGeoTransform(double *padfTransform)
+CPLErr GDALOverviewDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    double adfGeoTransform[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-    if (poMainDS->GetGeoTransform(adfGeoTransform) != CE_None)
+    if (poMainDS->GetGeoTransform(gt) != CE_None)
         return CE_Failure;
 
-    adfGeoTransform[1] *=
+    const double dfOvrXRatio =
         static_cast<double>(poMainDS->GetRasterXSize()) / nRasterXSize;
-    adfGeoTransform[2] *=
+    const double dfOvrYRatio =
         static_cast<double>(poMainDS->GetRasterYSize()) / nRasterYSize;
-    adfGeoTransform[4] *=
-        static_cast<double>(poMainDS->GetRasterXSize()) / nRasterXSize;
-    adfGeoTransform[5] *=
-        static_cast<double>(poMainDS->GetRasterYSize()) / nRasterYSize;
-
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt.Rescale(dfOvrXRatio, dfOvrYRatio);
 
     return CE_None;
 }
@@ -451,13 +434,18 @@ const GDAL_GCP *GDALOverviewDataset::GetGCPs()
 /*                             Rescale()                                */
 /************************************************************************/
 
+/* static */
 void GDALOverviewDataset::Rescale(char **&papszMD, const char *pszItem,
-                                  double dfRatio, double dfDefaultVal)
+                                  double dfRatio, double dfDefaultVal,
+                                  double dfPreShift /*= 0*/,
+                                  double dfPostShift /*= 0*/)
 {
     double dfVal = CPLAtofM(CSLFetchNameValueDef(
-        papszMD, pszItem, CPLSPrintf("%.18g", dfDefaultVal)));
+        papszMD, pszItem, CPLSPrintf("%.17g", dfDefaultVal)));
+    dfVal += dfPreShift;
     dfVal *= dfRatio;
-    papszMD = CSLSetNameValue(papszMD, pszItem, CPLSPrintf("%.18g", dfVal));
+    dfVal += dfPostShift;
+    papszMD = CSLSetNameValue(papszMD, pszItem, CPLSPrintf("%.17g", dfVal));
 }
 
 /************************************************************************/
@@ -483,18 +471,20 @@ char **GDALOverviewDataset::GetMetadata(const char *pszDomain)
             return papszMD_RPC;
         papszMD_RPC = CSLDuplicate(papszMD);
 
-        Rescale(papszMD_RPC, RPC_LINE_OFF,
-                static_cast<double>(nRasterYSize) / poMainDS->GetRasterYSize(),
-                0.0);
-        Rescale(papszMD_RPC, RPC_LINE_SCALE,
-                static_cast<double>(nRasterYSize) / poMainDS->GetRasterYSize(),
-                1.0);
-        Rescale(papszMD_RPC, RPC_SAMP_OFF,
-                static_cast<double>(nRasterXSize) / poMainDS->GetRasterXSize(),
-                0.0);
-        Rescale(papszMD_RPC, RPC_SAMP_SCALE,
-                static_cast<double>(nRasterXSize) / poMainDS->GetRasterXSize(),
-                1.0);
+        const double dfXRatio =
+            static_cast<double>(nRasterXSize) / poMainDS->GetRasterXSize();
+        const double dfYRatio =
+            static_cast<double>(nRasterYSize) / poMainDS->GetRasterYSize();
+
+        // For line offset and pixel offset, we need to convert from RPC
+        // pixel center registration convention to GDAL pixel top-left corner
+        // registration convention by adding an initial 0.5 shift, and un-apply
+        // it after scaling.
+
+        Rescale(papszMD_RPC, RPC_LINE_OFF, dfYRatio, 0.0, 0.5, -0.5);
+        Rescale(papszMD_RPC, RPC_LINE_SCALE, dfYRatio, 1.0);
+        Rescale(papszMD_RPC, RPC_SAMP_OFF, dfXRatio, 0.0, 0.5, -0.5);
+        Rescale(papszMD_RPC, RPC_SAMP_SCALE, dfXRatio, 1.0);
 
         papszMD = papszMD_RPC;
     }
@@ -620,14 +610,8 @@ int GDALOverviewBand::GetOverviewCount()
     GDALRasterBand *poMainBand = (nBand == 0)
                                      ? poMainDS->GetRasterBand(1)->GetMaskBand()
                                      : poMainDS->GetRasterBand(nBand);
-    auto poUnderlyingDS =
-        poUnderlyingBand ? poUnderlyingBand->GetDataset() : nullptr;
-    if (poUnderlyingDS)
-        poUnderlyingDS->SetEnableOverviews(true);
-    const int nRet = poMainBand->GetOverviewCount() - poOvrDS->nOvrLevel - 1;
-    if (poUnderlyingDS)
-        poUnderlyingDS->SetEnableOverviews(false);
-    return nRet;
+    return poMainBand->GetOverviewCount() - poOvrDS->nOvrLevel - 1;
+    ;
 }
 
 /************************************************************************/
@@ -644,14 +628,7 @@ GDALRasterBand *GDALOverviewBand::GetOverview(int iOvr)
     GDALRasterBand *poMainBand = (nBand == 0)
                                      ? poMainDS->GetRasterBand(1)->GetMaskBand()
                                      : poMainDS->GetRasterBand(nBand);
-    auto poUnderlyingDS =
-        poUnderlyingBand ? poUnderlyingBand->GetDataset() : nullptr;
-    if (poUnderlyingDS)
-        poUnderlyingDS->SetEnableOverviews(true);
-    auto poRet = poMainBand->GetOverview(iOvr + poOvrDS->nOvrLevel + 1);
-    if (poUnderlyingDS)
-        poUnderlyingDS->SetEnableOverviews(false);
-    return poRet;
+    return poMainBand->GetOverview(iOvr + poOvrDS->nOvrLevel + 1);
 }
 
 /************************************************************************/
@@ -691,6 +668,19 @@ CPLErr GDALOverviewBand::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                                    GSpacing nLineSpace,
                                    GDALRasterIOExtraArg *psExtraArg)
 {
+    GDALOverviewDataset *const poOvrDS =
+        cpl::down_cast<GDALOverviewDataset *>(poDS);
+    if (poOvrDS->bThisLevelOnly && poOvrDS->poOvrDS)
+    {
+        const bool bEnabledOverviews = poOvrDS->poOvrDS->AreOverviewsEnabled();
+        poOvrDS->poOvrDS->SetEnableOverviews(false);
+        CPLErr eErr = GDALProxyRasterBand::IRasterIO(
+            eRWFlag, nXOff, nYOff, nXSize, nYSize, pData, nBufXSize, nBufYSize,
+            eBufType, nPixelSpace, nLineSpace, psExtraArg);
+        poOvrDS->poOvrDS->SetEnableOverviews(bEnabledOverviews);
+        return eErr;
+    }
+
     // Try to pass the request to the most appropriate overview.
     if (nBufXSize < nXSize && nBufYSize < nYSize)
     {

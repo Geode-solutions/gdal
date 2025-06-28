@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test pixel functions support.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2010-2014, Antonio Valentino <antonio.valentino@tiscali.it>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import math
@@ -35,9 +18,14 @@ import pytest
 
 from osgeo import gdal
 
+pytestmark = pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+
 # All tests will be skipped if numpy is unavailable.
 numpy = pytest.importorskip("numpy")
-
+gdaltest.importorskip_gdal_array()
 
 ###############################################################################
 # Verify real part extraction from a complex dataset.
@@ -55,7 +43,7 @@ def test_pixfun_real_c():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata.real)
+    assert numpy.all(data == refdata.real)
 
 
 ###############################################################################
@@ -74,7 +62,7 @@ def test_pixfun_real_r():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata.real)
+    assert numpy.all(data == refdata.real)
 
 
 ###############################################################################
@@ -93,14 +81,14 @@ def test_pixfun_imag_c():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata.imag)
+    assert numpy.all(data == refdata.imag)
 
     # Test bugfix of #6599
     copied_ds = gdal.Translate("", filename, format="MEM")
     data_ds = copied_ds.GetRasterBand(1).ReadAsArray()
     copied_ds = None
 
-    assert numpy.alltrue(data == data_ds)
+    assert numpy.all(data == data_ds)
 
 
 ###############################################################################
@@ -114,7 +102,7 @@ def test_pixfun_imag_r():
     assert ds is not None, 'Unable to open "%s" dataset.' % filename
     data = ds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == 0)
+    assert numpy.all(data == 0)
 
 
 ###############################################################################
@@ -253,7 +241,7 @@ def test_pixfun_mod_r():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    res = numpy.alltrue(data == numpy.abs(refdata))
+    res = numpy.all(data == numpy.abs(refdata))
     if gdaltest.is_travis_branch("sanitize") and not res:
         print(data)
         print(numpy.abs(refdata))
@@ -298,7 +286,7 @@ def test_pixfun_phase_r():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == numpy.arctan2(0, refdata))
+    assert numpy.all(data == numpy.arctan2(0, refdata))
 
 
 ###############################################################################
@@ -312,7 +300,7 @@ def test_pixfun_phase_unsigned():
     assert ds is not None, 'Unable to open "%s" dataset.' % filename
     data = ds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == numpy.zeros(data.shape))
+    assert numpy.all(data == numpy.zeros(data.shape))
 
 
 ###############################################################################
@@ -331,7 +319,7 @@ def test_pixfun_conj_c():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == numpy.conj(refdata))
+    assert numpy.all(data == numpy.conj(refdata))
 
 
 ###############################################################################
@@ -350,7 +338,7 @@ def test_pixfun_conj_r():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == numpy.conj(refdata))
+    assert numpy.all(data == numpy.conj(refdata))
 
 
 ###############################################################################
@@ -370,7 +358,7 @@ def test_pixfun_sum_r():
         assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
         refdata += refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata)
+    assert numpy.all(data == refdata)
 
 
 ###############################################################################
@@ -390,7 +378,7 @@ def test_pixfun_sum_c():
         assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
         refdata += refds.GetRasterBand(1).ReadAsArray(0, 0, 5, 6)
 
-    assert numpy.alltrue(data == refdata)
+    assert numpy.all(data == refdata)
 
 
 ###############################################################################
@@ -411,7 +399,7 @@ def test_pixfun_sum_k():
         assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
         refdata += refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata)
+    assert numpy.all(data == refdata)
 
 
 ###############################################################################
@@ -435,7 +423,7 @@ def test_pixfun_diff_r():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata2 = refds.GetRasterBand(1).ReadAsArray(10, 10, 5, 6)
 
-    assert numpy.alltrue(data == refdata1 - refdata2)
+    assert numpy.all(data == refdata1 - refdata2)
 
 
 ###############################################################################
@@ -459,7 +447,7 @@ def test_pixfun_diff_c():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata2 = refds.GetRasterBand(1).ReadAsArray(0, 0, 5, 6)
 
-    assert numpy.alltrue(data == refdata1 - refdata2)
+    assert numpy.all(data == refdata1 - refdata2)
 
 
 ###############################################################################
@@ -479,7 +467,7 @@ def test_pixfun_mul_r():
         assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
         refdata *= refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata)
+    assert numpy.all(data == refdata)
 
 
 ###############################################################################
@@ -498,7 +486,7 @@ def test_pixfun_mul_c():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata * refdata)
+    assert numpy.all(data == refdata * refdata)
 
 
 ###############################################################################
@@ -519,7 +507,7 @@ def test_pixfun_mul_k():
         assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
         refdata *= refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata)
+    assert numpy.all(data == refdata)
 
 
 ###############################################################################
@@ -544,7 +532,42 @@ def test_pixfun_div_r():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata2 = refds.GetRasterBand(1).ReadAsArray(10, 10, 5, 6)
 
-    assert numpy.alltrue(data == (refdata1 / refdata2))
+    assert numpy.all(data == (refdata1 / refdata2))
+
+
+@pytest.mark.parametrize(
+    "dtype,expected",
+    [(gdal.GDT_Float32, float("inf")), (gdal.GDT_Int16, 32767), (gdal.GDT_Byte, 255)],
+)
+def test_pixfun_div_by_zero(tmp_vsimem, dtype, expected):
+
+    with gdal.GetDriverByName("GTiff").Create(
+        tmp_vsimem / "src.tif", 1, 1, 2, dtype
+    ) as src:
+        src.GetRasterBand(1).Fill(5)
+        src.GetRasterBand(2).Fill(0)
+
+    nodata_value = 123
+
+    xml = f"""
+    <VRTDataset rasterXSize="1" rasterYSize="1">
+      <VRTRasterBand dataType="{gdal.GetDataTypeName(dtype)}" band="1" subclass="VRTDerivedRasterBand">
+        <NoDataValue>{nodata_value}</NoDataValue>
+        <PixelFunctionType>div</PixelFunctionType>
+        <SimpleSource>
+           <SourceFilename>{tmp_vsimem / "src.tif"}</SourceFilename>
+           <SourceBand>1</SourceBand>
+        </SimpleSource>
+        <SimpleSource>
+           <SourceFilename>{tmp_vsimem / "src.tif"}</SourceFilename>
+           <SourceBand>2</SourceBand>
+        </SimpleSource>
+      </VRTRasterBand>
+    </VRTDataset>"""
+
+    result = gdal.Open(xml).ReadAsArray()[0, 0]
+
+    assert result == expected
 
 
 ###############################################################################
@@ -568,7 +591,7 @@ def test_pixfun_div_c():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata2 = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == (refdata1 / refdata2).astype("complex64"))
+    assert numpy.all(data == (refdata1 / refdata2).astype("complex64"))
 
 
 ###############################################################################
@@ -587,7 +610,7 @@ def test_pixfun_cmul_c():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == refdata * refdata.conj())
+    assert numpy.all(data == refdata * refdata.conj())
 
 
 ###############################################################################
@@ -613,7 +636,7 @@ def test_pixfun_cmul_r():
     refdata2 = refds.GetRasterBand(1).ReadAsArray()
     refdata2 = refdata2.astype("float64")
 
-    assert numpy.alltrue(data == refdata1 * refdata2.conj())
+    assert numpy.all(data == refdata1 * refdata2.conj())
 
 
 ###############################################################################
@@ -633,7 +656,7 @@ def test_pixfun_inv_r():
     refdata = refds.GetRasterBand(1).ReadAsArray()
     refdata = refdata.astype("float64")
 
-    assert numpy.alltrue(data == 1.0 / refdata)
+    assert numpy.all(data == 1.0 / refdata)
 
 
 def test_pixfun_inv_r_zero():
@@ -675,8 +698,8 @@ def test_pixfun_inv_c():
     refdata = refdata.astype("complex")
     delta = data - 1.0 / refdata
 
-    assert numpy.alltrue(abs(delta.real) < 1e-13)
-    assert numpy.alltrue(abs(delta.imag) < 1e-13)
+    assert numpy.all(abs(delta.real) < 1e-13)
+    assert numpy.all(abs(delta.imag) < 1e-13)
 
 
 def test_pixfun_inv_c_zero():
@@ -719,7 +742,7 @@ def test_pixfun_inv_k():
     refdata = refdata.astype("float64")
 
     k = 2.0
-    assert numpy.alltrue(data == k / refdata)
+    assert numpy.all(data == k / refdata)
 
 
 ###############################################################################
@@ -738,7 +761,7 @@ def test_pixfun_intensity_c():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == (refdata * refdata.conj()).real)
+    assert numpy.all(data == (refdata * refdata.conj()).real)
 
 
 ###############################################################################
@@ -757,7 +780,7 @@ def test_pixfun_intensity_r():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == (refdata * refdata.conj()).real)
+    assert numpy.all(data == (refdata * refdata.conj()).real)
 
 
 ###############################################################################
@@ -776,7 +799,7 @@ def test_pixfun_sqrt():
     assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
     refdata = refds.GetRasterBand(1).ReadAsArray()
 
-    assert numpy.alltrue(data == numpy.sqrt(refdata))
+    assert numpy.all(data == numpy.sqrt(refdata))
 
 
 ###############################################################################
@@ -1046,6 +1069,29 @@ def test_pixfun_pow():
 
 
 ###############################################################################
+# Verify the normalized difference of 2 (real) datasets.
+
+
+def test_pixfun_norm_diff_r():
+
+    filename = "data/vrt/pixfun_norm_diff_r.vrt"
+    ds = gdal.OpenShared(filename, gdal.GA_ReadOnly)
+    assert ds is not None, 'Unable to open "%s" dataset.' % filename
+    data = ds.GetRasterBand(1).ReadAsArray()
+
+    reffilename = "data/int32.tif"
+    refds = gdal.Open(reffilename)
+    assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
+    refdata1 = refds.GetRasterBand(1).ReadAsArray(0, 0, 5, 6)
+
+    reffilename = "data/float32.tif"
+    refds = gdal.Open(reffilename)
+    assert refds is not None, 'Unable to open "%s" dataset.' % reffilename
+    refdata2 = refds.GetRasterBand(1).ReadAsArray(10, 10, 5, 6)
+    assert numpy.allclose(data, (refdata1 - refdata2) / (refdata1 + refdata2))
+
+
+###############################################################################
 # Verify linear pixel interpolation
 
 
@@ -1291,10 +1337,154 @@ def test_pixfun_missing_builtin():
     assert band_vrt.GetScale() == 1
     assert band_vrt.GetNoDataValue() == None
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    data = band_vrt.ReadAsArray(buf_type=gdal.GDT_Float32)
-    gdal.PopErrorHandler()
-    assert data is None
+    with pytest.raises(Exception):
+        band_vrt.ReadAsArray(buf_type=gdal.GDT_Float32)
+
+
+def test_pixfun_min():
+
+    vrt_ds = gdal.Open(
+        """<VRTDataset rasterXSize="50" rasterYSize="50">
+  <VRTRasterBand dataType="Byte" band="1" subClass="VRTDerivedRasterBand">
+    <NoDataValue>0</NoDataValue>
+    <PixelFunctionType>min</PixelFunctionType>
+    <SourceTransferType>Byte</SourceTransferType>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>3</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>2</SourceBand>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>"""
+    )
+    ar = vrt_ds.GetRasterBand(1).ReadAsArray()
+    assert ar[10][9] == 0
+    assert ar[10][10] == 32
+    assert ar[10][11] == 32
+    assert ar[10][12] == 32
+
+
+def test_pixfun_min_propagateNoData():
+
+    vrt_ds = gdal.Open(
+        """<VRTDataset rasterXSize="50" rasterYSize="50">
+  <VRTRasterBand dataType="Byte" band="1" subClass="VRTDerivedRasterBand">
+    <NoDataValue>0</NoDataValue>
+    <PixelFunctionType>min</PixelFunctionType>
+    <PixelFunctionArguments propagateNoData="true" />
+    <SourceTransferType>Byte</SourceTransferType>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>3</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>"""
+    )
+    ar = vrt_ds.GetRasterBand(1).ReadAsArray()
+    assert ar[10][9] == 0
+    assert ar[10][10] == 32
+    assert ar[10][11] == 0
+    assert ar[10][12] == 32
+
+
+def test_pixfun_max():
+
+    vrt_ds = gdal.Open(
+        """<VRTDataset rasterXSize="50" rasterYSize="50">
+  <VRTRasterBand dataType="Byte" band="1" subClass="VRTDerivedRasterBand">
+    <NoDataValue>0</NoDataValue>
+    <PixelFunctionType>max</PixelFunctionType>
+    <SourceTransferType>Byte</SourceTransferType>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>3</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>2</SourceBand>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>"""
+    )
+    ar = vrt_ds.GetRasterBand(1).ReadAsArray()
+    assert ar[10][9] == 0
+    assert ar[10][10] == 255
+    assert ar[10][11] == 255
+    assert ar[10][12] == 255
+
+
+def test_pixfun_max_nodata_255():
+
+    vrt_ds = gdal.Open(
+        """<VRTDataset rasterXSize="50" rasterYSize="50">
+  <VRTRasterBand dataType="Byte" band="1" subClass="VRTDerivedRasterBand">
+    <NoDataValue>255</NoDataValue>
+    <PixelFunctionType>max</PixelFunctionType>
+    <SourceTransferType>Byte</SourceTransferType>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>3</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>2</SourceBand>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>"""
+    )
+    ar = vrt_ds.GetRasterBand(1).ReadAsArray()
+    assert ar[10][9] == 0
+    assert ar[10][10] == 32
+    assert ar[10][11] == 32
+    assert ar[10][12] == 32
+
+
+def test_pixfun_max_no_nodata():
+
+    vrt_ds = gdal.Open(
+        """<VRTDataset rasterXSize="50" rasterYSize="50">
+  <VRTRasterBand dataType="Byte" band="1" subClass="VRTDerivedRasterBand">
+    <PixelFunctionType>max</PixelFunctionType>
+    <SourceTransferType>Byte</SourceTransferType>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>3</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+    </SimpleSource>
+    <SimpleSource>
+      <SourceFilename relativeToVRT="0">data/test_nodatavalues.tif</SourceFilename>
+      <SourceBand>2</SourceBand>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>"""
+    )
+    ar = vrt_ds.GetRasterBand(1).ReadAsArray()
+    assert ar[10][9] == 0
+    assert ar[10][10] == 255
+    assert ar[10][11] == 255
+    assert ar[10][12] == 255
 
 
 ###############################################################################

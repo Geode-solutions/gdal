@@ -10,29 +10,14 @@
  * Copyright (C) 2010 Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "ogr_swq.h"
 
 #include <cctype>
+#include <cinttypes>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
@@ -42,8 +27,10 @@
 #include "cpl_error.h"
 #include "cpl_safemaths.hpp"
 #include "cpl_string.h"
+#include "ogr_api.h"
 #include "ogr_geometry.h"
 #include "ogr_p.h"
+#include "utf8.h"
 
 /************************************************************************/
 /*                           swq_test_like()                            */
@@ -51,8 +38,8 @@
 /*      Does input match pattern?                                       */
 /************************************************************************/
 
-static int swq_test_like(const char *input, const char *pattern, char chEscape,
-                         bool insensitive)
+int swq_test_like(const char *input, const char *pattern, char chEscape,
+                  bool insensitive, bool bUTF8Strings)
 
 {
     if (input == nullptr || pattern == nullptr)
@@ -68,8 +55,7 @@ static int swq_test_like(const char *input, const char *pattern, char chEscape,
             pattern++;
             if (*pattern == '\0')
                 return 0;
-            if ((!insensitive && *pattern != *input) ||
-                (insensitive && tolower(*pattern) != tolower(*input)))
+            if (*pattern != *input)
             {
                 return 0;
             }
@@ -82,8 +68,21 @@ static int swq_test_like(const char *input, const char *pattern, char chEscape,
 
         else if (*pattern == '_')
         {
-            input++;
             pattern++;
+            if (bUTF8Strings && static_cast<unsigned int>(*input) > 127)
+            {
+                // Continuation bytes of such characters are of the form
+                // 10xxxxxx (0x80), whereas single-byte are 0xxxxxxx
+                // and the start of a multi-byte is 11xxxxxx
+                do
+                {
+                    input++;
+                } while (static_cast<unsigned int>(*input) > 127);
+            }
+            else
+            {
+                input++;
+            }
         }
         else if (*pattern == '%')
         {
@@ -94,7 +93,7 @@ static int swq_test_like(const char *input, const char *pattern, char chEscape,
             for (int eat = 0; input[eat] != '\0'; eat++)
             {
                 if (swq_test_like(input + eat, pattern + 1, chEscape,
-                                  insensitive))
+                                  insensitive, bUTF8Strings))
                     return 1;
             }
 
@@ -102,8 +101,53 @@ static int swq_test_like(const char *input, const char *pattern, char chEscape,
         }
         else
         {
-            if ((!insensitive && *pattern != *input) ||
-                (insensitive && tolower(*pattern) != tolower(*input)))
+            if (bUTF8Strings && insensitive)
+            {
+                const auto IsStringLongEnough =
+                    [](const char *str, size_t nReqSize)
+                {
+                    while (nReqSize >= 2)
+                    {
+                        if (str[1] == 0)
+                            return false;
+                        str++;
+                        nReqSize--;
+                    }
+                    return true;
+                };
+
+                const auto pattern_codepoint_size = utf8codepointcalcsize(
+                    reinterpret_cast<const utf8_int8_t *>(pattern));
+                if (!IsStringLongEnough(pattern, pattern_codepoint_size))
+                    return 0;
+                utf8_int32_t pattern_codepoint = 0;
+                utf8codepoint(reinterpret_cast<const utf8_int8_t *>(pattern),
+                              &pattern_codepoint);
+
+                const auto input_codepoint_size = utf8codepointcalcsize(
+                    reinterpret_cast<const utf8_int8_t *>(input));
+                if (!IsStringLongEnough(input, input_codepoint_size))
+                    return 0;
+                utf8_int32_t input_codepoint = 0;
+                utf8codepoint(reinterpret_cast<const utf8_int8_t *>(input),
+                              &input_codepoint);
+
+                if (!(input_codepoint == pattern_codepoint ||
+                      utf8uprcodepoint(input_codepoint) ==
+                          utf8uprcodepoint(pattern_codepoint) ||
+                      utf8lwrcodepoint(input_codepoint) ==
+                          utf8lwrcodepoint(pattern_codepoint)))
+                {
+                    return 0;
+                }
+
+                pattern += pattern_codepoint_size;
+                input += input_codepoint_size;
+            }
+            else if ((!insensitive && *pattern != *input) ||
+                     (insensitive &&
+                      CPLTolower(static_cast<unsigned char>(*pattern)) !=
+                          CPLTolower(static_cast<unsigned char>(*input))))
             {
                 return 0;
             }
@@ -301,7 +345,8 @@ static const char *OGRFormatDate(const OGRField *psField)
 /************************************************************************/
 
 swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
-                                   swq_expr_node **sub_node_values)
+                                   swq_expr_node **sub_node_values,
+                                   const swq_evaluation_context &sContext)
 
 {
     swq_expr_node *poRet = nullptr;
@@ -324,7 +369,7 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
             sub_node_values[1]->float_value =
                 static_cast<double>(sub_node_values[1]->int_value);
 
-        if (node->nOperation != SWQ_ISNULL)
+        if (node->nOperation != SWQ_ISNULL && node->nOperation != SWQ_IN)
         {
             for (int i = 0; i < node->nSubExprCount; i++)
             {
@@ -333,6 +378,7 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
                     if (poRet->field_type == SWQ_BOOLEAN)
                     {
                         poRet->int_value = FALSE;
+                        poRet->is_null = 1;
                         return poRet;
                     }
                     else if (poRet->field_type == SWQ_FLOAT)
@@ -387,13 +433,29 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
             case SWQ_IN:
             {
                 poRet->int_value = 0;
-                for (int i = 1; i < node->nSubExprCount; i++)
+                if (sub_node_values[0]->is_null)
                 {
-                    if (sub_node_values[0]->float_value ==
-                        sub_node_values[i]->float_value)
+                    poRet->is_null = 1;
+                }
+                else
+                {
+                    bool bNullFound = false;
+                    for (int i = 1; i < node->nSubExprCount; i++)
                     {
-                        poRet->int_value = 1;
-                        break;
+                        if (sub_node_values[i]->is_null)
+                        {
+                            bNullFound = true;
+                        }
+                        else if (sub_node_values[0]->float_value ==
+                                 sub_node_values[i]->float_value)
+                        {
+                            poRet->int_value = 1;
+                            break;
+                        }
+                    }
+                    if (bNullFound && !poRet->int_value)
+                    {
+                        poRet->is_null = 1;
                     }
                 }
             }
@@ -459,18 +521,16 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
         poRet = new swq_expr_node(0);
         poRet->field_type = node->field_type;
 
-        if (node->nOperation != SWQ_ISNULL)
+        if (node->nOperation != SWQ_ISNULL && node->nOperation != SWQ_OR &&
+            node->nOperation != SWQ_AND && node->nOperation != SWQ_NOT &&
+            node->nOperation != SWQ_IN)
         {
             for (int i = 0; i < node->nSubExprCount; i++)
             {
                 if (sub_node_values[i]->is_null)
                 {
-                    if (poRet->field_type == SWQ_BOOLEAN)
-                    {
-                        poRet->int_value = FALSE;
-                        return poRet;
-                    }
-                    else if (SWQ_IS_INTEGER(poRet->field_type))
+                    if (poRet->field_type == SWQ_BOOLEAN ||
+                        SWQ_IS_INTEGER(poRet->field_type))
                     {
                         poRet->int_value = 0;
                         poRet->is_null = 1;
@@ -485,15 +545,21 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
             case SWQ_AND:
                 poRet->int_value = sub_node_values[0]->int_value &&
                                    sub_node_values[1]->int_value;
+                poRet->is_null =
+                    sub_node_values[0]->is_null && sub_node_values[1]->is_null;
                 break;
 
             case SWQ_OR:
                 poRet->int_value = sub_node_values[0]->int_value ||
                                    sub_node_values[1]->int_value;
+                poRet->is_null =
+                    sub_node_values[0]->is_null || sub_node_values[1]->is_null;
                 break;
 
             case SWQ_NOT:
-                poRet->int_value = !sub_node_values[0]->int_value;
+                poRet->int_value = !sub_node_values[0]->int_value &&
+                                   !sub_node_values[0]->is_null;
+                poRet->is_null = sub_node_values[0]->is_null;
                 break;
 
             case SWQ_EQ:
@@ -529,13 +595,29 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
             case SWQ_IN:
             {
                 poRet->int_value = 0;
-                for (int i = 1; i < node->nSubExprCount; i++)
+                if (sub_node_values[0]->is_null)
                 {
-                    if (sub_node_values[0]->int_value ==
-                        sub_node_values[i]->int_value)
+                    poRet->is_null = 1;
+                }
+                else
+                {
+                    bool bNullFound = false;
+                    for (int i = 1; i < node->nSubExprCount; i++)
                     {
-                        poRet->int_value = 1;
-                        break;
+                        if (sub_node_values[i]->is_null)
+                        {
+                            bNullFound = true;
+                        }
+                        else if (sub_node_values[0]->int_value ==
+                                 sub_node_values[i]->int_value)
+                        {
+                            poRet->int_value = 1;
+                            break;
+                        }
+                    }
+                    if (bNullFound && !poRet->int_value)
+                    {
+                        poRet->is_null = 1;
                     }
                 }
             }
@@ -639,11 +721,28 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
               node->nOperation == SWQ_LE || node->nOperation == SWQ_IN ||
               node->nOperation == SWQ_BETWEEN))
     {
+        if (node->field_type == SWQ_BOOLEAN && node->nOperation != SWQ_IN)
+        {
+            for (int i = 0; i < node->nSubExprCount; i++)
+            {
+                if (sub_node_values[i]->is_null)
+                {
+                    poRet = new swq_expr_node(FALSE);
+                    poRet->field_type = node->field_type;
+                    poRet->is_null = 1;
+                    return poRet;
+                }
+            }
+        }
+
         OGRField sField0, sField1;
+        OGR_RawField_SetUnset(&sField0);
+        OGR_RawField_SetUnset(&sField1);
         poRet = new swq_expr_node(0);
         poRet->field_type = node->field_type;
 
-        if (!OGRParseDate(sub_node_values[0]->string_value, &sField0, 0))
+        if (!OGRParseDate(sub_node_values[0]->string_value, &sField0, 0) &&
+            node->nOperation != SWQ_IN)
         {
             CPLError(
                 CE_Failure, CPLE_AppDefined,
@@ -652,7 +751,8 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
             delete poRet;
             return nullptr;
         }
-        if (!OGRParseDate(sub_node_values[1]->string_value, &sField1, 0))
+        if (node->nOperation != SWQ_IN &&
+            !OGRParseDate(sub_node_values[1]->string_value, &sField1, 0))
         {
             CPLError(
                 CE_Failure, CPLE_AppDefined,
@@ -705,27 +805,46 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
 
             case SWQ_IN:
             {
-                OGRField sFieldIn;
-                bool bFound = false;
-                for (int i = 1; i < node->nSubExprCount; ++i)
+                poRet->int_value = 0;
+                if (sub_node_values[0]->is_null)
                 {
-                    if (!OGRParseDate(sub_node_values[i]->string_value,
-                                      &sFieldIn, 0))
+                    poRet->is_null = 1;
+                }
+                else
+                {
+                    OGRField sFieldIn;
+                    bool bNullFound = false;
+                    for (int i = 1; i < node->nSubExprCount; i++)
                     {
-                        CPLError(CE_Failure, CPLE_AppDefined,
-                                 "Failed to parse date '%s' evaluating OGR "
-                                 "WHERE expression",
-                                 sub_node_values[i]->string_value);
-                        delete poRet;
-                        return nullptr;
+                        if (sub_node_values[i]->is_null)
+                        {
+                            bNullFound = true;
+                        }
+                        else
+                        {
+                            if (!OGRParseDate(sub_node_values[i]->string_value,
+                                              &sFieldIn, 0))
+                            {
+                                CPLError(
+                                    CE_Failure, CPLE_AppDefined,
+                                    "Failed to parse date '%s' evaluating OGR "
+                                    "WHERE expression",
+                                    sub_node_values[i]->string_value);
+                                delete poRet;
+                                return nullptr;
+                            }
+                            if (OGRCompareDate(&sField0, &sFieldIn) == 0)
+                            {
+                                poRet->int_value = 1;
+                                break;
+                            }
+                        }
                     }
-                    if (OGRCompareDate(&sField0, &sFieldIn) == 0)
+                    if (bNullFound && !poRet->int_value)
                     {
-                        bFound = true;
-                        break;
+                        poRet->is_null = 1;
                     }
                 }
-                poRet->int_value = bFound;
             }
             break;
 
@@ -745,7 +864,7 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
         poRet = new swq_expr_node(0);
         poRet->field_type = node->field_type;
 
-        if (node->nOperation != SWQ_ISNULL)
+        if (node->nOperation != SWQ_ISNULL && node->nOperation != SWQ_IN)
         {
             for (int i = 0; i < node->nSubExprCount; i++)
             {
@@ -754,6 +873,7 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
                     if (poRet->field_type == SWQ_BOOLEAN)
                     {
                         poRet->int_value = FALSE;
+                        poRet->is_null = 1;
                         return poRet;
                     }
                     else if (poRet->field_type == SWQ_STRING)
@@ -917,14 +1037,34 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
             case SWQ_IN:
             {
                 poRet->int_value = 0;
-                for (int i = 1; i < node->nSubExprCount; i++)
+                if (sub_node_values[0]->is_null)
                 {
-                    if (sub_node_values[i]->string_value &&
-                        strcasecmp(sub_node_values[0]->string_value,
-                                   sub_node_values[i]->string_value) == 0)
+                    poRet->is_null = 1;
+                }
+                else
+                {
+                    bool bNullFound = false;
+                    for (int i = 1; i < node->nSubExprCount; i++)
                     {
-                        poRet->int_value = 1;
-                        break;
+                        if (sub_node_values[i]->is_null ||
+                            !sub_node_values[i]->string_value)
+                        {
+                            bNullFound = true;
+                        }
+                        else
+                        {
+                            if (strcasecmp(sub_node_values[0]->string_value,
+                                           sub_node_values[i]->string_value) ==
+                                0)
+                            {
+                                poRet->int_value = 1;
+                                break;
+                            }
+                        }
+                    }
+                    if (bNullFound && !poRet->int_value)
+                    {
+                        poRet->is_null = 1;
                     }
                 }
             }
@@ -960,10 +1100,10 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
                         chEscape = sub_node_values[2]->string_value[0];
                     const bool bInsensitive = CPLTestBool(
                         CPLGetConfigOption("OGR_SQL_LIKE_AS_ILIKE", "FALSE"));
-                    poRet->int_value =
-                        swq_test_like(sub_node_values[0]->string_value,
-                                      sub_node_values[1]->string_value,
-                                      chEscape, bInsensitive);
+                    poRet->int_value = swq_test_like(
+                        sub_node_values[0]->string_value,
+                        sub_node_values[1]->string_value, chEscape,
+                        bInsensitive, sContext.bUTF8Strings);
                 }
                 break;
             }
@@ -979,9 +1119,10 @@ swq_expr_node *SWQGeneralEvaluator(swq_expr_node *node,
                     char chEscape = '\0';
                     if (node->nSubExprCount == 3)
                         chEscape = sub_node_values[2]->string_value[0];
-                    poRet->int_value = swq_test_like(
-                        sub_node_values[0]->string_value,
-                        sub_node_values[1]->string_value, chEscape, true);
+                    poRet->int_value =
+                        swq_test_like(sub_node_values[0]->string_value,
+                                      sub_node_values[1]->string_value,
+                                      chEscape, true, sContext.bUTF8Strings);
                 }
                 break;
             }
@@ -1514,7 +1655,8 @@ swq_field_type SWQGeneralChecker(swq_expr_node *poNode,
 /************************************************************************/
 
 swq_expr_node *SWQCastEvaluator(swq_expr_node *node,
-                                swq_expr_node **sub_node_values)
+                                swq_expr_node **sub_node_values,
+                                const swq_evaluation_context &)
 
 {
     swq_expr_node *poRetNode = nullptr;
@@ -1647,7 +1789,7 @@ swq_expr_node *SWQCastEvaluator(swq_expr_node *node,
                 case SWQ_INTEGER:
                 case SWQ_BOOLEAN:
                 case SWQ_INTEGER64:
-                    osRet.Printf(CPL_FRMT_GIB, poSrcNode->int_value);
+                    osRet.Printf("%" PRId64, poSrcNode->int_value);
                     break;
 
                 case SWQ_FLOAT:

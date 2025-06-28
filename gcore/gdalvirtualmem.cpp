@@ -8,23 +8,7 @@
  **********************************************************************
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -72,6 +56,7 @@ class GDALVirtualMem
     {
         return bIsCompact;
     }
+
     bool IsBandSequential() const
     {
         return bIsBandSequential;
@@ -204,8 +189,9 @@ void GDALVirtualMem::GetXYBand(size_t nOffset, coord_type &x, coord_type &y,
         if (nBandCount == 1)
             band = 0;
         else
-            band = static_cast<int>(
-                (nOffset - y * nLineSpace - x * nPixelSpace) / nBandSpace);
+            band = static_cast<int>((nOffset - y * nLineSpace -
+                                     static_cast<size_t>(x) * nPixelSpace) /
+                                    nBandSpace);
     }
 }
 
@@ -258,8 +244,8 @@ bool GDALVirtualMem::GotoNextPixel(coord_type &x, coord_type &y,
 size_t GDALVirtualMem::GetOffset(const coord_type &x, const coord_type &y,
                                  int band) const
 {
-    return static_cast<size_t>(x * nPixelSpace + y * nLineSpace +
-                               band * nBandSpace);
+    return static_cast<size_t>(static_cast<size_t>(x) * nPixelSpace +
+                               y * nLineSpace + band * nBandSpace);
 }
 
 /************************************************************************/
@@ -1115,9 +1101,10 @@ void GDALTiledVirtualMem::DoIO(GDALRWFlag eRWFlag, size_t nOffset, void *pPage,
                                size_t nBytes) const
 {
     const int nDataTypeSize = GDALGetDataTypeSizeBytes(eBufType);
-    int nTilesPerRow = (nXSize + nTileXSize - 1) / nTileXSize;
-    int nTilesPerCol = (nYSize + nTileYSize - 1) / nTileYSize;
-    size_t nPageSize = nTileXSize * nTileYSize * nDataTypeSize;
+    const int nTilesPerRow = DIV_ROUND_UP(nXSize, nTileXSize);
+    const int nTilesPerCol = DIV_ROUND_UP(nYSize, nTileYSize);
+    size_t nPageSize =
+        static_cast<size_t>(nTileXSize) * nTileYSize * nDataTypeSize;
     if (eTileOrganization != GTO_BSQ)
         nPageSize *= nBandCount;
     CPLAssert((nOffset % nPageSize) == 0);
@@ -1146,9 +1133,10 @@ void GDALTiledVirtualMem::DoIO(GDALRWFlag eRWFlag, size_t nOffset, void *pPage,
     else
     {
         // offset = nPageSize * (band * nTilesPerRow * nTilesPerCol + nTile)
-        band = static_cast<int>(nOffset /
-                                (nPageSize * nTilesPerRow * nTilesPerCol));
-        nTile = nOffset / nPageSize - band * nTilesPerRow * nTilesPerCol;
+        band = static_cast<int>(nOffset / (static_cast<size_t>(nPageSize) *
+                                           nTilesPerRow * nTilesPerCol));
+        nTile = nOffset / nPageSize -
+                static_cast<size_t>(band) * nTilesPerRow * nTilesPerCol;
         nPixelSpace = nDataTypeSize;
         nLineSpace = nPixelSpace * nTileXSize;
         nBandSpace = 0;
@@ -1260,8 +1248,8 @@ static CPLVirtualMem *GDALGetTiledVirtualMem(
         return nullptr;
 
     const int nDataTypeSize = GDALGetDataTypeSizeBytes(eBufType);
-    int nTilesPerRow = (nXSize + nTileXSize - 1) / nTileXSize;
-    int nTilesPerCol = (nYSize + nTileYSize - 1) / nTileYSize;
+    int nTilesPerRow = DIV_ROUND_UP(nXSize, nTileXSize);
+    int nTilesPerCol = DIV_ROUND_UP(nYSize, nTileYSize);
     GUIntBig nReqMem = static_cast<GUIntBig>(nTilesPerRow) * nTilesPerCol *
                        nTileXSize * nTileYSize * nBandCount * nDataTypeSize;
 #if SIZEOF_SIZE_T == 4
@@ -1273,7 +1261,8 @@ static CPLVirtualMem *GDALGetTiledVirtualMem(
     }
 #endif
 
-    size_t nPageSizeHint = nTileXSize * nTileYSize * nDataTypeSize;
+    size_t nPageSizeHint =
+        static_cast<size_t>(nTileXSize) * nTileYSize * nDataTypeSize;
     if (eTileOrganization != GTO_BSQ)
         nPageSizeHint *= nBandCount;
     if ((nPageSizeHint % nPageSize) != 0)

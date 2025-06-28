@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Basic tests of OGRSpatialReference (OSR) operation, not including
@@ -12,25 +11,10 @@
 # Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import json
 import os
 import subprocess
 import sys
@@ -526,8 +510,8 @@ def test_osr_basic_15():
     srs = osr.SpatialReference()
     srs.SetFromUserInput(wkt)
 
-    # Missing PRIMEM
-    assert srs.Validate() != 0
+    with pytest.raises(Exception):
+        srs.Validate()
 
 
 ###############################################################################
@@ -596,15 +580,13 @@ def test_osr_basic_16():
     # Error expected. Cannot work on a PROJCS
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(32631)
-    ret = srs.SetGeocCS("a")
-    if ret == 0:
-        print(srs)
-        pytest.fail("expected failure")
+    with pytest.raises(Exception):
+        srs.SetGeocCS("a")
 
     # Limit test : build GEOCCS from an invalid GEOGCS
     srs = osr.SpatialReference()
-    with gdaltest.error_handler():
-        assert srs.SetFromUserInput("""GEOGCS["foo"]""") != 0
+    with pytest.raises(Exception):
+        srs.SetFromUserInput("""GEOGCS["foo"]""")
 
 
 ###############################################################################
@@ -1163,30 +1145,30 @@ def test_osr_basic_25():
         AXIS["Easting",EAST],
         AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Mercator_2SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Mercator_2SP") is None
 
     # Mercator_1SP -> Mercator_2SP: Invalid eccentricity
     sr = osr.SpatialReference()
-    sr.SetFromUserInput(
-        """PROJCS["unnamed",
-        GEOGCS["WGS 84",
-            DATUM["WGS_1984",
-                SPHEROID["WGS 84",6378137,0.1]],
-            PRIMEM["Greenwich",0,
-                AUTHORITY["EPSG","8901"]],
-            UNIT["degree",0.0174532925199433]],
-        PROJECTION["Mercator_1SP"],
-        PARAMETER["central_meridian",0],
-        PARAMETER["scale_factor",0.5],
-        PARAMETER["false_easting",0],
-        PARAMETER["false_northing",0],
-        UNIT["metre",1],
-        AXIS["Easting",EAST],
-        AXIS["Northing",NORTH]]"""
-    )
-    sr2 = sr.ConvertToOtherProjection("Mercator_2SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        sr.SetFromUserInput(
+            """PROJCS["unnamed",
+            GEOGCS["WGS 84",
+                DATUM["WGS_1984",
+                    SPHEROID["WGS 84",6378137,0.1]],
+                PRIMEM["Greenwich",0,
+                    AUTHORITY["EPSG","8901"]],
+                UNIT["degree",0.0174532925199433]],
+            PROJECTION["Mercator_1SP"],
+            PARAMETER["central_meridian",0],
+            PARAMETER["scale_factor",0.5],
+            PARAMETER["false_easting",0],
+            PARAMETER["false_northing",0],
+            UNIT["metre",1],
+            AXIS["Easting",EAST],
+            AXIS["Northing",NORTH]]"""
+        )
+        assert sr.ConvertToOtherProjection("Mercator_2SP") is None
 
     # Mercator_2SP -> Mercator_1SP: Invalid standard_parallel_1
     sr = osr.SpatialReference()
@@ -1207,30 +1189,30 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Mercator_1SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Mercator_1SP") is None
 
     # Mercator_2SP -> Mercator_1SP: Invalid eccentricity
     sr = osr.SpatialReference()
-    sr.SetFromUserInput(
-        """PROJCS["unnamed",
-    GEOGCS["WGS 84",
-        DATUM["WGS_1984",
-            SPHEROID["WGS 84",6378137,0.1]],
-        PRIMEM["Greenwich",0,
-            AUTHORITY["EPSG","8901"]],
-        UNIT["degree",0.0174532925199433]],
-    PROJECTION["Mercator_2SP"],
-    PARAMETER["standard_parallel_1",60],
-    PARAMETER["central_meridian",0],
-    PARAMETER["false_easting",0],
-    PARAMETER["false_northing",0],
-    UNIT["metre",1],
-    AXIS["Easting",EAST],
-    AXIS["Northing",NORTH]]"""
-    )
-    sr2 = sr.ConvertToOtherProjection("Mercator_1SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        sr.SetFromUserInput(
+            """PROJCS["unnamed",
+        GEOGCS["WGS 84",
+            DATUM["WGS_1984",
+                SPHEROID["WGS 84",6378137,0.1]],
+            PRIMEM["Greenwich",0,
+                AUTHORITY["EPSG","8901"]],
+            UNIT["degree",0.0174532925199433]],
+        PROJECTION["Mercator_2SP"],
+        PARAMETER["standard_parallel_1",60],
+        PARAMETER["central_meridian",0],
+        PARAMETER["false_easting",0],
+        PARAMETER["false_northing",0],
+        UNIT["metre",1],
+        AXIS["Easting",EAST],
+        AXIS["Northing",NORTH]]"""
+        )
+        assert sr.ConvertToOtherProjection("Mercator_1SP") is None
 
     # LCC_1SP -> LCC_2SP: Negative scale factor
     sr = osr.SpatialReference()
@@ -1251,30 +1233,30 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_2SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_2SP") is None
 
     # LCC_1SP -> LCC_2SP: Invalid eccentricity
     sr = osr.SpatialReference()
-    sr.SetFromUserInput(
-        """PROJCS["unnamed",
-    GEOGCS["NTF (Paris)",
-        DATUM["Nouvelle_Triangulation_Francaise_Paris",
-            SPHEROID["Clarke 1880 (IGN)",6378249.2,0.1]],
-        PRIMEM["Paris",2.33722917],
-        UNIT["grad",0.01570796326794897]],
-    PROJECTION["Lambert_Conformal_Conic_1SP"],
-    PARAMETER["latitude_of_origin",46.85],
-    PARAMETER["central_meridian",0],
-    PARAMETER["scale_factor",0.99994471],
-    PARAMETER["false_easting",234.358],
-    PARAMETER["false_northing",4185861.369],
-    UNIT["metre",1],
-    AXIS["Easting",EAST],
-    AXIS["Northing",NORTH]]"""
-    )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_2SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        sr.SetFromUserInput(
+            """PROJCS["unnamed",
+        GEOGCS["NTF (Paris)",
+            DATUM["Nouvelle_Triangulation_Francaise_Paris",
+                SPHEROID["Clarke 1880 (IGN)",6378249.2,0.1]],
+            PRIMEM["Paris",2.33722917],
+            UNIT["grad",0.01570796326794897]],
+        PROJECTION["Lambert_Conformal_Conic_1SP"],
+        PARAMETER["latitude_of_origin",46.85],
+        PARAMETER["central_meridian",0],
+        PARAMETER["scale_factor",0.99994471],
+        PARAMETER["false_easting",234.358],
+        PARAMETER["false_northing",4185861.369],
+        UNIT["metre",1],
+        AXIS["Easting",EAST],
+        AXIS["Northing",NORTH]]"""
+        )
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_2SP") is None
 
     # LCC_1SP -> LCC_2SP: Invalid latitude_of_origin
     sr = osr.SpatialReference()
@@ -1295,8 +1277,8 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_2SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_2SP") is None
 
     # LCC_1SP -> LCC_2SP: latitude_of_origin == 0
     sr = osr.SpatialReference()
@@ -1317,8 +1299,8 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_2SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_2SP") is None
 
     # LCC_2SP -> LCC_1SP : Invalid standard_parallel_1
     sr.SetFromUserInput(
@@ -1340,8 +1322,8 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP") is None
 
     # LCC_2SP -> LCC_1SP : Invalid standard_parallel_2
     sr.SetFromUserInput(
@@ -1363,8 +1345,8 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP") is None
 
     # LCC_2SP -> LCC_1SP : Invalid latitude_of_origin
     sr.SetFromUserInput(
@@ -1386,8 +1368,8 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP") is None
 
     # LCC_2SP -> LCC_1SP : abs(stdp1) == abs(stdp2)
     sr.SetFromUserInput(
@@ -1409,8 +1391,8 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP") is None
 
     # LCC_2SP -> LCC_1SP : stdp1 ~= stdp2 ~= 0
     sr.SetFromUserInput(
@@ -1432,31 +1414,31 @@ def test_osr_basic_25():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
     )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP") is None
 
     # LCC_2SP -> LCC_1SP : Invalid eccentricity
-    sr.SetFromUserInput(
-        """PROJCS["unnamed",
-    GEOGCS["RGF93",
-        DATUM["Reseau_Geodesique_Francais_1993",
-            SPHEROID["GRS 1980",6378137,0.1]],
-        PRIMEM["Greenwich",0,
-            AUTHORITY["EPSG","8901"]],
-        UNIT["degree",0.0174532925199433]],
-    PROJECTION["Lambert_Conformal_Conic_2SP"],
-    PARAMETER["standard_parallel_1",46.4567],
-    PARAMETER["standard_parallel_2",46.4567],
-    PARAMETER["latitude_of_origin",46.123],
-    PARAMETER["central_meridian",3],
-    PARAMETER["false_easting",700000],
-    PARAMETER["false_northing",6600000],
-    UNIT["metre",1],
-    AXIS["Easting",EAST],
-    AXIS["Northing",NORTH]]"""
-    )
-    sr2 = sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP")
-    assert sr2 is None
+    with gdaltest.disable_exceptions():
+        sr.SetFromUserInput(
+            """PROJCS["unnamed",
+        GEOGCS["RGF93",
+            DATUM["Reseau_Geodesique_Francais_1993",
+                SPHEROID["GRS 1980",6378137,0.1]],
+            PRIMEM["Greenwich",0,
+                AUTHORITY["EPSG","8901"]],
+            UNIT["degree",0.0174532925199433]],
+        PROJECTION["Lambert_Conformal_Conic_2SP"],
+        PARAMETER["standard_parallel_1",46.4567],
+        PARAMETER["standard_parallel_2",46.4567],
+        PARAMETER["latitude_of_origin",46.123],
+        PARAMETER["central_meridian",3],
+        PARAMETER["false_easting",700000],
+        PARAMETER["false_northing",6600000],
+        UNIT["metre",1],
+        AXIS["Easting",EAST],
+        AXIS["Northing",NORTH]]"""
+        )
+        assert sr.ConvertToOtherProjection("Lambert_Conformal_Conic_1SP") is None
 
 
 ###############################################################################
@@ -1519,20 +1501,22 @@ def test_osr_basic_set_from_user_input_IGNF():
 def test_osr_basic_set_from_user_input_IGNF_non_existing_code():
 
     srs = osr.SpatialReference()
-    assert srs.SetFromUserInput("IGNF:non_existing_code") != 0
+    with pytest.raises(Exception):
+        srs.SetFromUserInput("IGNF:non_existing_code")
 
 
 def test_osr_basic_set_from_user_input_non_existing_authority():
 
     srs = osr.SpatialReference()
-    assert srs.SetFromUserInput("non_existing_auth:1234") != 0
+    with pytest.raises(Exception):
+        srs.SetFromUserInput("non_existing_auth:1234")
 
 
 ###############################################################################
 # Test IAU: CRS
 
 
-@gdaltest.require_proj_version(8, 2)
+@pytest.mark.require_proj(8, 2)
 def test_osr_basic_set_from_user_input_IAU():
 
     srs = osr.SpatialReference()
@@ -1541,9 +1525,9 @@ def test_osr_basic_set_from_user_input_IAU():
     srs = osr.SpatialReference()
     assert srs.SetFromUserInput("IAU:2015:49910") == ogr.OGRERR_NONE
 
-    # Error
     srs = osr.SpatialReference()
-    assert srs.SetFromUserInput("IAU:0000:49910") != ogr.OGRERR_NONE
+    with pytest.raises(Exception):
+        srs.SetFromUserInput("IAU:0000:49910")
 
 
 def test_osr_basic_set_from_user_input_GEODCRS():
@@ -1758,18 +1742,18 @@ def test_osr_get_name():
     assert sr.GetName() == "WGS 84"
 
 
-@gdaltest.require_proj_version(6, 1)
 def test_SetPROJSearchPath():
 
-    # OSRSetPROJSearchPaths() is only taken into priority over other methods
-    # starting with PROJ >= 6.1
-
-    # Do the test in a new thread, so that SetPROJSearchPath() is taken
-    # into account
+    # Do the test in a new thread, so that the EPSG code cache which is thread
+    # locale is not used, and we can effectively test that the new search path
+    # is used
     def threaded_function(arg):
         sr = osr.SpatialReference()
-        with gdaltest.error_handler():
-            arg[0] = sr.ImportFromEPSG(32631)
+        try:
+            sr.ImportFromEPSG(32631)
+            arg[0] = True
+        except Exception:
+            arg[0] = False
 
     backup_search_paths = osr.GetPROJSearchPaths()
     try:
@@ -1778,14 +1762,14 @@ def test_SetPROJSearchPath():
         thread = Thread(target=threaded_function, args=(arg,))
         thread.start()
         thread.join()
-        assert arg[0] == 0
+        assert arg[0] == True
 
         osr.SetPROJSearchPath("/i_do/not/exist")
 
         thread = Thread(target=threaded_function, args=(arg,))
         thread.start()
         thread.join()
-        assert arg[0] > 0
+        assert arg[0] == False
     finally:
         osr.SetPROJSearchPaths(backup_search_paths)
 
@@ -1793,16 +1777,90 @@ def test_SetPROJSearchPath():
     assert sr.ImportFromEPSG(32631) == 0
 
 
-# Test for PROJ < 6.2
-def test_osr_import_projjson_possibly_error_out():
+def test_Set_PROJ_DATA_config_option():
+
+    # OSRSetPROJSearchPaths() is only taken into priority over other methods
+    # starting with PROJ >= 6.1
+
+    # Do the test in a new thread, so that the EPSG code cache which is thread
+    # locale is not used, and we can effectively test that the new search path
+    # is used
+    def threaded_function(arg):
+        sr = osr.SpatialReference()
+        try:
+            sr.ImportFromEPSG(32631)
+            arg[0] = True
+        except Exception:
+            arg[0] = False
+
+    backup_search_paths = osr.GetPROJSearchPaths()
+    # conftest.py set 2 paths: autotest/gcore/tmp/proj_db_tmpdir and autotest/proj_grids
+    assert len(backup_search_paths) == 2
+    try:
+        gdal.SetConfigOption("PROJ_DATA", "/i_do/not/exist")
+        arg = [-1]
+        thread = Thread(target=threaded_function, args=(arg,))
+        thread.start()
+        thread.join()
+        assert arg[0] == False
+
+        gdal.SetConfigOption("PROJ_DATA", backup_search_paths[0])
+        arg = [-1]
+        thread = Thread(target=threaded_function, args=(arg,))
+        thread.start()
+        thread.join()
+        assert arg[0] == True
+
+        gdal.SetConfigOption("PROJ_DATA", None)
+    finally:
+        osr.SetPROJSearchPaths(backup_search_paths)
 
     sr = osr.SpatialReference()
-    projjson = '{"$schema":"https://proj.org/schemas/v0.1/projjson.schema.json","type":"GeographicCRS","name":"WGS 84","datum":{"type":"GeodeticReferenceFrame","name":"World Geodetic System 1984","ellipsoid":{"name":"WGS 84","semi_major_axis":6378137,"inverse_flattening":298.257223563}},"coordinate_system":{"subtype":"ellipsoidal","axis":[{"name":"Geodetic latitude","abbreviation":"Lat","direction":"north","unit":"degree"},{"name":"Geodetic longitude","abbreviation":"Lon","direction":"east","unit":"degree"}]},"area":"World","bbox":{"south_latitude":-90,"west_longitude":-180,"north_latitude":90,"east_longitude":180},"id":{"authority":"EPSG","code":4326}}'
-    with gdaltest.error_handler():
-        sr.SetFromUserInput(projjson)
+    assert sr.ImportFromEPSG(32631) == 0
 
 
-@gdaltest.require_proj_version(6, 2)
+###############################################################################
+
+
+@pytest.mark.skipif(
+    gdaltest.is_travis_branch("sanitize"), reason="fails on sanitize for unknown reason"
+)
+def test_Set_PROJ_DATA_config_option_sub_proccess_config_option_ok():
+
+    backup_search_paths = osr.GetPROJSearchPaths()
+    # conftest.py set 2 paths: autotest/gcore/tmp/proj_db_tmpdir and autotest/proj_grids
+    assert len(backup_search_paths) == 2
+    subprocess.check_call(
+        [
+            sys.executable,
+            "osr_basic_subprocess.py",
+            "config_option_ok",
+            backup_search_paths[0],
+        ]
+    )
+
+
+###############################################################################
+
+
+@pytest.mark.skipif(
+    gdaltest.is_travis_branch("sanitize"), reason="fails on sanitize for unknown reason"
+)
+def test_Set_PROJ_DATA_config_option_sub_proccess_config_option_ko():
+
+    backup_search_paths = osr.GetPROJSearchPaths()
+    # conftest.py set 2 paths: autotest/gcore/tmp/proj_db_tmpdir and autotest/proj_grids
+    assert len(backup_search_paths) == 2
+    subprocess.check_call(
+        [
+            sys.executable,
+            "osr_basic_subprocess.py",
+            "config_option_ko",
+            "/i_do/not/exist",
+        ]
+    )
+
+
 def test_osr_import_projjson():
 
     sr = osr.SpatialReference()
@@ -1811,21 +1869,10 @@ def test_osr_import_projjson():
     assert ret == 0
 
     broken_projjson = projjson[0:-10]
-    with gdaltest.error_handler():
-        assert sr.SetFromUserInput(broken_projjson) != 0
+    with pytest.raises(Exception):
+        sr.SetFromUserInput(broken_projjson)
 
 
-# Test for PROJ < 6.2
-def test_osr_export_projjson_possibly_error_out():
-
-    sr = osr.SpatialReference()
-    sr.SetFromUserInput("WGS84")
-
-    with gdaltest.error_handler():
-        sr.ExportToPROJJSON()
-
-
-@gdaltest.require_proj_version(6, 2)
 def test_osr_export_projjson():
 
     sr = osr.SpatialReference()
@@ -1834,16 +1881,6 @@ def test_osr_export_projjson():
     assert sr.ExportToPROJJSON() != ""
 
 
-# Test for PROJ < 6.3
-def test_osr_promote_to_3D_possibly_error_out():
-
-    sr = osr.SpatialReference()
-    sr.SetFromUserInput("WGS84")
-    with gdaltest.error_handler():
-        sr.PromoteTo3D()
-
-
-@gdaltest.require_proj_version(6, 3)
 def test_osr_promote_to_3D():
 
     sr = osr.SpatialReference()
@@ -1956,7 +1993,8 @@ def test_SetPROJAuxDbPaths():
     #
     # See PR https://github.com/OSGeo/gdal/pull/3590
     subprocess.check_call(
-        [sys.executable, "osr_basic_subprocess.py"], env=os.environ.copy()
+        [sys.executable, "osr_basic_subprocess.py", "aux_db_test"],
+        env=os.environ.copy(),
     )
 
 
@@ -1964,7 +2002,7 @@ def test_SetPROJAuxDbPaths():
 # Test IsDynamic()
 
 
-@gdaltest.require_proj_version(7, 2)
+@pytest.mark.require_proj(7, 2)
 def test_osr_basic_is_dynamic():
 
     srs = osr.SpatialReference()
@@ -1985,7 +2023,9 @@ def test_osr_basic_is_dynamic():
 
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4258)  # ETRS89 (generic), using datum ensemble
-    assert not srs.IsDynamic()
+    # Just run it. Prior to PROJ 9.6, this was not a dynamic CRS
+    # Since PROJ 9.6, it is a dynamic CRS.
+    srs.IsDynamic()
 
     srs = osr.SpatialReference()
     srs.SetFromUserInput(
@@ -2052,20 +2092,14 @@ def test_osr_basic_export_equal_earth_to_wkt():
 def test_osr_basic_set_from_user_input_too_long():
 
     srs = osr.SpatialReference()
-    with gdaltest.error_handler():
-        assert (
-            srs.SetFromUserInput("+proj=pipeline " + "+step +proj=longlat " * 100000)
-            != ogr.OGRERR_NONE
-        )
+    with pytest.raises(Exception):
+        srs.SetFromUserInput("+proj=pipeline " + "+step +proj=longlat " * 100000)
 
-    with gdaltest.error_handler():
-        assert srs.SetFromUserInput("AUTO:" + "x" * 100000) != ogr.OGRERR_NONE
+    with pytest.raises(Exception):
+        srs.SetFromUserInput("AUTO:" + "x" * 100000)
 
-    with gdaltest.error_handler():
-        assert (
-            srs.SetFromUserInput("http://opengis.net/def/crs/" + "x" * 100000)
-            != ogr.OGRERR_NONE
-        )
+    with pytest.raises(Exception):
+        srs.SetFromUserInput("http://opengis.net/def/crs/" + "x" * 100000)
 
 
 ###############################################################################
@@ -2177,7 +2211,7 @@ def test_osr_basic_export_derived_projected_crs_to_wkt():
 # Test osr.GetPROJEnableNetwork / osr.SetPROJEnableNetwork
 
 
-@gdaltest.require_proj_version(7)
+@pytest.mark.require_proj(7)
 def test_osr_basic_proj_network():
 
     initial_value = osr.GetPROJEnableNetwork()
@@ -2224,7 +2258,7 @@ def test_osr_basic_get_linear_units_compound_engineering_crs():
 # Test EPSG:horizontal_code+geographic_code
 
 
-@gdaltest.require_proj_version(9)
+@pytest.mark.require_proj(9)
 def test_osr_basic_epsg_horizontal_and_ellipsoidal_height():
 
     sr = osr.SpatialReference()
@@ -2246,13 +2280,13 @@ def test_osr_basic_eqearth_central_meridian():
 
 
 ###############################################################################
-# Test osr.enable_exceptions()
+# Test osr.ExceptionMgr()
 
 
 def test_osr_exceptions():
 
     with pytest.raises(Exception):
-        with osr.enable_exceptions():
+        with osr.ExceptionMgr():
             srs = osr.SpatialReference()
             srs.ImportFromEPSG(0)
 
@@ -2261,7 +2295,7 @@ def test_osr_exceptions():
 # Test SetFromUserInput() with COORDINATEMETADATA[]
 
 
-@gdaltest.require_proj_version(9, 2)
+@pytest.mark.require_proj(9, 2)
 def test_osr_basic_set_from_user_input_COORDINATEMETADATA_with_epoch():
 
     srs = osr.SpatialReference()
@@ -2300,7 +2334,7 @@ def test_osr_basic_set_from_user_input_COORDINATEMETADATA_with_epoch():
 # Test SetFromUserInput() with COORDINATEMETADATA[]
 
 
-@gdaltest.require_proj_version(9, 2)
+@pytest.mark.require_proj(9, 2)
 def test_osr_basic_set_from_user_input_COORDINATEMETADATA_without_epoch():
 
     srs = osr.SpatialReference()
@@ -2344,3 +2378,290 @@ def test_osr_basic_SetProjCS_Bound():
     srs.SetProjCS("Projected CRS name")
     assert srs.GetName() == "Projected CRS name"
     assert srs.ExportToProj4() == proj4str
+
+
+###############################################################################
+
+
+def test_osr_basic_warning_exceptions():
+
+    python_exe = sys.executable
+    cmd = '%s -c "from osgeo import osr; ' % python_exe + (
+        "osr.SpatialReference();" ' " '
+    )
+    try:
+        (_, err) = gdaltest.runexternal_out_and_err(cmd, encoding="UTF-8")
+    except Exception as e:
+        pytest.skip("got exception %s" % str(e))
+    assert "FutureWarning: Neither osr.UseExceptions()" in err
+
+
+def test_osr_basic_wkt_format_configuration_option():
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(32145)
+
+    with gdal.config_option("OSR_WKT_FORMAT", "WKT1"):
+        wkt1 = srs.ExportToWkt()
+
+    with gdal.config_option("OSR_WKT_FORMAT", "WKT2"):
+        wkt2 = srs.ExportToWkt()
+
+    assert "BBOX" not in wkt1
+    assert "BBOX" in wkt2
+
+
+def test_osr_basic_default_axis_mapping_strategy():
+
+    with gdal.config_option(
+        "OSR_DEFAULT_AXIS_MAPPING_STRATEGY", "TRADITIONAL_GIS_ORDER"
+    ):
+        crs1 = osr.SpatialReference()
+        crs1.ImportFromEPSG(4326)
+
+    crs2 = osr.SpatialReference()
+    crs2.ImportFromEPSG(4326)
+
+    assert crs1.GetAxisMappingStrategy() == osr.OAMS_TRADITIONAL_GIS_ORDER
+    assert crs2.GetAxisMappingStrategy() == osr.OAMS_AUTHORITY_COMPLIANT
+
+
+###############################################################################
+
+
+@pytest.mark.require_proj(9, 4)
+def test_osr_basic_urn_coordinateMetadata():
+
+    srs = osr.SpatialReference()
+    assert (
+        srs.SetFromUserInput(
+            "urn:ogc:def:coordinateMetadata:NRCAN::NAD83_CSRS_1997_MTM7_HT2_1997"
+        )
+        == ogr.OGRERR_NONE
+    )
+    assert srs.GetName() == "NAD83(CSRS)v7 / MTM zone 7 + CGVD28 height"
+    assert srs.GetCoordinateEpoch() == 1997.0
+
+
+###############################################################################
+
+
+@pytest.mark.require_proj(9, 4)
+def test_osr_basic_set_from_user_input_EPSG_8254_at_something():
+
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput("EPSG:8255 @ 2002.5")  # NAD83(CSRS)v7
+    assert srs.GetName() == "NAD83(CSRS)v7"
+    assert srs.GetCoordinateEpoch() == 2002.5
+
+
+###############################################################################
+
+
+@pytest.mark.require_proj(9, 4)
+def test_osr_basic_has_point_motion_operation():
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(8255)  # NAD83(CSRS)v7
+    assert srs.HasPointMotionOperation()
+
+
+###############################################################################
+
+
+# Test workaround for https://github.com/OSGeo/PROJ/pull/4166
+def test_osr_basic_export_wkt_utm_south():
+
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput("+proj=utm +zone=1 +south +datum=WGS84")
+
+    assert 'ID["EPSG",16101]' in srs.ExportToWkt(["FORMAT=WKT2_2019"])
+
+    j = json.loads(srs.ExportToPROJJSON())
+    assert j["conversion"]["id"]["code"] == 16101
+
+
+###############################################################################
+
+
+def test_osr_basic_GetAuthorityListFromDatabase():
+
+    ret = osr.GetAuthorityListFromDatabase()
+    assert "EPSG" in ret
+    assert "PROJ" in ret
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "args,kwargs",
+    (
+        pytest.param([], {"epsg": 4326}, id="epsg"),
+        pytest.param(["+proj=utm +zone=18 +datum=WGS84"], {}, id="proj4"),
+        pytest.param(
+            [
+                'PROJCS["NAD83 / Vermont (ftUS)",GEOGCS["NAD83",DATUM["North_American_Datum_1983",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6269"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4269"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",42.5],PARAMETER["central_meridian",-72.5],PARAMETER["scale_factor",0.999964286],PARAMETER["false_easting",1640416.6667],PARAMETER["false_northing",0],UNIT["US survey foot",0.304800609601219,AUTHORITY["EPSG","9003"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","5646"]]'
+            ],
+            {},
+            id="wkt",
+        ),
+        pytest.param(
+            [
+                '{\n  "$schema": "https://proj.org/schemas/v0.7/projjson.schema.json",\n  "type": "ProjectedCRS",\n  "name": "NAD83 / Vermont (ftUS)",\n  "base_crs": {\n    "name": "NAD83",\n    "datum": {\n      "type": "GeodeticReferenceFrame",\n      "name": "North American Datum 1983",\n      "ellipsoid": {\n        "name": "GRS 1980",\n        "semi_major_axis": 6378137,\n        "inverse_flattening": 298.257222101\n      }\n    },\n    "coordinate_system": {\n      "subtype": "ellipsoidal",\n      "axis": [\n        {\n          "name": "Geodetic latitude",\n          "abbreviation": "Lat",\n          "direction": "north",\n          "unit": "degree"\n        },\n        {\n          "name": "Geodetic longitude",\n          "abbreviation": "Lon",\n          "direction": "east",\n          "unit": "degree"\n        }\n      ]\n    },\n    "id": {\n      "authority": "EPSG",\n      "code": 4269\n    }\n  },\n  "conversion": {\n    "name": "SPCS83 Vermont zone (US survey foot)",\n    "method": {\n      "name": "Transverse Mercator",\n      "id": {\n        "authority": "EPSG",\n        "code": 9807\n      }\n    },\n    "parameters": [\n      {\n        "name": "Latitude of natural origin",\n        "value": 42.5,\n        "unit": "degree",\n        "id": {\n          "authority": "EPSG",\n          "code": 8801\n        }\n      },\n      {\n        "name": "Longitude of natural origin",\n        "value": -72.5,\n        "unit": "degree",\n        "id": {\n          "authority": "EPSG",\n          "code": 8802\n        }\n      },\n      {\n        "name": "Scale factor at natural origin",\n        "value": 0.999964286,\n        "unit": "unity",\n        "id": {\n          "authority": "EPSG",\n          "code": 8805\n        }\n      },\n      {\n        "name": "False easting",\n        "value": 1640416.6667,\n        "unit": {\n          "type": "LinearUnit",\n          "name": "US survey foot",\n          "conversion_factor": 0.304800609601219\n        },\n        "id": {\n          "authority": "EPSG",\n          "code": 8806\n        }\n      },\n      {\n        "name": "False northing",\n        "value": 0,\n        "unit": {\n          "type": "LinearUnit",\n          "name": "US survey foot",\n          "conversion_factor": 0.304800609601219\n        },\n        "id": {\n          "authority": "EPSG",\n          "code": 8807\n        }\n      }\n    ]\n  },\n  "coordinate_system": {\n    "subtype": "Cartesian",\n    "axis": [\n      {\n        "name": "Easting",\n        "abbreviation": "X",\n        "direction": "east",\n        "unit": {\n          "type": "LinearUnit",\n          "name": "US survey foot",\n          "conversion_factor": 0.304800609601219\n        }\n      },\n      {\n        "name": "Northing",\n        "abbreviation": "Y",\n        "direction": "north",\n        "unit": {\n          "type": "LinearUnit",\n          "name": "US survey foot",\n          "conversion_factor": 0.304800609601219\n        }\n      }\n    ]\n  },\n  "scope": "Engineering survey, topographic mapping.",\n  "area": "United States (USA) - Vermont - counties of Addison; Bennington; Caledonia; Chittenden; Essex; Franklin; Grand Isle; Lamoille; Orange; Orleans; Rutland; Washington; Windham; Windsor.",\n  "bbox": {\n    "south_latitude": 42.72,\n    "west_longitude": -73.44,\n    "north_latitude": 45.03,\n    "east_longitude": -71.5\n  },\n  "id": {\n    "authority": "EPSG",\n    "code": 5646\n  }\n}'
+            ],
+            {},
+            id="projjson text",
+        ),
+        pytest.param(
+            [
+                {
+                    "$schema": "https://proj.org/schemas/v0.7/projjson.schema.json",
+                    "type": "ProjectedCRS",
+                    "name": "NAD83 / Vermont (ftUS)",
+                    "base_crs": {
+                        "name": "NAD83",
+                        "datum": {
+                            "type": "GeodeticReferenceFrame",
+                            "name": "North American Datum 1983",
+                            "ellipsoid": {
+                                "name": "GRS 1980",
+                                "semi_major_axis": 6378137,
+                                "inverse_flattening": 298.257222101,
+                            },
+                        },
+                        "coordinate_system": {
+                            "subtype": "ellipsoidal",
+                            "axis": [
+                                {
+                                    "name": "Geodetic latitude",
+                                    "abbreviation": "Lat",
+                                    "direction": "north",
+                                    "unit": "degree",
+                                },
+                                {
+                                    "name": "Geodetic longitude",
+                                    "abbreviation": "Lon",
+                                    "direction": "east",
+                                    "unit": "degree",
+                                },
+                            ],
+                        },
+                        "id": {"authority": "EPSG", "code": 4269},
+                    },
+                    "conversion": {
+                        "name": "SPCS83 Vermont zone (US survey foot)",
+                        "method": {
+                            "name": "Transverse Mercator",
+                            "id": {"authority": "EPSG", "code": 9807},
+                        },
+                        "parameters": [
+                            {
+                                "name": "Latitude of natural origin",
+                                "value": 42.5,
+                                "unit": "degree",
+                                "id": {"authority": "EPSG", "code": 8801},
+                            },
+                            {
+                                "name": "Longitude of natural origin",
+                                "value": -72.5,
+                                "unit": "degree",
+                                "id": {"authority": "EPSG", "code": 8802},
+                            },
+                            {
+                                "name": "Scale factor at natural origin",
+                                "value": 0.999964286,
+                                "unit": "unity",
+                                "id": {"authority": "EPSG", "code": 8805},
+                            },
+                            {
+                                "name": "False easting",
+                                "value": 1640416.6667,
+                                "unit": {
+                                    "type": "LinearUnit",
+                                    "name": "US survey foot",
+                                    "conversion_factor": 0.304800609601219,
+                                },
+                                "id": {"authority": "EPSG", "code": 8806},
+                            },
+                            {
+                                "name": "False northing",
+                                "value": 0,
+                                "unit": {
+                                    "type": "LinearUnit",
+                                    "name": "US survey foot",
+                                    "conversion_factor": 0.304800609601219,
+                                },
+                                "id": {"authority": "EPSG", "code": 8807},
+                            },
+                        ],
+                    },
+                    "coordinate_system": {
+                        "subtype": "Cartesian",
+                        "axis": [
+                            {
+                                "name": "Easting",
+                                "abbreviation": "X",
+                                "direction": "east",
+                                "unit": {
+                                    "type": "LinearUnit",
+                                    "name": "US survey foot",
+                                    "conversion_factor": 0.304800609601219,
+                                },
+                            },
+                            {
+                                "name": "Northing",
+                                "abbreviation": "Y",
+                                "direction": "north",
+                                "unit": {
+                                    "type": "LinearUnit",
+                                    "name": "US survey foot",
+                                    "conversion_factor": 0.304800609601219,
+                                },
+                            },
+                        ],
+                    },
+                    "scope": "Engineering survey, topographic mapping.",
+                    "area": "United States (USA) - Vermont - counties of Addison; Bennington; Caledonia; Chittenden; Essex; Franklin; Grand Isle; Lamoille; Orange; Orleans; Rutland; Washington; Windham; Windsor.",
+                    "bbox": {
+                        "south_latitude": 42.72,
+                        "west_longitude": -73.44,
+                        "north_latitude": 45.03,
+                        "east_longitude": -71.5,
+                    },
+                    "id": {"authority": "EPSG", "code": 5646},
+                }
+            ],
+            {},
+            id="projjson dict",
+        ),
+    ),
+)
+def test_osr_basic_constructor(args, kwargs):
+
+    srs = osr.SpatialReference(*args, **kwargs)
+
+    assert srs.ExportToWkt() != ""
+
+
+@pytest.mark.parametrize("arg", ("", None))
+def test_osr_basic_constructor_empty(arg):
+
+    srs = osr.SpatialReference(arg)
+    assert srs is not None
+
+
+def test_osr_basic_constructor_overspecified():
+
+    # The arguments provided here don't make any sense.
+    # But SpatialReference.SetFromUserInput doesn't seem to complain if we pass it
+    # unexpected options, so we have no way to catch this for now.
+
+    with pytest.raises(ValueError, match="Unexpected argument"):
+        osr.SpatialReference(proj4="+proj=utm +zone=18 +datum=WGS84", epsg=4326)
+
+
+def test_osr_basic_constructor_invalid_kwarg():
+
+    with pytest.raises(ValueError, match="Unexpected argument"):
+        osr.SpatialReference(description="VT State Plane")

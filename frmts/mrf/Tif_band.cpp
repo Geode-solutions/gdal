@@ -51,24 +51,15 @@
 #include "marfa.h"
 NAMESPACE_MRF_START
 
-// Returns a string in /vsimem/ + prefix + count that doesn't exist when this
-// function gets called It is not thread safe, open the result as soon as
-// possible
+// Returns a unique filename
 static CPLString uniq_memfname(const char *prefix)
 {
     // Define MRF_LOCAL_TMP to use local files instead of RAM
     // #define MRF_LOCAL_TMP
 #if defined(MRF_LOCAL_TMP)
-    return CPLGenerateTempFilename(prefix);
+    return CPLGenerateTempFilenameSafe(prefix);
 #else
-    CPLString fname;
-    VSIStatBufL statb;
-    static unsigned int cnt = 0;
-    do
-    {
-        fname.Printf("/vsimem/%s_%08x", prefix, cnt++);
-    } while (!VSIStatL(fname, &statb));
-    return fname;
+    return VSIMemGenerateHiddenFilename(prefix);
 #endif
 }
 
@@ -76,7 +67,7 @@ static CPLString uniq_memfname(const char *prefix)
 // Uses GDAL to create a temporary TIF file, using the band create options
 // copies the content to the destination buffer then erases the temp TIF
 //
-static CPLErr CompressTIF(buf_mgr &dst, buf_mgr &src, const ILImage &img,
+static CPLErr CompressTIF(buf_mgr &dst, const buf_mgr &src, const ILImage &img,
                           char **papszOptions)
 {
     CPLErr ret;
@@ -136,7 +127,9 @@ static CPLErr CompressTIF(buf_mgr &dst, buf_mgr &src, const ILImage &img,
 }
 
 // Read from a RAM Tiff. This is rather generic
-static CPLErr DecompressTIF(buf_mgr &dst, buf_mgr &src, const ILImage &img)
+// cppcheck-suppress constParameterReference
+static CPLErr DecompressTIF(buf_mgr &dst, const buf_mgr &src,
+                            const ILImage &img)
 {
     CPLString fname = uniq_memfname("mrf_tif_read");
     VSILFILE *fp =
@@ -203,7 +196,8 @@ static CPLErr DecompressTIF(buf_mgr &dst, buf_mgr &src, const ILImage &img)
         ret = poTiff->RasterIO(
             GF_Read, 0, 0, img.pagesize.x, img.pagesize.y, dst.buffer,
             img.pagesize.x, img.pagesize.y, img.dt, img.pagesize.c, nullptr,
-            nDTSize * img.pagesize.c, nDTSize * img.pagesize.c * img.pagesize.x,
+            static_cast<GSpacing>(nDTSize) * img.pagesize.c,
+            static_cast<GSpacing>(nDTSize) * img.pagesize.c * img.pagesize.x,
             nDTSize, nullptr);
 
     GDALClose(poTiff);
@@ -239,6 +233,8 @@ TIF_Band::TIF_Band(MRFDataset *pDS, const ILImage &image, int b, int level)
     // ZLEVEL 8, which is fine.
     if (q > 2)
         q -= 2;
+    if (q == 0)  // TIF does not accept ZLEVEL of zero
+        q = 6;
     papszOptions = CSLAddNameValue(papszOptions, "ZLEVEL", CPLOPrintf("%d", q));
 }
 

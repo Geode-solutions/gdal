@@ -4,12 +4,27 @@
  * it was moved into this file.
  */
 %{
+#include "cpl_string.h"
+#include "cpl_conv.h"
+
 static int bUseExceptions=0;
-static CPLErrorHandler pfnPreviousHandler = CPLDefaultErrorHandler;
+static int bUserHasSpecifiedIfUsingExceptions = FALSE;
+static thread_local int bUseExceptionsLocal = -1;
+
+struct PythonBindingErrorHandlerContext
+{
+    std::string     osInitialMsg{};
+    std::string     osFailureMsg{};
+    CPLErrorNum     nLastCode = CPLE_None;
+    bool            bMemoryError = false;
+};
 
 static void CPL_STDCALL
-PythonBindingErrorHandler(CPLErr eclass, int code, const char *msg )
+PythonBindingErrorHandler(CPLErr eclass, CPLErrorNum err_no, const char *msg )
 {
+  PythonBindingErrorHandlerContext* ctxt = static_cast<
+      PythonBindingErrorHandlerContext*>(CPLGetErrorHandlerUserData());
+
   /*
   ** Generally we want to suppress error reporting if we have exceptions
   ** enabled as the error message will be in the exception thrown in
@@ -20,7 +35,7 @@ PythonBindingErrorHandler(CPLErr eclass, int code, const char *msg )
      because the CPL support code does an abort() before any exception
      can be generated */
   if (eclass == CE_Fatal ) {
-    pfnPreviousHandler(eclass, code, msg );
+    CPLCallPreviousHandler(eclass, err_no, msg );
   }
 
   /*
@@ -28,74 +43,115 @@ PythonBindingErrorHandler(CPLErr eclass, int code, const char *msg )
   ** they won't be translated into exceptions.
   */
   else if (eclass != CE_Failure ) {
-    pfnPreviousHandler(eclass, code, msg );
+    CPLCallPreviousHandler(eclass, err_no, msg );
   }
   else {
-    CPLSetThreadLocalConfigOption("__last_error_message", msg);
-    CPLSetThreadLocalConfigOption("__last_error_code", CPLSPrintf("%d", code));
+    ctxt->nLastCode = err_no;
+    try
+    {
+        if( ctxt->osFailureMsg.empty() ) {
+          ctxt->osFailureMsg = msg;
+          ctxt->osInitialMsg = ctxt->osFailureMsg;
+        } else {
+          if( ctxt->osFailureMsg.size() < 10000 ) {
+            std::string osTmp(msg);
+            osTmp += "\nMay be caused by: ";
+            osTmp += ctxt->osFailureMsg;
+            ctxt->osFailureMsg = std::move(osTmp);
+            ctxt->osInitialMsg = ctxt->osFailureMsg;
+          }
+          else
+          {
+            std::string osTmp(msg);
+            osTmp += "\n[...]\nMay be caused by: ";
+            osTmp += ctxt->osInitialMsg;
+            ctxt->osFailureMsg = std::move(osTmp);
+          }
+        }
+    }
+    catch( const std::exception& )
+    {
+        ctxt->bMemoryError = true;
+    }
   }
 }
+
 %}
 
 %exception GetUseExceptions
 {
 %#ifdef SED_HACKS
-    if( bUseExceptions ) bLocalUseExceptionsCode = FALSE;
+    if( ReturnSame(TRUE) ) bLocalUseExceptionsCode = FALSE;
 %#endif
     result = GetUseExceptions();
+}
+
+%exception _GetExceptionsLocal
+{
+%#ifdef SED_HACKS
+    if( ReturnSame(TRUE) ) bLocalUseExceptionsCode = FALSE;
+%#endif
+    $action
+}
+
+%exception _SetExceptionsLocal
+{
+%#ifdef SED_HACKS
+    if( ReturnSame(TRUE) ) bLocalUseExceptionsCode = FALSE;
+%#endif
+    $action
+}
+
+%exception _UserHasSpecifiedIfUsingExceptions
+{
+%#ifdef SED_HACKS
+    if( ReturnSame(TRUE) ) bLocalUseExceptionsCode = FALSE;
+%#endif
+    $action
 }
 
 %inline %{
 
 static
 int GetUseExceptions() {
-  return bUseExceptions;
+  return bUseExceptionsLocal >= 0 ? bUseExceptionsLocal : bUseExceptions;
+}
+
+static int _GetExceptionsLocal()
+{
+  return bUseExceptionsLocal;
+}
+
+static void _SetExceptionsLocal(int bVal)
+{
+  bUseExceptionsLocal = bVal;
 }
 
 static
-void UseExceptions() {
+void _UseExceptions() {
   CPLErrorReset();
+  bUserHasSpecifiedIfUsingExceptions = TRUE;
   if( !bUseExceptions )
   {
     bUseExceptions = 1;
-    char* pszNewValue = CPLStrdup(CPLSPrintf("%s %s",
-                   MODULE_NAME,
-                   CPLGetConfigOption("__chain_python_error_handlers", "")));
-    CPLSetConfigOption("__chain_python_error_handlers", pszNewValue);
-    CPLFree(pszNewValue);
-    // if the previous logger was custom, we need the user data available
-    pfnPreviousHandler =
-        CPLSetErrorHandlerEx( (CPLErrorHandler) PythonBindingErrorHandler, CPLGetErrorHandlerUserData() );
   }
 }
 
 static
-void DontUseExceptions() {
+void _DontUseExceptions() {
   CPLErrorReset();
+  bUserHasSpecifiedIfUsingExceptions = TRUE;
   if( bUseExceptions )
   {
-    const char* pszValue = CPLGetConfigOption("__chain_python_error_handlers", "");
-    if( strncmp(pszValue, MODULE_NAME, strlen(MODULE_NAME)) != 0 ||
-        pszValue[strlen(MODULE_NAME)] != ' ')
-    {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "Cannot call %s.DontUseExceptions() at that point since the "
-                 "stack of error handlers is: %s", MODULE_NAME, pszValue);
-        return;
-    }
-    char* pszNewValue = CPLStrdup(pszValue + strlen(MODULE_NAME) + 1);
-    if( pszNewValue[0] == ' ' && pszNewValue[1] == '\0' )
-    {
-        CPLFree(pszNewValue);
-        pszNewValue = NULL;
-    }
-    CPLSetConfigOption("__chain_python_error_handlers", pszNewValue);
-    CPLFree(pszNewValue);
     bUseExceptions = 0;
-    // if the previous logger was custom, we need the user data available. Preserve it.
-    CPLSetErrorHandlerEx( pfnPreviousHandler, CPLGetErrorHandlerUserData());
   }
 }
+
+static int _UserHasSpecifiedIfUsingExceptions()
+{
+    return bUserHasSpecifiedIfUsingExceptions || bUseExceptionsLocal >= 0;
+}
+
 %}
 
 %{
@@ -115,28 +171,30 @@ template<class T> static T ReturnSame(T x)
     return 0;
 }
 
-static void ClearErrorState()
+static void pushErrorHandler()
 {
-    CPLSetThreadLocalConfigOption("__last_error_message", NULL);
-    CPLSetThreadLocalConfigOption("__last_error_code", NULL);
     CPLErrorReset();
+    PythonBindingErrorHandlerContext* ctxt = new PythonBindingErrorHandlerContext();
+    CPLPushErrorHandlerEx(PythonBindingErrorHandler, ctxt);
 }
 
-static void StoreLastException() CPL_UNUSED;
-
-// Note: this is also copy&pasted in gdal_array.i
-static void StoreLastException()
+static void popErrorHandler()
 {
-    const char* pszLastErrorMessage =
-        CPLGetThreadLocalConfigOption("__last_error_message", NULL);
-    const char* pszLastErrorCode =
-        CPLGetThreadLocalConfigOption("__last_error_code", NULL);
-    if( pszLastErrorMessage != NULL && pszLastErrorCode != NULL )
+    PythonBindingErrorHandlerContext* ctxt = static_cast<
+      PythonBindingErrorHandlerContext*>(CPLGetErrorHandlerUserData());
+    CPLPopErrorHandler();
+    if( ctxt->bMemoryError )
     {
-        CPLErrorSetState( CE_Failure,
-            static_cast<CPLErrorNum>(atoi(pszLastErrorCode)),
-            pszLastErrorMessage);
+        CPLErrorSetState(
+          CE_Failure, CPLE_OutOfMemory, "Out of memory");
     }
+    else if( !ctxt->osFailureMsg.empty() )
+    {
+      CPLErrorSetState(
+          CPLGetLastErrorType() == CE_Failure ? CE_Failure: CE_Warning,
+          ctxt->nLastCode, ctxt->osFailureMsg.c_str());
+    }
+    delete ctxt;
 }
 
 %}
@@ -144,13 +202,16 @@ static void StoreLastException()
 %include exception.i
 
 %exception {
-
-    if ( bUseExceptions ) {
-        ClearErrorState();
+    const int bLocalUseExceptions = GetUseExceptions();
+    if ( bLocalUseExceptions ) {
+        pushErrorHandler();
     }
     $action
+    if ( bLocalUseExceptions ) {
+        popErrorHandler();
+    }
 %#ifndef SED_HACKS
-    if ( bUseExceptions ) {
+    if ( bLocalUseExceptions ) {
       CPLErr eclass = CPLGetLastErrorType();
       if ( eclass == CE_Failure || eclass == CE_Fatal ) {
         SWIG_exception( SWIG_RuntimeError, CPLGetLastErrorMsg() );
@@ -160,20 +221,23 @@ static void StoreLastException()
 }
 
 %feature("except") Open {
-    if ( bUseExceptions ) {
-        ClearErrorState();
+    const int bLocalUseExceptions = GetUseExceptions();
+    if ( bLocalUseExceptions ) {
+        pushErrorHandler();
     }
     $action
+    if ( bLocalUseExceptions ) {
+        popErrorHandler();
+    }
 %#ifndef SED_HACKS
-    if( result == NULL && bUseExceptions ) {
+    if( result == NULL && bLocalUseExceptions ) {
       CPLErr eclass = CPLGetLastErrorType();
       if ( eclass == CE_Failure || eclass == CE_Fatal ) {
         SWIG_exception( SWIG_RuntimeError, CPLGetLastErrorMsg() );
       }
     }
 %#endif
-    if( result != NULL && bUseExceptions ) {
-        StoreLastException();
+    if( result != NULL && bLocalUseExceptions ) {
 %#ifdef SED_HACKS
         bLocalUseExceptionsCode = FALSE;
 %#endif
@@ -181,20 +245,23 @@ static void StoreLastException()
 }
 
 %feature("except") OpenShared {
-    if ( bUseExceptions ) {
-        ClearErrorState();
+    const int bLocalUseExceptions = GetUseExceptions();
+    if ( bLocalUseExceptions ) {
+        pushErrorHandler();
     }
     $action
+    if ( bLocalUseExceptions ) {
+        popErrorHandler();
+    }
 %#ifndef SED_HACKS
-    if( result == NULL && bUseExceptions ) {
+    if( result == NULL && bLocalUseExceptions ) {
       CPLErr eclass = CPLGetLastErrorType();
       if ( eclass == CE_Failure || eclass == CE_Fatal ) {
         SWIG_exception( SWIG_RuntimeError, CPLGetLastErrorMsg() );
       }
     }
 %#endif
-    if( result != NULL && bUseExceptions ) {
-        StoreLastException();
+    if( result != NULL && bLocalUseExceptions ) {
 %#ifdef SED_HACKS
         bLocalUseExceptionsCode = FALSE;
 %#endif
@@ -202,20 +269,23 @@ static void StoreLastException()
 }
 
 %feature("except") OpenEx {
-    if ( bUseExceptions ) {
-        ClearErrorState();
+    const int bLocalUseExceptions = GetUseExceptions();
+    if ( bLocalUseExceptions ) {
+        pushErrorHandler();
     }
     $action
+    if ( bLocalUseExceptions ) {
+        popErrorHandler();
+    }
 %#ifndef SED_HACKS
-    if( result == NULL && bUseExceptions ) {
+    if( result == NULL && bLocalUseExceptions ) {
       CPLErr eclass = CPLGetLastErrorType();
       if ( eclass == CE_Failure || eclass == CE_Fatal ) {
         SWIG_exception( SWIG_RuntimeError, CPLGetLastErrorMsg() );
       }
     }
 %#endif
-    if( result != NULL && bUseExceptions ) {
-        StoreLastException();
+    if( result != NULL && bLocalUseExceptions ) {
 %#ifdef SED_HACKS
         bLocalUseExceptionsCode = FALSE;
 %#endif
@@ -223,7 +293,7 @@ static void StoreLastException()
 }
 
 %pythoncode %{
-  class ExceptionMgr(object):
+  class ExceptionMgr:
       """
       Context manager to manage Python Exception state
       for GDAL/OGR/OSR/GNM.
@@ -237,7 +307,7 @@ static void StoreLastException()
 
           >>> print(gdal.GetUseExceptions())
           0
-          >>> with gdal.ExceptionMgr(useExceptions=True):
+          >>> with gdal.ExceptionMgr():
           ...     # Exceptions are now in use
           ...     print(gdal.GetUseExceptions())
           1
@@ -247,7 +317,7 @@ static void StoreLastException()
           0
 
       """
-      def __init__(self, useExceptions):
+      def __init__(self, useExceptions=True):
           """
           Save whether or not this context will be using exceptions
           """
@@ -259,20 +329,107 @@ static void StoreLastException()
           set it to the state requested for the context
 
           """
-          self.currentUseExceptions = (GetUseExceptions() != 0)
-
-          if self.requestedUseExceptions:
-              UseExceptions()
-          else:
-              DontUseExceptions()
+          self.currentUseExceptions = _GetExceptionsLocal()
+          _SetExceptionsLocal(self.requestedUseExceptions)
+          if ExceptionMgr.__module__ == "osgeo.gdal":
+              try:
+                  from . import gdal_array
+              except ImportError:
+                  gdal_array = None
+              if gdal_array:
+                  gdal_array._SetExceptionsLocal(self.requestedUseExceptions)
 
       def __exit__(self, exc_type, exc_val, exc_tb):
           """
           On exit, restore the GDAL/OGR/OSR/GNM exception state which was
           current on entry to the context
           """
-          if self.currentUseExceptions:
-              UseExceptions()
-          else:
-              DontUseExceptions()
+          _SetExceptionsLocal(self.currentUseExceptions)
+          if ExceptionMgr.__module__ == "osgeo.gdal":
+              try:
+                  from . import gdal_array
+              except ImportError:
+                  gdal_array = None
+              if gdal_array:
+                  gdal_array._SetExceptionsLocal(self.currentUseExceptions)
+
+%}
+
+
+%pythoncode %{
+
+import importlib.util
+
+def _has_gdal_array():
+    return importlib.util.find_spec("osgeo.gdal_array") and importlib.util.find_spec("numpy")
+
+def UseExceptions():
+    """ Enable exceptions in all GDAL related modules (osgeo.gdal, osgeo.ogr, osgeo.osr, osgeo.gnm).
+        Note: prior to GDAL 3.7, this only affected the calling module"""
+
+    try:
+        from . import gdal
+        gdal._UseExceptions()
+    except ImportError:
+        pass
+
+    if _has_gdal_array():
+        try:
+            from . import gdal_array
+            gdal_array._UseExceptions()
+        except ImportError:
+            pass
+    try:
+        from . import ogr
+        ogr._UseExceptions()
+    except ImportError:
+        pass
+
+    try:
+        from . import osr
+        osr._UseExceptions()
+    except ImportError:
+        pass
+
+    try:
+        from . import gnm
+        gnm._UseExceptions()
+    except ImportError:
+        pass
+
+def DontUseExceptions():
+    """ Disable exceptions in all GDAL related modules (osgeo.gdal, osgeo.ogr, osgeo.osr, osgeo.gnm).
+        Note: prior to GDAL 3.7, this only affected the calling module"""
+
+    try:
+        from . import gdal
+        gdal._DontUseExceptions()
+    except ImportError:
+        pass
+
+    if _has_gdal_array():
+        try:
+            from . import gdal_array
+            gdal_array._DontUseExceptions()
+        except ImportError:
+            pass
+
+    try:
+        from . import ogr
+        ogr._DontUseExceptions()
+    except ImportError:
+        pass
+
+    try:
+        from . import osr
+        osr._DontUseExceptions()
+    except ImportError:
+        pass
+
+    try:
+        from . import gnm
+        gnm._DontUseExceptions()
+    except ImportError:
+        pass
+
 %}

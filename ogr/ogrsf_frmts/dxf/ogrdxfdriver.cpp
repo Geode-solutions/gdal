@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2009, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_dxf.h"
@@ -38,7 +22,7 @@ static int OGRDXFDriverIdentify(GDALOpenInfo *poOpenInfo)
 {
     if (poOpenInfo->fpL == nullptr || poOpenInfo->nHeaderBytes == 0)
         return FALSE;
-    if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "dxf"))
+    if (poOpenInfo->IsExtensionEqualToCI("dxf"))
         return TRUE;
     const char *pszIter = (const char *)poOpenInfo->pabyHeader;
     bool bFoundZero = false;
@@ -85,7 +69,8 @@ static GDALDataset *OGRDXFDriverOpen(GDALOpenInfo *poOpenInfo)
 
     OGRDXFDataSource *poDS = new OGRDXFDataSource();
 
-    if (!poDS->Open(poOpenInfo->pszFilename))
+    if (!poDS->Open(poOpenInfo->pszFilename, false,
+                    poOpenInfo->papszOpenOptions))
     {
         delete poDS;
         poDS = nullptr;
@@ -144,7 +129,58 @@ void RegisterOGRDXF()
         "file' default='trailer.dxf'/>"
         "  <Option name='FIRST_ENTITY' type='int' description='Identifier of "
         "first entity'/>"
+        "  <Option name='INSUNITS' type='string-select' "
+        "description='Drawing units for the model space ($INSUNITS system "
+        "variable)' default='AUTO'>"
+        "    <Value>AUTO</Value>"
+        "    <Value>HEADER_VALUE</Value>"
+        "    <Value alias='0'>UNITLESS</Value>"
+        "    <Value alias='1'>INCHES</Value>"
+        "    <Value alias='2'>FEET</Value>"
+        "    <Value alias='4'>MILLIMETERS</Value>"
+        "    <Value alias='5'>CENTIMETERS</Value>"
+        "    <Value alias='6'>METERS</Value>"
+        "    <Value alias='21'>US_SURVEY_FEET</Value>"
+        "  </Option>"
+        "  <Option name='MEASUREMENT' type='string-select' "
+        "description='Whether the current drawing uses imperial or metric "
+        "hatch "
+        "pattern and linetype ($MEASUREMENT system variable)' "
+        "default='HEADER_VALUE'>"
+        "    <Value>HEADER_VALUE</Value>"
+        "    <Value alias='0'>IMPERIAL</Value>"
+        "    <Value alias='1'>METRIC</Value>"
+        "  </Option>"
         "</CreationOptionList>");
+
+    poDriver->SetMetadataItem(
+        GDAL_DMD_OPENOPTIONLIST,
+        "<OpenOptionList>"
+        "  <Option name='CLOSED_LINE_AS_POLYGON' type='boolean' description="
+        "'Whether to expose closed POLYLINE/LWPOLYLINE as polygons' "
+        "default='NO'/>"
+        "  <Option name='INLINE_BLOCKS' type='boolean' description="
+        "'Whether INSERT entities are exploded with the geometry of the BLOCK "
+        "they reference' default='YES'/>"
+        "  <Option name='MERGE_BLOCK_GEOMETRIES' type='boolean' description="
+        "'Whether blocks should be merged into a compound geometry' "
+        "default='YES'/>"
+        "  <Option name='TRANSLATE_ESCAPE_SEQUENCES' type='boolean' "
+        "description="
+        "'Whether character escapes are honored where applicable, and MTEXT "
+        "control sequences are stripped' default='YES'/>"
+        "  <Option name='INCLUDE_RAW_CODE_VALUES' type='boolean' description="
+        "'Whether a RawCodeValues field should be added to contain all group "
+        "codes and values' default='NO'/>"
+        "  <Option name='3D_EXTENSIBLE_MODE' type='boolean' description="
+        "'Whether to include ASM entities with the raw ASM data stored in a "
+        "field' default='NO'/>"
+        "  <Option name='HATCH_TOLEARNCE' type='float' description="
+        "'Tolerance used when looking for the next component to add to the "
+        "hatch boundary.'/>"
+        "  <Option name='ENCODING' type='string' description="
+        "'Encoding name, as supported by iconv, to override $DWGCODEPAGE'/>"
+        "</OpenOptionList>");
 
     poDriver->SetMetadataItem(GDAL_DS_LAYER_CREATIONOPTIONLIST,
                               "<LayerCreationOptionList/>");

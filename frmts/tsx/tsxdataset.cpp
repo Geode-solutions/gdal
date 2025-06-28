@@ -10,23 +10,7 @@
  * Copyright (c) 2007, Philippe Vachon <philippe@cowpig.ca>
  * Copyright (c) 2009-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_minixml.h"
@@ -36,7 +20,7 @@
 
 #define MAX_GCPS 5000  // this should be more than enough ground control points
 
-namespace
+namespace gdal::TSX
 {
 enum ePolarization
 {
@@ -54,7 +38,9 @@ enum eProductType
     eGEC,
     eUnknown
 };
-}  // namespace
+}  // namespace gdal::TSX
+
+using namespace gdal::TSX;
 
 /************************************************************************/
 /* Helper Functions                                                     */
@@ -93,7 +79,7 @@ class TSXDataset final : public GDALPamDataset
     OGRSpatialReference m_oGCPSRS{};
 
     OGRSpatialReference m_oSRS{};
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     bool bHaveGeoTransform;
 
     eProductType nProduct;
@@ -106,7 +92,7 @@ class TSXDataset final : public GDALPamDataset
     const OGRSpatialReference *GetGCPSpatialRef() const override;
     virtual const GDAL_GCP *GetGCPs() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
@@ -193,8 +179,8 @@ CPLErr TSXRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
     {
         nRequestYSize = nRasterYSize - nBlockYOff * nBlockYSize;
         memset(pImage, 0,
-               (GDALGetDataTypeSize(eDataType) / 8) * nBlockXSize *
-                   nBlockYSize);
+               static_cast<size_t>(GDALGetDataTypeSizeBytes(eDataType)) *
+                   nBlockXSize * nBlockYSize);
     }
     else
     {
@@ -233,12 +219,6 @@ TSXDataset::TSXDataset()
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     m_oGCPSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -266,15 +246,18 @@ int TSXDataset::Identify(GDALOpenInfo *poOpenInfo)
     {
         if (poOpenInfo->bIsDirectory)
         {
-            const CPLString osFilename = CPLFormCIFilename(
+            const CPLString osFilename = CPLFormCIFilenameSafe(
                 poOpenInfo->pszFilename,
                 CPLGetFilename(poOpenInfo->pszFilename), "xml");
 
             /* Check if the filename contains TSX1_SAR (TerraSAR-X) or TDX1_SAR
              * (TanDEM-X) or PAZ1_SAR (PAZ) */
-            if (!(STARTS_WITH_CI(CPLGetBasename(osFilename), "TSX1_SAR") ||
-                  STARTS_WITH_CI(CPLGetBasename(osFilename), "TDX1_SAR") ||
-                  STARTS_WITH_CI(CPLGetBasename(osFilename), "PAZ1_SAR")))
+            if (!(STARTS_WITH_CI(CPLGetBasenameSafe(osFilename).c_str(),
+                                 "TSX1_SAR") ||
+                  STARTS_WITH_CI(CPLGetBasenameSafe(osFilename).c_str(),
+                                 "TDX1_SAR") ||
+                  STARTS_WITH_CI(CPLGetBasenameSafe(osFilename).c_str(),
+                                 "PAZ1_SAR")))
                 return 0;
 
             VSIStatBufL sStat;
@@ -287,9 +270,12 @@ int TSXDataset::Identify(GDALOpenInfo *poOpenInfo)
 
     /* Check if the filename contains TSX1_SAR (TerraSAR-X) or TDX1_SAR
      * (TanDEM-X) or PAZ1_SAR (PAZ) */
-    if (!(STARTS_WITH_CI(CPLGetBasename(poOpenInfo->pszFilename), "TSX1_SAR") ||
-          STARTS_WITH_CI(CPLGetBasename(poOpenInfo->pszFilename), "TDX1_SAR") ||
-          STARTS_WITH_CI(CPLGetBasename(poOpenInfo->pszFilename), "PAZ1_SAR")))
+    if (!(STARTS_WITH_CI(CPLGetBasenameSafe(poOpenInfo->pszFilename).c_str(),
+                         "TSX1_SAR") ||
+          STARTS_WITH_CI(CPLGetBasenameSafe(poOpenInfo->pszFilename).c_str(),
+                         "TDX1_SAR") ||
+          STARTS_WITH_CI(CPLGetBasenameSafe(poOpenInfo->pszFilename).c_str(),
+                         "PAZ1_SAR")))
         return 0;
 
     /* finally look for the <level1Product tag */
@@ -437,7 +423,7 @@ bool TSXDataset::getGCPsFromGEOREF_XML(char *pszGeorefFilename)
         // CPLAtof(CPLGetXMLValue(psNode,"height",""));
     }
 
-    m_oGCPSRS = osr;
+    m_oGCPSRS = std::move(osr);
 
     CPLDestroyXMLNode(psGeorefData);
 
@@ -463,9 +449,7 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The TSX driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("TSX");
         return nullptr;
     }
 
@@ -473,9 +457,9 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poOpenInfo->bIsDirectory)
     {
-        osFilename =
-            CPLFormCIFilename(poOpenInfo->pszFilename,
-                              CPLGetFilename(poOpenInfo->pszFilename), "xml");
+        osFilename = CPLFormCIFilenameSafe(
+            poOpenInfo->pszFilename, CPLGetFilename(poOpenInfo->pszFilename),
+            "xml");
     }
     else
         osFilename = poOpenInfo->pszFilename;
@@ -603,9 +587,9 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
          psComponent != nullptr; psComponent = psComponent->psNext)
     {
         const char *pszType = nullptr;
-        const char *pszPath =
-            CPLFormFilename(CPLGetDirname(osFilename),
-                            GetFilePath(psComponent, &pszType).c_str(), "");
+        const std::string osPath =
+            CPLFormFilenameSafe(CPLGetDirnameSafe(osFilename).c_str(),
+                                GetFilePath(psComponent, &pszType).c_str(), "");
         const char *pszPolLayer = CPLGetXMLValue(psComponent, "polLayer", " ");
 
         if (!STARTS_WITH_CI(pszType, " "))
@@ -613,13 +597,13 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
             if (STARTS_WITH_CI(pszType, "MAPPING_GRID"))
             {
                 /* the mapping grid... save as a metadata item this path */
-                poDS->SetMetadataItem("MAPPING_GRID", pszPath);
+                poDS->SetMetadataItem("MAPPING_GRID", osPath.c_str());
             }
             else if (STARTS_WITH_CI(pszType, "GEOREF"))
             {
                 /* save the path to the georef data for later use */
                 CPLFree(pszGeorefFile);
-                pszGeorefFile = CPLStrdup(pszPath);
+                pszGeorefFile = CPLStrdup(osPath.c_str());
             }
         }
         else if (!STARTS_WITH_CI(pszPolLayer, " ") &&
@@ -650,7 +634,7 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
 
             /* try opening the file that represents that band */
             GDALDataset *poBandData =
-                GDALDataset::FromHandle(GDALOpen(pszPath, GA_ReadOnly));
+                GDALDataset::FromHandle(GDALOpen(osPath.c_str(), GA_ReadOnly));
             if (poBandData != nullptr)
             {
                 TSXRasterBand *poBand =
@@ -664,8 +648,7 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
                 if (poSrcSRS)
                     poDS->m_oSRS = *poSrcSRS;
 
-                geoTransformErr =
-                    poBandData->GetGeoTransform(poDS->adfGeoTransform);
+                geoTransformErr = poBandData->GetGeoTransform(poDS->m_gt);
             }
         }
     }
@@ -679,12 +662,7 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
     {
         poDS->bHaveGeoTransform = FALSE;
         poDS->m_oSRS.Clear();
-        poDS->adfGeoTransform[0] = 0.0;
-        poDS->adfGeoTransform[1] = 1.0;
-        poDS->adfGeoTransform[2] = 0.0;
-        poDS->adfGeoTransform[3] = 0.0;
-        poDS->adfGeoTransform[4] = 0.0;
-        poDS->adfGeoTransform[5] = 1.0;
+        poDS->m_gt = GDALGeoTransform();
     }
 
     CPLFree(pszDataType);
@@ -773,12 +751,7 @@ GDALDataset *TSXDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             poDS->bHaveGeoTransform = FALSE;
             poDS->m_oSRS.Clear();
-            poDS->adfGeoTransform[0] = 0.0;
-            poDS->adfGeoTransform[1] = 1.0;
-            poDS->adfGeoTransform[2] = 0.0;
-            poDS->adfGeoTransform[3] = 0.0;
-            poDS->adfGeoTransform[4] = 0.0;
-            poDS->adfGeoTransform[5] = 1.0;
+            poDS->m_gt = GDALGeoTransform();
         }
     }
     else
@@ -846,9 +819,9 @@ const OGRSpatialReference *TSXDataset::GetSpatialRef() const
 /************************************************************************/
 /*                               GetGeotransform()                      */
 /************************************************************************/
-CPLErr TSXDataset::GetGeoTransform(double *padfTransform)
+CPLErr TSXDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
 
     if (bHaveGeoTransform)
         return CE_None;

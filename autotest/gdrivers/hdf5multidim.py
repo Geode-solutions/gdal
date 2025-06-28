@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test multidimensional support in HDF5 driver
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import struct
@@ -45,12 +28,15 @@ def test_hdf5_multidim_basic():
     rg = ds.GetRootGroup()
     assert rg
     assert not rg.GetGroupNames()
-    assert not rg.OpenGroup("non_existing")
+    with pytest.raises(Exception):
+        rg.OpenGroup("non_existing")
     assert rg.GetMDArrayNames() == ["TestArray"]
-    assert not rg.OpenMDArray("non_existing")
+    with pytest.raises(Exception):
+        rg.OpenMDArray("non_existing")
     ar = rg.OpenMDArray("TestArray")
     assert ar
-    assert not ar.GetAttribute("non_existing")
+    with pytest.raises(Exception):
+        ar.GetAttribute("non_existing")
     dims = ar.GetDimensions()
     assert len(dims) == 2
     assert dims[0].GetSize() == 6
@@ -409,8 +395,8 @@ def test_hdf5_multidim_attr_alldatatypes():
     assert map_attrs["attr_char"].GetDimensionCount() == 0
     assert map_attrs["attr_char"].Read() == "x"
     assert map_attrs["attr_char"].ReadAsStringArray() == ["x"]
-    with gdaltest.error_handler():
-        assert not map_attrs["attr_char"].ReadAsRaw()
+    with pytest.raises(Exception):
+        map_attrs["attr_char"].ReadAsRaw()
 
     assert (
         map_attrs["attr_string_as_repeated_char"].GetDataType().GetClass()
@@ -475,8 +461,8 @@ def test_hdf5_multidim_attr_alldatatypes():
     assert len(map_attrs["attr_custom_type_2_elts"].ReadAsRaw()) == 8
 
     # Compound type contains a string
-    with gdaltest.error_handler():
-        assert not map_attrs["attr_custom_with_string"].ReadAsRaw()
+    with pytest.raises(Exception):
+        map_attrs["attr_custom_with_string"].ReadAsRaw()
 
 
 def test_hdf5_multidim_nodata_unit():
@@ -494,6 +480,67 @@ def test_hdf5_multidim_nodata_unit():
     ar = rg.OpenMDArray("longitude")
     assert ar.GetNoDataValueAsRaw() is None
     assert ar.GetUnit() == "degrees_east"
+
+
+###############################################################################
+
+
+def test_hdf5_multidim_read_missing_value_of_different_type():
+    def create():
+
+        import h5py
+
+        f = h5py.File("data/hdf5/FillValue_of_different_type.h5", "w")
+        dset = f.create_dataset("test", (1,), dtype="f")
+        dset.attrs.create("_FillValue", -9999, dtype="d")
+        f.close()
+
+    # create()
+
+    ds = gdal.OpenEx(
+        "data/hdf5/FillValue_of_different_type.h5",
+        gdal.OF_MULTIDIM_RASTER,
+    )
+    rg = ds.GetRootGroup()
+    var = rg.OpenMDArray("test")
+    assert var.GetDataType().GetNumericDataType() == gdal.GDT_Float32
+    assert (
+        var.GetAttribute("_FillValue").GetDataType().GetNumericDataType()
+        == gdal.GDT_Float64
+    )
+    assert var.GetNoDataValue() == -9999.0
+
+
+###############################################################################
+
+
+def test_hdf5_multidim_read_missing_value_of_different_type_not_in_range():
+    def create():
+
+        import h5py
+
+        f = h5py.File("data/hdf5/FillValue_of_different_type_not_in_range.h5", "w")
+        dset = f.create_dataset("test", (1,), dtype="B")
+        dset.attrs.create("_FillValue", -9999, dtype="d")
+        f.close()
+
+    # create()
+
+    ds = gdal.OpenEx(
+        "data/hdf5/FillValue_of_different_type_not_in_range.h5",
+        gdal.OF_MULTIDIM_RASTER,
+    )
+    rg = ds.GetRootGroup()
+    with gdal.quiet_errors():
+        gdal.ErrorReset()
+        var = rg.OpenMDArray("test")
+        assert gdal.GetLastErrorMsg() != ""
+        assert var.GetDataType().GetNumericDataType() == gdal.GDT_Byte
+        assert (
+            var.GetAttribute("_FillValue").GetDataType().GetNumericDataType()
+            == gdal.GDT_Float64
+        )
+        assert var.GetNoDataValue() is None
 
 
 def test_hdf5_multidim_recursive_groups():
@@ -669,3 +716,174 @@ def test_hdf5_multidim_read_transposed():
         for y in range(y_size):
             manually_transposed_data.append(data[y * x_size + x])
     assert transposed_data == manually_transposed_data
+
+
+##############################################################################
+# Test opening a HDF5EOS grid file
+
+
+def test_hdf5_multimdim_eos_grid_geo_projection():
+
+    ds = gdal.OpenEx(
+        "data/hdf5/dummy_HDFEOS_with_geo_projection.h5", gdal.OF_MULTIDIM_RASTER
+    )
+    ar = ds.GetRootGroup().OpenMDArrayFromFullname(
+        "/HDFEOS/GRIDS/test/Data Fields/test"
+    )
+    dims = ar.GetDimensions()
+    assert len(dims) == 2
+    assert dims[0].GetName() == "YDim"
+    assert dims[0].GetFullName() == "/HDFEOS/GRIDS/test/YDim"
+    assert dims[0].GetType() == "HORIZONTAL_Y"
+    assert dims[0].GetSize() == 20
+    assert dims[1].GetName() == "XDim"
+    assert dims[1].GetFullName() == "/HDFEOS/GRIDS/test/XDim"
+    assert dims[1].GetType() == "HORIZONTAL_X"
+    assert dims[1].GetSize() == 20
+    ydim_var = dims[0].GetIndexingVariable()
+    assert ydim_var
+    assert struct.unpack("d" * 20, ydim_var.Read())[0:2] == pytest.approx(
+        (33.90033388888937, 33.899796111111556)
+    )
+    xdim_var = dims[1].GetIndexingVariable()
+    assert xdim_var
+    assert struct.unpack("d" * 20, xdim_var.Read())[0:2] == pytest.approx(
+        (-117.64084298610936, -117.64019006944282)
+    )
+    srs = ar.GetSpatialRef()
+    assert srs is not None
+    assert srs.IsGeographic()
+    # WGS 84
+    assert srs.GetSemiMajor() == 6378137
+    assert srs.GetInvFlattening() == 298.257223563
+    assert srs.GetDataAxisToSRSAxisMapping() == [1, 2]
+    assert len(ar.GetCoordinateVariables()) == 0
+
+
+##############################################################################
+# Test opening a HDF5EOS grid file
+
+
+def test_hdf5_multimdim_eos_grid_utm_projection():
+
+    ds = gdal.OpenEx(
+        "data/hdf5/dummy_HDFEOS_with_utm_projection.h5", gdal.OF_MULTIDIM_RASTER
+    )
+    ar = ds.GetRootGroup().OpenMDArrayFromFullname(
+        "/HDFEOS/GRIDS/test/Data Fields/test"
+    )
+    srs = ar.GetSpatialRef()
+    assert srs is not None
+    assert srs.IsProjected()
+    assert srs.GetDataAxisToSRSAxisMapping() == [2, 1]
+    assert len(ar.GetCoordinateVariables()) == 0
+
+
+###############################################################################
+# Test opening a HDF5EOS swath file
+
+
+def test_hdf5_multidim_eos_swath_no_explicit_dimension_map():
+
+    ds = gdal.OpenEx("data/hdf5/dummy_HDFEOS_swath.h5", gdal.OF_MULTIDIM_RASTER)
+    ar = ds.GetRootGroup().OpenMDArrayFromFullname(
+        "/HDFEOS/SWATHS/MySwath/Data Fields/MyDataField"
+    )
+    dims = ar.GetDimensions()
+    assert len(dims) == 3
+    assert dims[0].GetName() == "Band"
+    assert dims[0].GetFullName() == "/HDFEOS/SWATHS/MySwath/Band"
+    assert dims[0].GetSize() == 2
+    assert dims[1].GetName() == "AlongTrack"
+    assert dims[1].GetFullName() == "/HDFEOS/SWATHS/MySwath/AlongTrack"
+    assert dims[1].GetSize() == 3
+    assert dims[2].GetName() == "CrossTrack"
+    assert dims[2].GetFullName() == "/HDFEOS/SWATHS/MySwath/CrossTrack"
+    assert dims[2].GetSize() == 4
+    coordinates = ar.GetCoordinateVariables()
+    assert len(coordinates) == 2
+    assert (
+        coordinates[0].GetFullName()
+        == "/HDFEOS/SWATHS/MySwath/Geolocation Fields/Longitude"
+    )
+    assert (
+        coordinates[1].GetFullName()
+        == "/HDFEOS/SWATHS/MySwath/Geolocation Fields/Latitude"
+    )
+
+
+###############################################################################
+# Test GetBlockSize() and GetStructuralInfo()
+
+
+def test_hdf5_multidim_block_size_structural_info():
+
+    ds = gdal.OpenEx("data/hdf5/deflate.h5", gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    var = rg.OpenMDArray("Band1")
+    assert var.GetBlockSize() == [1, 2]
+    assert var.GetStructuralInfo() == {"COMPRESSION": "DEFLATE", "FILTER": "SHUFFLE"}
+
+
+###############################################################################
+# Test reading a compound data type made of 2 Float16 values
+
+
+def test_hdf5_multidim_read_cfloat16():
+
+    ds = gdal.OpenEx("data/hdf5/complex.h5", gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    var = rg.OpenMDArray("f16")
+    assert var.GetDataType().GetNumericDataType() == gdal.GDT_CFloat32
+    assert struct.unpack("f" * (5 * 5 * 2), var.Read()) == (
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        2.0,
+        2.0,
+        3.0,
+        3.0,
+        4.0,
+        4.0,
+        5.0,
+        5.0,
+        6.0,
+        6.0,
+        7.0,
+        7.0,
+        8.0,
+        8.0,
+        9.0,
+        9.0,
+        10.0,
+        10.0,
+        11.0,
+        11.0,
+        12.0,
+        12.0,
+        13.0,
+        13.0,
+        14.0,
+        14.0,
+        15.0,
+        15.0,
+        16.0,
+        16.0,
+        17.0,
+        17.0,
+        18.0,
+        18.0,
+        19.0,
+        19.0,
+        20.0,
+        20.0,
+        21.0,
+        21.0,
+        22.0,
+        22.0,
+        23.0,
+        23.0,
+        24.0,
+        24.0,
+    )

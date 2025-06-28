@@ -9,23 +9,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -86,7 +70,7 @@ HFARasterAttributeTable::HFARasterAttributeTable(HFARasterBand *poBand,
 {
     if (poDT != nullptr)
     {
-        nRows = poDT->GetIntField("numRows");
+        nRows = std::max(0, poDT->GetIntField("numRows"));
 
         // Scan under table for columns.
         for (HFAEntry *poDTChild = poDT->GetChild(); poDTChild != nullptr;
@@ -215,7 +199,7 @@ HFARasterAttributeTable::~HFARasterAttributeTable()
 
 GDALRasterAttributeTable *HFARasterAttributeTable::Clone() const
 {
-    if ((GetRowCount() * GetColumnCount()) > RAT_MAX_ELEM_FOR_CLONE)
+    if (nRows > 0 && GetColumnCount() > RAT_MAX_ELEM_FOR_CLONE / nRows)
         return nullptr;
 
     GDALDefaultRasterAttributeTable *poRAT =
@@ -237,8 +221,8 @@ GDALRasterAttributeTable *HFARasterAttributeTable::Clone() const
                 return nullptr;
             }
 
-            if (((GDALDefaultRasterAttributeTable *)this)
-                    ->ValuesIO(GF_Read, iCol, 0, nRows, panColData) != CE_None)
+            if (const_cast<HFARasterAttributeTable *>(this)->ValuesIO(
+                    GF_Read, iCol, 0, nRows, panColData) != CE_None)
             {
                 CPLFree(panColData);
                 delete poRAT;
@@ -261,8 +245,8 @@ GDALRasterAttributeTable *HFARasterAttributeTable::Clone() const
                 return nullptr;
             }
 
-            if (((GDALDefaultRasterAttributeTable *)this)
-                    ->ValuesIO(GF_Read, iCol, 0, nRows, padfColData) != CE_None)
+            if (const_cast<HFARasterAttributeTable *>(this)->ValuesIO(
+                    GF_Read, iCol, 0, nRows, padfColData) != CE_None)
             {
                 CPLFree(padfColData);
                 delete poRAT;
@@ -285,9 +269,8 @@ GDALRasterAttributeTable *HFARasterAttributeTable::Clone() const
                 return nullptr;
             }
 
-            if (((GDALDefaultRasterAttributeTable *)this)
-                    ->ValuesIO(GF_Read, iCol, 0, nRows, papszColData) !=
-                CE_None)
+            if (const_cast<HFARasterAttributeTable *>(this)->ValuesIO(
+                    GF_Read, iCol, 0, nRows, papszColData) != CE_None)
             {
                 CPLFree(papszColData);
                 delete poRAT;
@@ -370,6 +353,7 @@ int HFARasterAttributeTable::GetColOfUsage(GDALRATFieldUsage eUsage) const
 
     return -1;
 }
+
 /************************************************************************/
 /*                          GetRowCount()                               */
 /************************************************************************/
@@ -386,15 +370,16 @@ int HFARasterAttributeTable::GetRowCount() const
 const char *HFARasterAttributeTable::GetValueAsString(int iRow,
                                                       int iField) const
 {
-    // Get ValuesIO do do the work.
+    // Let ValuesIO do the work.
     char *apszStrList[1] = {nullptr};
-    if (((HFARasterAttributeTable *)this)
-            ->ValuesIO(GF_Read, iField, iRow, 1, apszStrList) != CE_None)
+    if (const_cast<HFARasterAttributeTable *>(this)->ValuesIO(
+            GF_Read, iField, iRow, 1, apszStrList) != CE_None)
     {
         return "";
     }
 
-    ((HFARasterAttributeTable *)this)->osWorkingResult = apszStrList[0];
+    const_cast<HFARasterAttributeTable *>(this)->osWorkingResult =
+        apszStrList[0];
     CPLFree(apszStrList[0]);
 
     return osWorkingResult;
@@ -406,10 +391,10 @@ const char *HFARasterAttributeTable::GetValueAsString(int iRow,
 
 int HFARasterAttributeTable::GetValueAsInt(int iRow, int iField) const
 {
-    // Get ValuesIO do do the work.
+    // Let ValuesIO do the work.
     int nValue = 0;
-    if (((HFARasterAttributeTable *)this)
-            ->ValuesIO(GF_Read, iField, iRow, 1, &nValue) != CE_None)
+    if (const_cast<HFARasterAttributeTable *>(this)->ValuesIO(
+            GF_Read, iField, iRow, 1, &nValue) != CE_None)
     {
         return 0;
     }
@@ -423,10 +408,10 @@ int HFARasterAttributeTable::GetValueAsInt(int iRow, int iField) const
 
 double HFARasterAttributeTable::GetValueAsDouble(int iRow, int iField) const
 {
-    // Get ValuesIO do do the work.
+    // Let ValuesIO do the work.
     double dfValue = 0.0;
-    if (((HFARasterAttributeTable *)this)
-            ->ValuesIO(GF_Read, iField, iRow, 1, &dfValue) != CE_None)
+    if (const_cast<HFARasterAttributeTable *>(this)->ValuesIO(
+            GF_Read, iField, iRow, 1, &dfValue) != CE_None)
     {
         return 0.0;
     }
@@ -438,31 +423,32 @@ double HFARasterAttributeTable::GetValueAsDouble(int iRow, int iField) const
 /*                          SetValue()                                  */
 /************************************************************************/
 
-void HFARasterAttributeTable::SetValue(int iRow, int iField,
-                                       const char *pszValue)
+CPLErr HFARasterAttributeTable::SetValue(int iRow, int iField,
+                                         const char *pszValue)
 {
-    // Get ValuesIO do do the work.
-    ValuesIO(GF_Write, iField, iRow, 1, (char **)&pszValue);
+    // Let ValuesIO do the work.
+    char *apszValues[1] = {const_cast<char *>(pszValue)};
+    return ValuesIO(GF_Write, iField, iRow, 1, apszValues);
 }
 
 /************************************************************************/
 /*                          SetValue()                                  */
 /************************************************************************/
 
-void HFARasterAttributeTable::SetValue(int iRow, int iField, double dfValue)
+CPLErr HFARasterAttributeTable::SetValue(int iRow, int iField, double dfValue)
 {
-    // Get ValuesIO do do the work.
-    ValuesIO(GF_Write, iField, iRow, 1, &dfValue);
+    // Let ValuesIO do the work.
+    return ValuesIO(GF_Write, iField, iRow, 1, &dfValue);
 }
 
 /************************************************************************/
 /*                          SetValue()                                  */
 /************************************************************************/
 
-void HFARasterAttributeTable::SetValue(int iRow, int iField, int nValue)
+CPLErr HFARasterAttributeTable::SetValue(int iRow, int iField, int nValue)
 {
-    // Get ValuesIO do do the work.
-    ValuesIO(GF_Write, iField, iRow, 1, &nValue);
+    // Let ValuesIO do the work.
+    return ValuesIO(GF_Write, iField, iRow, 1, &nValue);
 }
 
 /************************************************************************/
@@ -1402,6 +1388,7 @@ int HFARasterAttributeTable::GetRowOfValue(double dfValue) const
     }
     return -1;
 }
+
 /************************************************************************/
 /*                          GetRowOfValue()                             */
 /*                                                                      */
@@ -1651,7 +1638,7 @@ void HFARasterAttributeTable::RemoveStatistics()
                 }
         }
     }
-    aoFields = aoNewFields;
+    aoFields = std::move(aoNewFields);
 }
 
 /************************************************************************/
@@ -2056,7 +2043,7 @@ void HFARasterBand::ReadHistogramMetadata()
                     static_cast<double>(std::numeric_limits<GUIntBig>::max()) ||
                 dfNumber <
                     static_cast<double>(std::numeric_limits<GUIntBig>::min()) ||
-                CPLIsNan(dfNumber))
+                std::isnan(dfNumber))
             {
                 CPLError(CE_Failure, CPLE_FileIO, "Out of range hist vals.");
                 CPLFree(panHistValues);
@@ -2264,8 +2251,8 @@ void HFARasterBand::EstablishOverviews()
 
         for (int iOvIndex = 0; iOvIndex < nOverviews; iOvIndex++)
         {
-            papoOverviewBands[iOvIndex] =
-                new HFARasterBand((HFADataset *)poDS, nBand, iOvIndex);
+            papoOverviewBands[iOvIndex] = new HFARasterBand(
+                cpl::down_cast<HFADataset *>(poDS), nBand, iOvIndex);
             if (papoOverviewBands[iOvIndex]->GetXSize() == 0)
             {
                 delete papoOverviewBands[iOvIndex];
@@ -2638,9 +2625,9 @@ CPLErr HFARasterBand::CleanOverviews()
     // this.
     if (hHFA->psDependent != hHFA && hHFA->psDependent != nullptr)
     {
-        CPLString osFilename =
-            CPLFormFilename(hHFA->psDependent->pszPath,
-                            hHFA->psDependent->pszFilename, nullptr);
+        const CPLString osFilename =
+            CPLFormFilenameSafe(hHFA->psDependent->pszPath,
+                                hHFA->psDependent->pszFilename, nullptr);
 
         CPL_IGNORE_RET_VAL(HFAClose(hHFA->psDependent));
         hHFA->psDependent = nullptr;
@@ -2730,8 +2717,8 @@ CPLErr HFARasterBand::BuildOverviews(const char *pszResampling,
             nOverviews = iResult + 1;
             papoOverviewBands = static_cast<HFARasterBand **>(
                 CPLRealloc(papoOverviewBands, sizeof(void *) * nOverviews));
-            papoOverviewBands[iResult] =
-                new HFARasterBand((HFADataset *)poDS, nBand, iResult);
+            papoOverviewBands[iResult] = new HFARasterBand(
+                cpl::down_cast<HFADataset *>(poDS), nBand, iResult);
 
             papoOvBands[iOverview] = papoOverviewBands[iResult];
         }
@@ -3061,13 +3048,8 @@ CPLErr HFARasterBand::WriteNamedRAT(const char * /*pszName*/,
 /************************************************************************/
 
 HFADataset::HFADataset()
-    : hHFA(nullptr), bMetadataDirty(false), bGeoDirty(false), bIgnoreUTM(false),
-      bForceToPEString(false), nGCPCount(0)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-
-    memset(asGCPList, 0, sizeof(asGCPList));
-    memset(adfGeoTransform, 0, sizeof(adfGeoTransform));
 }
 
 /************************************************************************/
@@ -3100,9 +3082,6 @@ HFADataset::~HFADataset()
         }
         hHFA = nullptr;
     }
-
-    if (nGCPCount > 0)
-        GDALDeinitGCPs(36, asGCPList);
 }
 
 /************************************************************************/
@@ -3188,16 +3167,18 @@ CPLErr HFADataset::WriteProjection()
 
         if (nGCS == 4326)
             sDatum.datumname = const_cast<char *>("WGS 84");
-        if (nGCS == 4322)
+        else if (nGCS == 4322)
             sDatum.datumname = const_cast<char *>("WGS 1972");
-        if (nGCS == 4267)
+        else if (nGCS == 4267)
             sDatum.datumname = const_cast<char *>("NAD27");
-        if (nGCS == 4269)
+        else if (nGCS == 4269)
             sDatum.datumname = const_cast<char *>("NAD83");
-        if (nGCS == 4283)
+        else if (nGCS == 4283)
             sDatum.datumname = const_cast<char *>("GDA94");
-        if (nGCS == 6284)
+        else if (nGCS == 4284)
             sDatum.datumname = const_cast<char *>("Pulkovo 1942");
+        else if (nGCS == 4272)
+            sDatum.datumname = const_cast<char *>("Geodetic Datum 1949");
 
         if (poGeogSRS->GetTOWGS84(sDatum.params) == OGRERR_NONE)
         {
@@ -3219,7 +3200,8 @@ CPLErr HFADataset::WriteProjection()
         }
 
         // Verify if we need to write a ESRI PE string.
-        bPEStringStored = CPL_TO_BOOL(WritePeStringIfNeeded(&oSRS, hHFA));
+        if (!bDisablePEString)
+            bPEStringStored = CPL_TO_BOOL(WritePeStringIfNeeded(&oSRS, hHFA));
 
         sPro.proSpheroid.sphereName =
             (char *)poGeogSRS->GetAttrValue("GEOGCS|DATUM|SPHEROID");
@@ -3910,16 +3892,14 @@ CPLErr HFADataset::WriteProjection()
     else
         sMapInfo.proName = const_cast<char *>("Unknown");
 
-    sMapInfo.upperLeftCenter.x = adfGeoTransform[0] + adfGeoTransform[1] * 0.5;
-    sMapInfo.upperLeftCenter.y = adfGeoTransform[3] + adfGeoTransform[5] * 0.5;
+    sMapInfo.upperLeftCenter.x = m_gt[0] + m_gt[1] * 0.5;
+    sMapInfo.upperLeftCenter.y = m_gt[3] + m_gt[5] * 0.5;
 
-    sMapInfo.lowerRightCenter.x =
-        adfGeoTransform[0] + adfGeoTransform[1] * (GetRasterXSize() - 0.5);
-    sMapInfo.lowerRightCenter.y =
-        adfGeoTransform[3] + adfGeoTransform[5] * (GetRasterYSize() - 0.5);
+    sMapInfo.lowerRightCenter.x = m_gt[0] + m_gt[1] * (GetRasterXSize() - 0.5);
+    sMapInfo.lowerRightCenter.y = m_gt[3] + m_gt[5] * (GetRasterYSize() - 0.5);
 
-    sMapInfo.pixelSize.width = std::abs(adfGeoTransform[1]);
-    sMapInfo.pixelSize.height = std::abs(adfGeoTransform[5]);
+    sMapInfo.pixelSize.width = std::abs(m_gt[1]);
+    sMapInfo.pixelSize.height = std::abs(m_gt[5]);
 
     // Handle units.  Try to match up with a known name.
     sMapInfo.units = const_cast<char *>("meters");
@@ -3963,14 +3943,13 @@ CPLErr HFADataset::WriteProjection()
     }
 
     // Write out definitions.
-    if (adfGeoTransform[2] == 0.0 && adfGeoTransform[4] == 0.0)
+    if (m_gt[2] == 0.0 && m_gt[4] == 0.0)
     {
         HFASetMapInfo(hHFA, &sMapInfo);
     }
     else
     {
-        HFASetGeoTransform(hHFA, sMapInfo.proName, sMapInfo.units,
-                           adfGeoTransform);
+        HFASetGeoTransform(hHFA, sMapInfo.proName, sMapInfo.units, m_gt.data());
     }
 
     if (bHaveSRS && sPro.proName != nullptr)
@@ -4219,7 +4198,7 @@ CPLErr HFADataset::ReadProjection()
                          "configuration option to NO.",
                          pszProjName);
             }
-            m_oSRS = oSRSFromPE;
+            m_oSRS = std::move(oSRSFromPE);
         }
         CPLFree(pszPE_COORDSYS);
         return m_oSRS.IsEmpty() ? CE_Failure : CE_None;
@@ -4246,7 +4225,7 @@ CPLErr HFADataset::ReadProjection()
         CPLTestBool(CPLGetConfigOption("HFA_USE_ESRI_PE_STRING", "YES")) &&
         oSRSFromPE.importFromWkt(pszPE_COORDSYS) == OGRERR_NONE)
     {
-        m_oSRS = oSRSFromPE;
+        m_oSRS = std::move(oSRSFromPE);
 
         // Copy TOWGS84 clause from HFA SRS to PE SRS.
         if (poSRS != nullptr)
@@ -4393,7 +4372,7 @@ GDALDataset *HFADataset::Open(GDALOpenInfo *poOpenInfo)
 
     // Get geotransform, or if that fails, try to find XForms to
     // build gcps, and metadata.
-    if (!HFAGetGeoTransform(hHFA, poDS->adfGeoTransform))
+    if (!HFAGetGeoTransform(hHFA, poDS->m_gt.data()))
     {
         Efga_Polynomial *pasPolyListForward = nullptr;
         Efga_Polynomial *pasPolyListReverse = nullptr;
@@ -4551,28 +4530,27 @@ CPLErr HFADataset::SetMetadataItem(const char *pszTag, const char *pszValue,
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr HFADataset::GetGeoTransform(double *padfTransform)
+CPLErr HFADataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    if (adfGeoTransform[0] != 0.0 || adfGeoTransform[1] != 1.0 ||
-        adfGeoTransform[2] != 0.0 || adfGeoTransform[3] != 0.0 ||
-        adfGeoTransform[4] != 0.0 || adfGeoTransform[5] != 1.0)
+    if (m_gt[0] != 0.0 || m_gt[1] != 1.0 || m_gt[2] != 0.0 || m_gt[3] != 0.0 ||
+        m_gt[4] != 0.0 || m_gt[5] != 1.0)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
-    return GDALPamDataset::GetGeoTransform(padfTransform);
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr HFADataset::SetGeoTransform(double *padfTransform)
+CPLErr HFADataset::SetGeoTransform(const GDALGeoTransform &gt)
 
 {
-    memcpy(adfGeoTransform, padfTransform, sizeof(double) * 6);
+    m_gt = gt;
     bGeoDirty = true;
 
     return CE_None;
@@ -4591,7 +4569,7 @@ CPLErr HFADataset::SetGeoTransform(double *padfTransform)
 CPLErr HFADataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                              int nXSize, int nYSize, void *pData, int nBufXSize,
                              int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, int *panBandMap,
+                             int nBandCount, BANDMAP_TYPE panBandMap,
                              GSpacing nPixelSpace, GSpacing nLineSpace,
                              GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg)
@@ -4619,28 +4597,21 @@ void HFADataset::UseXFormStack(int nStepCount, Efga_Polynomial *pasPLForward,
 
 {
     // Generate GCPs using the transform.
-    nGCPCount = 0;
-    GDALInitGCPs(36, asGCPList);
-
     for (double dfYRatio = 0.0; dfYRatio < 1.001; dfYRatio += 0.2)
     {
         for (double dfXRatio = 0.0; dfXRatio < 1.001; dfXRatio += 0.2)
         {
             const double dfLine = 0.5 + (GetRasterYSize() - 1) * dfYRatio;
             const double dfPixel = 0.5 + (GetRasterXSize() - 1) * dfXRatio;
-            const int iGCP = nGCPCount;
 
-            asGCPList[iGCP].dfGCPPixel = dfPixel;
-            asGCPList[iGCP].dfGCPLine = dfLine;
-
-            asGCPList[iGCP].dfGCPX = dfPixel;
-            asGCPList[iGCP].dfGCPY = dfLine;
-            asGCPList[iGCP].dfGCPZ = 0.0;
-
+            gdal::GCP gcp("", "", dfPixel, dfLine,
+                          /* X = */ dfPixel,
+                          /* Y = */ dfLine);
             if (HFAEvaluateXFormStack(nStepCount, FALSE, pasPLReverse,
-                                      &(asGCPList[iGCP].dfGCPX),
-                                      &(asGCPList[iGCP].dfGCPY)))
-                nGCPCount++;
+                                      &(gcp.X()), &(gcp.Y())))
+            {
+                m_aoGCPs.emplace_back(std::move(gcp));
+            }
         }
     }
 
@@ -4716,7 +4687,7 @@ void HFADataset::UseXFormStack(int nStepCount, Efga_Polynomial *pasPLForward,
 int HFADataset::GetGCPCount()
 {
     const int nPAMCount = GDALPamDataset::GetGCPCount();
-    return nPAMCount > 0 ? nPAMCount : nGCPCount;
+    return nPAMCount > 0 ? nPAMCount : static_cast<int>(m_aoGCPs.size());
 }
 
 /************************************************************************/
@@ -4729,7 +4700,7 @@ const OGRSpatialReference *HFADataset::GetGCPSpatialRef() const
     const OGRSpatialReference *poSRS = GDALPamDataset::GetGCPSpatialRef();
     if (poSRS)
         return poSRS;
-    return nGCPCount > 0 && !m_oSRS.IsEmpty() ? &m_oSRS : nullptr;
+    return !m_aoGCPs.empty() && !m_oSRS.IsEmpty() ? &m_oSRS : nullptr;
 }
 
 /************************************************************************/
@@ -4741,7 +4712,7 @@ const GDAL_GCP *HFADataset::GetGCPs()
     const GDAL_GCP *psPAMGCPs = GDALPamDataset::GetGCPs();
     if (psPAMGCPs)
         return psPAMGCPs;
-    return asGCPList;
+    return gdal::GCP::c_ptr(m_aoGCPs);
 }
 
 /************************************************************************/
@@ -4751,11 +4722,12 @@ const GDAL_GCP *HFADataset::GetGCPs()
 char **HFADataset::GetFileList()
 
 {
-    char **papszFileList = GDALPamDataset::GetFileList();
+    CPLStringList oFileList(GDALPamDataset::GetFileList());
 
-    if (HFAGetIGEFilename(hHFA) != nullptr)
+    const std::string osIGEFilename = HFAGetIGEFilename(hHFA);
+    if (!osIGEFilename.empty())
     {
-        papszFileList = CSLAddString(papszFileList, HFAGetIGEFilename(hHFA));
+        oFileList.push_back(osIGEFilename);
     }
 
     // Request an overview to force opening of dependent overview files.
@@ -4766,16 +4738,15 @@ char **HFADataset::GetFileList()
     {
         HFAInfo_t *psDep = hHFA->psDependent;
 
-        papszFileList = CSLAddString(
-            papszFileList,
-            CPLFormFilename(psDep->pszPath, psDep->pszFilename, nullptr));
+        oFileList.push_back(
+            CPLFormFilenameSafe(psDep->pszPath, psDep->pszFilename, nullptr));
 
-        if (HFAGetIGEFilename(psDep) != nullptr)
-            papszFileList =
-                CSLAddString(papszFileList, HFAGetIGEFilename(psDep));
+        const std::string osIGEFilenameDep = HFAGetIGEFilename(psDep);
+        if (!osIGEFilenameDep.empty())
+            oFileList.push_back(osIGEFilenameDep);
     }
 
-    return papszFileList;
+    return oFileList.StealList();
 }
 
 /************************************************************************/
@@ -4856,6 +4827,17 @@ GDALDataset *HFADataset::Create(const char *pszFilenameIn, int nXSize,
             return nullptr;
     }
 
+    const bool bForceToPEString =
+        CPLFetchBool(papszParamList, "FORCETOPESTRING", false);
+    const bool bDisablePEString =
+        CPLFetchBool(papszParamList, "DISABLEPESTRING", false);
+    if (bForceToPEString && bDisablePEString)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "FORCETOPESTRING and DISABLEPESTRING are mutually exclusive");
+        return nullptr;
+    }
+
     // Create the new file.
     HFAHandle hHFA = HFACreate(pszFilenameIn, nXSize, nYSize, nBandsIn,
                                eHfaDataType, papszParamList);
@@ -4884,8 +4866,8 @@ GDALDataset *HFADataset::Create(const char *pszFilenameIn, int nXSize,
     // coordinate system descriptions.
     if (poDS != nullptr)
     {
-        poDS->bForceToPEString =
-            CPLFetchBool(papszParamList, "FORCETOPESTRING", false);
+        poDS->bForceToPEString = bForceToPEString;
+        poDS->bDisablePEString = bDisablePEString;
     }
 
     return poDS;
@@ -4907,8 +4889,8 @@ CPLErr HFADataset::Rename(const char *pszNewName, const char *pszOldName)
         return eErr;
 
     // Now try to go into the .img file and update RRDNames[] lists.
-    CPLString osOldBasename = CPLGetBasename(pszOldName);
-    CPLString osNewBasename = CPLGetBasename(pszNewName);
+    CPLString osOldBasename = CPLGetBasenameSafe(pszOldName);
+    CPLString osNewBasename = CPLGetBasenameSafe(pszNewName);
 
     if (osOldBasename != osNewBasename)
     {
@@ -4949,8 +4931,8 @@ CPLErr HFADataset::CopyFiles(const char *pszNewName, const char *pszOldName)
         return eErr;
 
     // Now try to go into the .img file and update RRDNames[] lists.
-    CPLString osOldBasename = CPLGetBasename(pszOldName);
-    CPLString osNewBasename = CPLGetBasename(pszNewName);
+    CPLString osOldBasename = CPLGetBasenameSafe(pszOldName);
+    CPLString osNewBasename = CPLGetBasenameSafe(pszNewName);
 
     if (osOldBasename != osNewBasename)
     {
@@ -5024,9 +5006,9 @@ GDALDataset *HFADataset::CreateCopy(const char *pszFilename,
         }
     }
 
-    HFADataset *poDS = (HFADataset *)Create(
-        pszFilename, poSrcDS->GetRasterXSize(), poSrcDS->GetRasterYSize(),
-        nBandCount, eType, papszModOptions);
+    HFADataset *poDS = cpl::down_cast<HFADataset *>(
+        Create(pszFilename, poSrcDS->GetRasterXSize(),
+               poSrcDS->GetRasterYSize(), nBandCount, eType, papszModOptions));
 
     CSLDestroy(papszModOptions);
 
@@ -5072,14 +5054,13 @@ GDALDataset *HFADataset::CreateCopy(const char *pszFilename,
     }
 
     // Copy projection information.
-    double adfGeoTransform[6] = {};
+    GDALGeoTransform gt;
+    if (poSrcDS->GetGeoTransform(gt) == CE_None)
+        poDS->SetGeoTransform(gt);
 
-    if (poSrcDS->GetGeoTransform(adfGeoTransform) == CE_None)
-        poDS->SetGeoTransform(adfGeoTransform);
-
-    const char *pszProj = poSrcDS->GetProjectionRef();
-    if (pszProj != nullptr && strlen(pszProj) > 0)
-        poDS->SetProjection(pszProj);
+    const OGRSpatialReference *poSrcSRS = poSrcDS->GetSpatialRef();
+    if (poSrcSRS)
+        poDS->SetSpatialRef(poSrcSRS);
 
     // Copy the imagery.
     if (!bCreateAux)
@@ -5239,10 +5220,18 @@ void GDALRegister_HFA()
         "dependent file (must not have absolute path)'/>"
         "   <Option name='FORCETOPESTRING' type='boolean' description='Force "
         "use of ArcGIS PE String in file instead of Imagine coordinate system "
-        "format'/>"
+        "format' default='NO'/>"
+        "   <Option name='DISABLEPESTRING' type='boolean' description='Disable "
+        "use of ArcGIS PE String' default='NO'/>"
         "</CreationOptionList>");
 
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
+
+    poDriver->SetMetadataItem(GDAL_DCAP_UPDATE, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_UPDATE_ITEMS,
+                              "GeoTransform SRS NoData "
+                              "RasterValues "
+                              "DatasetMetadata BandMetadata");
 
     poDriver->pfnOpen = HFADataset::Open;
     poDriver->pfnCreate = HFADataset::Create;

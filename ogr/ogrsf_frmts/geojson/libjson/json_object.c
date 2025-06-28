@@ -37,6 +37,8 @@
 #include "snprintf_compat.h"
 #include "strdup_compat.h"
 
+#include "cpl_string.h"
+
 #if SIZEOF_LONG_LONG != SIZEOF_INT64_T
 #error "The long long type isn't 64-bits"
 #endif
@@ -1020,11 +1022,11 @@ static int json_object_double_to_json_string_format(struct json_object *jso, str
 	 * ECMA 262 section 9.8.1 defines
 	 * how to handle these cases as strings
 	 */
-	if (CPLIsNan(jsodbl->c_double))
+	if (isnan(jsodbl->c_double))
 	{
 		size = snprintf(buf, sizeof(buf), "NaN");
 	}
-	else if (CPLIsInf(jsodbl->c_double))
+	else if (isinf(jsodbl->c_double))
 	{
 		if (jsodbl->c_double > 0)
 			size = snprintf(buf, sizeof(buf), "Infinity");
@@ -1192,7 +1194,7 @@ double json_object_get_double(const struct json_object *jso)
 	case json_type_boolean: return JC_BOOL_C(jso)->c_boolean;
 	case json_type_string:
 		errno = 0;
-		cdouble = strtod(get_string_component(jso), &errPtr);
+		cdouble = CPLStrtod(get_string_component(jso), &errPtr);
 
 		/* if conversion stopped at the first character, return 0.0 */
 		if (errPtr == get_string_component(jso))

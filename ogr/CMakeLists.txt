@@ -10,6 +10,7 @@ add_library(
   ogrpolygon.cpp
   ogrtriangle.cpp
   ogrutils.cpp
+  ogrgeomcoordinateprecision.cpp
   ogrgeometry.cpp
   ogrgeometrycollection.cpp
   ogrmultipolygon.cpp
@@ -34,6 +35,7 @@ add_library(
   ogr_srsnode.cpp
   ogr_fromepsg.cpp
   ogrct.cpp
+  ogr_srs_cf1.cpp
   ogr_srs_esri.cpp
   ogr_srs_pci.cpp
   ogr_srs_usgs.cpp
@@ -54,30 +56,52 @@ add_library(
   ogr_expat.cpp
   ogrpgeogeometry.cpp
   ogr_geocoding.cpp
+  ogr_schema_override.cpp
   ogrgeomfielddefn.cpp
   ograpispy.cpp
   ogr_xerces.cpp
   ogr_geo_utils.cpp
   ogr_proj_p.cpp
-  ogr_wkb.cpp)
+  ogr_wkb.cpp
+  ogrvrtgeometrytypes.cpp
+  ogr2kmlgeometry.cpp
+  ogrlibjsonutils.cpp
+  ogrgeojsongeometry.cpp
+  ogrgeojsonwriter.cpp
+  ogresrijsongeometry.cpp
+  ogrmitabspatialref.cpp
+  mitab_bounds.cpp
+)
 add_dependencies(ogr generate_gdal_version_h)
-if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
-  set_property(
-    SOURCE ogrfeaturequery.cpp
-           ogr_srs_usgs.cpp
-           ogr_srs_panorama.cpp
-           swq_expr_node.cpp
-           swq_op_general.cpp
-           swq_parser.cpp
-           swq_select.cpp
-    PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
-endif ()
+
+set(GDAL_DATA_FILES
+    LICENSE.TXT
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/cubewerx_extra.wkt
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/ecw_cs.wkt
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/epsg.wkt
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/esri_StatePlane_extra.wkt
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/ozi_datum.csv
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/ozi_ellips.csv
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/pci_datum.txt
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/pci_ellips.txt
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/stateplane.csv
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/ogr_fields_override.schema.json
+)
+set_property(
+  TARGET ${GDAL_LIB_TARGET_NAME}
+  APPEND
+  PROPERTY RESOURCE "${GDAL_DATA_FILES}")
+
 include(GdalStandardIncludes)
 gdal_standard_includes(ogr)
 target_compile_options(ogr PRIVATE ${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX})
-target_include_directories(ogr PRIVATE $<TARGET_PROPERTY:ogr_geojson,SOURCE_DIR> $<TARGET_PROPERTY:ogr_MEM,SOURCE_DIR>)
 set_property(TARGET ogr PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
 target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:ogr>)
+
+target_compile_definitions(ogr PUBLIC $<$<CONFIG:DEBUG>:GDAL_DEBUG>)
+if (USE_PRECOMPILED_HEADERS)
+    target_precompile_headers(ogr REUSE_FROM gdal_priv_header)
+endif()
 
 if (GDAL_USE_ZLIB_INTERNAL)
   gdal_add_vendored_lib(ogr libz)
@@ -86,8 +110,6 @@ endif ()
 if (GDAL_USE_JSONC_INTERNAL)
   gdal_add_vendored_lib(ogr libjson)
 endif ()
-
-target_compile_definitions(ogr PRIVATE HAVE_MITAB)
 
 gdal_target_link_libraries(ogr PRIVATE PROJ::proj)
 
@@ -100,6 +122,9 @@ endif ()
 if (GDAL_USE_SFCGAL)
   target_compile_definitions(ogr PRIVATE -DHAVE_SFCGAL=1)
   gdal_target_link_libraries(ogr PRIVATE SFCGAL::SFCGAL)
+  string(REGEX REPLACE "^([0-9]+)\\.[0-9]+\\.[0-9]+" "\\1" SFCGAL_VERSION_MAJOR "${SFCGAL_VERSION_STRING}")
+  string(REGEX REPLACE "^[0-9]+\\.([0-9]+)\\.[0-9]+" "\\1" SFCGAL_VERSION_MINOR "${SFCGAL_VERSION_STRING}")
+  string(REGEX REPLACE "^[0-9]+\\.[0-9]+\\.([0-9]+)" "\\1" SFCGAL_VERSION_PATCH "${SFCGAL_VERSION_STRING}")
   # work around for SFCGAL 1.3.7 on Ubuntu 20.04/Debian
   if (SFCGAL_VERSION_STRING VERSION_EQUAL "1.3.7")
     if (CMAKE_SYSTEM_NAME MATCHES "Linux")
@@ -112,6 +137,11 @@ if (GDAL_USE_SFCGAL)
     endif ()
   endif ()
 endif ()
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/ogr_sfcgal.h.in
+  ${CMAKE_CURRENT_BINARY_DIR}/ogr_sfcgal.h
+)
+target_include_directories(ogr PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 if (NOT GDAL_USE_ZLIB_INTERNAL)
   target_compile_definitions(ogr PRIVATE -DHAVE_ZLIB_H -DHAVE_ZLIB)
@@ -148,6 +178,7 @@ target_public_header(
   ogr_featurestyle.h
   ogr_geocoding.h
   ogr_geometry.h
+  ogr_geomcoordinateprecision.h
   ogr_p.h
   ogr_spatialref.h
   ogr_swq.h
@@ -170,7 +201,7 @@ add_custom_target(check_swq_parser_md5 ALL
                   COMMAND ${CMAKE_COMMAND}
                       "-DIN_FILE=swq_parser.y"
                       "-DTARGET=generate_swq_parser"
-                      "-DEXPECTED_MD5SUM=44620ffbb37fb8665887a175b299781b"
+                      "-DEXPECTED_MD5SUM=c3eaca734f3005e73586cc697e481f94"
                       "-DFILENAME_CMAKE=${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
                       -P "${PROJECT_SOURCE_DIR}/cmake/helpers/check_md5sum.cmake"
                   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  jpip read driver
  * Purpose:  GDAL bindings for JPIP.
@@ -11,22 +10,7 @@ following license:
  *
  * Copyright (c) 2000-2007, ITT Visual Information Solutions
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
-
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
 **/
 
 #include "gdal_pam.h"
@@ -71,34 +55,42 @@ class JPIPDataSegment
     {
         return nId;
     }
+
     long GetAux() const
     {
         return nAux;
     }
+
     long GetClassId() const
     {
         return nClassId;
     }
+
     long GetCodestreamIdx() const
     {
         return nCodestream;
     }
+
     long GetOffset() const
     {
         return nOffset;
     }
+
     long GetLen() const
     {
         return nLen;
     }
+
     GByte *GetData()
     {
         return pabyData;
     }
+
     int IsFinal() const
     {
         return bIsFinal;
     }
+
     int IsEOR() const
     {
         return bIsEOR;
@@ -108,38 +100,47 @@ class JPIPDataSegment
     {
         this->nId = nIdIn;
     }
+
     void SetAux(long nAuxIn)
     {
         this->nAux = nAuxIn;
     }
+
     void SetClassId(long nClassIdIn)
     {
         this->nClassId = nClassIdIn;
     }
+
     void SetCodestreamIdx(long nCodestreamIn)
     {
         this->nCodestream = nCodestreamIn;
     }
+
     void SetOffset(long nOffsetIn)
     {
         this->nOffset = nOffsetIn;
     }
+
     void SetLen(long nLenIn)
     {
         this->nLen = nLenIn;
     }
+
     void SetData(GByte *pabyDataIn)
     {
         this->pabyData = pabyDataIn;
     }
+
     void SetFinal(int bIsFinalIn)
     {
         this->bIsFinal = bIsFinalIn;
     }
+
     void SetEOR(int bIsEORIn)
     {
         this->bIsEOR = bIsEORIn;
     }
+
     JPIPDataSegment();
     ~JPIPDataSegment();
 };
@@ -173,7 +174,7 @@ class JPIPKAKDataset final : public GDALPamDataset
     int nCodestream = 0;
     long nDatabins = 0;
 
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
 
     int bWindowDone = FALSE;
     int bGeoTransformValid = FALSE;
@@ -220,14 +221,17 @@ class JPIPKAKDataset final : public GDALPamDataset
                      char **papszOptions) override;
 
     virtual void EndAsyncReader(GDALAsyncReader *) override;
+
     int GetNQualityLayers() const
     {
         return nQualityLayers;
     }
+
     int GetNResolutionLevels() const
     {
         return nResLevels;
     }
+
     int GetNComponents() const
     {
         return nComps;
@@ -240,7 +244,7 @@ class JPIPKAKDataset final : public GDALPamDataset
                        int nBandCount, const int *panBandList) const;
 
     // gdaldataset methods
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
     virtual int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
@@ -248,7 +252,7 @@ class JPIPKAKDataset final : public GDALPamDataset
     virtual CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                              int nXSize, int nYSize, void *pData, int nBufXSize,
                              int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, int *panBandMap,
+                             int nBandCount, BANDMAP_TYPE panBandMap,
                              GSpacing nPixelSpace, GSpacing nLineSpace,
                              GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg) override;
@@ -337,6 +341,7 @@ class JPIPKAKAsyncReader final : public GDALAsyncReader
     virtual GDALAsyncStatusType
     GetNextUpdatedRegion(double timeout, int *pnxbufoff, int *pnybufoff,
                          int *pnxbufsize, int *pnybufsize) override;
+
     void SetComplete(int bFinished)
     {
         this->bComplete = bFinished;

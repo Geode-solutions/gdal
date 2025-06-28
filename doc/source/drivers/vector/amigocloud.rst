@@ -42,7 +42,7 @@ Currently the following one is supported :
 
 If several parameters are specified, they must be separated by a space.
 
-If no datset_id is provided, the driver will print list of available
+If no dataset_id is provided, the driver will print list of available
 datasets for given project.
 
 For example: **"AmigoCloud:1234 datasets"**
@@ -61,7 +61,7 @@ Authentication
 All the access permissions are defined by AmigoCloud backend.
 
 Authenticated access is obtained by specifying the API key given in the
-AmigoCloud dashboard web interface. It is specified with the AMIGOCLOUD_API_KEY
+AmigoCloud dashboard web interface. It is specified with the :config:`AMIGOCLOUD_API_KEY`
 configuration option.
 
 Geometry
@@ -105,22 +105,36 @@ issuing a lot of commands due to many client/server exchanges.
 Layer creation options
 ----------------------
 
+|about-layer-creation-options|
 The following layer creation options are available:
 
--  **OVERWRITE**\ =YES/NO: Whether to overwrite an existing table with
-   the layer name to be created. Defaults to NO.
--  **GEOMETRY_NULLABLE**\ =YES/NO: Whether the values of the geometry
-   column can be NULL. Defaults to YES.
+-  .. lco:: OVERWRITE
+      :choices: YES, NO
+      :default: NO
+
+      Whether to overwrite an existing table with
+      the layer name to be created.
+
+-  .. lco:: GEOMETRY_NULLABLE
+      :choices: YES, NO
+      :default: YES
+
+      Whether the values of the geometry column can be NULL.
 
 Configuration options
 ---------------------
 
-The following :ref:`configuration options <configoptions>` are 
-available:
+|about-config-options|
+The following configuration options are available:
 
--  :decl_configoption:`AMIGOCLOUD_API_URL`: defaults to 
-   https://www.amigocloud.com/api/v1. Can be used to point to another server.
--  :decl_configoption:`AMIGOCLOUD_API_KEY`: see following paragraph.
+-  .. config:: AMIGOCLOUD_API_URL
+      :default: https://www.amigocloud.com/api/v1
+
+      Can be used to point to another server.
+
+-  .. config:: AMIGOCLOUD_API_KEY
+
+      See usage examples.
 
 Examples
 --------

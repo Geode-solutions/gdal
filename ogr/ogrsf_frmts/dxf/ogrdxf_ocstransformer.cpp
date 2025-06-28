@@ -9,26 +9,15 @@
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  * Copyright (c) 2018, Alan Thomas <alant@outlook.com.au>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_dxf.h"
+
+OGRCoordinateTransformation *OGRDXFInsertTransformer::Clone() const
+{
+    return new OGRDXFInsertTransformer(*this);
+}
 
 /************************************************************************/
 /*                         Mathematical helpers                         */
@@ -125,11 +114,11 @@ OGRDXFOCSTransformer::OGRDXFOCSTransformer(double adfNIn[3],
 /*                            Transform()                               */
 /************************************************************************/
 
-int OGRDXFOCSTransformer::Transform(int nCount, double *adfX, double *adfY,
+int OGRDXFOCSTransformer::Transform(size_t nCount, double *adfX, double *adfY,
                                     double *adfZ, double * /* adfT */,
                                     int *pabSuccess /* = nullptr */)
 {
-    for (int i = 0; i < nCount; i++)
+    for (size_t i = 0; i < nCount; i++)
     {
         const double x = adfX[i];
         const double y = adfY[i];
@@ -149,13 +138,13 @@ int OGRDXFOCSTransformer::Transform(int nCount, double *adfX, double *adfY,
 /*                          InverseTransform()                          */
 /************************************************************************/
 
-int OGRDXFOCSTransformer::InverseTransform(int nCount, double *adfX,
+int OGRDXFOCSTransformer::InverseTransform(size_t nCount, double *adfX,
                                            double *adfY, double *adfZ)
 {
     if (dfDeterminant == 0.0)
         return FALSE;
 
-    for (int i = 0; i < nCount; i++)
+    for (size_t i = 0; i < nCount; i++)
     {
         const double x = adfX[i];
         const double y = adfY[i];

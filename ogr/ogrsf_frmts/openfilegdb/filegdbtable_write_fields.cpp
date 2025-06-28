@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -151,7 +135,7 @@ bool FileGDBTable::CreateField(std::unique_ptr<FileGDBField> &&psField)
             m_nNullableFieldsSizeInBytes =
                 BIT_ARRAY_SIZE_IN_BYTES(m_nCountNullableFields);
         }
-        m_apoFields.resize(m_apoFields.size() - 1);
+        m_apoFields.pop_back();
         m_bDirtyFieldDescriptors = true;
         return false;
     }
@@ -170,7 +154,7 @@ bool FileGDBTable::RewriteTableToAddLastAddedField()
     {
         nOldCountNullableFields--;
     }
-    const int nOldNullableFieldsSizeInBytes =
+    const unsigned nOldNullableFieldsSizeInBytes =
         BIT_ARRAY_SIZE_IN_BYTES(nOldCountNullableFields);
     int nExtraBytes = 0;
     if (nOldNullableFieldsSizeInBytes != m_nNullableFieldsSizeInBytes)
@@ -204,6 +188,10 @@ bool FileGDBTable::RewriteTableToAddLastAddedField()
         {
             WriteInt32(abyDefaultVal, psLastField->GetDefault()->Integer);
         }
+        else if (psLastField->GetType() == FGFT_INT64)
+        {
+            WriteInt64(abyDefaultVal, psLastField->GetDefault()->Integer64);
+        }
         else if (psLastField->GetType() == FGFT_FLOAT32)
         {
             WriteFloat32(abyDefaultVal,
@@ -213,10 +201,36 @@ bool FileGDBTable::RewriteTableToAddLastAddedField()
         {
             WriteFloat64(abyDefaultVal, psLastField->GetDefault()->Real);
         }
-        else if (psLastField->GetType() == FGFT_DATETIME)
+        else if (psLastField->GetType() == FGFT_DATETIME ||
+                 psLastField->GetType() == FGFT_DATE)
+        {
+            WriteFloat64(abyDefaultVal, FileGDBOGRDateToDoubleDate(
+                                            psLastField->GetDefault(),
+                                            /* bConvertToUTC = */ true,
+                                            psLastField->IsHighPrecision()));
+        }
+        else if (psLastField->GetType() == FGFT_TIME)
         {
             WriteFloat64(abyDefaultVal,
-                         FileGDBOGRDateToDoubleDate(psLastField->GetDefault()));
+                         FileGDBOGRTimeToDoubleTime(psLastField->GetDefault()));
+        }
+        else if (psLastField->GetType() == FGFT_DATETIME_WITH_OFFSET)
+        {
+            const auto psDefault = psLastField->GetDefault();
+            WriteFloat64(abyDefaultVal,
+                         FileGDBOGRDateToDoubleDate(
+                             psDefault, /* bConvertToUTC = */ false,
+                             /* bIsHighPrecision= */ true));
+            if (psDefault->Date.TZFlag > 1)
+            {
+                WriteInt16(
+                    abyDefaultVal,
+                    static_cast<int16_t>((psDefault->Date.TZFlag - 100) * 15));
+            }
+            else
+            {
+                WriteInt16(abyDefaultVal, 0);
+            }
         }
         nExtraBytes += static_cast<int>(abyDefaultVal.size());
     }
@@ -290,7 +304,7 @@ bool FileGDBTable::RewriteTableToAddLastAddedField()
                     return false;
 
                 // Write updated feature data
-                if (nOldNullableFieldsSizeInBytes > 0)
+                if (nOldNullableFieldsSizeInBytes != 0)
                 {
                     if (VSIFWriteL(m_abyBuffer.data(),
                                    nOldNullableFieldsSizeInBytes, 1,
@@ -306,7 +320,7 @@ bool FileGDBTable::RewriteTableToAddLastAddedField()
                                    oWholeFileRewriter.m_fpTable) != 1)
                         return false;
                 }
-                if (nFeatureSize - nOldNullableFieldsSizeInBytes > 0)
+                if (nFeatureSize > nOldNullableFieldsSizeInBytes)
                 {
                     if (VSIFWriteL(m_abyBuffer.data() +
                                        nOldNullableFieldsSizeInBytes,
@@ -353,8 +367,17 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
     WriteUTF16String(abyBuffer, psField->GetAlias().c_str(),
                      NUMBER_OF_CHARS_ON_UINT8);
     WriteUInt8(abyBuffer, static_cast<uint8_t>(psField->GetType()));
-    constexpr int UNKNOWN_FIELD_FLAG = 4;
+
     const auto &sDefault = *(psField->GetDefault());
+
+    uint8_t nFlag = 0;
+    if (psField->IsNullable())
+        nFlag = static_cast<uint8_t>(nFlag | FileGDBField::MASK_NULLABLE);
+    if (psField->IsRequired())
+        nFlag = static_cast<uint8_t>(nFlag | FileGDBField::MASK_REQUIRED);
+    if (psField->IsEditable())
+        nFlag = static_cast<uint8_t>(nFlag | FileGDBField::MASK_EDITABLE);
+
     switch (psField->GetType())
     {
         case FGFT_UNDEFINED:
@@ -366,9 +389,7 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
         case FGFT_INT16:
         {
             WriteUInt8(abyBuffer, 2);  // sizeof(int16)
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             if (!OGR_RawField_IsNull(&sDefault) &&
                 !OGR_RawField_IsUnset(&sDefault))
             {
@@ -385,9 +406,7 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
         case FGFT_INT32:
         {
             WriteUInt8(abyBuffer, 4);  // sizeof(int32)
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             if (!OGR_RawField_IsNull(&sDefault) &&
                 !OGR_RawField_IsUnset(&sDefault))
             {
@@ -404,9 +423,7 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
         case FGFT_FLOAT32:
         {
             WriteUInt8(abyBuffer, 4);  // sizeof(float32)
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             if (!OGR_RawField_IsNull(&sDefault) &&
                 !OGR_RawField_IsUnset(&sDefault))
             {
@@ -423,9 +440,7 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
         case FGFT_FLOAT64:
         {
             WriteUInt8(abyBuffer, 8);  // sizeof(float64)
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             if (!OGR_RawField_IsNull(&sDefault) &&
                 !OGR_RawField_IsUnset(&sDefault))
             {
@@ -442,9 +457,7 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
         case FGFT_STRING:
         {
             WriteUInt32(abyBuffer, psField->GetMaxWidth());
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             if (!OGR_RawField_IsNull(&sDefault) &&
                 !OGR_RawField_IsUnset(&sDefault))
             {
@@ -472,16 +485,18 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
         }
 
         case FGFT_DATETIME:
+        case FGFT_DATE:
         {
             WriteUInt8(abyBuffer, 8);  // sizeof(float64)
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             if (!OGR_RawField_IsNull(&sDefault) &&
                 !OGR_RawField_IsUnset(&sDefault))
             {
                 WriteUInt8(abyBuffer, 8);  // sizeof(float64)
-                WriteFloat64(abyBuffer, FileGDBOGRDateToDoubleDate(&sDefault));
+                WriteFloat64(abyBuffer,
+                             FileGDBOGRDateToDoubleDate(
+                                 &sDefault, /* bConvertToUTC = */ true,
+                                 psField->IsHighPrecision()));
             }
             else
             {
@@ -502,9 +517,7 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
             const auto *geomField =
                 cpl::down_cast<const FileGDBGeomField *>(psField);
             WriteUInt8(abyBuffer, 0);  // unknown role
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      2 | UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             WriteUTF16String(abyBuffer, geomField->GetWKT().c_str(),
                              NUMBER_OF_BYTES_ON_UINT16);
             WriteUInt8(
@@ -566,9 +579,7 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
         case FGFT_BINARY:
         {
             WriteUInt8(abyBuffer, 0);  // unknown role
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             break;
         }
 
@@ -583,18 +594,79 @@ WriteFieldDescriptor(std::vector<GByte> &abyBuffer, const FileGDBField *psField,
         case FGFT_GLOBALID:
         {
             WriteUInt8(abyBuffer, 38);  // size
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
             break;
         }
 
         case FGFT_XML:
         {
             WriteUInt8(abyBuffer, 0);  // unknown role
-            WriteUInt8(abyBuffer, static_cast<uint8_t>(
-                                      UNKNOWN_FIELD_FLAG |
-                                      static_cast<int>(psField->IsNullable())));
+            WriteUInt8(abyBuffer, nFlag);
+            break;
+        }
+
+        case FGFT_INT64:
+        {
+            WriteUInt8(abyBuffer, 8);  // sizeof(int64)
+            WriteUInt8(abyBuffer, nFlag);
+            if (!OGR_RawField_IsNull(&sDefault) &&
+                !OGR_RawField_IsUnset(&sDefault))
+            {
+                WriteUInt8(abyBuffer, 8);  // sizeof(int64)
+                WriteInt64(abyBuffer, sDefault.Integer64);
+            }
+            else
+            {
+                WriteUInt8(abyBuffer, 0);  // size of default value
+            }
+            break;
+        }
+
+        case FGFT_TIME:
+        {
+            WriteUInt8(abyBuffer, 8);  // sizeof(float64)
+            WriteUInt8(abyBuffer, nFlag);
+            if (!OGR_RawField_IsNull(&sDefault) &&
+                !OGR_RawField_IsUnset(&sDefault))
+            {
+                WriteUInt8(abyBuffer, 8);  // sizeof(float64)
+                WriteFloat64(abyBuffer, FileGDBOGRTimeToDoubleTime(&sDefault));
+            }
+            else
+            {
+                WriteUInt8(abyBuffer, 0);  // size of default value
+            }
+            break;
+        }
+
+        case FGFT_DATETIME_WITH_OFFSET:
+        {
+            WriteUInt8(abyBuffer, 8 + 2);  // sizeof(float64) + sizeof(int16)
+            WriteUInt8(abyBuffer, nFlag);
+            if (!OGR_RawField_IsNull(&sDefault) &&
+                !OGR_RawField_IsUnset(&sDefault))
+            {
+                WriteUInt8(abyBuffer,
+                           8 + 2);  // sizeof(float64) + sizeof(int16)
+                WriteFloat64(abyBuffer,
+                             FileGDBOGRDateToDoubleDate(
+                                 &sDefault, /* bConvertToUTC = */ false,
+                                 /* bIsHighPrecision = */ true));
+                if (sDefault.Date.TZFlag > 1)
+                {
+                    WriteInt16(abyBuffer,
+                               static_cast<int16_t>(
+                                   (sDefault.Date.TZFlag - 100) * 15));
+                }
+                else
+                {
+                    WriteInt16(abyBuffer, 0);
+                }
+            }
+            else
+            {
+                WriteUInt8(abyBuffer, 0);  // size of default value
+            }
             break;
         }
     }
@@ -732,7 +804,7 @@ bool FileGDBTable::DeleteField(int iField)
             m_apoFields[m_iGeomField]->m_eType = FGFT_BINARY;
         m_iGeomField = -1;
 
-        for (int iCurFeat = 0; iCurFeat < m_nTotalRecordCount; ++iCurFeat)
+        for (int64_t iCurFeat = 0; iCurFeat < m_nTotalRecordCount; ++iCurFeat)
         {
             iCurFeat = GetAndSelectNextNonEmptyRow(iCurFeat);
             if (iCurFeat < 0)
@@ -787,9 +859,11 @@ bool FileGDBTable::DeleteField(int iField)
 
                 if (iField != m_iObjectIdField)
                 {
-                    VSIUnlink(CPLResetExtension(
-                        m_osFilename.c_str(),
-                        (m_apoIndexes[i]->GetIndexName() + ".atx").c_str()));
+                    VSIUnlink(
+                        CPLResetExtensionSafe(
+                            m_osFilename.c_str(),
+                            (m_apoIndexes[i]->GetIndexName() + ".atx").c_str())
+                            .c_str());
                 }
 
                 m_apoIndexes.erase(m_apoIndexes.begin() + i);
@@ -872,8 +946,9 @@ bool FileGDBTable::AlterField(int iField, const std::string &osName,
     GetIndexCount();
     auto poIndex = m_apoFields[iField]->m_poIndex;
 
-    m_apoFields[iField] = cpl::make_unique<FileGDBField>(
-        osName, osAlias, eType, bNullable, nMaxWidth, sDefault);
+    m_apoFields[iField] = std::make_unique<FileGDBField>(
+        osName, osAlias, eType, bNullable, m_apoFields[iField]->IsRequired(),
+        m_apoFields[iField]->IsEditable(), nMaxWidth, sDefault);
     m_apoFields[iField]->SetParent(this);
     m_apoFields[iField]->m_poIndex = poIndex;
     if (poIndex && bRenameField)

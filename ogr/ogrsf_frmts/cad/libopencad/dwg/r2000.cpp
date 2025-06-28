@@ -10,23 +10,7 @@
  *  Copyright (c) 2016 Alexandr Borzykh
  *  Copyright (c) 2016-2018 NextGIS, <info@nextgis.com>
  *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in all
- *  copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
+  * SPDX-License-Identifier: MIT
  *******************************************************************************/
 #include "cadgeometry.h"
 #include "cadobjects.h"
@@ -34,6 +18,7 @@
 #include "r2000.h"
 
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -738,7 +723,7 @@ int DWGFileR2000::ReadClasses( enum OpenOptions eOptions )
             stClass.bWasZombie       = buffer.ReadBIT();
             stClass.bIsEntity        = buffer.ReadBITSHORT() == 0x1F2;
 
-            oClasses.addClass( stClass );
+            oClasses.addClass( std::move(stClass) );
         }
 
         buffer.Seek(dSectionBitSize, CADBuffer::BEG);
@@ -3120,14 +3105,14 @@ CADMLineObject * DWGFileR2000::getMLine(unsigned int dObjectSize,
                     stLStyle.adfAreaFillParameters.push_back( buffer.ReadBITDOUBLE() );
             }
 
-            stVertex.astLStyles.push_back( stLStyle );
+            stVertex.astLStyles.push_back( std::move(stLStyle) );
             if( buffer.IsEOB() )
             {
                 delete mline;
                 return nullptr;
             }
         }
-        mline->avertVertices.push_back( stVertex );
+        mline->avertVertices.push_back( std::move(stVertex) );
     }
 
     if( mline->stCed.bbEntMode == 0 )
@@ -3409,7 +3394,7 @@ CADDimensionObject * DWGFileR2000::getDimension(short dObjectType,
 
             dimension->setSize( dObjectSize );
             dimension->stCed = stCommonEntityData;
-            dimension->cdd   = stCDD;
+            dimension->cdd   = std::move(stCDD);
 
             CADVector vert10pt = buffer.ReadVector();
             dimension->vert10pt = vert10pt;
@@ -3438,7 +3423,7 @@ CADDimensionObject * DWGFileR2000::getDimension(short dObjectType,
 
             dimension->setSize( dObjectSize );
             dimension->stCed = stCommonEntityData;
-            dimension->cdd   = stCDD;
+            dimension->cdd   = std::move(stCDD);
 
             CADVector vert13pt = buffer.ReadVector();
             dimension->vert13pt = vert13pt;
@@ -3468,7 +3453,7 @@ CADDimensionObject * DWGFileR2000::getDimension(short dObjectType,
 
             dimension->setSize( dObjectSize );
             dimension->stCed = stCommonEntityData;
-            dimension->cdd   = stCDD;
+            dimension->cdd   = std::move(stCDD);
 
             CADVector vert13pt = buffer.ReadVector();
             dimension->vert13pt = vert13pt;
@@ -3497,7 +3482,7 @@ CADDimensionObject * DWGFileR2000::getDimension(short dObjectType,
 
             dimension->setSize( dObjectSize );
             dimension->stCed = stCommonEntityData;
-            dimension->cdd   = stCDD;
+            dimension->cdd   = std::move(stCDD);
 
             CADVector vert10pt = buffer.ReadVector();
             dimension->vert10pt = vert10pt;
@@ -3527,7 +3512,7 @@ CADDimensionObject * DWGFileR2000::getDimension(short dObjectType,
 
             dimension->setSize( dObjectSize );
             dimension->stCed = stCommonEntityData;
-            dimension->cdd   = stCDD;
+            dimension->cdd   = std::move(stCDD);
 
             CADVector vert16pt = buffer.ReadVector();
             dimension->vert16pt = vert16pt;
@@ -3560,7 +3545,7 @@ CADDimensionObject * DWGFileR2000::getDimension(short dObjectType,
 
             dimension->setSize( dObjectSize );
             dimension->stCed = stCommonEntityData;
-            dimension->cdd   = stCDD;
+            dimension->cdd   = std::move(stCDD);
 
             CADVector vert10pt = buffer.ReadVector();
             dimension->vert10pt = vert10pt;
@@ -3586,7 +3571,7 @@ CADDimensionObject * DWGFileR2000::getDimension(short dObjectType,
 
             dimension->setSize( dObjectSize );
             dimension->stCed = stCommonEntityData;
-            dimension->cdd   = stCDD;
+            dimension->cdd   = std::move(stCDD);
 
             CADVector vert15pt = buffer.ReadVector();
             dimension->vert15pt = vert15pt;

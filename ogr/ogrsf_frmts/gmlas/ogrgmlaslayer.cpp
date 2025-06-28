@@ -9,23 +9,7 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_gmlas.h"
@@ -40,12 +24,9 @@ OGRGMLASLayer::OGRGMLASLayer(OGRGMLASDataSource *poDS,
                              const GMLASFeatureClass &oFC,
                              OGRGMLASLayer *poParentLayer,
                              bool bAlwaysGenerateOGRPKId)
-    : m_poDS(poDS), m_oFC(oFC), m_bLayerDefnFinalized(false),
-      m_nMaxFieldIndex(0), m_poFeatureDefn(new OGRFeatureDefn(oFC.GetName())),
-      m_bEOF(false), m_poReader(nullptr), m_fpGML(nullptr), m_nIDFieldIdx(-1),
-      m_bIDFieldIsGenerated(false), m_poParentLayer(poParentLayer),
-      m_nParentIDFieldIdx(-1)
-
+    : m_poDS(poDS), m_oFC(oFC),
+      m_poFeatureDefn(new OGRFeatureDefn(oFC.GetName())),
+      m_poParentLayer(poParentLayer)
 {
     m_poFeatureDefn->SetGeomType(wkbNone);
     m_poFeatureDefn->Reference();
@@ -152,11 +133,8 @@ OGRGMLASLayer::OGRGMLASLayer(OGRGMLASDataSource *poDS,
 /************************************************************************/
 
 OGRGMLASLayer::OGRGMLASLayer(const char *pszLayerName)
-    : m_poDS(nullptr), m_bLayerDefnFinalized(true), m_nMaxFieldIndex(0),
-      m_poFeatureDefn(new OGRFeatureDefn(pszLayerName)), m_bEOF(false),
-      m_poReader(nullptr), m_fpGML(nullptr), m_nIDFieldIdx(-1),
-      m_bIDFieldIsGenerated(false), m_poParentLayer(nullptr),
-      m_nParentIDFieldIdx(-1)
+    : m_bLayerDefnFinalized(true),
+      m_poFeatureDefn(new OGRFeatureDefn(pszLayerName))
 
 {
     m_poFeatureDefn->SetGeomType(wkbNone);
@@ -227,9 +205,8 @@ void OGRGMLASLayer::ProcessDataRecordOfDataArrayCreateFields(
         if (psIter->eType == CXT_Element &&
             strcmp(psIter->pszValue, "field") == 0)
         {
-            CPLString osName = CPLGetXMLValue(psIter, "name", "");
-            osName.tolower();
-            OGRFieldDefn oFieldDefn(osName, OFTString);
+            const char *pszName = CPLGetXMLValue(psIter, "name", "");
+            OGRFieldDefn oFieldDefn(CPLString(pszName).tolower(), OFTString);
             OGRFieldType eType;
             OGRFieldSubType eSubType;
             CPLXMLNode *psNode = GetSWEChildAndType(psIter, eType, eSubType);
@@ -279,8 +256,8 @@ void OGRGMLASLayer::ProcessDataRecordCreateFields(
         if (psIter->eType == CXT_Element &&
             strcmp(psIter->pszValue, "field") == 0)
         {
-            CPLString osName = CPLGetXMLValue(psIter, "name", "");
-            osName = osName.tolower();
+            const char *pszName = CPLGetXMLValue(psIter, "name", "");
+            CPLString osName = CPLString(pszName).tolower();
             OGRFieldDefn oFieldDefn(osName, OFTString);
             OGRFieldType eType;
             OGRFieldSubType eSubType;
@@ -338,8 +315,9 @@ void OGRGMLASLayer::ProcessDataRecordCreateFields(
                     if (psIter2->eType == CXT_Element &&
                         strcmp(psIter2->pszValue, "value") != 0)
                     {
-                        CPLString osName2(osName + "_" + psIter2->pszValue);
-                        osName2.tolower();
+                        const CPLString osName2 =
+                            CPLString(osName + "_" + psIter2->pszValue)
+                                .tolower();
                         for (CPLXMLNode *psIter3 = psIter2->psChild;
                              psIter3 != nullptr; psIter3 = psIter3->psNext)
                         {
@@ -349,9 +327,10 @@ void OGRGMLASLayer::ProcessDataRecordCreateFields(
                                 const char *pszColon = strchr(pszValue, ':');
                                 if (pszColon)
                                     pszValue = pszColon + 1;
-                                CPLString osName3(osName2 + "_" + pszValue);
-                                osName3.tolower();
-                                OGRFieldDefn oFieldDefn2(osName3, OFTString);
+                                OGRFieldDefn oFieldDefn2(
+                                    CPLString(osName2 + "_" + pszValue)
+                                        .tolower(),
+                                    OFTString);
                                 m_poFeatureDefn->AddFieldDefn(&oFieldDefn2);
                             }
                             else if (psIter3->eType == CXT_Text)
@@ -419,8 +398,8 @@ void OGRGMLASLayer::ProcessDataRecordFillFeature(CPLXMLNode *psDataRecord,
         if (psIter->eType == CXT_Element &&
             strcmp(psIter->pszValue, "field") == 0)
         {
-            CPLString osName = CPLGetXMLValue(psIter, "name", "");
-            osName = osName.tolower();
+            const char *pszName = CPLGetXMLValue(psIter, "name", "");
+            CPLString osName = CPLString(pszName).tolower();
             OGRFieldDefn oFieldDefn(osName, OFTString);
             OGRFieldType eType;
             OGRFieldSubType eSubType;
@@ -438,8 +417,8 @@ void OGRGMLASLayer::ProcessDataRecordFillFeature(CPLXMLNode *psDataRecord,
             {
                 if (psIter2->eType == CXT_Element)
                 {
-                    CPLString osName2(osName + "_" + psIter2->pszValue);
-                    osName2.tolower();
+                    const CPLString osName2 =
+                        CPLString(osName + "_" + psIter2->pszValue).tolower();
                     for (CPLXMLNode *psIter3 = psIter2->psChild;
                          psIter3 != nullptr; psIter3 = psIter3->psNext)
                     {
@@ -449,10 +428,10 @@ void OGRGMLASLayer::ProcessDataRecordFillFeature(CPLXMLNode *psDataRecord,
                             const char *pszColon = strchr(pszValue, ':');
                             if (pszColon)
                                 pszValue = pszColon + 1;
-                            CPLString osName3(osName2 + "_" + pszValue);
-                            osName3.tolower();
-                            SetSWEValue(poFeature, osName3,
-                                        psIter3->psChild->pszValue);
+                            SetSWEValue(
+                                poFeature,
+                                CPLString(osName2 + "_" + pszValue).tolower(),
+                                psIter3->psChild->pszValue);
                         }
                         else if (psIter3->eType == CXT_Text)
                         {
@@ -936,6 +915,8 @@ void OGRGMLASLayer::PostInit(bool bIncludeGeometryXML)
                 [GMLASField::MakeXLinkRawContentFieldXPathFromXLinkHrefXPath(
                     oField.GetXPath())] = m_poFeatureDefn->GetFieldCount() - 1;
         }
+
+        CPL_IGNORE_RET_VAL(osOGRFieldName);
     }
 
     CreateCompoundFoldedMappings();
@@ -1000,9 +981,6 @@ void OGRGMLASLayer::CreateCompoundFoldedMappings()
 OGRGMLASLayer::~OGRGMLASLayer()
 {
     m_poFeatureDefn->Release();
-    delete m_poReader;
-    if (m_fpGML != nullptr)
-        VSIFCloseL(m_fpGML);
 }
 
 /************************************************************************/
@@ -1051,7 +1029,7 @@ bool OGRGMLASLayer::RemoveField(int nIdx)
             else if (oIter.first > nIdx)
                 oMapOGRFieldIdxtoFCFieldIdx[oIter.first - 1] = oIter.second;
         }
-        m_oMapOGRFieldIdxtoFCFieldIdx = oMapOGRFieldIdxtoFCFieldIdx;
+        m_oMapOGRFieldIdxtoFCFieldIdx = std::move(oMapOGRFieldIdxtoFCFieldIdx);
     }
 
     OGRLayer *poFieldsMetadataLayer = m_poDS->GetFieldsMetadataLayer();
@@ -1091,7 +1069,8 @@ static void InsertTargetIndex(std::map<CPLString, int> &oMap, int nIdx)
 /*                            InsertNewField()                          */
 /************************************************************************/
 
-void OGRGMLASLayer::InsertNewField(int nInsertPos, OGRFieldDefn &oFieldDefn,
+void OGRGMLASLayer::InsertNewField(int nInsertPos,
+                                   const OGRFieldDefn &oFieldDefn,
                                    const CPLString &osXPath)
 {
     CPLAssert(nInsertPos >= 0 &&
@@ -1123,7 +1102,7 @@ void OGRGMLASLayer::InsertNewField(int nInsertPos, OGRFieldDefn &oFieldDefn,
             else
                 oMapOGRFieldIdxtoFCFieldIdx[oIter.first + 1] = oIter.second;
         }
-        m_oMapOGRFieldIdxtoFCFieldIdx = oMapOGRFieldIdxtoFCFieldIdx;
+        m_oMapOGRFieldIdxtoFCFieldIdx = std::move(oMapOGRFieldIdxtoFCFieldIdx);
     }
 
     OGRLayer *poFieldsMetadataLayer = m_poDS->GetFieldsMetadataLayer();
@@ -1134,7 +1113,7 @@ void OGRGMLASLayer::InsertNewField(int nInsertPos, OGRFieldDefn &oFieldDefn,
         if (strcmp(poFeature->GetFieldAsString(szLAYER_NAME), GetName()) == 0)
         {
             int nFieldIndex = poFeature->GetFieldAsInteger(szFIELD_INDEX);
-            if (nFieldIndex >= nInsertPos)
+            if (nFieldIndex >= nInsertPos && nFieldIndex < INT_MAX)
             {
                 poFeature->SetField(szFIELD_INDEX, nFieldIndex + 1);
                 CPL_IGNORE_RET_VAL(
@@ -1268,7 +1247,8 @@ CPLString OGRGMLASLayer::LaunderFieldName(const CPLString &osFieldName)
 
     if (m_poDS->GetConf().m_bPGIdentifierLaundering)
     {
-        char *pszLaundered = OGRPGCommonLaunderName(osLaunderedName, "GMLAS");
+        char *pszLaundered =
+            OGRPGCommonLaunderName(osLaunderedName, "GMLAS", false);
         osLaunderedName = pszLaundered;
         CPLFree(pszLaundered);
     }
@@ -1276,15 +1256,15 @@ CPLString OGRGMLASLayer::LaunderFieldName(const CPLString &osFieldName)
     if (m_poFeatureDefn->GetFieldIndex(osLaunderedName) >= 0)
     {
         nCounter = 1;
-        CPLString osCandidate;
+        std::string osCandidate;
         do
         {
             nCounter++;
             osCandidate = OGRGMLASAddSerialNumber(
                 osLaunderedName, nCounter, nCounter + 1, nIdentifierMaxLength);
         } while (nCounter < 100 &&
-                 m_poFeatureDefn->GetFieldIndex(osCandidate) >= 0);
-        osLaunderedName = osCandidate;
+                 m_poFeatureDefn->GetFieldIndex(osCandidate.c_str()) >= 0);
+        osLaunderedName = std::move(osCandidate);
     }
 
     return osLaunderedName;
@@ -1457,9 +1437,7 @@ OGRFeatureDefn *OGRGMLASLayer::GetLayerDefn()
                 // Avoid keeping too many file descriptor opened
                 if (m_fpGML != nullptr)
                     m_poDS->PushUnusedGMLFilePointer(m_fpGML);
-                m_fpGML = nullptr;
-                delete m_poReader;
-                m_poReader = nullptr;
+                m_poReader.reset();
             }
         }
     }
@@ -1472,8 +1450,7 @@ OGRFeatureDefn *OGRGMLASLayer::GetLayerDefn()
 
 void OGRGMLASLayer::ResetReading()
 {
-    delete m_poReader;
-    m_poReader = nullptr;
+    m_poReader.reset();
     m_bEOF = false;
 }
 
@@ -1485,8 +1462,8 @@ bool OGRGMLASLayer::InitReader()
 {
     CPLAssert(m_poReader == nullptr);
 
-    m_poReader = m_poDS->CreateReader(m_fpGML);
     m_bLayerDefnFinalized = true;
+    m_poReader.reset(m_poDS->CreateReader(m_fpGML));
     if (m_poReader != nullptr)
     {
         m_poReader->SetLayerOfInterest(this);
@@ -1535,9 +1512,7 @@ OGRFeature *OGRGMLASLayer::GetNextFeature()
             // Avoid keeping too many file descriptor opened
             if (m_fpGML != nullptr)
                 m_poDS->PushUnusedGMLFilePointer(m_fpGML);
-            m_fpGML = nullptr;
-            delete m_poReader;
-            m_poReader = nullptr;
+            m_poReader.reset();
             m_bEOF = true;
             return nullptr;
         }

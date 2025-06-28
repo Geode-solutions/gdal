@@ -27,7 +27,6 @@
 ###############################################################################
 
 import shutil
-import sys
 
 import gdaltest
 import pytest
@@ -40,16 +39,14 @@ pytestmark = pytest.mark.require_driver("SXF")
 # Open SXF datasource.
 
 
+@pytest.fixture()
 def test_ogr_sxf_1():
 
-    gdaltest.sxf_ds = None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         # Expect Warning 0 and Warning 6.
-        gdaltest.sxf_ds = ogr.Open("data/sxf/100_test.sxf")
+        ds = ogr.Open("data/sxf/100_test.sxf")
 
-    if gdaltest.sxf_ds is not None:
-        return
-    pytest.fail()
+    assert ds is not None
 
 
 ###############################################################################
@@ -74,11 +71,11 @@ def test_ogr_sxf_2():
 # Open SXF datasource with custom RSC file.
 
 
-def test_ogr_sxf_3():
+def test_ogr_sxf_3(tmp_path):
 
     lyr_names = ["SYSTEM", "Not_Classified"]
-    sxf_name = "tmp/test_ogr_sxf_3.sxf"
-    rsc_name = "tmp/test_ogr_sxf_3.rsc"
+    sxf_name = str(tmp_path / "test_ogr_sxf_3.sxf")
+    rsc_name = str(tmp_path / "test_ogr_sxf_3.rsc")
     fake_rsc = open(rsc_name, "w")
     fake_rsc.close()
     shutil.copy("data/sxf/100_test.sxf", sxf_name)
@@ -97,7 +94,7 @@ def test_ogr_sxf_3():
 # Open SXF datasource with layers fullname.
 
 
-def test_ogr_sxf_4(capsys):
+def test_ogr_sxf_4():
 
     lyr_names = [
         "СИСТЕМНЫЙ",
@@ -118,30 +115,11 @@ def test_ogr_sxf_4(capsys):
     assert sxf_ds is not None
     assert sxf_ds.GetLayerCount() == len(lyr_names)
 
-    if sys.platform != "win32":
-        with capsys.disabled():
-            print("Expected:")
-            for n in lyr_names:
-                print(n)
-            print("In fact:")
-            for layer_n in range(sxf_ds.GetLayerCount()):
-                lyr = sxf_ds.GetLayer(layer_n)
-                print(lyr.GetName())
-
+    actual_layer_names = []
     for layer_n in range(sxf_ds.GetLayerCount()):
         lyr = sxf_ds.GetLayer(layer_n)
         if lyr.TestCapability(ogr.OLCStringsAsUTF8) != 1:
             pytest.skip("skipping test: recode is not possible")
-        assert lyr_names[layer_n] == lyr.GetName()
+        actual_layer_names.append(lyr.GetName())
 
-
-###############################################################################
-#
-
-
-def test_ogr_sxf_cleanup():
-
-    if gdaltest.sxf_ds is None:
-        pytest.skip()
-
-    gdaltest.sxf_ds = None
+    assert actual_layer_names == lyr_names

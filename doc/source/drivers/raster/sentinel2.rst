@@ -15,8 +15,7 @@ are also supported.
 The SENTINEL2 driver will be used if the main metadata .xml file at the
 root of a SENTINEL2 data product is opened (whose name is typically
 S2A_OPER_MTD_SAFL1C\_....xml). It can also accept directly .zip files
-downloaded from the `Sentinels Scientific Data
-Hub <https://scihub.copernicus.eu/>`__
+downloaded from the `Copernicus Browser <https://browser.dataspace.copernicus.eu/>`__.
 
 To be able to read the imagery, GDAL must be configured with at least
 one of the JPEG2000 capable drivers.
@@ -61,6 +60,12 @@ imagery of each band is put in a separate JPEG2000 file.
 
 Level-1B products are aimed at advanced users.
 
+Starting with GDAL 3.12, two modes are possible, depending on the value of
+the ``L1B_MODE`` open option.
+
+Default / per-granule mode (``L1B_MODE = GRANULE``)
++++++++++++++++++++++++++++++++++++++++++++++++++++
+
 When opening the main metadata .xml file, the driver will typically
 expose N \* 3 sub-datasets, where N is the number of granules composing
 the user product, and 3 corresponds to the number of spatial
@@ -74,6 +79,23 @@ resolutions.
 
 When opening a subdataset, the georeferencing is made of 5 ground
 control points for the 4 corner of the images and the center of image.
+
+Per-datastrip per-detector per-band mode (``L1B_MODE = DATASTRIP``)
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+This mode is the default one since GDAL 3.12 for products that contain geolocation
+arrays as formatted by the MPC Sen2VM process. Granules participating to
+the datastrip are virtually mosaiced together, and a geolocation array is
+associated to them.
+
+Example how to ortho-rectify a subdataset:
+
+::
+
+    gdalwarp -overwrite \
+         SENTINEL2_L1B_WITH_GEOLOC:"S2B_OPER_MTD_SAFL1B_PDMC_20241022T154709_R023_V20241019T120217_20241019T120235.xml":S2B_OPER_GEO_L1B_DS_2BPS_20241019T153411_S20241019T120215_D09_B05 \
+         out_D09_B05.tif -co TILED=YES
+
 
 Level-1C
 --------
@@ -121,13 +143,15 @@ When opening the main metadata .xml file, the driver will typically
 expose 4 sub-datasets:
 
 -  one for the 4 native 10m bands, and L2A specific bands (AOT and WVP)
--  one for the 6 native 20m bands, plus the 10m bands, except B8,
-   resampled to 20m, and L2A specific bands (AOT, WVP, SCL, CLD and
+-  one for the 6 native 20m bands, and L2A specific bands (AOT, WVP, SCL, CLD and
    SNW),
--  one for the 3 native 60m bands, plus the 10m&20m bands, except B8,
-   resampled to 60m, and L2A specific bands (AOT, WVP, SCL, CLD and
+-  one for the B01 and B09 native 60m bands, and L2A specific bands (AOT, WVP, SCL, CLD and
    SNW),
--  one for a preview of the R,G,B bands at a 320m resolution
+-  one for a true-color image (TCI) of the R,G,B bands at a 10m resolution,
+   for the "compact" L2A product formulation (or a preview of the R,G,B bands
+   at a 320m resolution for the older L2A product formulation). The TCI
+   products at resolution 20m and 60m are not exposed, as they are just
+   subsampled versions of the 10m product.
 
 All tiles of same resolution and projection are mosaiced together. If a
 product spans over several UTM zones, they will be exposed as separate
@@ -161,31 +185,44 @@ NONE resampling method ('-r none' as gdaladdo switch).
 
 When converting a subdataset to another format like tiled GeoTIFF, if
 using the JP2OpenJPEG driver, the recommended minimum value for the
-:decl_configoption:`GDAL_CACHEMAX` configuration option is (subdataset_width \* 2048 \* 2 ) /
+:config:`GDAL_CACHEMAX` configuration option is (subdataset_width \* 2048 \* 2 ) /
 10000000 if generating a INTERLEAVE=BAND GeoTIFF, or that value
 multiplied by the number of bands for the default INTERLEAVE=PIXEL
 configuration. The current versions of the OpenJPEG libraries can also
 consume a lot of memory to decode a JPEG2000 tile (up to 600MB), so you
-might want to specify the :decl_configoption:`GDAL_NUM_THREADS` configuration option to a
+might want to specify the :config:`GDAL_NUM_THREADS` configuration option to a
 reasonable number of threads if you are short of memory (the default
 value is the total number of virtual CPUs).
 
 Open options
 ------------
 
+|about-open-options|
 The driver can be passed the following open options:
 
--  **ALPHA**\ =YES/NO: whether to expose an alpha band. Defaults to NO.
-   If set, an extra band is added after the Sentinel2 bands with an
-   alpha channel. Its value are:
+-  .. oo:: ALPHA
+      :choices: YES, NO
+      :default: NO
 
-   -  0 on areas with no tiles, or when the tile data is set to the
-      NODATA or SATURATED special values,
-   -  4095 on areas with valid data.
+      Whether to expose an alpha band.
+      If set, an extra band is added after the Sentinel2 bands with an
+      alpha channel. Its value are:
 
-Note: above open options can also be specified as configuration options,
-by prefixing the open option name with SENTINEL2\_ (e.g.
-SENTINEL2_ALPHA).
+      -  0 on areas with no tiles, or when the tile data is set to the
+         NODATA or SATURATED special values,
+      -  4095 on areas with valid data.
+
+-  .. oo:: L1B_MODE
+      :choices: DEAULT, GRANULE, DATASTRIP
+      :default: DEFAULT
+      :since: 3.12
+
+      When opening a L1B product, determines what kind of subdatasets it must
+      report. In the DEFAULT mode, if the product contains geolocation arrays
+      as formatted by the MPC Sen2VM process, a subdataset is reported per-datastrip
+      per-detector and per-band
+      will be reported. In the GRANULE mode (only one supported before 3.12),
+      a subdataset is reported per-granule and per-resolution.
 
 Examples
 --------
@@ -447,7 +484,7 @@ Examples
 See Also
 --------
 
--  `Sentinels Scientific Data Hub <https://scihub.esa.int/>`__
+-  `Copernicus Data Space Ecosystem <https://dataspace.copernicus.eu>`__
 -  `Sentinel 2 User
    guide <https://sentinels.copernicus.eu/web/sentinel/user-guides/sentinel-2-msi>`__
 -  `Sentinel 2 User
@@ -456,6 +493,10 @@ See Also
 Credits
 -------
 
-This driver has been developed by `Spatialys <http://spatialys.com>`__
-with funding from `Centre National d'Etudes Spatiales
-(CNES) <https://cnes.fr>`__
+Th driver has been developed by `Spatialys <http://spatialys.com>`__
+with initial funding from `Centre National d'Etudes Spatiales (CNES) <https://cnes.fr>`__
+
+.. below is an allow-list for spelling checker.
+
+.. spelling:word-list::
+    datastrip

@@ -11,30 +11,14 @@
 #  Copyright (c) 2015, Even Rouault <even.rouault at spatialys.com>
 #  Copyright (c) 2020, Idan Miara <idan@miara.com>
 #
-#  Permission is hereby granted, free of charge, to any person obtaining a
-#  copy of this software and associated documentation files (the "Software"),
-#  to deal in the Software without restriction, including without limitation
-#  the rights to use, copy, modify, merge, publish, distribute, sublicense,
-#  and/or sell copies of the Software, and to permit persons to whom the
-#  Software is furnished to do so, subject to the following conditions:
-#
-#  The above copyright notice and this permission notice shall be included
-#  in all copies or substantial portions of the Software.
-#
-#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-#  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-#  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-#  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-#  DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 # ******************************************************************************
 import os
 from numbers import Real
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 from osgeo import __version__ as gdal_version_str
-from osgeo import gdal
+from osgeo import gdal, ogr, osr
 from osgeo_utils.auxiliary.base import (
     MaybeSequence,
     OptionalBoolStr,
@@ -54,9 +38,19 @@ gdal_version = tuple(int(s) for s in str(gdal_version_str).split(".") if s.isdig
 ]
 
 
+def enable_gdal_exceptions(fun):
+    def enable_exceptions_wrapper(*args, **kwargs):
+        with gdal.ExceptionMgr(useExceptions=True), osr.ExceptionMgr(
+            useExceptions=True
+        ), ogr.ExceptionMgr(useExceptions=True):
+            return fun(*args, **kwargs)
+
+    return enable_exceptions_wrapper
+
+
 def DoesDriverHandleExtension(drv: gdal.Driver, ext: str) -> bool:
     exts = drv.GetMetadataItem(gdal.DMD_EXTENSIONS)
-    return exts is not None and exts.lower().find(ext.lower()) >= 0
+    return exts is not None and ext.lower() in exts.lower().split(" ")
 
 
 def GetOutputDriversFor(filename: PathLikeOrStr, is_raster=True) -> List[str]:
@@ -241,9 +235,18 @@ class OpenDS:
     def __enter__(self) -> gdal.Dataset:
 
         if self.ds is None:
-            self.ds = self._open_ds(self.filename, *self.args, **self.kwargs)
+            try:
+                self.ds = self._open_ds(self.filename, *self.args, **self.kwargs)
+            except Exception as e:
+                if self.silent_fail:
+                    return None
+                msg = str(e)
+                prefix = f"{self.filename}: "
+                if msg.startswith(prefix):
+                    msg = msg[len(prefix) :]
+                raise IOError(f'Could not open file "{self.filename}": {msg}')
             if self.ds is None and not self.silent_fail:
-                raise IOError('could not open file "{}"'.format(self.filename))
+                raise IOError(f'Could not open file "{self.filename}"')
             self.own = True
         return self.ds
 

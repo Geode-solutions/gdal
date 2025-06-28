@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  PDF driver
  * Purpose:  GDALDataset driver for PDF dataset.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2019, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef PDFCREATECOPY_H_INCLUDED
@@ -65,6 +48,7 @@ class GDALFakePDFDataset final : public GDALDataset
 {
   public:
     GDALFakePDFDataset() = default;
+    ~GDALFakePDFDataset() override;
 };
 
 /************************************************************************/
@@ -79,14 +63,17 @@ class GDALXRefEntry
     int bFree = FALSE;
 
     GDALXRefEntry() = default;
+
     explicit GDALXRefEntry(vsi_l_offset nOffsetIn, int nGenIn = 0)
         : nOffset(nOffsetIn), nGen(nGenIn)
     {
     }
+
     GDALXRefEntry(const GDALXRefEntry &oOther)
         : nOffset(oOther.nOffset), nGen(oOther.nGen), bFree(oOther.bFree)
     {
     }
+
     GDALXRefEntry &operator=(const GDALXRefEntry &oOther)
     {
         nOffset = oOther.nOffset;
@@ -239,11 +226,6 @@ class GDALPDFBaseWriter
                                        const char *pszNEATLINE,
                                        PDFMargins *psMargins,
                                        int bWriteViewport);
-    GDALPDFObjectNum WriteSRS_OGC_BP(GDALDataset *poSrcDS, double dfUserUnit,
-                                     const char *pszNEATLINE,
-                                     PDFMargins *psMargins);
-    static GDALPDFDictionaryRW *
-    GDALPDFBuildOGC_BP_Projection(const OGRSpatialReference *poSRS);
 
     GDALPDFObjectNum
     WriteOCG(const char *pszLayerName,
@@ -301,6 +283,9 @@ class GDALPDFBaseWriter
                              const char *pszSUBJECT, const char *pszTITLE,
                              const char *pszKEYWORDS);
     GDALPDFObjectNum SetXMP(GDALDataset *poSrcDS, const char *pszXMP);
+
+  private:
+    CPL_DISALLOW_COPY_ASSIGN(GDALPDFBaseWriter)
 };
 
 class GDALPDFUpdateWriter final : public GDALPDFBaseWriter
@@ -319,6 +304,7 @@ class GDALPDFUpdateWriter final : public GDALPDFBaseWriter
     {
         return m_nCatalogId;
     }
+
     int GetCatalogGen() const
     {
         return m_nCatalogGen;
@@ -369,14 +355,15 @@ class GDALPDFWriter final : public GDALPDFBaseWriter
                             const char *pszOGRLinkField,
                             int bWriteOGRAttributes);
 
-    GDALPDFLayerDesc StartOGRLayer(CPLString osLayerName,
+    GDALPDFLayerDesc StartOGRLayer(const std::string &osLayerName,
                                    int bWriteOGRAttributes);
     void EndOGRLayer(GDALPDFLayerDesc &osVectorDesc);
 
-    int WriteOGRLayer(OGRDataSourceH hDS, int iLayer,
+    int WriteOGRLayer(GDALDatasetH hDS, int iLayer,
                       const char *pszOGRDisplayField,
-                      const char *pszOGRLinkField, CPLString osLayerName,
-                      int bWriteOGRAttributes, int &iObj);
+                      const char *pszOGRLinkField,
+                      const std::string &osLayerName, int bWriteOGRAttributes,
+                      int &iObj);
 
     int WriteOGRFeature(GDALPDFLayerDesc &osVectorDesc, OGRFeatureH hFeat,
                         OGRCoordinateTransformationH hCT,

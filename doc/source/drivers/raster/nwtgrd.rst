@@ -65,26 +65,47 @@ reported as -1e37.
 Creation Options
 ~~~~~~~~~~~~~~~~
 
--  **ZMIN=-2e37**: Set the minimum Z value. Data are scaled on disk to a
-   16 bit integer and the Z value range is used to scale data. If not
-   set, it may cause incorrect data to be written when using 'Create()'
-   or a full recalculation of the source dataset statistics when using
-   'CreateCopy'
+|about-creation-options|
+The following creation options are available:
 
--  **ZMAX=2e38**: Set the maximum Z value. Data are scaled on disk to a
-   16 bit integer and the Z value range is used to scale data. If not
-   set, it may cause incorrect data to be written when using 'Create()'
-   or a full recalculation of the source dataset statistics when using
-   'CreateCopy'
+-  .. co:: ZMIN
+      :default: -2e37
 
--  **BRIGHTNESS=50**: Set the brightness level. Only affects opening the
-   file in MapInfo/Vertical Mapper
+      Set the minimum Z value. Data are scaled on disk to a
+      16 bit integer and the Z value range is used to scale data. If not
+      set, it may cause incorrect data to be written when using 'Create()'
+      or a full recalculation of the source dataset statistics when using
+      'CreateCopy'
 
--  **CONTRAST=50**: Set the contrast level. Only affects opening the
-   file in MapInfo/Vertical Mapper
+-  .. co:: ZMAX
+      :default: 2e38
 
--  **TRANSCOLOR=0**: Set a transparent color level. Only affects opening
-   the file in MapInfo/Vertical Mapper
+      Set the maximum Z value. Data are scaled on disk to a
+      16 bit integer and the Z value range is used to scale data. If not
+      set, it may cause incorrect data to be written when using 'Create()'
+      or a full recalculation of the source dataset statistics when using
+      'CreateCopy'
 
--  **TRANSLUCENCY=0**: Set the translucency level. Only affects opening
-   the file in MapInfo/Vertical Mapper
+-  .. co:: BRIGHTNESS
+      :default: 50
+
+      Set the brightness level. Only affects opening the
+      file in MapInfo/Vertical Mapper
+
+-  .. co:: CONTRAST
+      :default: 50
+
+      Set the contrast level. Only affects opening the
+      file in MapInfo/Vertical Mapper
+
+-  .. co:: TRANSCOLOR
+      :default: 0
+
+      Set a transparent color level. Only affects opening
+      the file in MapInfo/Vertical Mapper
+
+-  .. co:: TRANSLUCENCY
+      :default: 0
+
+      Set the translucency level. Only affects opening
+      the file in MapInfo/Vertical Mapper

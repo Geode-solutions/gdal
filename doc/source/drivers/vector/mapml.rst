@@ -58,30 +58,57 @@ Attributes are written as a HTML table.
 Dataset creation options
 ------------------------
 
--  **HEAD**\ =string: Filename or inline XML content for head element.
--  **EXTENT_UNITS**\ =AUTO/WGS84/OSMTILE/CBMTILE/APSTILE: To override the CRS.
--  **EXTENT_ACTION**\ =string: Value of ``extent@action`` attribute.
--  **EXTENT_XMIN**\ =float: Override extent xmin value.
--  **EXTENT_YMIN**\ =float: Override extent ymin value.
--  **EXTENT_XMAX**\ =float: Override extent xmax value.
--  **EXTENT_YMAX**\ =float: Override extent ymax value.
--  **EXTENT_XMIN_MIN**\ =float: Min value for extent.xmin value.
--  **EXTENT_XMIN_MAX**\ =float: Max value for extent.xmin value.
--  **EXTENT_YMIN_MIN**\ =float: Min value for extent.ymin value.
--  **EXTENT_YMIN_MAX**\ =float: Max value for extent.ymin value.
--  **EXTENT_XMAX_MIN**\ =float: Min value for extent.xmax value.
--  **EXTENT_XMAX_MAX**\ =float: Max value for extent.xmax value.
--  **EXTENT_YMAX_MIN**\ =float: Min value for extent.ymax value.
--  **EXTENT_YMAX_MAX**\ =float: Max value for extent.ymax value.
--  **EXTENT_ZOOM**\ =int: Value of extent.zoom.
--  **EXTENT_ZOOM_MIN**\ =int: Min value for extent.zoom.
--  **EXTENT_ZOOM_MAX**\ =int: Max value for extent.zoom.
--  **EXTENT_EXTRA**\ =string: Filename of inline XML content for extra content to insert in extent element.
--  **BODY_LINKS**\ =string: Inline XML content for extra content to insert as link elements in the body. For example '<link type="foo" href="bar" /><link type="baz" href="baw" />'
+|about-dataset-creation-options|
+The following dataset creation options are supported:
+
+-  .. dsco:: HEAD
+
+      Filename or inline XML content for head element.
+
+-  .. dsco:: EXTENT_UNITS
+      :choices: AUTO, WGS84, OSMTILE, CBMTILE, APSTILE
+
+      To override the CRS.
+
+-  .. dsco:: EXTENT_XMIN
+
+      Override extent xmin value.
+
+-  .. dsco:: EXTENT_YMIN
+
+      Override extent ymin value.
+
+-  .. dsco:: EXTENT_XMAX
+
+      Override extent xmax value.
+
+-  .. dsco:: EXTENT_YMAX
+
+      Override extent ymax value.
+
+-  .. dsco:: EXTENT_ZOOM
+      :choices: <integer>
+
+      Value of extent.zoom.
+
+-  .. dsco:: EXTENT_ZOOM_MIN
+      :choices: <integer>
+
+      Min value for extent.zoom.
+
+-  .. dsco:: EXTENT_ZOOM_MAX
+      :choices: <integer>
+
+      Max value for extent.zoom.
+
+-  .. dsco:: HEAD_LINKS
+
+      Inline XML content for extra content to insert as link elements in the map-head. For example '<link rel="license" href="bar" title="foo" /><link type="baz" href="baw" />'
 
 Links
 -----
 
+-  `MapML.js documentation <https://maps4html.org/web-map-doc/>`_
 -  `MapML specification <https://maps4html.org/MapML/spec>`_
 -  `MapML schemas <https://github.com/Maps4HTML/MapML/tree/gh-pages/schema>`_
 -  :ref:`gdal2tiles` mapml output

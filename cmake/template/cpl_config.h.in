@@ -24,6 +24,12 @@
 /* The size of `size_t', as computed by sizeof. */
 #cmakedefine SIZEOF_SIZE_T @SIZEOF_SIZE_T@
 
+/* Whether `std::float16_t` is available (and working). */
+#cmakedefine HAVE_STD_FLOAT16_T @HAVE_STD_FLOAT16_T@
+
+/* Whether `_Float16' is supported. */
+#cmakedefine HAVE__FLOAT16 @HAVE__FLOAT16@
+
 /* Define to 1, if you have LARGEFILE64_SOURCE */
 #cmakedefine VSI_NEED_LARGEFILE64_SOURCE 1
 
@@ -69,6 +75,12 @@
 
 /* Define to 1 if you have the 5 args `mremap' function. */
 #cmakedefine HAVE_5ARGS_MREMAP 1
+
+/* Define to 1 if you have the <sys/random.h> header file. */
+#cmakedefine HAVE_SYS_RANDOM_H 1
+
+/* Define to 1 if you have the `getrandom' function. */
+#cmakedefine HAVE_GETRANDOM 1
 
 /* Define to 1 if you have the `getrlimit' function. */
 #cmakedefine HAVE_GETRLIMIT 1
@@ -175,6 +187,9 @@
 /* Define to 1 if you have the `sched_getaffinity' function. */
 #cmakedefine HAVE_SCHED_GETAFFINITY 1
 
+/* Define to 1 if you have the `std::shared_mutex' function. */
+#cmakedefine HAVE_SHARED_MUTEX 1
+
 /* Define to 1 if you have the `uselocale' function. */
 #cmakedefine HAVE_USELOCALE 1
 
@@ -191,6 +206,15 @@
 
 /* Define to 1 if you have the <atlbase.h> header file. */
 #cmakedefine HAVE_ATLBASE_H 1
+
+/* Define to 1 if you have the `ctime_r' function. */
+#cmakedefine HAVE_CTIME_R 1
+
+/* Define to 1 if you have the `localtime_r' function. */
+#cmakedefine HAVE_LOCALTIME_R 1
+
+/* Define to 1 if you have the `gmtime_r' function. */
+#cmakedefine HAVE_GMTIME_R 1
 
 #endif /* GDAL_COMPILATION */
 

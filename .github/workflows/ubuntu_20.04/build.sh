@@ -2,59 +2,97 @@
 
 set -eu
 
-if test "${COVERITY_SCAN_TOKEN:-}" = ""; then
-  if test -f /build/ccache.tar.gz; then
-      echo "Restoring ccache..."
-      (cd $HOME && tar xzf /build/ccache.tar.gz)
-  fi
+export CXXFLAGS="-march=native -O2 -Wodr -flto-odr-type-merging -Werror"
+export CFLAGS="-O2 -march=native -Werror"
 
-  ccache -M 200M
-  ccache -s
+# for precompiled headers
+ccache --set-config sloppiness=pch_defines,time_macros,include_file_mtime,include_file_ctime
 
-  export CXXFLAGS="-std=c++17 -march=native -O2 -Wodr -flto-odr-type-merging -Werror"
-  export CFLAGS="-O2 -march=native -Werror"
-  export OTHER_SWITCHES="-DUSE_CCACHE=ON -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON"
-else
-  wget -q https://scan.coverity.com/download/cxx/linux64 --post-data "token=$COVERITY_SCAN_TOKEN&project=GDAL" -O cov-analysis-linux64.tar.gz
-  mkdir /tmp/cov-analysis-linux64
-  tar xzf cov-analysis-linux64.tar.gz --strip 1 -C /tmp/cov-analysis-linux64
-  export OTHER_SWITCHES="-DCMAKE_BUILD_TYPE=Debug -DBUILD_PYTHON_BINDINGS=OFF -DBUILD_JAVA_BINDINGS=OFF -DBUILD_CSHARP_BINDINGS=OFF"
-fi
-
-cd /build
-
-mkdir build
-cd build
-cmake .. ${OTHER_SWITCHES} \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DGDAL_USE_TIFF_INTERNAL=ON \
-    -DGDAL_USE_GEOTIFF_INTERNAL=ON \
+cmake "${GDAL_SOURCE_DIR:=..}" \
+    -DUSE_CCACHE=ON \
+    "-DUSE_PRECOMPILED_HEADERS=ON" \
+    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+    -DCMAKE_INSTALL_PREFIX=/tmp/install-gdal \
+    -DGDAL_USE_TIFF_INTERNAL=OFF \
+    -DGDAL_USE_GEOTIFF_INTERNAL=OFF \
     -DECW_ROOT=/opt/libecwj2-3.3 \
     -DMRSID_ROOT=/usr/local \
-    -DFileGDB_ROOT=/usr/local/FileGDB_API
-
-if test "${COVERITY_SCAN_TOKEN:-}" != ""; then
-  /tmp/cov-analysis-linux64/bin/cov-build --dir cov-int make "-j$(nproc)"
-  tar czf cov-int.tgz cov-int
-  curl \
-      --form token=$COVERITY_SCAN_TOKEN \
-      --form email=$COVERITY_SCAN_EMAIL \
-      --form file=@cov-int.tgz \
-      --form version=master \
-      --form description="`git rev-parse --abbrev-ref HEAD` `git rev-parse --short HEAD`" \
-      https://scan.coverity.com/builds?project=GDAL
-  exit 0
-fi
+    -DFileGDB_ROOT=/usr/local/FileGDB_API \
+    -DSQLite3_INCLUDE_DIR=/usr/local/install-sqlite-trusted-schema-off/include \
+    -DSQLite3_LIBRARY=/usr/local/install-sqlite-trusted-schema-off/lib/libsqlite3.so
 
 unset CXXFLAGS
 unset CFLAGS
 
-make install "-j$(nproc)"
+make "-j$(nproc)"
+make "-j$(nproc)" install
+
+# Download Oracle SDK
+wget https://download.oracle.com/otn_software/linux/instantclient/1923000/instantclient-basic-linux.x64-19.23.0.0.0dbru.zip
+wget https://download.oracle.com/otn_software/linux/instantclient/1923000/instantclient-sdk-linux.x64-19.23.0.0.0dbru.zip
+unzip -o instantclient-basic-linux.x64-19.23.0.0.0dbru.zip
+unzip -o instantclient-sdk-linux.x64-19.23.0.0.0dbru.zip
+
+# Test building MrSID driver in standalone mode
+mkdir build_mrsid
+cd build_mrsid
+cmake -S ${GDAL_SOURCE_DIR:=..}/frmts/mrsid -DMRSID_ROOT=/usr/local -DCMAKE_PREFIX_PATH=/tmp/install-gdal
+cmake --build . "-j$(nproc)"
+test -f gdal_MrSID.so
 cd ..
-ldconfig
 
-ccache -s
+# Test building OCI driver in standalone mode
+mkdir build_oci
+cd build_oci
+cmake -S "${GDAL_SOURCE_DIR:=..}/ogr/ogrsf_frmts/oci" "-DOracle_ROOT=$PWD/../instantclient_19_23" -DCMAKE_PREFIX_PATH=/tmp/install-gdal
+cmake --build . "-j$(nproc)"
+test -f ogr_OCI.so
+cd ..
 
-echo "Saving ccache..."
-rm -f /build/ccache.tar.gz
-(cd $HOME && tar czf /build/ccache.tar.gz .ccache)
+# Test building GeoRaster driver in standalone mode
+mkdir build_georaster
+cd build_georaster
+cmake -S "${GDAL_SOURCE_DIR:=..}/frmts/georaster" -DCMAKE_PREFIX_PATH=/tmp/install-gdal "-DOracle_ROOT=$PWD/../instantclient_19_23"
+cmake --build . "-j$(nproc)"
+test -f gdal_GEOR.so
+cd ..
+
+# Test building Parquet driver in standalone mode
+mkdir build_parquet
+cd build_parquet
+cmake -S "${GDAL_SOURCE_DIR:=..}/ogr/ogrsf_frmts/parquet" -DCMAKE_PREFIX_PATH=/tmp/install-gdal
+cmake --build . "-j$(nproc)"
+test -f ogr_Parquet.so
+cd ..
+
+# Test building Arrow driver in standalone mode
+mkdir build_arrow
+cd build_arrow
+cmake -S "${GDAL_SOURCE_DIR:=..}/ogr/ogrsf_frmts/arrow" -DCMAKE_PREFIX_PATH=/tmp/install-gdal
+cmake --build . "-j$(nproc)"
+test -f ogr_Arrow.so
+cd ..
+
+# Test building OpenJPEG driver in standalone mode
+mkdir build_openjpeg
+cd build_openjpeg
+cmake -S "${GDAL_SOURCE_DIR:=..}/frmts/openjpeg" -DCMAKE_PREFIX_PATH=/tmp/install-gdal
+cmake --build . "-j$(nproc)"
+test -f gdal_JP2OpenJPEG.so
+cd ..
+
+# Test building TileDB driver in standalone mode
+mkdir build_tiledb
+cd build_tiledb
+cmake -S "${GDAL_SOURCE_DIR:=..}/frmts/tiledb" -DCMAKE_PREFIX_PATH=/tmp/install-gdal
+cmake --build . "-j$(nproc)"
+test -f gdal_TileDB.so
+cd ..
+
+# Test building ECW driver in standalone mode
+mkdir build_ecw
+cd build_ecw
+cmake -S "${GDAL_SOURCE_DIR:=..}/frmts/ecw" -DCMAKE_PREFIX_PATH=/tmp/install-gdal -DECW_ROOT=/opt/libecwj2-3.3
+cmake --build . "-j$(nproc)"
+test -f gdal_ECW_JP2ECW.so
+cd ..

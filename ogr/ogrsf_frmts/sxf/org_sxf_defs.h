@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  SXF Translator
  * Purpose:  Include file defining Records Structures for file reading and
@@ -12,23 +11,7 @@
  * Copyright (c) 2011, Ben Ahmed Daho Ali
  * Copyright (c) 2013, NextGIS
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *
  ******************************************************************************
  * Structure of the SXF file :
@@ -166,6 +149,7 @@ enum SXFTextEncoding /* Flag of text encoding (Note 6) */
     SXF_ENC_DOS = 0,
     SXF_ENC_WIN = 1,
     SXF_ENC_KOI_8 = 2
+
 #define SXF_ENC_LAST SXF_ENC_KOI_8
 };
 
@@ -176,6 +160,7 @@ enum SXFCoordinatesAccuracy /* Flag of coordinate storing accuracy (Note 7) */
     SXF_COORD_ACC_CM = 2,    // cantimeters
     SXF_COORD_ACC_MM = 3,    // millimeters
     SXF_COORD_ACC_DM = 4     // decimeters
+
 #define SXF_COORD_ACC_LAST SXF_COORD_ACC_DM
 };
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test KTX2 driver
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2022, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -34,6 +17,12 @@ import pytest
 from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("KTX2")
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 def test_ktx2_read_etc1s():
@@ -100,7 +89,7 @@ def test_ktx2_read_two_layers():
     ],
 )
 def test_ktx2_read_wrong_subds(filename):
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.Open(filename) is None
 
 
@@ -306,7 +295,7 @@ def test_ktx2_write_etc1s_clusters_options():
     gdal.Unlink(out_filename)
 
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             gdal.GetDriverByName("KTX2").CreateCopy(
                 out_filename,
@@ -364,7 +353,7 @@ def test_ktx2_write_etc1s_incompatible_or_missing_options():
     out_filename = "/vsimem/out.ktx2"
 
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             gdal.GetDriverByName("KTX2").CreateCopy(
                 out_filename, src_ds, options=["ETC1S_MAX_ENDPOINTS_CLUSTERS=16128"]
@@ -374,7 +363,7 @@ def test_ktx2_write_etc1s_incompatible_or_missing_options():
         assert gdal.GetLastErrorMsg() != ""
 
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             gdal.GetDriverByName("KTX2").CreateCopy(
                 out_filename, src_ds, options=["ETC1S_MAX_SELECTOR_CLUSTERS=16128"]
@@ -384,7 +373,7 @@ def test_ktx2_write_etc1s_incompatible_or_missing_options():
         assert gdal.GetLastErrorMsg() != ""
 
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             gdal.GetDriverByName("KTX2").CreateCopy(
                 out_filename,
@@ -397,7 +386,7 @@ def test_ktx2_write_etc1s_incompatible_or_missing_options():
     gdal.Unlink(out_filename)
 
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             gdal.GetDriverByName("KTX2").CreateCopy(
                 out_filename,
@@ -415,13 +404,13 @@ def test_ktx2_write_incompatible_source():
     out_filename = "/vsimem/out.ktx2"
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.GetDriverByName("KTX2").CreateCopy(out_filename, src_ds) is None
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 5)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.GetDriverByName("KTX2").CreateCopy(out_filename, src_ds) is None
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 1, gdal.GDT_UInt16)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.GetDriverByName("KTX2").CreateCopy(out_filename, src_ds) is None

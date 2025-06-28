@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test the image reprojection functions. Try to test as many
@@ -11,23 +10,7 @@
 ###############################################################################
 # Copyright (c) 2008, Andrey Kiselev <dron16@ak4719.spb.edu>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -36,13 +19,18 @@ import pytest
 
 from osgeo import gdal
 
+pytestmark = pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+
 ###############################################################################
 
 
 def test_cutline_1():
 
     tst = gdaltest.GDALTest("VRT", "cutline_noblend.vrt", 1, 11409)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -52,7 +40,7 @@ def test_cutline_1():
 def test_cutline_2():
 
     tst = gdaltest.GDALTest("VRT", "cutline_blend.vrt", 1, 21395)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -62,7 +50,7 @@ def test_cutline_2():
 def test_cutline_3():
 
     tst = gdaltest.GDALTest("VRT", "cutline_multipolygon.vrt", 1, 20827)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################

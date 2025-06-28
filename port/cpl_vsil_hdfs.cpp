@@ -8,23 +8,7 @@
  * Copyright (c) 2010-2015, Even Rouault <even dot rouault at spatialys.com>
  * Copyright (c) 2018, Azavea
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 //! @cond Doxygen_Suppress
@@ -93,11 +77,8 @@ class VSIHdfsHandle final : public VSIVirtualHandle
     bool bEOF = false;
 
   public:
-#if __cplusplus >= 201103L
     static constexpr const char *VSIHDFS = "/vsihdfs/";
-#else
-    static const char *VSIHDFS = "/vsihdfs/";
-#endif
+
     VSIHdfsHandle(hdfsFile poFile, hdfsFS poFilesystem, const char *pszFilename,
                   bool bReadOnly);
     ~VSIHdfsHandle() override;
@@ -107,7 +88,9 @@ class VSIHdfsHandle final : public VSIVirtualHandle
     size_t Read(void *pBuffer, size_t nSize, size_t nMemb) override;
     size_t Write(const void *pBuffer, size_t nSize, size_t nMemb) override;
     vsi_l_offset Length();
+    void ClearErr() override;
     int Eof() override;
+    int Error() override;
     int Flush() override;
     int Close() override;
 };
@@ -169,6 +152,8 @@ size_t VSIHdfsHandle::Read(void *pBuffer, size_t nSize, size_t nMemb)
 
         if (bytes > 0)
         {
+            if (static_cast<size_t>(bytes) < bytes_to_request)
+                bEOF = true;
             bytes_read += bytes;
         }
         if (bytes == 0)
@@ -209,6 +194,15 @@ int VSIHdfsHandle::Eof()
     return bEOF;
 }
 
+int VSIHdfsHandle::Error()
+{
+    return 0;
+}
+
+void VSIHdfsHandle::ClearErr()
+{
+}
+
 int VSIHdfsHandle::Flush()
 {
     return hdfsFlush(poFilesystem, poFile);
@@ -247,7 +241,7 @@ class VSIHdfsFilesystemHandler final : public VSIFilesystemHandler
     int Unlink(const char *pszFilename) override;
     int Mkdir(const char *pszDirname, long nMode) override;
     int Rmdir(const char *pszDirname) override;
-    char **ReadDir(const char *pszDirname) override;
+    char **ReadDirEx(const char *pszDirname, int nMaxFiles) override;
     int Rename(const char *oldpath, const char *newpath) override;
 };
 
@@ -311,13 +305,23 @@ VSIHdfsFilesystemHandler::Open(const char *pszFilename, const char *pszAccess,
     return nullptr;
 }
 
-int VSIHdfsFilesystemHandler::Stat(const char *pszeFilename,
+int VSIHdfsFilesystemHandler::Stat(const char *pszFilename,
                                    VSIStatBufL *pStatBuf, int)
 {
+    memset(pStatBuf, 0, sizeof(VSIStatBufL));
+
+    if (strncmp(pszFilename, VSIHdfsHandle::VSIHDFS,
+                strlen(VSIHdfsHandle::VSIHDFS)) != 0)
+    {
+        return -1;
+    }
+
     EnsureFilesystem();
 
+    // CPLDebug("VSIHDFS", "Stat(%s)", pszFilename);
+
     hdfsFileInfo *poInfo = hdfsGetPathInfo(
-        poFilesystem, pszeFilename + strlen(VSIHdfsHandle::VSIHDFS));
+        poFilesystem, pszFilename + strlen(VSIHdfsHandle::VSIHDFS));
 
     if (poInfo != nullptr)
     {
@@ -379,23 +383,61 @@ int VSIHdfsFilesystemHandler::Rmdir(const char *)
     return -1;
 }
 
-char **VSIHdfsFilesystemHandler::ReadDir(const char *pszDirname)
+char **VSIHdfsFilesystemHandler::ReadDirEx(const char *pszDirname,
+                                           int /* nMaxFiles */)
 {
+    if (strncmp(pszDirname, VSIHdfsHandle::VSIHDFS,
+                strlen(VSIHdfsHandle::VSIHDFS)) != 0)
+    {
+        return nullptr;
+    }
+
     EnsureFilesystem();
 
-    int mEntries = 0;
+    std::string osDirName(pszDirname);
+    if (osDirName.back() != '/')
+        osDirName += '/';
+
+    VSIStatBufL sStat;
+    if (Stat(osDirName.c_str(), &sStat, 0) != 0 || sStat.st_mode != S_IFDIR)
+        return nullptr;
+
+    int nEntries = 0;
+    std::string osDirNameWithoutPrefix(
+        osDirName.substr(strlen(VSIHdfsHandle::VSIHDFS)));
+
+    // file:///home/user/... is accepted, but if this is used, files returned
+    // by hdfsListDirectory() use file:/home/user/...
+    if (osDirNameWithoutPrefix.compare(0, strlen("file:///"), "file:///") == 0)
+    {
+        osDirNameWithoutPrefix =
+            "file:/" + osDirNameWithoutPrefix.substr(strlen("file:///"));
+    }
+
     hdfsFileInfo *paoInfo = hdfsListDirectory(
-        poFilesystem, pszDirname + strlen(VSIHdfsHandle::VSIHDFS), &mEntries);
-    char **retval = nullptr;
+        poFilesystem, osDirNameWithoutPrefix.c_str(), &nEntries);
 
     if (paoInfo != nullptr)
     {
         CPLStringList aosNames;
-        for (int i = 0; i < mEntries; ++i)
-            aosNames.AddString(paoInfo[i].mName);
-        retval = aosNames.StealList();
-        hdfsFreeFileInfo(paoInfo, mEntries);
-        return retval;
+        for (int i = 0; i < nEntries; ++i)
+        {
+            // CPLDebug("VSIHDFS", "[%d]: %s", i, paoInfo[i].mName);
+            if (STARTS_WITH(paoInfo[i].mName, osDirNameWithoutPrefix.c_str()))
+            {
+                aosNames.AddString(paoInfo[i].mName +
+                                   osDirNameWithoutPrefix.size());
+            }
+            else
+            {
+                CPLDebug("VSIHDFS",
+                         "hdfsListDirectory() returned %s, but this is not "
+                         "starting with %s",
+                         paoInfo[i].mName, osDirNameWithoutPrefix.c_str());
+            }
+        }
+        hdfsFreeFileInfo(paoInfo, nEntries);
+        return aosNames.StealList();
     }
     return nullptr;
 }

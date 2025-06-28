@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2020, SAP SE
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogrhanafeaturereader.h"
@@ -32,6 +16,7 @@
 #include "cpl_time.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <ctime>
 #include <limits>
@@ -82,7 +67,7 @@ template <typename T> T strToInt(const char *value)
 
 }  // anonymous namespace
 
-OGRHanaFeatureReader::OGRHanaFeatureReader(OGRFeature &feature)
+OGRHanaFeatureReader::OGRHanaFeatureReader(const OGRFeature &feature)
     : feature_(feature)
 {
 }
@@ -195,7 +180,7 @@ odbc::String OGRHanaFeatureReader::GetFieldAsString(int fieldIndex,
         defaultValue[strlen(defaultValue) - 1] == '\'')
     {
         CPLString str(defaultValue + 1);
-        str.resize(str.size() - 1);
+        str.pop_back();
         char *tmp = CPLUnescapeString(str, nullptr, CPLES_SQL);
         odbc::String ret = getString(tmp);
         CPLFree(tmp);
@@ -216,21 +201,21 @@ odbc::String OGRHanaFeatureReader::GetFieldAsNString(int fieldIndex,
         if (maxCharLength <= 0)
             return odbc::String(std::string(str));
 
-        int nSrcLen = static_cast<int>(std::strlen(str));
-        int nSrcLenUTF = CPLStrlenUTF8(str);
+        size_t nSrcLen = std::strlen(str);
+        const size_t nSrcLenUTF = CPLStrlenUTF8Ex(str);
 
-        if (nSrcLenUTF > maxCharLength)
+        if (nSrcLenUTF > static_cast<size_t>(maxCharLength))
         {
             CPLDebug("HANA",
                      "Truncated field value '%s' at index %d to %d characters.",
                      str, fieldIndex, maxCharLength);
 
-            int iUTF8Char = 0;
-            for (int iChar = 0; iChar < nSrcLen; ++iChar)
+            size_t iUTF8Char = 0;
+            for (size_t iChar = 0; iChar < nSrcLen; ++iChar)
             {
                 if ((str[iChar] & 0xc0) != 0x80)
                 {
-                    if (iUTF8Char == maxCharLength)
+                    if (iUTF8Char == static_cast<size_t>(maxCharLength))
                     {
                         nSrcLen = iChar;
                         break;
@@ -240,8 +225,7 @@ odbc::String OGRHanaFeatureReader::GetFieldAsNString(int fieldIndex,
             }
         }
 
-        return odbc::String(
-            std::string(str, static_cast<std::size_t>(nSrcLen)));
+        return odbc::String(std::string(str, nSrcLen));
     };
 
     if (IsFieldSet(fieldIndex))
@@ -255,7 +239,7 @@ odbc::String OGRHanaFeatureReader::GetFieldAsNString(int fieldIndex,
         defaultValue[strlen(defaultValue) - 1] == '\'')
     {
         CPLString str(defaultValue + 1);
-        str.resize(str.size() - 1);
+        str.pop_back();
         char *tmp = CPLUnescapeString(str, nullptr, CPLES_SQL);
         odbc::String ret = getString(tmp);
         CPLFree(tmp);
@@ -469,7 +453,7 @@ odbc::String OGRHanaFeatureReader::GetFieldAsRealArray(int fieldIndex) const
         feature_.GetFieldAsDoubleList(fieldIndex, &numElements);
     return CreateStringFromValues<double>(
         values, numElements,
-        [](double value)
+        [](double value) -> std::string
         {
             return std::isnan(value)
                        ? "NULL"
@@ -487,7 +471,7 @@ odbc::String OGRHanaFeatureReader::GetFieldAsDoubleArray(int fieldIndex) const
         feature_.GetFieldAsDoubleList(fieldIndex, &numElements);
     return CreateStringFromValues<double>(
         values, numElements,
-        [](double value)
+        [](double value) -> std::string
         { return std::isnan(value) ? "NULL" : std::to_string(value); });
 }
 

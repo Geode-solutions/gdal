@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  VDV Translator
  * Purpose:  Implements OGRVDVDriver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2015, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_VDV_H_INCLUDED
@@ -65,6 +48,7 @@ class OGRIDFDataSource final : public GDALDataset
 
 class OGRVDVLayer final : public OGRLayer
 {
+    GDALDataset *m_poDS = nullptr;
     VSILFILE *m_fpL;
     bool m_bOwnFP;
     bool m_bRecodeFromLatin1;
@@ -78,18 +62,25 @@ class OGRVDVLayer final : public OGRLayer
     int m_iLatitudeVDV452;
 
   public:
-    OGRVDVLayer(const CPLString &osTableName, VSILFILE *fpL, bool bOwnFP,
-                bool bRecodeFromLatin1, vsi_l_offset nStartOffset);
+    OGRVDVLayer(GDALDataset *poDS, const CPLString &osTableName, VSILFILE *fpL,
+                bool bOwnFP, bool bRecodeFromLatin1, vsi_l_offset nStartOffset);
     virtual ~OGRVDVLayer();
 
     virtual void ResetReading() override;
     virtual OGRFeature *GetNextFeature() override;
     virtual GIntBig GetFeatureCount(int bForce) override;
+
     virtual OGRFeatureDefn *GetLayerDefn() override
     {
         return m_poFeatureDefn;
     }
+
     virtual int TestCapability(const char *pszCap) override;
+
+    GDALDataset *GetDataset() override
+    {
+        return m_poDS;
+    }
 
     void SetFeatureCount(GIntBig nTotalFeatureCount)
     {
@@ -128,6 +119,7 @@ class OGRVDV452Tables
     OGRVDV452Tables()
     {
     }
+
     ~OGRVDV452Tables()
     {
         for (size_t i = 0; i < aosTables.size(); i++)
@@ -165,15 +157,19 @@ class OGRVDVWriterLayer final : public OGRLayer
 
     virtual void ResetReading() override;
     virtual OGRFeature *GetNextFeature() override;
+
     virtual OGRFeatureDefn *GetLayerDefn() override
     {
         return m_poFeatureDefn;
     }
+
     virtual int TestCapability(const char *pszCap) override;
-    virtual OGRErr CreateField(OGRFieldDefn *poFieldDefn,
+    virtual OGRErr CreateField(const OGRFieldDefn *poFieldDefn,
                                int bApproxOK = TRUE) override;
     virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
     virtual GIntBig GetFeatureCount(int bForce = TRUE) override;
+
+    GDALDataset *GetDataset() override;
 
     void StopAsCurrentLayer();
 };
@@ -206,10 +202,11 @@ class OGRVDVDataSource final : public GDALDataset
 
     virtual int GetLayerCount() override;
     virtual OGRLayer *GetLayer(int) override;
-    virtual OGRLayer *ICreateLayer(const char *pszLayerName,
-                                   OGRSpatialReference * /*poSpatialRef*/,
-                                   OGRwkbGeometryType /*eGType*/,
-                                   char **papszOptions) override;
+
+    OGRLayer *ICreateLayer(const char *pszName,
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
+
     virtual int TestCapability(const char *pszCap) override;
 
     void SetCurrentWriterLayer(OGRVDVWriterLayer *poLayer);

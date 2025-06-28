@@ -3,7 +3,6 @@ add_gdal_driver(
   TARGET ogr_SQLite
   BUILTIN
   SOURCES ogr_sqlite.h
-          ogrsqlite3ext.h
           ogrsqliteexecutesql.h
           ogrsqlitesqlfunctions.h
           ogrsqlitevirtualogr.h
@@ -21,12 +20,33 @@ add_gdal_driver(
           ogrsqliteutility.cpp
           ogrsqliteapiroutines.c
           rasterlite2_header.h
-          rasterlite2.cpp)
+          rasterlite2.cpp
+          sqlite_rtree_bulk_load/wrapper.cpp
+)
 gdal_standard_includes(ogr_SQLite)
+
+# I'm not completely sure why this is needed, but otherwise
+# autotest/cpp/gdal_unit_test crashes in test_ogr.GDALDatasetSetQueryLoggerFunc
+# This may be related to the sqlite3 extension stuff in ogrsqliteapiroutines.c
+# and ogrsqlitevirtualogr.cpp
+set_property(TARGET ogr_SQLite PROPERTY UNITY_BUILD OFF)
 
 target_compile_definitions(ogr_SQLite PRIVATE -DHAVE_SQLITE)
 gdal_target_link_libraries(ogr_SQLite PRIVATE SQLite::SQLite3)
 gdal_target_link_libraries(ogr_SQLite PRIVATE PROJ::proj)
+
+include(CMakePushCheckState)
+include(CheckIncludeFile)
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_INCLUDES "${SQLite3_INCLUDE_DIRS}")
+check_include_file("sqlite3ext.h" HAVE_SQLITE3EXT_H)
+cmake_pop_check_state()
+
+if (HAVE_SQLITE3EXT_H)
+  target_compile_definitions(ogr_SQLite PRIVATE -DHAVE_SQLITE3EXT_H)
+else()
+  message(WARNING "sqlite3ext.h is missing. SQLite VirtualOGR and SQLite SQL dialect will be missing")
+endif()
 
 if (SQLite3_HAS_LOAD_EXTENSION)
   option(OGR_SQLITE_ALLOW_LOAD_EXTENSIONS "Whether SQLite extension loading is enabled through the OGR_SQLITE_LOAD_EXTENSIONS configuration option" ON)
@@ -52,11 +72,9 @@ if (SQLite3_HAS_NON_DEPRECATED_AUTO_EXTENSION)
 endif ()
 
 if (GDAL_USE_SPATIALITE)
+  check_sqlite3_rtree("Spatialite")
   target_compile_definitions(ogr_SQLite PRIVATE -DHAVE_SPATIALITE)
   gdal_target_link_libraries(ogr_SQLite PRIVATE SPATIALITE::SPATIALITE)
-  if (SPATIALITE_VERSION_STRING VERSION_GREATER 4.1.2 OR SPATIALITE_VERSION_STRING VERSION_EQUAL 4.1.2)
-    target_compile_definitions(ogr_SQLite PRIVATE -DSPATIALITE_412_OR_LATER)
-  endif ()
 endif ()
 if (GDAL_USE_RASTERLITE2)
   target_compile_definitions(ogr_SQLite PRIVATE -DHAVE_RASTERLITE2)
@@ -77,8 +95,7 @@ if (GDAL_USE_SPATIALITE)
 endif ()
 
 # Test sqlite3 extension
-find_path(SQLITE3EXT_INCLUDE_DIR NAMES sqlite3ext.h)
-if (SQLITE3EXT_INCLUDE_DIR)
+if (HAVE_SQLITE3EXT_H AND BUILD_SHARED_LIBS)
     add_library(my_test_sqlite3_ext MODULE my_test_sqlite3_ext.c)
     gdal_standard_includes(my_test_sqlite3_ext)
     get_target_property(PLUGIN_OUTPUT_DIR ${GDAL_LIB_TARGET_NAME} PLUGIN_OUTPUT_DIR)

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test Minixml services from Python.
@@ -10,27 +9,11 @@
 # Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
-import gdaltest
+import pytest
 
 from osgeo import gdal
 
@@ -163,7 +146,7 @@ def test_minixml_5():
     )
 
     for xml_str, expect in test_pairs:
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             tree = gdal.ParseXMLString(xml_str)
 
         found = gdal.GetLastErrorMsg()
@@ -198,17 +181,8 @@ def test_minixml_6():
     )
 
     for xml_str, expect in test_pairs:
-        with gdaltest.error_handler():
-            tree = gdal.ParseXMLString(xml_str)
-
-        found = gdal.GetLastErrorMsg()
-        assert expect in found, (
-            'Did not find expected error message: "%s"  '
-            'Found: "%s"  '
-            'For test string: "%s""' % (expect, found, xml_str)
-        )
-
-        assert tree is None, 'Tree is not None: "%s"' % tree
+        with pytest.raises(Exception):
+            gdal.ParseXMLString(xml_str)
 
 
 ###############################################################################
@@ -244,10 +218,8 @@ def test_minixml_8():
     xml_str += "</a>" * 10001
 
     gdal.ErrorReset()
-    with gdaltest.error_handler():
-        tree = gdal.ParseXMLString(xml_str)
-    assert tree is None, "expected None tree"
-    assert gdal.GetLastErrorMsg() != "", "expected error message"
+    with pytest.raises(Exception):
+        gdal.ParseXMLString(xml_str)
 
 
 ###############################################################################

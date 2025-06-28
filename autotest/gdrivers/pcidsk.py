@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read/write functionality for PCIDSK driver.
@@ -11,23 +10,7 @@
 # Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -35,9 +18,16 @@ import os
 import gdaltest
 import pytest
 
-from osgeo import gdal, ogr
+from osgeo import gdal, ogr, osr
 
 pytestmark = pytest.mark.require_driver("PCIDSK")
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 ###############################################################################
 # Read test of floating point reference data.
@@ -46,18 +36,19 @@ pytestmark = pytest.mark.require_driver("PCIDSK")
 def test_pcidsk_1():
 
     tst = gdaltest.GDALTest("PCIDSK", "pcidsk/utm.pix", 1, 39576)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
 # Test lossless copying (16, multiband) via Create().
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_2():
 
     tst = gdaltest.GDALTest("PCIDSK", "png/rgba16.png", 2, 2042)
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
 ###############################################################################
@@ -68,7 +59,7 @@ def test_pcidsk_3():
 
     tst = gdaltest.GDALTest("PCIDSK", "pcidsk/utm.pix", 1, 39576)
 
-    return tst.testCreateCopy(check_gt=1, check_srs=1)
+    tst.testCreateCopy(check_gt=1, check_srs=1)
 
 
 ###############################################################################
@@ -90,53 +81,48 @@ def test_pcidsk_4():
 # Test writing metadata to a newly created file.
 
 
-def test_pcidsk_5():
+def test_pcidsk_5(tmp_path):
+
+    testfile = str(tmp_path / "pcidsk_5.pix")
 
     # Create testing file.
 
-    gdaltest.pcidsk_ds = gdal.GetDriverByName("PCIDSK").Create(
-        "tmp/pcidsk_5.pix", 400, 600, 1, gdal.GDT_Byte
+    pcidsk_ds = gdal.GetDriverByName("PCIDSK").Create(
+        testfile, 400, 600, 1, gdal.GDT_Byte
     )
 
     # Write out some metadata to the default and non-default domain and
     # using the set and single methods.
 
-    gdaltest.pcidsk_ds.SetMetadata(["ABC=DEF", "GHI=JKL"])
-    gdaltest.pcidsk_ds.SetMetadataItem("XXX", "YYY")
-    gdaltest.pcidsk_ds.SetMetadataItem("XYZ", "123", "AltDomain")
+    pcidsk_ds.SetMetadata(["ABC=DEF", "GHI=JKL"])
+    pcidsk_ds.SetMetadataItem("XXX", "YYY")
+    pcidsk_ds.SetMetadataItem("XYZ", "123", "AltDomain")
 
     # Close and reopen.
-    gdaltest.pcidsk_ds = None
-    gdaltest.pcidsk_ds = gdal.Open("tmp/pcidsk_5.pix", gdal.GA_Update)
+    pcidsk_ds = None
+    pcidsk_ds = gdal.Open(testfile, gdal.GA_Update)
 
     # Check metadata.
-    mddef = gdaltest.pcidsk_ds.GetMetadata()
-    if mddef["GHI"] != "JKL" or mddef["XXX"] != "YYY":
-        print(mddef)
-        gdaltest.post_reason("file default domain metadata broken. ")
+    mddef = pcidsk_ds.GetMetadata()
+    assert mddef["GHI"] == "JKL", "file default domain metadata broken. "
+    assert mddef["XXX"] == "YYY", "file default domain metadata broken. "
 
-    assert gdaltest.pcidsk_ds.GetMetadataItem("GHI") == "JKL"
-    assert gdaltest.pcidsk_ds.GetMetadataItem("GHI") == "JKL"
-    gdaltest.pcidsk_ds.SetMetadataItem("GHI", "JKL2")
-    assert gdaltest.pcidsk_ds.GetMetadataItem("GHI") == "JKL2"
-    assert gdaltest.pcidsk_ds.GetMetadataItem("I_DONT_EXIST") is None
-    assert gdaltest.pcidsk_ds.GetMetadataItem("I_DONT_EXIST") is None
+    assert pcidsk_ds.GetMetadataItem("GHI") == "JKL"
+    assert pcidsk_ds.GetMetadataItem("GHI") == "JKL"
+    pcidsk_ds.SetMetadataItem("GHI", "JKL2")
+    assert pcidsk_ds.GetMetadataItem("GHI") == "JKL2"
+    assert pcidsk_ds.GetMetadataItem("I_DONT_EXIST") is None
+    assert pcidsk_ds.GetMetadataItem("I_DONT_EXIST") is None
 
-    mdalt = gdaltest.pcidsk_ds.GetMetadata("AltDomain")
-    if mdalt["XYZ"] != "123":
-        print(mdalt)
-        gdaltest.post_reason("file alt domain metadata broken. ")
+    mdalt = pcidsk_ds.GetMetadata("AltDomain")
+    assert mdalt["XYZ"] == "123", "file alt domain metadata broken."
 
-
-###############################################################################
-# Test writing metadata to a band.
-
-
-def test_pcidsk_6():
+    ###############################################################################
+    # Test writing metadata to a band.
 
     # Write out some metadata to the default and non-default domain and
     # using the set and single methods.
-    band = gdaltest.pcidsk_ds.GetRasterBand(1)
+    band = pcidsk_ds.GetRasterBand(1)
 
     band.SetMetadata(["ABC=DEF", "GHI=JKL"])
     band.SetMetadataItem("XXX", "YYY")
@@ -144,15 +130,14 @@ def test_pcidsk_6():
     band = None
 
     # Close and reopen.
-    gdaltest.pcidsk_ds = None
-    gdaltest.pcidsk_ds = gdal.Open("tmp/pcidsk_5.pix", gdal.GA_Update)
+    pcidsk_ds = None
+    pcidsk_ds = gdal.Open(testfile, gdal.GA_Update)
 
     # Check metadata.
-    band = gdaltest.pcidsk_ds.GetRasterBand(1)
+    band = pcidsk_ds.GetRasterBand(1)
     mddef = band.GetMetadata()
-    if mddef["GHI"] != "JKL" or mddef["XXX"] != "YYY":
-        print(mddef)
-        gdaltest.post_reason("channel default domain metadata broken. ")
+    assert mddef["GHI"] == "JKL", "channel default domain metadata broken. "
+    assert mddef["XXX"] == "YYY", "channel default domain metadata broken. "
 
     assert band.GetMetadataItem("GHI") == "JKL"
     assert band.GetMetadataItem("GHI") == "JKL"
@@ -162,20 +147,14 @@ def test_pcidsk_6():
     assert band.GetMetadataItem("I_DONT_EXIST") is None
 
     mdalt = band.GetMetadata("AltDomain")
-    if mdalt["XYZ"] != "123":
-        print(mdalt)
-        gdaltest.post_reason("channel alt domain metadata broken. ")
+    assert mdalt["XYZ"] == "123", "channel alt domain metadata broken."
 
-
-###############################################################################
-# Test creating a color table and reading it back.
-
-
-def test_pcidsk_7():
+    ###############################################################################
+    # Test creating a color table and reading it back.
 
     # Write out some metadata to the default and non-default domain and
     # using the set and single methods.
-    band = gdaltest.pcidsk_ds.GetRasterBand(1)
+    band = pcidsk_ds.GetRasterBand(1)
 
     ct = band.GetColorTable()
 
@@ -200,10 +179,10 @@ def test_pcidsk_7():
     band = None
 
     # Close and reopen.
-    gdaltest.pcidsk_ds = None
-    gdaltest.pcidsk_ds = gdal.Open("tmp/pcidsk_5.pix", gdal.GA_Update)
+    pcidsk_ds = None
+    pcidsk_ds = gdal.Open(testfile, gdal.GA_Update)
 
-    band = gdaltest.pcidsk_ds.GetRasterBand(1)
+    band = pcidsk_ds.GetRasterBand(1)
 
     ct = band.GetColorTable()
 
@@ -227,13 +206,14 @@ def test_pcidsk_7():
 # Test FILE interleaving.
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_8():
 
     tst = gdaltest.GDALTest(
         "PCIDSK", "png/rgba16.png", 2, 2042, options=["INTERLEAVING=FILE"]
     )
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
 ###############################################################################
@@ -251,9 +231,8 @@ def pcidsk_9():
     ds.CreateLayer("foo")
     ds = None
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("/vsimem/pcidsk_9.pix")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("/vsimem/pcidsk_9.pix")
     assert ds is None
     ds = None
 
@@ -290,6 +269,7 @@ def test_pcidsk_10():
 # Test INTERLEAVING=TILED interleaving.
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_11():
 
     tst = gdaltest.GDALTest(
@@ -300,9 +280,10 @@ def test_pcidsk_11():
         options=["INTERLEAVING=TILED", "TILESIZE=32"],
     )
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_11_v1():
 
     tst = gdaltest.GDALTest(
@@ -313,9 +294,10 @@ def test_pcidsk_11_v1():
         options=["INTERLEAVING=TILED", "TILESIZE=32", "TILEVERSION=1"],
     )
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_11_v2():
 
     tst = gdaltest.GDALTest(
@@ -326,13 +308,14 @@ def test_pcidsk_11_v2():
         options=["INTERLEAVING=TILED", "TILESIZE=32", "TILEVERSION=2"],
     )
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
 ###############################################################################
 # Test INTERLEAVING=TILED interleaving and COMPRESSION=RLE
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_12():
 
     tst = gdaltest.GDALTest(
@@ -343,9 +326,10 @@ def test_pcidsk_12():
         options=["INTERLEAVING=TILED", "TILESIZE=32", "COMPRESSION=RLE"],
     )
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_12_v1():
 
     tst = gdaltest.GDALTest(
@@ -361,9 +345,10 @@ def test_pcidsk_12_v1():
         ],
     )
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_12_v2():
 
     tst = gdaltest.GDALTest(
@@ -379,7 +364,7 @@ def test_pcidsk_12_v2():
         ],
     )
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
 ###############################################################################
@@ -524,6 +509,8 @@ def test_pcidsk_external_ovr_rrd():
     with gdaltest.config_option("USE_RRD", "YES"):
         ds.BuildOverviews("NEAR", [2])
     ds = None
+    if gdal.GetLastErrorMsg() == "This build does not support creating .aux overviews":
+        pytest.skip(gdal.GetLastErrorMsg())
     assert gdal.VSIStatL("/vsimem/test.aux") is not None
     ds = gdal.Open("/vsimem/test.pix")
     assert ds.GetRasterBand(1).GetOverviewCount() == 1
@@ -645,10 +632,7 @@ def test_pcidsk_online_1():
         "Glaciers",
     ]
 
-    if names != exp_names:
-        print(names)
-        gdaltest.post_reason("did not get expected category names.")
-        return "false"
+    assert names == exp_names, "did not get expected category names."
 
     band = ds.GetRasterBand(20)
     assert (
@@ -671,7 +655,7 @@ def test_pcidsk_tile_v1():
 
     tst = gdaltest.GDALTest("PCIDSK", "pcidsk/tile_v1.1.pix", 1, 49526)
 
-    return tst.testCreateCopy(check_gt=1, check_srs=1)
+    tst.testCreateCopy(check_gt=1, check_srs=1)
 
 
 def test_pcidsk_tile_v1_overview():
@@ -738,15 +722,24 @@ def test_pcidsk_online_rpc():
 )
 def test_pcidsk_invalid_files(filename):
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.VSIStatL(filename) is not None
         assert gdal.Open(filename) is None
 
 
 ###############################################################################
-# Cleanup.
+# Test Web Mercator support
 
 
-def test_pcidsk_cleanup():
-    gdaltest.pcidsk_ds = None
-    gdaltest.clean_tmp()
+def test_pcidsk_web_mercator(tmp_path):
+
+    gdal.Translate(
+        f"{tmp_path}/test_pcidsk_web_mercator.pix",
+        "data/byte.tif",
+        options="-of PCIDSK -a_srs EPSG:3857",
+    )
+    gdal.Unlink(f"{tmp_path}/test_pcidsk_web_mercator.pix.aux.xml")
+    ds = gdal.Open(f"{tmp_path}/test_pcidsk_web_mercator.pix")
+    expected_srs = osr.SpatialReference()
+    expected_srs.ImportFromEPSG(3857)
+    assert ds.GetSpatialRef().IsSame(expected_srs)

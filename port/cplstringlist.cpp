@@ -8,23 +8,7 @@
  * Copyright (c) 2011, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -89,6 +73,55 @@ CPLStringList::CPLStringList(CSLConstList papszListIn) : CPLStringList()
 /*                           CPLStringList()                            */
 /************************************************************************/
 
+/**
+ * CPLStringList constructor.
+ *
+ * The input list is copied.
+ *
+ * @param aosList input list.
+ *
+ * @since GDAL 3.9
+ */
+CPLStringList::CPLStringList(const std::vector<std::string> &aosList)
+{
+    if (!aosList.empty())
+    {
+        bOwnList = true;
+        papszList = static_cast<char **>(
+            VSI_CALLOC_VERBOSE(aosList.size() + 1, sizeof(char *)));
+        nCount = static_cast<int>(aosList.size());
+        for (int i = 0; i < nCount; ++i)
+        {
+            papszList[i] = VSI_STRDUP_VERBOSE(aosList[i].c_str());
+        }
+    }
+}
+
+/************************************************************************/
+/*                           CPLStringList()                            */
+/************************************************************************/
+
+/**
+ * CPLStringList constructor.
+ *
+ * The input list is copied.
+ *
+ * @param oInitList input list.
+ *
+ * @since GDAL 3.9
+ */
+CPLStringList::CPLStringList(std::initializer_list<const char *> oInitList)
+{
+    for (const char *pszStr : oInitList)
+    {
+        AddString(pszStr);
+    }
+}
+
+/************************************************************************/
+/*                           CPLStringList()                            */
+/************************************************************************/
+
 //! Copy constructor
 CPLStringList::CPLStringList(const CPLStringList &oOther) : CPLStringList()
 
@@ -105,6 +138,27 @@ CPLStringList::CPLStringList(CPLStringList &&oOther) : CPLStringList()
 
 {
     operator=(std::move(oOther));
+}
+
+/************************************************************************/
+/*                           BoundToConstList()                         */
+/************************************************************************/
+
+/**
+ * Return a CPLStringList that wraps the passed list.
+ *
+ * The input list is *NOT* copied and must be kept alive while the
+ * return CPLStringList is used.
+ *
+ * @param papszListIn a NULL terminated list of strings to wrap into the CPLStringList
+ * @since GDAL 3.9
+ */
+
+/* static */
+const CPLStringList CPLStringList::BoundToConstList(CSLConstList papszListIn)
+{
+    return CPLStringList(const_cast<char **>(papszListIn),
+                         /* bTakeOwnership= */ false);
 }
 
 /************************************************************************/
@@ -398,6 +452,23 @@ CPLStringList &CPLStringList::AddString(const char *pszNewString)
 }
 
 /************************************************************************/
+/*                             AddString()                              */
+/************************************************************************/
+/**
+ * Add a string to the list.
+ *
+ * A copy of the passed in string is made and inserted in the list.
+ *
+ * @param newString the string to add to the list.
+ * @return a reference to the CPLStringList on which it was invoked.
+ */
+
+CPLStringList &CPLStringList::AddString(const std::string &newString)
+{
+    return AddString(newString.c_str());
+}
+
+/************************************************************************/
 /*                            AddNameValue()                            */
 /************************************************************************/
 
@@ -583,6 +654,7 @@ char **CPLStringList::StealList()
     return papszRetList;
 }
 
+/* Case insensitive comparison function */
 static int CPLCompareKeyValueString(const char *pszKVa, const char *pszKVb)
 {
     const char *pszItera = pszKVa;
@@ -616,19 +688,6 @@ static int CPLCompareKeyValueString(const char *pszKVa, const char *pszKVb)
 }
 
 /************************************************************************/
-/*                            llCompareStr()                            */
-/*                                                                      */
-/*      Note this is case insensitive!  This is because we normally     */
-/*      treat key value keywords as case insensitive.                   */
-/************************************************************************/
-static int llCompareStr(const void *a, const void *b)
-{
-    return CPLCompareKeyValueString(
-        *static_cast<const char **>(const_cast<void *>(a)),
-        *static_cast<const char **>(const_cast<void *>(b)));
-}
-
-/************************************************************************/
 /*                                Sort()                                */
 /************************************************************************/
 
@@ -651,8 +710,12 @@ CPLStringList &CPLStringList::Sort()
     if (!MakeOurOwnCopy())
         return *this;
 
-    if (nCount)
-        qsort(papszList, nCount, sizeof(char *), llCompareStr);
+    if (nCount > 1)
+    {
+        std::sort(papszList, papszList + nCount,
+                  [](const char *a, const char *b)
+                  { return CPLCompareKeyValueString(a, b) < 0; });
+    }
     bIsSorted = true;
 
     return *this;
@@ -919,3 +982,85 @@ int CPLStringList::FindSortedInsertionPoint(const char *pszLine)
 
     return iEnd;
 }
+
+namespace cpl
+{
+
+/************************************************************************/
+/*             CSLIterator::operator==(const CSLIterator &other)        */
+/************************************************************************/
+
+/*! @cond Doxygen_Suppress */
+bool CSLIterator::operator==(const CSLIterator &other) const
+{
+    if (!m_bAtEnd && other.m_bAtEnd)
+    {
+        return m_papszList == nullptr || *m_papszList == nullptr;
+    }
+    if (!m_bAtEnd && !other.m_bAtEnd)
+    {
+        return m_papszList == other.m_papszList;
+    }
+    if (m_bAtEnd && other.m_bAtEnd)
+    {
+        return true;
+    }
+    return false;
+}
+
+/*! @endcond */
+
+/************************************************************************/
+/*                      CSLNameValueIterator::operator*()               */
+/************************************************************************/
+
+/*! @cond Doxygen_Suppress */
+CSLNameValueIterator::value_type CSLNameValueIterator::operator*()
+{
+    if (m_papszList)
+    {
+        while (*m_papszList)
+        {
+            char *pszKey = nullptr;
+            const char *pszValue = CPLParseNameValue(*m_papszList, &pszKey);
+            if (pszKey)
+            {
+                m_osKey = pszKey;
+                CPLFree(pszKey);
+                return {m_osKey.c_str(), pszValue};
+            }
+            else if (m_bReturnNullKeyIfNotNameValue)
+            {
+                return {nullptr, *m_papszList};
+            }
+            // Skip entries that are not name=value pairs.
+            ++m_papszList;
+        }
+    }
+    // Should not happen
+    CPLAssert(false);
+    return {"", ""};
+}
+
+/*! @endcond */
+
+/************************************************************************/
+/*                   CSLNameValueIteratorWrapper::end()                 */
+/************************************************************************/
+
+/*! @cond Doxygen_Suppress */
+CSLNameValueIterator CSLNameValueIteratorWrapper::end() const
+{
+    int nCount = CSLCount(m_papszList);
+    if (!m_bReturnNullKeyIfNotNameValue)
+    {
+        while (nCount > 0 && strchr(m_papszList[nCount - 1], '=') == nullptr)
+            --nCount;
+    }
+    return CSLNameValueIterator{m_papszList + nCount,
+                                m_bReturnNullKeyIfNotNameValue};
+}
+
+/*! @endcond */
+
+}  // namespace cpl

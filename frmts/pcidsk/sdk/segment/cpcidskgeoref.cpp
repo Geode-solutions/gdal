@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "pcidsk_exception.h"
@@ -41,6 +25,8 @@ static double PAK2PCI( double deg, int function );
 #ifndef ABS
 #  define ABS(x)        ((x<0) ? (-1*(x)) : x)
 #endif
+
+PCIDSKGeoref::~PCIDSKGeoref() = default;
 
 /************************************************************************/
 /*                           CPCIDSKGeoref()                            */
@@ -433,7 +419,7 @@ std::string CPCIDSKGeoref::ReformatGeosys( std::string const& geosysIn )
     while( cp < local_buf + 16 && cp[1] != '\0' )
         cp++;
 
-    while( cp > local_buf && isspace(*cp) )
+    while( cp > local_buf && isspace(static_cast<unsigned char>(*cp)) )
         cp--;
 
     last = '\0';
@@ -452,7 +438,7 @@ std::string CPCIDSKGeoref::ReformatGeosys( std::string const& geosysIn )
         i = atoi( cp+1 );
         if(    i > -100 && i < 1000
                && (cp == local_buf
-                   || ( cp >  local_buf && isspace( *(cp-1) ) )
+                   || ( cp >  local_buf && isspace( static_cast<unsigned char>(*(cp-1)) ) )
                    )
                )
         {
@@ -485,13 +471,13 @@ std::string CPCIDSKGeoref::ReformatGeosys( std::string const& geosysIn )
     else if( STARTS_WITH_CI(local_buf, "UTM") )
     {
         /* Attempt to find a zone and ellipsoid */
-        for( ptr=local_buf+3; isspace(*ptr); ptr++ ) {}
+        for( ptr=local_buf+3; isspace(static_cast<unsigned char>(*ptr)); ptr++ ) {}
         if( isdigit( (unsigned char)*ptr ) || *ptr == '-' )
         {
             zone = atoi(ptr);
             for( ; isdigit((unsigned char)*ptr) || *ptr == '-'; ptr++ ) {}
-            for( ; isspace(*ptr); ptr++ ) {}
-            if( isalpha(*ptr)
+            for( ; isspace(static_cast<unsigned char>(*ptr)); ptr++ ) {}
+            if( isalpha(static_cast<unsigned char>(*ptr))
                 && !isdigit((unsigned char)*(ptr+1))
                 && ptr[1] != '-' )
                 zone_code = *(ptr++);
@@ -545,7 +531,7 @@ std::string CPCIDSKGeoref::ReformatGeosys( std::string const& geosysIn )
     {
         int nSPZone = 0;
 
-        for( ptr=local_buf+4; isspace(*ptr); ptr++ ) {}
+        for( ptr=local_buf+4; isspace(static_cast<unsigned char>(*ptr)); ptr++ ) {}
         nSPZone = atoi(ptr);
 
         if      ( STARTS_WITH_CI(local_buf, "SPCS ") )
@@ -708,11 +694,11 @@ std::string CPCIDSKGeoref::ReformatGeosys( std::string const& geosysIn )
     else if( STARTS_WITH_CI(local_buf, "UPS ") )
     {
         /* Attempt to find UPS zone */
-        for( ptr=local_buf+3; isspace(*ptr); ptr++ ) {}
+        for( ptr=local_buf+3; isspace(static_cast<unsigned char>(*ptr)); ptr++ ) {}
         if( *ptr == 'A' || *ptr == 'B' || *ptr == 'Y' || *ptr == 'Z' )
             ups_zone = *ptr;
         else if( *ptr == 'a' || *ptr == 'b' || *ptr == 'y' || *ptr == 'z' )
-            ups_zone = toupper( *ptr );
+            ups_zone = toupper( static_cast<unsigned char>(*ptr) );
         else
             ups_zone = ' ';
 

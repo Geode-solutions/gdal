@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  VSI Virtual File System
  * Purpose:  Implement an error system for reporting file system errors.
@@ -10,23 +9,7 @@
  ******************************************************************************
  * Copyright (c) 2016, Rob Emanuele <rdemanuele at gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_VSI_ERROR_H_INCLUDED
@@ -47,12 +30,48 @@ typedef int VSIErrorNum;
 #define VSIE_FileError 1
 #define VSIE_HttpError 2
 
-#define VSIE_AWSError 5
-#define VSIE_AWSAccessDenied 6
-#define VSIE_AWSBucketNotFound 7
-#define VSIE_AWSObjectNotFound 8
-#define VSIE_AWSInvalidCredentials 9
-#define VSIE_AWSSignatureDoesNotMatch 10
+#define VSIE_ObjectStorageGenericError 5
+#define VSIE_AccessDenied 6
+#define VSIE_BucketNotFound 7
+#define VSIE_ObjectNotFound 8
+#define VSIE_InvalidCredentials 9
+#define VSIE_SignatureDoesNotMatch 10
+
+/** Deprecated alias for VSIE_ObjectStorageGenericError
+ *
+ * @deprecated since 3.12
+ */
+#define VSIE_AWSError VSIE_ObjectStorageGenericError
+
+/** Deprecated alias for VSIE_AccessDenied
+ *
+ * @deprecated since 3.12
+ */
+#define VSIE_AWSAccessDenied VSIE_AccessDenied
+
+/** Deprecated alias for VSIE_BucketNotFound
+ *
+ * @deprecated since 3.12
+ */
+#define VSIE_AWSBucketNotFound VSIE_BucketNotFound
+
+/** Deprecated alias for VSIE_ObjectNotFound
+ *
+ * @deprecated since 3.12
+ */
+#define VSIE_AWSObjectNotFound VSIE_ObjectNotFound
+
+/** Deprecated alias for VSIE_InvalidCredentials
+ *
+ * @deprecated since 3.12
+ */
+#define VSIE_AWSInvalidCredentials VSIE_InvalidCredentials
+
+/** Deprecated alias for VSIE_SignatureDoesNotMatch
+ *
+ * @deprecated since 3.12
+ */
+#define VSIE_AWSSignatureDoesNotMatch VSIE_SignatureDoesNotMatch
 
 void CPL_DLL VSIError(VSIErrorNum err_no, CPL_FORMAT_STRING(const char *fmt),
                       ...) CPL_PRINT_FUNC_FORMAT(2, 3);
@@ -61,8 +80,11 @@ void CPL_DLL CPL_STDCALL VSIErrorReset(void);
 VSIErrorNum CPL_DLL CPL_STDCALL VSIGetLastErrorNo(void);
 const char CPL_DLL *CPL_STDCALL VSIGetLastErrorMsg(void);
 
+const char *VSIErrorNumToString(int eErr);
 int CPL_DLL CPL_STDCALL VSIToCPLError(CPLErr eErrClass,
                                       CPLErrorNum eDefaultErrorNo);
+void CPL_DLL VSIToCPLErrorWithMsg(CPLErr eErrClass, CPLErrorNum eDefaultErrorNo,
+                                  const char *pszMsg);
 
 CPL_C_END
 

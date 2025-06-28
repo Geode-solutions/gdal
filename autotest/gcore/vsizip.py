@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test /vsizip/vsimem/
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2010-2014, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import random
@@ -40,6 +23,7 @@ from osgeo import gdal
 # Test writing a ZIP with multiple files and directories
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_1():
 
     # We can keep the handle open during all the ZIP writing
@@ -62,9 +46,8 @@ def test_vsizip_1():
 
     # Test that we cannot read a zip file being written
     gdal.ErrorReset()
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f = gdal.VSIFOpenL("/vsizip/vsimem/test.zip/subdir3/abcd", "rb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f = gdal.VSIFOpenL("/vsizip/vsimem/test.zip/subdir3/abcd", "rb")
     assert (
         gdal.GetLastErrorMsg() == "Cannot read a zip file being written"
     ), "expected error"
@@ -77,9 +60,8 @@ def test_vsizip_1():
 
     # Try creating a 3d file
     gdal.ErrorReset()
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f4 = gdal.VSIFOpenL("/vsizip/vsimem/test.zip/that_wont_work", "wb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f4 = gdal.VSIFOpenL("/vsizip/vsimem/test.zip/that_wont_work", "wb")
     assert (
         gdal.GetLastErrorMsg()
         == "Cannot create that_wont_work while another file is being written in the .zip"
@@ -93,7 +75,7 @@ def test_vsizip_1():
 
     # ERROR 6: Support only 1 file in archive file /vsimem/test.zip when no explicit in-archive filename is specified
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = gdal.VSIFOpenL("/vsizip/vsimem/test.zip", "rb")
     if f is not None:
         gdal.VSIFCloseL(f)
@@ -173,6 +155,7 @@ def test_vsizip_1():
 # Test writing 2 files in the ZIP by closing it completely between the 2
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_2():
 
     zip_name = "/vsimem/test2.zip"
@@ -191,9 +174,8 @@ def test_vsizip_2():
     gdal.VSIFWriteL("67890", 1, 5, fmain)
 
     gdal.ErrorReset()
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    content = gdal.ReadDir("/vsizip/" + zip_name)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        content = gdal.ReadDir("/vsizip/" + zip_name)
     assert (
         gdal.GetLastErrorMsg() == "Cannot read a zip file being written"
     ), "expected error"
@@ -270,6 +252,9 @@ def test_vsizip_4():
         "uint16.tif",
     ], "bad content"
 
+    # Test with trailing slash too
+    assert gdal.ReadDirRecursive("/vsizip/data/testzip.zip/") == res
+
 
 ###############################################################################
 # Test ReadRecursive on deep zip
@@ -300,6 +285,7 @@ def test_vsizip_5():
 # Test writing 2 files with same name in a ZIP (#4785)
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_6():
 
     # Maintain ZIP file opened
@@ -310,9 +296,8 @@ def test_vsizip_6():
     gdal.VSIFCloseL(f)
     f = None
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f = gdal.VSIFOpenL("/vsizip/vsimem/test6.zip/foo.bar", "wb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f = gdal.VSIFOpenL("/vsizip/vsimem/test6.zip/foo.bar", "wb")
     if f is not None:
         gdal.VSIFCloseL(f)
         pytest.fail()
@@ -328,9 +313,8 @@ def test_vsizip_6():
     gdal.VSIFCloseL(f)
     f = None
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f = gdal.VSIFOpenL("/vsizip/vsimem/test6.zip/foo.bar", "wb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f = gdal.VSIFOpenL("/vsizip/vsimem/test6.zip/foo.bar", "wb")
     if f is not None:
         gdal.VSIFCloseL(f)
         pytest.fail()
@@ -414,9 +398,8 @@ def test_vsizip_9():
 
 def test_vsizip_10():
 
-    gdal.SetConfigOption("CPL_ZIP_ENCODING", "CP866")
-    content = gdal.ReadDir("/vsizip/data/cp866.zip")
-    gdal.SetConfigOption("CPL_ZIP_ENCODING", None)
+    with gdal.config_option("CPL_ZIP_ENCODING", "CP866"):
+        content = gdal.ReadDir("/vsizip/data/cp866.zip")
     ok = 0
     try:
         local_vars = {"content": content, "ok": ok}
@@ -553,7 +536,7 @@ def test_vsizip_14():
     except Exception:
         cp866_filename = "\u0430\u0431\u0432\u0433\u0434\u0435"
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = gdal.VSIFOpenL("/vsizip//vsimem/vsizip_14.zip/" + cp866_filename, "wb")
     if f is None:
         gdal.VSIFCloseL(fmain)
@@ -605,9 +588,10 @@ def test_vsizip_multi_thread():
 # Test multithreaded compression, with I/O error
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_multi_thread_error():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         with gdaltest.config_options(
             {"GDAL_NUM_THREADS": "ALL_CPUS", "CPL_VSIL_DEFLATE_CHUNK_SIZE": "16K"}
         ):
@@ -685,6 +669,7 @@ def test_vsizip_create_zip64():
 
 
 @pytest.mark.slow()
+@gdaltest.disable_exceptions()
 def test_vsizip_create_zip64_stream_larger_than_4G():
 
     zip_name = "tmp/vsizip_create_zip64_stream_larger_than_4G.zip"
@@ -735,10 +720,16 @@ def test_vsizip_deflate64():
     assert f
     try:
         data = gdal.VSIFReadL(1, size, f)
+        assert gdal.VSIFEofL(f) == 0
+        assert gdal.VSIFErrorL(f) == 0
         assert len(data) == size
         assert len(gdal.VSIFReadL(1, 1, f)) == 0
+        assert gdal.VSIFEofL(f) == 1
+        assert gdal.VSIFErrorL(f) == 0
         assert gdal.VSIFSeekL(f, 0, 0) == 0
         data2 = gdal.VSIFReadL(1, size, f)
+        assert gdal.VSIFEofL(f) == 0
+        assert gdal.VSIFErrorL(f) == 0
         len_data2 = len(data2)
         assert len_data2 == size
         assert data2 == data
@@ -750,6 +741,11 @@ def test_vsizip_deflate64():
         ]:
             assert gdal.VSIFSeekL(f, pos, 0) == 0
             data2 = gdal.VSIFReadL(1, nread, f)
+            if pos + nread > size:
+                assert gdal.VSIFEofL(f) == 1
+            else:
+                assert gdal.VSIFEofL(f) == 0
+            assert gdal.VSIFErrorL(f) == 0, (pos, nread)
             len_data2 = len(data2)
             assert len_data2 == min(nread, size - pos), (pos, nread)
             assert data2 == data[pos : pos + len_data2], (pos, nread)
@@ -760,6 +756,7 @@ def test_vsizip_deflate64():
 ###############################################################################
 
 
+@gdaltest.disable_exceptions()
 def test_vsizip_byte_copyfile_regular():
 
     zipfilename = "/vsimem/test_vsizip_byte_copyfile_regular.zip"
@@ -782,7 +779,7 @@ def test_vsizip_byte_copyfile_regular():
         assert int(md["COMPRESSED_SIZE"]) < int(md["UNCOMPRESSED_SIZE"])
 
         # The file already exists:
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             assert gdal.CopyFile("data/byte.tif", dstfilename) == -1
     finally:
         gdal.Unlink(zipfilename)
@@ -963,3 +960,37 @@ def test_vsizip_sozip_of_file_bigger_than_4GB():
         assert gdal.VSIFReadL(1, 2, f) == b"\x00"
     finally:
         gdal.VSIFCloseL(f)
+
+
+###############################################################################
+# Test bugfix for https://github.com/OSGeo/gdal/issues/12572
+
+
+@pytest.mark.require_curl()
+def test_vsizip_vsicurl_error():
+
+    gdal.VSIErrorReset()
+    gdal.VSIStatL(
+        "/vsicurl/https://expired-rsa-dv.ssl.com/",
+        gdal.VSI_STAT_EXISTS_FLAG
+        | gdal.VSI_STAT_NATURE_FLAG
+        | gdal.VSI_STAT_SIZE_FLAG
+        | gdal.VSI_STAT_SET_ERROR_FLAG,
+    )
+    if "server certificate verification failed" not in gdal.VSIGetLastErrorMsg():
+        pytest.skip(
+            "Expected 'server certificate verification failed' in "
+            + gdal.VSIGetLastErrorMsg()
+        )
+
+    gdal.VSICurlClearCache()
+
+    gdal.VSIErrorReset()
+    gdal.VSIStatL(
+        "/vsizip/{/vsicurl/https://expired-rsa-dv.ssl.com/}",
+        gdal.VSI_STAT_EXISTS_FLAG
+        | gdal.VSI_STAT_NATURE_FLAG
+        | gdal.VSI_STAT_SIZE_FLAG
+        | gdal.VSI_STAT_SET_ERROR_FLAG,
+    )
+    assert "server certificate verification failed" in gdal.VSIGetLastErrorMsg()

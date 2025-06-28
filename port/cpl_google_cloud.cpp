@@ -6,23 +6,7 @@
  **********************************************************************
  * Copyright (c) 2017, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_google_cloud.h"
@@ -31,15 +15,65 @@
 #include "cpl_sha256.h"
 #include "cpl_time.h"
 #include "cpl_http.h"
-#include "cpl_multiproc.h"
+#include "cpl_mem_cache.h"
 #include "cpl_aws.h"
 #include "cpl_json.h"
 
+#include <mutex>
+#include <utility>
+
 #ifdef HAVE_CURL
 
-static CPLMutex *hMutex = nullptr;
 static bool bFirstTimeForDebugMessage = true;
-static GOA2Manager oStaticManager;
+
+struct GOA2ManagerCache
+{
+    struct ManagerWithMutex
+    {
+        std::mutex oMutex{};
+        GOA2Manager oManager{};
+
+        explicit ManagerWithMutex(const GOA2Manager &oManagerIn)
+            : oManager(oManagerIn)
+        {
+        }
+    };
+
+    std::mutex oMutexGOA2ManagerCache{};
+    lru11::Cache<std::string, std::shared_ptr<ManagerWithMutex>>
+        oGOA2ManagerCache{};
+
+    std::string GetBearer(const GOA2Manager &oManager)
+    {
+        const std::string osKey(oManager.GetKey());
+        std::shared_ptr<ManagerWithMutex> poSharedManager;
+        {
+            std::lock_guard oLock(oMutexGOA2ManagerCache);
+            if (!oGOA2ManagerCache.tryGet(osKey, poSharedManager))
+            {
+                poSharedManager = std::make_shared<ManagerWithMutex>(oManager);
+                oGOA2ManagerCache.insert(osKey, poSharedManager);
+            }
+        }
+        {
+            std::lock_guard oLock(poSharedManager->oMutex);
+            const char *pszBearer = poSharedManager->oManager.GetBearer();
+            return std::string(pszBearer ? pszBearer : "");
+        }
+    }
+
+    void clear()
+    {
+        std::lock_guard oLock(oMutexGOA2ManagerCache);
+        oGOA2ManagerCache.clear();
+    }
+
+    static GOA2ManagerCache &GetSingleton()
+    {
+        static GOA2ManagerCache goGOA2ManagerCache;
+        return goGOA2ManagerCache;
+    }
+};
 
 /************************************************************************/
 /*                    CPLIsMachineForSureGCEInstance()                  */
@@ -66,26 +100,19 @@ bool CPLIsMachineForSureGCEInstance()
     bool bIsGCEInstance = false;
     if (CPLTestBool(CPLGetConfigOption("CPL_GCE_CHECK_LOCAL_FILES", "YES")))
     {
-        static bool bIsGCEInstanceStatic = false;
-        static bool bDone = false;
+        static bool bIsGCEInstanceStatic = []()
         {
-            CPLMutexHolder oHolder(&hMutex);
-            if (!bDone)
+            bool bIsGCE = false;
+            VSILFILE *fp = VSIFOpenL("/sys/class/dmi/id/product_name", "rb");
+            if (fp)
             {
-                bDone = true;
-
-                VSILFILE *fp =
-                    VSIFOpenL("/sys/class/dmi/id/product_name", "rb");
-                if (fp)
-                {
-                    const char *pszLine = CPLReadLineL(fp);
-                    bIsGCEInstanceStatic =
-                        pszLine &&
-                        STARTS_WITH_CI(pszLine, "Google Compute Engine");
-                    VSIFCloseL(fp);
-                }
+                const char *pszLine = CPLReadLineL(fp);
+                bIsGCE =
+                    pszLine && STARTS_WITH_CI(pszLine, "Google Compute Engine");
+                VSIFCloseL(fp);
             }
-        }
+            return bIsGCE;
+        }();
         bIsGCEInstance = bIsGCEInstanceStatic;
     }
     return bIsGCEInstance;
@@ -117,7 +144,7 @@ bool CPLIsMachinePotentiallyGCEInstance()
         bIsMachinePotentialGCEInstance = CPLIsMachineForSureGCEInstance();
     }
     return bIsMachinePotentialGCEInstance;
-#elif defined(WIN32)
+#elif defined(_WIN32)
     // We might add later a way of detecting if we run on GCE using WMI
     // See https://cloud.google.com/compute/docs/instances/managing-instances
     // For now, unconditionally try
@@ -135,11 +162,11 @@ bool CPLIsMachinePotentiallyGCEInstance()
 /************************************************************************/
 
 static struct curl_slist *
-GetGSHeaders(const std::string &osPathForOption, const CPLString &osVerb,
+GetGSHeaders(const std::string &osPathForOption, const std::string &osVerb,
              const struct curl_slist *psExistingHeaders,
-             const CPLString &osCanonicalResource,
-             const CPLString &osSecretAccessKey, const CPLString &osAccessKeyId,
-             const std::string &osUserProject)
+             const std::string &osCanonicalResource,
+             const std::string &osSecretAccessKey,
+             const std::string &osAccessKeyId, const std::string &osUserProject)
 {
     if (osSecretAccessKey.empty())
     {
@@ -147,22 +174,22 @@ GetGSHeaders(const std::string &osPathForOption, const CPLString &osVerb,
         return nullptr;
     }
 
-    CPLString osDate = VSIGetPathSpecificOption(osPathForOption.c_str(),
-                                                "CPL_GS_TIMESTAMP", "");
+    std::string osDate = VSIGetPathSpecificOption(osPathForOption.c_str(),
+                                                  "CPL_GS_TIMESTAMP", "");
     if (osDate.empty())
     {
         osDate = IVSIS3LikeHandleHelper::GetRFC822DateTime();
     }
 
-    std::map<CPLString, CPLString> oSortedMapHeaders;
+    std::map<std::string, std::string> oSortedMapHeaders;
     if (!osUserProject.empty())
         oSortedMapHeaders["x-goog-user-project"] = osUserProject;
-    CPLString osCanonicalizedHeaders(
+    std::string osCanonicalizedHeaders(
         IVSIS3LikeHandleHelper::BuildCanonicalizedHeaders(
             oSortedMapHeaders, psExistingHeaders, "x-goog-"));
 
     // See https://cloud.google.com/storage/docs/migrating
-    CPLString osStringToSign;
+    std::string osStringToSign;
     osStringToSign += osVerb + "\n";
     osStringToSign +=
         CPLAWSGetHeaderVal(psExistingHeaders, "Content-MD5") + "\n";
@@ -177,10 +204,10 @@ GetGSHeaders(const std::string &osPathForOption, const CPLString &osVerb,
 
     GByte abySignature[CPL_SHA1_HASH_SIZE] = {};
     CPL_HMAC_SHA1(osSecretAccessKey.c_str(), osSecretAccessKey.size(),
-                  osStringToSign, osStringToSign.size(), abySignature);
+                  osStringToSign.c_str(), osStringToSign.size(), abySignature);
 
     char *pszBase64 = CPLBase64Encode(sizeof(abySignature), abySignature);
-    CPLString osAuthorization("GOOG1 ");
+    std::string osAuthorization("GOOG1 ");
     osAuthorization += osAccessKeyId;
     osAuthorization += ":";
     osAuthorization += pszBase64;
@@ -203,10 +230,10 @@ GetGSHeaders(const std::string &osPathForOption, const CPLString &osVerb,
 /************************************************************************/
 /*                         VSIGSHandleHelper()                          */
 /************************************************************************/
-VSIGSHandleHelper::VSIGSHandleHelper(const CPLString &osEndpoint,
-                                     const CPLString &osBucketObjectKey,
-                                     const CPLString &osSecretAccessKey,
-                                     const CPLString &osAccessKeyId,
+VSIGSHandleHelper::VSIGSHandleHelper(const std::string &osEndpoint,
+                                     const std::string &osBucketObjectKey,
+                                     const std::string &osSecretAccessKey,
+                                     const std::string &osAccessKeyId,
                                      bool bUseAuthenticationHeader,
                                      const GOA2Manager &oManager,
                                      const std::string &osUserProject)
@@ -233,11 +260,11 @@ VSIGSHandleHelper::~VSIGSHandleHelper()
 /************************************************************************/
 
 bool VSIGSHandleHelper::GetConfigurationFromConfigFile(
-    CPLString &osSecretAccessKey, CPLString &osAccessKeyId,
-    CPLString &osOAuth2RefreshToken, CPLString &osOAuth2ClientId,
-    CPLString &osOAuth2ClientSecret, CPLString &osCredentials)
+    std::string &osSecretAccessKey, std::string &osAccessKeyId,
+    std::string &osOAuth2RefreshToken, std::string &osOAuth2ClientId,
+    std::string &osOAuth2ClientSecret, std::string &osCredentials)
 {
-#ifdef WIN32
+#ifdef _WIN32
     const char *pszHome = CPLGetConfigOption("USERPROFILE", nullptr);
     constexpr char SEP_STRING[] = "\\";
 #else
@@ -260,7 +287,7 @@ bool VSIGSHandleHelper::GetConfigurationFromConfigFile(
         osCredentials += ".boto";
     }
 
-    VSILFILE *fp = VSIFOpenL(osCredentials, "rb");
+    VSILFILE *fp = VSIFOpenL(osCredentials.c_str(), "rb");
     if (fp != nullptr)
     {
         const char *pszLine;
@@ -273,9 +300,9 @@ bool VSIGSHandleHelper::GetConfigurationFromConfigFile(
                 bInCredentials = false;
                 bInOAuth2 = false;
 
-                if (CPLString(pszLine) == "[Credentials]")
+                if (std::string(pszLine) == "[Credentials]")
                     bInCredentials = true;
-                else if (CPLString(pszLine) == "[OAuth2]")
+                else if (std::string(pszLine) == "[OAuth2]")
                     bInOAuth2 = true;
             }
             else if (bInCredentials)
@@ -320,8 +347,8 @@ bool VSIGSHandleHelper::GetConfigurationFromConfigFile(
 
 bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
                                          CSLConstList papszOptions,
-                                         CPLString &osSecretAccessKey,
-                                         CPLString &osAccessKeyId,
+                                         std::string &osSecretAccessKey,
+                                         std::string &osAccessKeyId,
                                          bool &bUseAuthenticationHeader,
                                          GOA2Manager &oManager)
 {
@@ -343,7 +370,7 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
                                                  "GS_ACCESS_KEY_ID", "");
         if (osAccessKeyId.empty())
         {
-            VSIError(VSIE_AWSInvalidCredentials,
+            VSIError(VSIE_InvalidCredentials,
                      "GS_ACCESS_KEY_ID configuration option not defined");
             bFirstTimeForDebugMessage = false;
             return false;
@@ -358,7 +385,7 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         return true;
     }
 
-    const CPLString osHeaderFile = VSIGetPathSpecificOption(
+    const std::string osHeaderFile = VSIGetPathSpecificOption(
         osPathForOption.c_str(), "GDAL_HTTP_HEADER_FILE", "");
     bool bMayWarnDidNotFindAuth = false;
     if (!osHeaderFile.empty())
@@ -368,15 +395,15 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         // Do not allow /vsicurl/ access from /vsicurl because of
         // GetCurlHandleFor() e.g. "/vsicurl/,HEADER_FILE=/vsicurl/,url= " would
         // cause use of memory after free
-        if (strstr(osHeaderFile, "/vsicurl/") == nullptr &&
-            strstr(osHeaderFile, "/vsicurl?") == nullptr &&
-            strstr(osHeaderFile, "/vsis3/") == nullptr &&
-            strstr(osHeaderFile, "/vsigs/") == nullptr &&
-            strstr(osHeaderFile, "/vsiaz/") == nullptr &&
-            strstr(osHeaderFile, "/vsioss/") == nullptr &&
-            strstr(osHeaderFile, "/vsiswift/") == nullptr)
+        if (strstr(osHeaderFile.c_str(), "/vsicurl/") == nullptr &&
+            strstr(osHeaderFile.c_str(), "/vsicurl?") == nullptr &&
+            strstr(osHeaderFile.c_str(), "/vsis3/") == nullptr &&
+            strstr(osHeaderFile.c_str(), "/vsigs/") == nullptr &&
+            strstr(osHeaderFile.c_str(), "/vsiaz/") == nullptr &&
+            strstr(osHeaderFile.c_str(), "/vsioss/") == nullptr &&
+            strstr(osHeaderFile.c_str(), "/vsiswift/") == nullptr)
         {
-            fp = VSIFOpenL(osHeaderFile, "rb");
+            fp = VSIFOpenL(osHeaderFile.c_str(), "rb");
         }
         if (fp == nullptr)
         {
@@ -419,21 +446,13 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         return true;
     }
 
-    CPLString osRefreshToken(VSIGetPathSpecificOption(
+    std::string osRefreshToken(VSIGetPathSpecificOption(
         osPathForOption.c_str(), "GS_OAUTH2_REFRESH_TOKEN", ""));
     if (!osRefreshToken.empty())
     {
-        if (oStaticManager.GetAuthMethod() ==
-            GOA2Manager::ACCESS_TOKEN_FROM_REFRESH)
-        {
-            CPLMutexHolder oHolder(&hMutex);
-            oManager = oStaticManager;
-            return true;
-        }
-
-        CPLString osClientId = VSIGetPathSpecificOption(
+        std::string osClientId = VSIGetPathSpecificOption(
             osPathForOption.c_str(), "GS_OAUTH2_CLIENT_ID", "");
-        CPLString osClientSecret = VSIGetPathSpecificOption(
+        std::string osClientSecret = VSIGetPathSpecificOption(
             osPathForOption.c_str(), "GS_OAUTH2_CLIENT_SECRET", "");
 
         int nCount =
@@ -448,7 +467,7 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
 
         if (bFirstTimeForDebugMessage)
         {
-            CPLString osMsg(
+            std::string osMsg(
                 "Using GS_OAUTH2_REFRESH_TOKEN configuration option");
             if (osClientId.empty())
                 osMsg += " and GDAL default client_id/client_secret";
@@ -458,11 +477,12 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         }
         bFirstTimeForDebugMessage = false;
 
-        return oManager.SetAuthFromRefreshToken(osRefreshToken, osClientId,
-                                                osClientSecret, nullptr);
+        return oManager.SetAuthFromRefreshToken(
+            osRefreshToken.c_str(), osClientId.c_str(), osClientSecret.c_str(),
+            nullptr);
     }
 
-    CPLString osJsonFile(CSLFetchNameValueDef(
+    std::string osJsonFile(CSLFetchNameValueDef(
         papszOptions, "GOOGLE_APPLICATION_CREDENTIALS",
         VSIGetPathSpecificOption(osPathForOption.c_str(),
                                  "GOOGLE_APPLICATION_CREDENTIALS", "")));
@@ -475,15 +495,16 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         }
 
         // JSON file can be of type 'service_account' or 'authorized_user'
-        CPLString osJsonFileType = oDoc.GetRoot().GetString("type");
+        std::string osJsonFileType = oDoc.GetRoot().GetString("type");
 
-        if (strcmp(osJsonFileType, "service_account") == 0)
+        if (strcmp(osJsonFileType.c_str(), "service_account") == 0)
         {
             CPLString osPrivateKey = oDoc.GetRoot().GetString("private_key");
             osPrivateKey.replaceAll("\\n", "\n")
                 .replaceAll("\n\n", "\n")
                 .replaceAll("\r", "");
-            CPLString osClientEmail = oDoc.GetRoot().GetString("client_email");
+            std::string osClientEmail =
+                oDoc.GetRoot().GetString("client_email");
             const char *pszScope = CSLFetchNameValueDef(
                 papszOptions, "GS_OAUTH2_SCOPE",
                 VSIGetPathSpecificOption(
@@ -491,17 +512,19 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
                     "https://www.googleapis.com/auth/devstorage.read_write"));
 
             return oManager.SetAuthFromServiceAccount(
-                osPrivateKey, osClientEmail, pszScope, nullptr, nullptr);
+                osPrivateKey.c_str(), osClientEmail.c_str(), pszScope, nullptr,
+                nullptr);
         }
-        else if (strcmp(osJsonFileType, "authorized_user") == 0)
+        else if (strcmp(osJsonFileType.c_str(), "authorized_user") == 0)
         {
-            CPLString osClientId = oDoc.GetRoot().GetString("client_id");
-            CPLString osClientSecret =
+            std::string osClientId = oDoc.GetRoot().GetString("client_id");
+            std::string osClientSecret =
                 oDoc.GetRoot().GetString("client_secret");
             osRefreshToken = oDoc.GetRoot().GetString("refresh_token");
 
-            return oManager.SetAuthFromRefreshToken(osRefreshToken, osClientId,
-                                                    osClientSecret, nullptr);
+            return oManager.SetAuthFromRefreshToken(
+                osRefreshToken.c_str(), osClientId.c_str(),
+                osClientSecret.c_str(), nullptr);
         }
         return false;
     }
@@ -510,7 +533,7 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         papszOptions, "GS_OAUTH2_PRIVATE_KEY",
         VSIGetPathSpecificOption(osPathForOption.c_str(),
                                  "GS_OAUTH2_PRIVATE_KEY", ""));
-    CPLString osPrivateKeyFile = CSLFetchNameValueDef(
+    std::string osPrivateKeyFile = CSLFetchNameValueDef(
         papszOptions, "GS_OAUTH2_PRIVATE_KEY_FILE",
         VSIGetPathSpecificOption(osPathForOption.c_str(),
                                  "GS_OAUTH2_PRIVATE_KEY_FILE", ""));
@@ -518,7 +541,7 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
     {
         if (!osPrivateKeyFile.empty())
         {
-            VSILFILE *fp = VSIFOpenL(osPrivateKeyFile, "rb");
+            VSILFILE *fp = VSIFOpenL(osPrivateKeyFile.c_str(), "rb");
             if (fp == nullptr)
             {
                 CPLError(CE_Failure, CPLE_FileIO, "Cannot open %s",
@@ -539,7 +562,7 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
             .replaceAll("\n\n", "\n")
             .replaceAll("\r", "");
 
-        CPLString osClientEmail = CSLFetchNameValueDef(
+        std::string osClientEmail = CSLFetchNameValueDef(
             papszOptions, "GS_OAUTH2_CLIENT_EMAIL",
             VSIGetPathSpecificOption(osPathForOption.c_str(),
                                      "GS_OAUTH2_CLIENT_EMAIL", ""));
@@ -567,54 +590,47 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         }
         bFirstTimeForDebugMessage = false;
 
-        return oManager.SetAuthFromServiceAccount(osPrivateKey, osClientEmail,
+        return oManager.SetAuthFromServiceAccount(osPrivateKey.c_str(),
+                                                  osClientEmail.c_str(),
                                                   pszScope, nullptr, nullptr);
     }
 
     // Next try reading from ~/.boto
-    CPLString osCredentials;
-    CPLString osOAuth2RefreshToken;
-    CPLString osOAuth2ClientId;
-    CPLString osOAuth2ClientSecret;
+    std::string osCredentials;
+    std::string osOAuth2RefreshToken;
+    std::string osOAuth2ClientId;
+    std::string osOAuth2ClientSecret;
     if (GetConfigurationFromConfigFile(osSecretAccessKey, osAccessKeyId,
                                        osOAuth2RefreshToken, osOAuth2ClientId,
                                        osOAuth2ClientSecret, osCredentials))
     {
         if (!osOAuth2RefreshToken.empty())
         {
-            if (oStaticManager.GetAuthMethod() ==
-                GOA2Manager::ACCESS_TOKEN_FROM_REFRESH)
-            {
-                CPLMutexHolder oHolder(&hMutex);
-                oManager = oStaticManager;
-                return true;
-            }
-
-            CPLString osClientId =
+            std::string osClientId =
                 CPLGetConfigOption("GS_OAUTH2_CLIENT_ID", "");
-            CPLString osClientSecret =
+            std::string osClientSecret =
                 CPLGetConfigOption("GS_OAUTH2_CLIENT_SECRET", "");
             bool bClientInfoFromEnv = false;
             bool bClientInfoFromFile = false;
 
-            int nCount = (!osClientId.empty() ? 1 : 0) +
-                         (!osClientSecret.empty() ? 1 : 0);
-            if (nCount == 1)
+            const int nCountClientIdSecret = (!osClientId.empty() ? 1 : 0) +
+                                             (!osClientSecret.empty() ? 1 : 0);
+            if (nCountClientIdSecret == 1)
             {
                 CPLError(CE_Failure, CPLE_NotSupported,
                          "Either both or none of GS_OAUTH2_CLIENT_ID and "
                          "GS_OAUTH2_CLIENT_SECRET must be set");
                 return false;
             }
-            else if (nCount == 2)
+            else if (nCountClientIdSecret == 2)
             {
                 bClientInfoFromEnv = true;
             }
-            else if (nCount == 0)
+            else if (nCountClientIdSecret == 0)
             {
-                nCount = (!osOAuth2ClientId.empty() ? 1 : 0) +
-                         (!osOAuth2ClientSecret.empty() ? 1 : 0);
-                if (nCount == 1)
+                int nCountOAuth2IdSecret = (!osOAuth2ClientId.empty() ? 1 : 0);
+                nCountOAuth2IdSecret += (!osOAuth2ClientSecret.empty() ? 1 : 0);
+                if (nCountOAuth2IdSecret == 1)
                 {
                     CPLError(CE_Failure, CPLE_NotSupported,
                              "Either both or none of client_id and "
@@ -622,10 +638,10 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
                              osCredentials.c_str());
                     return false;
                 }
-                else if (nCount == 2)
+                else if (nCountOAuth2IdSecret == 2)
                 {
-                    osClientId = osOAuth2ClientId;
-                    osClientSecret = osOAuth2ClientSecret;
+                    osClientId = std::move(osOAuth2ClientId);
+                    osClientSecret = std::move(osOAuth2ClientSecret);
                     bClientInfoFromFile = true;
                 }
             }
@@ -647,9 +663,10 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
                 CPLDebug("GS", "%s", osMsg.c_str());
             }
             bFirstTimeForDebugMessage = false;
+
             return oManager.SetAuthFromRefreshToken(
-                osOAuth2RefreshToken.c_str(), osClientId, osClientSecret,
-                nullptr);
+                osOAuth2RefreshToken.c_str(), osClientId.c_str(),
+                osClientSecret.c_str(), nullptr);
         }
         else
         {
@@ -665,27 +682,17 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         }
     }
 
-    if (oStaticManager.GetAuthMethod() == GOA2Manager::GCE)
-    {
-        CPLMutexHolder oHolder(&hMutex);
-        oManager = oStaticManager;
-        return true;
-    }
     // Some Travis-CI workers are GCE machines, and for some tests, we don't
     // want this code path to be taken. And on AppVeyor/Window, we would also
     // attempt a network access
-    else if (!CPLTestBool(CPLGetConfigOption("CPL_GCE_SKIP", "NO")) &&
-             CPLIsMachinePotentiallyGCEInstance())
+    if (!CPLTestBool(CPLGetConfigOption("CPL_GCE_SKIP", "NO")) &&
+        CPLIsMachinePotentiallyGCEInstance())
     {
         oManager.SetAuthFromGCE(nullptr);
-        if (oManager.GetBearer() != nullptr)
+
+        if (!GOA2ManagerCache::GetSingleton().GetBearer(oManager).empty())
         {
             CPLDebug("GS", "Using GCE inherited permissions");
-
-            {
-                CPLMutexHolder oHolder(&hMutex);
-                oStaticManager = oManager;
-            }
 
             bFirstTimeForDebugMessage = false;
             return true;
@@ -699,15 +706,21 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
     }
 
     CPLString osMsg;
-    osMsg.Printf("GS_SECRET_ACCESS_KEY+GS_ACCESS_KEY_ID, "
-                 "GS_OAUTH2_REFRESH_TOKEN or "
-                 "GOOGLE_APPLICATION_CREDENTIALS or "
-                 "GS_OAUTH2_PRIVATE_KEY+GS_OAUTH2_CLIENT_EMAIL and %s, "
-                 "or GS_NO_SIGN_REQUEST=YES configuration options not defined",
-                 osCredentials.c_str());
+    osMsg.Printf(
+        "No valid GCS credentials found. "
+        "For authenticated requests, you need to set "
+        "GS_SECRET_ACCESS_KEY, GS_ACCESS_KEY_ID, GS_OAUTH2_REFRESH_TOKEN, "
+        "GOOGLE_APPLICATION_CREDENTIALS, or other configuration "
+        "options, or create a %s file. Consult "
+        "https://gdal.org/en/stable/user/"
+        "virtual_file_systems.html#vsigs-google-cloud-storage-files "
+        "for more details. "
+        "For unauthenticated requests on public resources, set the "
+        "GS_NO_SIGN_REQUEST configuration option to YES.",
+        osCredentials.c_str());
 
     CPLDebug("GS", "%s", osMsg.c_str());
-    VSIError(VSIE_AWSInvalidCredentials, "%s", osMsg.c_str());
+    VSIError(VSIE_InvalidCredentials, "%s", osMsg.c_str());
     return false;
 }
 
@@ -715,22 +728,23 @@ bool VSIGSHandleHelper::GetConfiguration(const std::string &osPathForOption,
 /*                          BuildFromURI()                              */
 /************************************************************************/
 
-VSIGSHandleHelper *VSIGSHandleHelper::BuildFromURI(const char *pszURI,
-                                                   const char * /*pszFSPrefix*/,
-                                                   CSLConstList papszOptions)
+VSIGSHandleHelper *VSIGSHandleHelper::BuildFromURI(
+    const char *pszURI, const char * /*pszFSPrefix*/,
+    const char *pszURIForPathSpecificOption, CSLConstList papszOptions)
 {
     std::string osPathForOption("/vsigs/");
-    osPathForOption += pszURI;
+    osPathForOption +=
+        pszURIForPathSpecificOption ? pszURIForPathSpecificOption : pszURI;
 
     // pszURI == bucket/object
-    const CPLString osBucketObject(pszURI);
-    CPLString osEndpoint(VSIGetPathSpecificOption(osPathForOption.c_str(),
-                                                  "CPL_GS_ENDPOINT", ""));
+    const std::string osBucketObject(pszURI);
+    std::string osEndpoint(VSIGetPathSpecificOption(osPathForOption.c_str(),
+                                                    "CPL_GS_ENDPOINT", ""));
     if (osEndpoint.empty())
         osEndpoint = "https://storage.googleapis.com/";
 
-    CPLString osSecretAccessKey;
-    CPLString osAccessKeyId;
+    std::string osSecretAccessKey;
+    std::string osAccessKeyId;
     bool bUseAuthenticationHeader;
     GOA2Manager oManager;
 
@@ -778,7 +792,7 @@ bool VSIGSHandleHelper::UsesHMACKey() const
 /************************************************************************/
 
 struct curl_slist *
-VSIGSHandleHelper::GetCurlHeaders(const CPLString &osVerb,
+VSIGSHandleHelper::GetCurlHeaders(const std::string &osVerb,
                                   const struct curl_slist *psExistingHeaders,
                                   const void *, size_t) const
 {
@@ -787,18 +801,14 @@ VSIGSHandleHelper::GetCurlHeaders(const CPLString &osVerb,
 
     if (m_oManager.GetAuthMethod() != GOA2Manager::NONE)
     {
-        const char *pszBearer = m_oManager.GetBearer();
-        if (pszBearer == nullptr)
+        const std::string osBearer =
+            GOA2ManagerCache::GetSingleton().GetBearer(m_oManager);
+        if (osBearer.empty())
             return nullptr;
-
-        {
-            CPLMutexHolder oHolder(&hMutex);
-            oStaticManager = m_oManager;
-        }
 
         struct curl_slist *headers = nullptr;
         headers = curl_slist_append(
-            headers, CPLSPrintf("Authorization: Bearer %s", pszBearer));
+            headers, CPLSPrintf("Authorization: Bearer %s", osBearer.c_str()));
 
         if (!m_osUserProject.empty())
         {
@@ -809,8 +819,8 @@ VSIGSHandleHelper::GetCurlHeaders(const CPLString &osVerb,
         return headers;
     }
 
-    CPLString osCanonicalResource("/" +
-                                  CPLAWSURLEncode(m_osBucketObjectKey, false));
+    std::string osCanonicalResource(
+        "/" + CPLAWSURLEncode(m_osBucketObjectKey, false));
     if (!m_osBucketObjectKey.empty() &&
         m_osBucketObjectKey.find('/') == std::string::npos)
         osCanonicalResource += "/";
@@ -827,24 +837,12 @@ VSIGSHandleHelper::GetCurlHeaders(const CPLString &osVerb,
 }
 
 /************************************************************************/
-/*                          CleanMutex()                                */
-/************************************************************************/
-
-void VSIGSHandleHelper::CleanMutex()
-{
-    if (hMutex != nullptr)
-        CPLDestroyMutex(hMutex);
-    hMutex = nullptr;
-}
-/************************************************************************/
 /*                          ClearCache()                                */
 /************************************************************************/
 
 void VSIGSHandleHelper::ClearCache()
 {
-    CPLMutexHolder oHolder(&hMutex);
-
-    oStaticManager = GOA2Manager();
+    GOA2ManagerCache::GetSingleton().clear();
     bFirstTimeForDebugMessage = true;
 }
 
@@ -852,7 +850,7 @@ void VSIGSHandleHelper::ClearCache()
 /*                           GetSignedURL()                             */
 /************************************************************************/
 
-CPLString VSIGSHandleHelper::GetSignedURL(CSLConstList papszOptions)
+std::string VSIGSHandleHelper::GetSignedURL(CSLConstList papszOptions)
 {
     if (!((!m_osAccessKeyId.empty() && !m_osSecretAccessKey.empty()) ||
           m_oManager.GetAuthMethod() == GOA2Manager::SERVICE_ACCOUNT))
@@ -862,7 +860,7 @@ CPLString VSIGSHandleHelper::GetSignedURL(CSLConstList papszOptions)
                  "AWS style authentication with "
                  "GS_ACCESS_KEY_ID+GS_SECRET_ACCESS_KEY, "
                  "or with service account authentication");
-        return CPLString();
+        return std::string();
     }
 
     GIntBig nStartDate = static_cast<GIntBig>(time(nullptr));
@@ -886,15 +884,15 @@ CPLString VSIGSHandleHelper::GetSignedURL(CSLConstList papszOptions)
     GIntBig nExpiresIn =
         nStartDate +
         atoi(CSLFetchNameValueDef(papszOptions, "EXPIRATION_DELAY", "3600"));
-    CPLString osExpires(CSLFetchNameValueDef(
+    std::string osExpires(CSLFetchNameValueDef(
         papszOptions, "EXPIRES", CPLSPrintf(CPL_FRMT_GIB, nExpiresIn)));
 
-    CPLString osVerb(CSLFetchNameValueDef(papszOptions, "VERB", "GET"));
+    std::string osVerb(CSLFetchNameValueDef(papszOptions, "VERB", "GET"));
 
-    CPLString osCanonicalizedResource(
+    std::string osCanonicalizedResource(
         "/" + CPLAWSURLEncode(m_osBucketObjectKey, false));
 
-    CPLString osStringToSign;
+    std::string osStringToSign;
     osStringToSign += osVerb + "\n";
     osStringToSign += "\n";  // Content_MD5
     osStringToSign += "\n";  // Content_Type
@@ -910,10 +908,11 @@ CPLString VSIGSHandleHelper::GetSignedURL(CSLConstList papszOptions)
         // No longer documented but actually works !
         GByte abySignature[CPL_SHA1_HASH_SIZE] = {};
         CPL_HMAC_SHA1(m_osSecretAccessKey.c_str(), m_osSecretAccessKey.size(),
-                      osStringToSign, osStringToSign.size(), abySignature);
+                      osStringToSign.c_str(), osStringToSign.size(),
+                      abySignature);
 
         char *pszBase64 = CPLBase64Encode(sizeof(abySignature), abySignature);
-        CPLString osSignature(pszBase64);
+        std::string osSignature(pszBase64);
         CPLFree(pszBase64);
 
         ResetQueryParameters();
@@ -928,10 +927,10 @@ CPLString VSIGSHandleHelper::GetSignedURL(CSLConstList papszOptions)
             m_oManager.GetPrivateKey().c_str(), osStringToSign.data(),
             static_cast<unsigned>(osStringToSign.size()), &nSignatureLen);
         if (pabySignature == nullptr)
-            return CPLString();
+            return std::string();
         char *pszBase64 = CPLBase64Encode(nSignatureLen, pabySignature);
         CPLFree(pabySignature);
-        CPLString osSignature(pszBase64);
+        std::string osSignature(pszBase64);
         CPLFree(pszBase64);
 
         ResetQueryParameters();

@@ -51,14 +51,21 @@ class NullLock
     void lock()
     {
     }
+
     void unlock()
     {
     }
+
     bool try_lock()
     {
         return true;
     }
 };
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
 
 /**
  * error raised when a key not in cache is passed to get()
@@ -71,6 +78,10 @@ class KeyNotFound : public std::invalid_argument
     }
 };
 
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
 template <typename K, typename V> struct KeyValuePair
 {
   public:
@@ -80,9 +91,14 @@ template <typename K, typename V> struct KeyValuePair
     KeyValuePair(const K &k, const V &v) : key(k), value(v)
     {
     }
+
     KeyValuePair(const K &k, V &&v) : key(k), value(std::move(v))
     {
     }
+
+  private:
+    KeyValuePair(const KeyValuePair &) = delete;
+    KeyValuePair &operator=(const KeyValuePair &) = delete;
 };
 
 /**
@@ -108,6 +124,7 @@ class Cache
     typedef Map map_type;
     typedef Lock lock_type;
     using Guard = std::lock_guard<lock_type>;
+
     /**
      * the max size is the hard limit of keys and (maxSize + elasticity) is the
      * soft limit
@@ -120,23 +137,28 @@ class Cache
         : maxSize_(maxSize), elasticity_(elasticity)
     {
     }
+
     virtual ~Cache() = default;
+
     size_t size() const
     {
         Guard g(lock_);
         return cache_.size();
     }
+
     bool empty() const
     {
         Guard g(lock_);
         return cache_.empty();
     }
+
     void clear()
     {
         Guard g(lock_);
         cache_.clear();
         keys_.clear();
     }
+
     void insert(const Key &k, const Value &v)
     {
         Guard g(lock_);
@@ -152,6 +174,7 @@ class Cache
         cache_[k] = keys_.begin();
         prune();
     }
+
     Value &insert(const Key &k, Value &&v)
     {
         Guard g(lock_);
@@ -168,6 +191,7 @@ class Cache
         prune();
         return keys_.front().value;
     }
+
     bool tryGet(const Key &kIn, Value &vOut)
     {
         Guard g(lock_);
@@ -180,6 +204,7 @@ class Cache
         vOut = iter->second->value;
         return true;
     }
+
     /**
      *	The const reference returned here is only
      *    guaranteed to be valid till the next insert/delete
@@ -195,6 +220,7 @@ class Cache
         keys_.splice(keys_.begin(), keys_, iter->second);
         return iter->second->value;
     }
+
     Value *getPtr(const Key &k)
     {
         Guard g(lock_);
@@ -206,6 +232,7 @@ class Cache
         keys_.splice(keys_.begin(), keys_, iter->second);
         return &(iter->second->value);
     }
+
     /**
      * returns a copy of the stored object (if found)
      */
@@ -213,6 +240,7 @@ class Cache
     {
         return get(k);
     }
+
     bool remove(const Key &k)
     {
         Guard g(lock_);
@@ -225,6 +253,7 @@ class Cache
         cache_.erase(iter);
         return true;
     }
+
     bool contains(const Key &k)
     {
         Guard g(lock_);
@@ -260,14 +289,17 @@ class Cache
     {
         return maxSize_;
     }
+
     size_t getElasticity() const
     {
         return elasticity_;
     }
+
     size_t getMaxAllowedSize() const
     {
         return maxSize_ + elasticity_;
     }
+
     template <typename F> void cwalk(F &f) const
     {
         Guard g(lock_);

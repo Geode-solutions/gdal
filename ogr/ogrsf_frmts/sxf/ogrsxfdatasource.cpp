@@ -12,23 +12,7 @@
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys.com>
  * Copyright (c) 2019, NextGIS, <info@nextgis.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -39,6 +23,10 @@
 #include <math.h>
 #include <map>
 #include <string>
+
+#ifdef EMBED_RESOURCE_FILES
+#include "embedded_resources.h"
+#endif
 
 // EPSG code range http://gis.stackexchange.com/a/18676/9904
 constexpr int MIN_EPSG = 1000;
@@ -126,9 +114,7 @@ int OGRSXFDataSource::Open(const char *pszFilename, bool bUpdateIn,
         return FALSE;
     }
 
-    pszName = pszFilename;
-
-    fpSXF = VSIFOpenL(pszName, "rb");
+    fpSXF = VSIFOpenL(pszFilename, "rb");
     if (fpSXF == nullptr)
     {
         CPLError(CE_Warning, CPLE_OpenFailed, "SXF open file %s failed",
@@ -217,39 +203,63 @@ int OGRSXFDataSource::Open(const char *pszFilename, bool bUpdateIn,
     /*---------------- TRY READ THE RSC FILE HEADER  -----------------------*/
 
     CPLString soRSCRileName;
-    const char *pszRSCRileName =
+    std::string osRSCRileNameCandidate =
         CSLFetchNameValueDef(papszOpenOpts, "SXF_RSC_FILENAME",
                              CPLGetConfigOption("SXF_RSC_FILENAME", ""));
-    if (pszRSCRileName != nullptr &&
-        CPLCheckForFile((char *)pszRSCRileName, nullptr) == TRUE)
+    if (!osRSCRileNameCandidate.empty() &&
+        CPLCheckForFile(osRSCRileNameCandidate.data(), nullptr) == TRUE)
     {
-        soRSCRileName = pszRSCRileName;
+        soRSCRileName = osRSCRileNameCandidate;
     }
 
     if (soRSCRileName.empty())
     {
-        pszRSCRileName = CPLResetExtension(pszFilename, "rsc");
-        if (CPLCheckForFile((char *)pszRSCRileName, nullptr) == TRUE)
+        osRSCRileNameCandidate = CPLResetExtensionSafe(pszFilename, "rsc");
+        if (CPLCheckForFile(osRSCRileNameCandidate.data(), nullptr) == TRUE)
         {
-            soRSCRileName = pszRSCRileName;
+            soRSCRileName = osRSCRileNameCandidate;
         }
     }
 
     if (soRSCRileName.empty())
     {
-        pszRSCRileName = CPLResetExtension(pszFilename, "RSC");
-        if (CPLCheckForFile((char *)pszRSCRileName, nullptr) == TRUE)
+        osRSCRileNameCandidate = CPLResetExtensionSafe(pszFilename, "RSC");
+        if (CPLCheckForFile(osRSCRileNameCandidate.data(), nullptr) == TRUE)
         {
-            soRSCRileName = pszRSCRileName;
+            soRSCRileName = osRSCRileNameCandidate;
         }
     }
 
     // 1. Create layers from RSC file or create default set of layers from
     // gdal_data/default.rsc.
 
+    VSILFILE *fpRSC = nullptr;
     if (soRSCRileName.empty())
     {
-        pszRSCRileName = CPLFindFile("gdal", "default.rsc");
+#if defined(USE_ONLY_EMBEDDED_RESOURCE_FILES)
+        const char *pszRSCRileName = nullptr;
+#else
+        const char *pszRSCRileName = CPLFindFile("gdal", "default.rsc");
+#endif
+#ifdef EMBED_RESOURCE_FILES
+        if (!pszRSCRileName || EQUAL(pszRSCRileName, "default.rsc"))
+        {
+            static const bool bOnce [[maybe_unused]] = []()
+            {
+                CPLDebug("SXF", "Using embedded default.rsc");
+                return true;
+            }();
+            int sxf_default_rsc_size = 0;
+            const unsigned char *sxf_default_rsc =
+                SXFGetDefaultRSC(&sxf_default_rsc_size);
+            fpRSC = VSIFileFromMemBuffer(
+                nullptr,
+                const_cast<GByte *>(
+                    reinterpret_cast<const GByte *>(sxf_default_rsc)),
+                sxf_default_rsc_size,
+                /* bTakeOwnership = */ false);
+        }
+#endif
         if (nullptr != pszRSCRileName)
         {
             soRSCRileName = pszRSCRileName;
@@ -260,14 +270,23 @@ int OGRSXFDataSource::Open(const char *pszFilename, bool bUpdateIn,
         }
     }
 
-    if (soRSCRileName.empty())
+    if (soRSCRileName.empty()
+#ifdef EMBED_RESOURCE_FILES
+        && !fpRSC
+#endif
+    )
     {
         CPLError(CE_Warning, CPLE_None, "RSC file for %s not exist",
                  pszFilename);
     }
     else
     {
-        VSILFILE *fpRSC = VSIFOpenL(soRSCRileName, "rb");
+#ifdef EMBED_RESOURCE_FILES
+        if (!fpRSC)
+#endif
+        {
+            fpRSC = VSIFOpenL(soRSCRileName, "rb");
+        }
         if (fpRSC == nullptr)
         {
             CPLError(CE_Warning, CPLE_OpenFailed, "RSC file %s open failed",
@@ -683,6 +702,7 @@ OGRErr OGRSXFDataSource::ReadSXFMapDescription(VSILFILE *fpSXFIn,
         }
 
         VSIFSeekL(fpSXFIn, 212, SEEK_SET);
+
         struct _buff
         {
             GUInt32 nRes;
@@ -690,6 +710,7 @@ OGRErr OGRSXFDataSource::ReadSXFMapDescription(VSILFILE *fpSXFIn,
             // cppcheck-suppress unusedStructMember
             GUInt32 nFrameCode;
         } buff;
+
         if (VSIFReadL(&buff, 20, 1, fpSXFIn) != 1)
             return OGRERR_FAILURE;
         CPL_LSBPTR32(&buff.nRes);
@@ -1100,7 +1121,7 @@ OGRSXFLayer *OGRSXFDataSource::GetLayerById(GByte nID)
 void OGRSXFDataSource::CreateLayers()
 {
     // default layers set
-    m_apoLayers.emplace_back(cpl::make_unique<OGRSXFLayer>(
+    m_apoLayers.emplace_back(std::make_unique<OGRSXFLayer>(
         fpSXF, &hIOMutex, static_cast<GByte>(0), CPLString("SYSTEM"),
         oSXFPassport.version, oSXFPassport.stMapDescription));
     auto pLayer = m_apoLayers.back().get();
@@ -1112,7 +1133,7 @@ void OGRSXFDataSource::CreateLayers()
     }
     pLayer->AddClassifyCode(91000000);
 
-    m_apoLayers.emplace_back(cpl::make_unique<OGRSXFLayer>(
+    m_apoLayers.emplace_back(std::make_unique<OGRSXFLayer>(
         fpSXF, &hIOMutex, static_cast<GByte>(255), CPLString("Not_Classified"),
         oSXFPassport.version, oSXFPassport.stMapDescription));
 }
@@ -1163,6 +1184,7 @@ void OGRSXFDataSource::CreateLayers(VSILFILE *fpRSC,
     CPL_LSBPTR32(&(stRSCFileHeader.nColorsInPalette));
 
     GByte szLayersID[4];
+
     struct _layer
     {
         GUInt32 nLength;
@@ -1201,7 +1223,7 @@ void OGRSXFDataSource::CreateLayers(VSILFILE *fpRSC,
             else
                 pszRecoded = CPLStrdup(LAYER.szName);
 
-            m_apoLayers.emplace_back(cpl::make_unique<OGRSXFLayer>(
+            m_apoLayers.emplace_back(std::make_unique<OGRSXFLayer>(
                 fpSXF, &hIOMutex, LAYER.nNo, CPLString(pszRecoded),
                 oSXFPassport.version, oSXFPassport.stMapDescription));
         }
@@ -1218,7 +1240,7 @@ void OGRSXFDataSource::CreateLayers(VSILFILE *fpRSC,
             else
                 pszRecoded = CPLStrdup(LAYER.szShortName);
 
-            m_apoLayers.emplace_back(cpl::make_unique<OGRSXFLayer>(
+            m_apoLayers.emplace_back(std::make_unique<OGRSXFLayer>(
                 fpSXF, &hIOMutex, LAYER.nNo, CPLString(pszRecoded),
                 oSXFPassport.version, oSXFPassport.stMapDescription));
         }
@@ -1228,11 +1250,12 @@ void OGRSXFDataSource::CreateLayers(VSILFILE *fpRSC,
         VSIFSeekL(fpRSC, nOffset, SEEK_SET);
     }
 
-    m_apoLayers.emplace_back(cpl::make_unique<OGRSXFLayer>(
+    m_apoLayers.emplace_back(std::make_unique<OGRSXFLayer>(
         fpSXF, &hIOMutex, static_cast<GByte>(255), CPLString("Not_Classified"),
         oSXFPassport.version, oSXFPassport.stMapDescription));
 
     char szObjectsID[4];
+
     struct _object
     {
         unsigned nLength;

@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2010-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -50,7 +34,7 @@ class HF2Dataset final : public GDALPamDataset
     friend class HF2RasterBand;
 
     VSILFILE *fp;
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
     vsi_l_offset *panBlockOffset;  // tile 0 is a the bottom left
 
@@ -62,7 +46,7 @@ class HF2Dataset final : public GDALPamDataset
     HF2Dataset();
     virtual ~HF2Dataset();
 
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 
     static GDALDataset *Open(GDALOpenInfo *);
@@ -126,7 +110,7 @@ HF2RasterBand::~HF2RasterBand()
 CPLErr HF2RasterBand::IReadBlock(int nBlockXOff, int nLineYOff, void *pImage)
 
 {
-    HF2Dataset *poGDS = (HF2Dataset *)poDS;
+    HF2Dataset *poGDS = cpl::down_cast<HF2Dataset *>(poDS);
 
     const int nXBlocks = DIV_ROUND_UP(nRasterXSize, poGDS->nTileSize);
 
@@ -273,12 +257,6 @@ HF2Dataset::HF2Dataset()
       bHasLoaderBlockMap(FALSE)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0;
-    adfGeoTransform[1] = 1;
-    adfGeoTransform[2] = 0;
-    adfGeoTransform[3] = 0;
-    adfGeoTransform[4] = 0;
-    adfGeoTransform[5] = 1;
 }
 
 /************************************************************************/
@@ -305,8 +283,8 @@ int HF2Dataset::LoadBlockMap()
 
     bHasLoaderBlockMap = TRUE;
 
-    const int nXBlocks = (nRasterXSize + nTileSize - 1) / nTileSize;
-    const int nYBlocks = (nRasterYSize + nTileSize - 1) / nTileSize;
+    const int nXBlocks = DIV_ROUND_UP(nRasterXSize, nTileSize);
+    const int nYBlocks = DIV_ROUND_UP(nRasterYSize, nTileSize);
     if (nXBlocks * nYBlocks > 1000000)
     {
         vsi_l_offset nCurOff = VSIFTellL(fp);
@@ -397,7 +375,7 @@ int HF2Dataset::Identify(GDALOpenInfo *poOpenInfo)
     /*  GZipped .hf2 files are common, so automagically open them */
     /*  if the /vsigzip/ has not been explicitly passed */
     CPLString osFilename;  // keep in that scope
-    if ((EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "hfz") ||
+    if ((poOpenInfo->IsExtensionEqualToCI("hfz") ||
          (strlen(poOpenInfo->pszFilename) > 6 &&
           EQUAL(poOpenInfo->pszFilename + strlen(poOpenInfo->pszFilename) - 6,
                 "hf2.gz"))) &&
@@ -441,7 +419,7 @@ GDALDataset *HF2Dataset::Open(GDALOpenInfo *poOpenInfo)
     /*  GZipped .hf2 files are common, so automagically open them */
     /*  if the /vsigzip/ has not been explicitly passed */
     CPLString osFilename(poOpenInfo->pszFilename);
-    if ((EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "hfz") ||
+    if ((poOpenInfo->IsExtensionEqualToCI("hfz") ||
          (strlen(poOpenInfo->pszFilename) > 6 &&
           EQUAL(poOpenInfo->pszFilename + strlen(poOpenInfo->pszFilename) - 6,
                 "hf2.gz"))) &&
@@ -493,8 +471,8 @@ GDALDataset *HF2Dataset::Open(GDALOpenInfo *poOpenInfo)
     {
         return nullptr;
     }
-    const int nXBlocks = (nXSize + nTileSize - 1) / nTileSize;
-    const int nYBlocks = (nYSize + nTileSize - 1) / nTileSize;
+    const int nXBlocks = DIV_ROUND_UP(nXSize, nTileSize);
+    const int nYBlocks = DIV_ROUND_UP(nYSize, nTileSize);
     if (nXBlocks > INT_MAX / nYBlocks)
     {
         return nullptr;
@@ -614,15 +592,15 @@ GDALDataset *HF2Dataset::Open(GDALOpenInfo *poOpenInfo)
              nTileSize);
     if (bHasExtent)
     {
-        poDS->adfGeoTransform[0] = dfMinX;
-        poDS->adfGeoTransform[3] = dfMaxY;
-        poDS->adfGeoTransform[1] = (dfMaxX - dfMinX) / nXSize;
-        poDS->adfGeoTransform[5] = -(dfMaxY - dfMinY) / nYSize;
+        poDS->m_gt[0] = dfMinX;
+        poDS->m_gt[3] = dfMaxY;
+        poDS->m_gt[1] = (dfMaxX - dfMinX) / nXSize;
+        poDS->m_gt[5] = -(dfMaxY - dfMinY) / nYSize;
     }
     else
     {
-        poDS->adfGeoTransform[1] = fHorizScale;
-        poDS->adfGeoTransform[5] = fHorizScale;
+        poDS->m_gt[1] = fHorizScale;
+        poDS->m_gt[5] = fHorizScale;
     }
 
     if (bHasEPSGCode)
@@ -659,7 +637,7 @@ GDALDataset *HF2Dataset::Open(GDALOpenInfo *poOpenInfo)
             oSRS.SetUTM(std::abs(static_cast<int>(nUTMZone)), nUTMZone > 0);
         }
         if (bHasSRS)
-            poDS->m_oSRS = oSRS;
+            poDS->m_oSRS = std::move(oSRS);
     }
 
     /* -------------------------------------------------------------------- */
@@ -697,10 +675,10 @@ GDALDataset *HF2Dataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr HF2Dataset::GetGeoTransform(double *padfTransform)
+CPLErr HF2Dataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, 6 * sizeof(double));
+    gt = m_gt;
 
     return CE_None;
 }
@@ -768,13 +746,11 @@ GDALDataset *HF2Dataset::CreateCopy(const char *pszFilename,
 
     const int nXSize = poSrcDS->GetRasterXSize();
     const int nYSize = poSrcDS->GetRasterYSize();
-    double adfGeoTransform[6];
-    poSrcDS->GetGeoTransform(adfGeoTransform);
-    int bHasGeoTransform =
-        !(adfGeoTransform[0] == 0 && adfGeoTransform[1] == 1 &&
-          adfGeoTransform[2] == 0 && adfGeoTransform[3] == 0 &&
-          adfGeoTransform[4] == 0 && adfGeoTransform[5] == 1);
-    if (adfGeoTransform[2] != 0 || adfGeoTransform[4] != 0)
+    GDALGeoTransform gt;
+    const bool bHasGeoTransform = poSrcDS->GetGeoTransform(gt) == CE_None &&
+                                  !(gt[0] == 0 && gt[1] == 1 && gt[2] == 0 &&
+                                    gt[3] == 0 && gt[4] == 0 && gt[5] == 1);
+    if (gt[2] != 0 || gt[4] != 0)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "HF2 driver does not support CreateCopy() from skewed or "
@@ -917,8 +893,7 @@ GDALDataset *HF2Dataset::CreateCopy(const char *pszFilename,
     WriteInt(fp, nYSize);
     WriteShort(fp, (GInt16)nTileSize);
     WriteFloat(fp, fVertPres);
-    const float fHorizScale =
-        (float)((fabs(adfGeoTransform[1]) + fabs(adfGeoTransform[5])) / 2);
+    const float fHorizScale = (float)((fabs(gt[1]) + fabs(gt[5])) / 2);
     WriteFloat(fp, fHorizScale);
     WriteInt(fp, nExtendedHeaderLen);
 
@@ -935,10 +910,10 @@ GDALDataset *HF2Dataset::CreateCopy(const char *pszFilename,
         VSIFWriteL(szBlockName, 16, 1, fp);
         WriteInt(fp, 34);
         WriteShort(fp, (GInt16)nExtentUnits);
-        WriteDouble(fp, adfGeoTransform[0]);
-        WriteDouble(fp, adfGeoTransform[0] + nXSize * adfGeoTransform[1]);
-        WriteDouble(fp, adfGeoTransform[3] + nYSize * adfGeoTransform[5]);
-        WriteDouble(fp, adfGeoTransform[3]);
+        WriteDouble(fp, gt[0]);
+        WriteDouble(fp, gt[0] + nXSize * gt[1]);
+        WriteDouble(fp, gt[3] + nYSize * gt[5]);
+        WriteDouble(fp, gt[3]);
     }
     if (nUTMZone != 0)
     {
@@ -971,11 +946,11 @@ GDALDataset *HF2Dataset::CreateCopy(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     /*      Copy imagery                                                    */
     /* -------------------------------------------------------------------- */
-    const int nXBlocks = (nXSize + nTileSize - 1) / nTileSize;
-    const int nYBlocks = (nYSize + nTileSize - 1) / nTileSize;
+    const int nXBlocks = DIV_ROUND_UP(nXSize, nTileSize);
+    const int nYBlocks = DIV_ROUND_UP(nYSize, nTileSize);
 
-    void *pTileBuffer = (void *)VSI_MALLOC_VERBOSE(
-        nTileSize * nTileSize * (GDALGetDataTypeSize(eReqDT) / 8));
+    void *pTileBuffer = VSI_MALLOC3_VERBOSE(nTileSize, nTileSize,
+                                            GDALGetDataTypeSizeBytes(eReqDT));
     if (pTileBuffer == nullptr)
     {
         VSIFCloseL(fp);
@@ -1061,7 +1036,7 @@ GDALDataset *HF2Dataset::CreateCopy(const char *pszFilename,
                 for (int k = 1; k < nReqYSize * nReqXSize; k++)
                 {
                     float fVal = ((float *)pTileBuffer)[k];
-                    if (CPLIsNan(fVal))
+                    if (std::isnan(fVal))
                     {
                         CPLError(CE_Failure, CPLE_NotSupported,
                                  "NaN value found");

@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2008, Ivan Lucena
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files ( the "Software" ),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 #include "gdal_priv.h"
@@ -83,7 +67,8 @@ GeoRasterRasterBand::GeoRasterRasterBand(GeoRasterDataset *poGDS, int nBandIn,
         for (int i = 0; i < nOverviewCount; i++)
         {
             papoOverviews[i] = new GeoRasterRasterBand(
-                (GeoRasterDataset *)poDS, nBand, i + 1, poJP2Dataset);
+                cpl::down_cast<GeoRasterDataset *>(poDS), nBand, i + 1,
+                poJP2Dataset);
         }
     }
 
@@ -110,7 +95,7 @@ GeoRasterRasterBand::GeoRasterRasterBand(GeoRasterDataset *poGDS, int nBandIn,
     //  Load NoData values and value ranges for this band (layer)
     //  -----------------------------------------------------------------------
 
-    if (((GeoRasterDataset *)poDS)->bApplyNoDataArray)
+    if ((cpl::down_cast<GeoRasterDataset *>(poDS))->bApplyNoDataArray)
     {
         CPLList *psList = nullptr;
         int nLayerCount = 0;
@@ -282,13 +267,14 @@ CPLErr GeoRasterRasterBand::IWriteBlock(int nBlockXOff, int nBlockYOff,
         return CE_Failure;
     }
 }
+
 //  ---------------------------------------------------------------------------
 //                                                     GetColorInterpretation()
 //  ---------------------------------------------------------------------------
 
 GDALColorInterp GeoRasterRasterBand::GetColorInterpretation()
 {
-    GeoRasterDataset *poGDS = (GeoRasterDataset *)poDS;
+    GeoRasterDataset *poGDS = cpl::down_cast<GeoRasterDataset *>(poDS);
 
     if (eDataType == GDT_Byte && poGDS->nBands > 2)
     {
@@ -404,13 +390,13 @@ CPLErr GeoRasterRasterBand::GetStatistics(int bApproxOK, int bForce,
     (void)bForce;
     (void)bApproxOK;
 
-    char szMin[MAX_DOUBLE_STR_REP + 1];
-    char szMax[MAX_DOUBLE_STR_REP + 1];
-    char szMean[MAX_DOUBLE_STR_REP + 1];
-    char szMedian[MAX_DOUBLE_STR_REP + 1];
-    char szMode[MAX_DOUBLE_STR_REP + 1];
-    char szStdDev[MAX_DOUBLE_STR_REP + 1];
-    char szSampling[MAX_DOUBLE_STR_REP + 1];
+    char szMin[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szMax[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szMean[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szMedian[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szMode[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szStdDev[MAX_DOUBLE_STR_REP + 1] = {0};
+    char szSampling[MAX_DOUBLE_STR_REP + 1] = {0};
 
     if (!bValidStats)
     {
@@ -505,7 +491,7 @@ CPLErr GeoRasterRasterBand::SetNoDataValue(double dfNoDataValue)
 
 CPLErr GeoRasterRasterBand::SetDefaultRAT(const GDALRasterAttributeTable *poRAT)
 {
-    GeoRasterDataset *poGDS = (GeoRasterDataset *)poDS;
+    GeoRasterDataset *poGDS = cpl::down_cast<GeoRasterDataset *>(poDS);
 
     if (!poRAT)
     {
@@ -594,7 +580,7 @@ CPLErr GeoRasterRasterBand::SetDefaultRAT(const GDALRasterAttributeTable *poRAT)
 
     OWStatement *poStmt = poGeoRaster->poConnection->CreateStatement(
         CPLSPrintf("DECLARE\n"
-                   "  TAB VARCHAR2(68)  := UPPER(:1);\n"
+                   "  TAB VARCHAR2(128) := UPPER(:1);\n"
                    "  CNT NUMBER        := 0;\n"
                    "BEGIN\n"
                    "  EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM USER_TABLES\n"
@@ -772,7 +758,7 @@ GDALRasterAttributeTable *GeoRasterRasterBand::GetDefaultRAT()
         poDefaultRAT = new GDALDefaultRasterAttributeTable();
     }
 
-    GeoRasterDataset *poGDS = (GeoRasterDataset *)poDS;
+    GeoRasterDataset *poGDS = cpl::down_cast<GeoRasterDataset *>(poDS);
 
     // ----------------------------------------------------------
     // Get the name of the VAT Table
@@ -850,7 +836,7 @@ GDALRasterAttributeTable *GeoRasterRasterBand::GetDefaultRAT()
     }
 
     if (!osColumnList.empty())
-        osColumnList.resize(osColumnList.size() - 1);  // remove the last comma
+        osColumnList.pop_back();  // remove the last comma
 
     // ----------------------------------------------------------
     // Read VAT and load RAT
@@ -940,7 +926,7 @@ CPLErr GeoRasterRasterBand::CreateMaskBand(int /*nFlags*/)
 
 GDALRasterBand *GeoRasterRasterBand::GetMaskBand()
 {
-    GeoRasterDataset *poGDS = (GeoRasterDataset *)this->poDS;
+    GeoRasterDataset *poGDS = cpl::down_cast<GeoRasterDataset *>(poDS);
 
     if (poGDS->poMaskBand != nullptr)
     {
@@ -956,7 +942,7 @@ GDALRasterBand *GeoRasterRasterBand::GetMaskBand()
 
 int GeoRasterRasterBand::GetMaskFlags()
 {
-    GeoRasterDataset *poGDS = (GeoRasterDataset *)this->poDS;
+    GeoRasterDataset *poGDS = cpl::down_cast<GeoRasterDataset *>(poDS);
 
     if (poGDS->poMaskBand != nullptr)
     {
@@ -972,9 +958,9 @@ int GeoRasterRasterBand::GetMaskFlags()
 
 void GeoRasterRasterBand::ApplyNoDataArray(void *pBuffer) const
 {
-    int i = 0;
+    size_t i = 0;
     int j = 0;
-    long n = nBlockXSize * nBlockYSize;
+    size_t n = static_cast<size_t>(nBlockXSize) * nBlockYSize;
 
     switch (eDataType)
     {

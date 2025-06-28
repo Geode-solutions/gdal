@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GeoPackage Translator
  * Purpose:  Utility header for OGR GeoPackage driver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2013, Paul Ramsey <pramsey@boundlessgeo.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_SQLITEUTILITY_H_INCLUDED
@@ -37,6 +20,7 @@
 #include <set>
 #include <string>
 #include <memory>
+#include <vector>
 
 class SQLResult
 {
@@ -48,14 +32,17 @@ class SQLResult
     {
         return nRowCount;
     }
+
     int ColCount() const
     {
         return nColCount;
     }
+
     void LimitRowCount(int nLimit);
 
     const char *GetValue(int iColumnNum, int iRowNum) const;
     int GetValueAsInteger(int iColNum, int iRowNum) const;
+    double GetValueAsDouble(int iColNum, int iRowNum) const;
 
   private:
     char **papszResult = nullptr;
@@ -71,8 +58,6 @@ GIntBig SQLGetInteger64(sqlite3 *poDb, const char *pszSQL, OGRErr *err);
 
 std::unique_ptr<SQLResult> SQLQuery(sqlite3 *poDb, const char *pszSQL);
 
-int SQLiteFieldFromOGR(OGRFieldType eType);
-
 /* To escape literals. The returned string doesn't contain the surrounding
  * single quotes */
 CPLString SQLEscapeLiteral(const char *pszLiteral);
@@ -87,6 +72,36 @@ CPLString SQLUnescape(const char *pszVal);
 
 char **SQLTokenize(const char *pszSQL);
 
-std::set<std::string> SQLGetUniqueFieldUCConstraints(sqlite3 *poDb,
-                                                     const char *pszTableName);
+struct SQLSqliteMasterContent
+{
+    std::string osSQL{};
+    std::string osType{};
+    std::string osTableName{};
+};
+
+std::set<std::string> SQLGetUniqueFieldUCConstraints(
+    sqlite3 *poDb, const char *pszTableName,
+    const std::vector<SQLSqliteMasterContent> &sqliteMasterContent =
+        std::vector<SQLSqliteMasterContent>());
+
+bool OGRSQLiteRTreeRequiresTrustedSchemaOn();
+
+bool OGRSQLiteIsSpatialFunctionReturningGeometry(const char *pszName);
+
+/* Wrapper of sqlite3_prepare_v2() that emits a CPLError() if failure */
+int SQLPrepareWithError(sqlite3 *db, const char *sql, int nByte,
+                        sqlite3_stmt **ppStmt, const char **pzTail);
+
+class GDALDataset;
+
+void OGRSQLite_gdal_get_pixel_value_common(const char *pszFunctionName,
+                                           sqlite3_context *pContext, int argc,
+                                           sqlite3_value **argv,
+                                           GDALDataset *poDS);
+
+#if defined(DEBUG) || defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION) ||     \
+    defined(ALLOW_FORMAT_DUMPS)
+bool SQLCheckLineIsSafe(const char *pszLine);
+#endif
+
 #endif  // OGR_SQLITEUTILITY_H_INCLUDED

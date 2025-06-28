@@ -1,7 +1,7 @@
 .. _gdal_merge:
 
 ================================================================================
-gdal_merge.py
+gdal_merge
 ================================================================================
 
 .. only:: html
@@ -15,16 +15,17 @@ Synopsis
 
 .. code-block::
 
-    gdal_merge.py [-o out_filename] [-of out_format] [-co NAME=VALUE]*
-                  [-ps pixelsize_x pixelsize_y] [-tap] [-separate] [-q] [-v] [-pct]
-                  [-ul_lr ulx uly lrx lry] [-init "value [value...]"]
-                  [-n nodata_value] [-a_nodata output_nodata_value]
-                  [-ot datatype] [-createonly] input_files
+    gdal_merge [--help] [--help-general]
+                  [-o <out_filename>] [-of <out_format>] [-co <NAME>=<VALUE>]...
+                  [-ps <pixelsize_x> <pixelsize_y>] [-tap] [-separate] [-q] [-v] [-pct]
+                  [-ul_lr <ulx> <uly> <lrx> <lry>] [-init "<value>[ <value>]..."]
+                  [-n <nodata_value>] [-a_nodata <output_nodata_value>]
+                  [-ot <datatype>] [-createonly] <input_file> [<input_file>]...
 
 Description
 -----------
 
-This utility will automatically mosaic a set of images.  All the images must
+This utility will automatically mosaic a set of images. All the images must
 be in the same coordinate system and have a matching number of bands, but
 they may be overlapping, and at different resolutions. In areas of overlap,
 the last image will be copied over earlier ones. Nodata/transparency values
@@ -32,7 +33,13 @@ are considered on a band by band level, i.e. a nodata/transparent pixel on
 one source band will not set a nodata/transparent value on all bands for the
 target pixel in the resulting raster nor will it overwrite a valid pixel value.
 
+.. note::
+
+    gdal_merge is a Python utility, and is only available if GDAL Python bindings are available.
+
 .. program:: gdal_merge
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: -o <out_filename>
 
@@ -63,6 +70,10 @@ target pixel in the resulting raster nor will it overwrite a valid pixel value.
     The extents of the output file.
     If not specified the aggregate extents of all input files will be
     used.
+
+.. option:: -q, -quiet
+
+    Suppress progress messages.
 
 .. option:: -v
 
@@ -97,24 +108,71 @@ target pixel in the resulting raster nor will it overwrite a valid pixel value.
     The output file is created (and potentially pre-initialized) but no input
     image data is copied into it.
 
-.. note::
 
-    gdal_merge.py is a Python script, and will only work if GDAL was built
-    with Python support.
+Examples
+--------
 
-Example
--------
+.. example::
+   :title: Creating an image with the pixels in all bands initialized to 255
 
-Create an image with the pixels in all bands initialized to 255.
+   .. code-block:: bash
 
-::
-
-    gdal_merge.py -init 255 -o out.tif in1.tif in2.tif
+      gdal_merge -init 255 -o out.tif in1.tif in2.tif
 
 
-Create an RGB image that shows blue in pixels with no data. The first two bands
-will be initialized to 0 and the third band will be initialized to 255.
+.. example::
+   :title: Creating an RGB image that shows blue in pixels with no data
 
-::
+   .. code-block:: bash
 
-    gdal_merge.py -init "0 0 255" -o out.tif in1.tif in2.tif
+      gdal_merge -init "0 0 255" -o out.tif in1.tif in2.tif
+
+   The first two bands will be initialized to 0 and the third band will be
+   initialized to 255.
+
+
+.. example::
+   :title: Passing a large list of files to :program:`gdal_merge`
+
+   .. code-block:: bash
+
+      ls -1 *.tif > tiff_list.txt
+
+   A large list of files can be passed to :program:`gdal_merge` by
+   listing them in a text file using the command above on Linux, or:
+
+   .. code-block:: doscon
+
+      dir /b /s *.tif > tiff_list.txt
+
+   on Windows. The text file can then be passed to :program:`gdal_merge`
+   using `--optfile`:
+
+   .. code-block:: bash
+
+      gdal_merge -o mosaic.tif --optfile tiff_list.txt
+
+
+.. example::
+   :title: Creating an RGB image by merging 3 different greyscale bands
+
+   Conduct "merging by stacking" with the :option:`-separate` flag. Given three
+   greyscale files that cover the same area, you can run:
+
+   .. code-block:: bash
+
+      gdal_merge -separate 1.tif 2.tif 3.tif -o rgb.tif
+
+   This maps :file:`1.tif` to red, :file:`2.tif` to green and :file:`3.tif` to blue.
+
+
+.. example::
+   :title: Specifying overlap precedence
+
+   The last image in the input line comes out on top of the finished image stack.
+   You might also need to use :option:`-n` to note which value should not be
+   copied into the destination image if it is not already defined as nodata.
+
+   .. code-block:: bash
+
+      gdal_merge -o merge.tif -n 0 image1.tif image2.tif image3.tif image4.tif

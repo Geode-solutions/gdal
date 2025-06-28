@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2010, Tamas Szekeres
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_mssqlspatial.h"
@@ -32,7 +16,8 @@
 /*                        OGRMSSQLSpatialLayer()                        */
 /************************************************************************/
 
-OGRMSSQLSpatialLayer::OGRMSSQLSpatialLayer()
+OGRMSSQLSpatialLayer::OGRMSSQLSpatialLayer(OGRMSSQLSpatialDataSource *poDSIn)
+    : poDS(poDSIn)
 
 {
 }
@@ -47,7 +32,7 @@ OGRMSSQLSpatialLayer::~OGRMSSQLSpatialLayer()
     if (m_nFeaturesRead > 0 && poFeatureDefn != nullptr)
     {
         CPLDebug("OGR_MSSQLSpatial", "%d features read on layer '%s'.",
-                 (int)m_nFeaturesRead, poFeatureDefn->GetName());
+                 static_cast<int>(m_nFeaturesRead), poFeatureDefn->GetName());
     }
 
     ClearStatement();
@@ -80,13 +65,30 @@ void OGRMSSQLSpatialLayer::BuildFeatureDefn(const char *pszLayerName,
     bool bShowFidColumn =
         CPLTestBool(CPLGetConfigOption("MSSQLSPATIAL_SHOW_FID_COLUMN", "NO"));
 
-    poFeatureDefn = new OGRFeatureDefn(pszLayerName);
+    if (!poFeatureDefn)
+    {
+        poFeatureDefn = new OGRFeatureDefn(pszLayerName);
+        poFeatureDefn->Reference();
+    }
+    else
+    {
+        for (int iFieldIdx = poFeatureDefn->GetFieldCount() - 1; iFieldIdx >= 0;
+             --iFieldIdx)
+        {
+            poFeatureDefn->DeleteFieldDefn(iFieldIdx);
+        }
+        for (int iFieldIdx = poFeatureDefn->GetGeomFieldCount() - 1;
+             iFieldIdx >= 0; --iFieldIdx)
+        {
+            poFeatureDefn->DeleteGeomFieldDefn(iFieldIdx);
+        }
+        poFeatureDefn->SetName(pszLayerName);
+    }
+
     nRawColumns = poStmtIn->GetColCount();
 
-    poFeatureDefn->Reference();
-
     CPLFree(panFieldOrdinals);
-    panFieldOrdinals = (int *)CPLMalloc(sizeof(int) * nRawColumns);
+    panFieldOrdinals = static_cast<int *>(CPLMalloc(sizeof(int) * nRawColumns));
 
     for (int iCol = 0; iCol < nRawColumns; iCol++)
     {
@@ -449,7 +451,7 @@ OGRFeature *OGRMSSQLSpatialLayer::GetNextRawFeature()
             poFeature->SetFieldNull(iField);
         else if (poFeature->GetFieldDefnRef(iField)->GetType() == OFTBinary)
             poFeature->SetField(iField, poStmt->GetColDataLength(iSrcField),
-                                (GByte *)pszValue);
+                                reinterpret_cast<const GByte *>(pszValue));
         else
             poFeature->SetField(iField, pszValue);
     }
@@ -478,7 +480,9 @@ OGRFeature *OGRMSSQLSpatialLayer::GetNextRawFeature()
                     {
                         OGRMSSQLGeometryParser oParser(nGeomColumnType);
                         eErr = oParser.ParseSqlGeometry(
-                            (unsigned char *)pszGeomText, nLength, &poGeom);
+                            reinterpret_cast<const unsigned char *>(
+                                pszGeomText),
+                            nLength, &poGeom);
                         nSRSId = oParser.GetSRSId();
                     }
                     break;
@@ -661,10 +665,8 @@ const char *OGRMSSQLSpatialLayer::GetGeometryColumn()
 char *OGRMSSQLSpatialLayer::GByteArrayToHexString(const GByte *pabyData,
                                                   int nLen)
 {
-    char *pszTextBuf;
-
     const size_t nTextBufLen = nLen * 2 + 3;
-    pszTextBuf = (char *)CPLMalloc(nTextBufLen);
+    char *pszTextBuf = static_cast<char *>(CPLMalloc(nTextBufLen));
 
     int iSrc, iDst = 0;
 
@@ -686,4 +688,13 @@ char *OGRMSSQLSpatialLayer::GByteArrayToHexString(const GByte *pabyData,
     pszTextBuf[iDst] = 0;
 
     return pszTextBuf;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRMSSQLSpatialLayer::GetDataset()
+{
+    return poDS;
 }

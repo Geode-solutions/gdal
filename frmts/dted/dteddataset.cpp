@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2007-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "dted_api.h"
@@ -57,12 +41,13 @@ class DTEDDataset final : public GDALPamDataset
     ~DTEDDataset() override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     const char *GetFileName() const
     {
         return pszFilename;
     }
+
     void SetFileName(const char *pszFilename);
 
     static GDALDataset *Open(GDALOpenInfo *);
@@ -128,7 +113,7 @@ DTEDRasterBand::DTEDRasterBand(DTEDDataset *poDSIn, int nBandIn)
 CPLErr DTEDRasterBand::IReadBlock(int nBlockXOff, CPL_UNUSED int nBlockYOff,
                                   void *pImage)
 {
-    DTEDDataset *poDTED_DS = (DTEDDataset *)poDS;
+    DTEDDataset *poDTED_DS = cpl::down_cast<DTEDDataset *>(poDS);
     int nYSize = poDTED_DS->psDTED->nYSize;
     GInt16 *panData;
 
@@ -138,7 +123,7 @@ CPLErr DTEDRasterBand::IReadBlock(int nBlockXOff, CPL_UNUSED int nBlockYOff,
     if (nBlockXSize != 1)
     {
         const int cbs = 32;  // optimize for 64 byte cache line size
-        const int bsy = (nBlockYSize + cbs - 1) / cbs * cbs;
+        const int bsy = DIV_ROUND_UP(nBlockYSize, cbs) * cbs;
         panData = (GInt16 *)pImage;
         GInt16 *panBuffer = (GInt16 *)CPLMalloc(sizeof(GInt16) * cbs * bsy);
         for (int i = 0; i < nBlockXSize; i += cbs)
@@ -196,7 +181,7 @@ CPLErr DTEDRasterBand::IReadBlock(int nBlockXOff, CPL_UNUSED int nBlockYOff,
 CPLErr DTEDRasterBand::IWriteBlock(int nBlockXOff, CPL_UNUSED int nBlockYOff,
                                    void *pImage)
 {
-    DTEDDataset *poDTED_DS = (DTEDDataset *)poDS;
+    DTEDDataset *poDTED_DS = cpl::down_cast<DTEDDataset *>(poDS);
     GInt16 *panData;
 
     (void)nBlockXOff;
@@ -463,6 +448,14 @@ GDALDataset *DTEDDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->SetMetadataItem("DTED_PartialCellIndicator", pszValue);
     CPLFree(pszValue);
 
+    pszValue = DTEDGetMetadata(psDTED, DTEDMD_SECURITYCONTROL);
+    poDS->SetMetadataItem("DTED_SecurityControl", pszValue);
+    CPLFree(pszValue);
+
+    pszValue = DTEDGetMetadata(psDTED, DTEDMD_SECURITYHANDLING);
+    poDS->SetMetadataItem("DTED_SecurityHandling", pszValue);
+    CPLFree(pszValue);
+
     poDS->SetMetadataItem(GDALMD_AREA_OR_POINT, GDALMD_AOP_POINT);
 
     /* -------------------------------------------------------------------- */
@@ -477,9 +470,9 @@ GDALDataset *DTEDDataset::Open(GDALOpenInfo *poOpenInfo)
         int bTryAux = TRUE;
         if (poOpenInfo->GetSiblingFiles() != nullptr &&
             CSLFindString(poOpenInfo->GetSiblingFiles(),
-                          CPLResetExtension(
-                              CPLGetFilename(poOpenInfo->pszFilename), "aux")) <
-                0 &&
+                          CPLResetExtensionSafe(
+                              CPLGetFilename(poOpenInfo->pszFilename), "aux")
+                              .c_str()) < 0 &&
             CSLFindString(
                 poOpenInfo->GetSiblingFiles(),
                 CPLSPrintf("%s.aux", CPLGetFilename(poOpenInfo->pszFilename))) <
@@ -514,7 +507,7 @@ GDALDataset *DTEDDataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr DTEDDataset::GetGeoTransform(double *padfTransform)
+CPLErr DTEDDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
 
@@ -522,23 +515,23 @@ CPLErr DTEDDataset::GetGeoTransform(double *padfTransform)
         CPLTestBool(CPLGetConfigOption("DTED_APPLY_PIXEL_IS_POINT", "FALSE"));
     if (!bApplyPixelIsPoint)
     {
-        padfTransform[0] = psDTED->dfULCornerX;
-        padfTransform[1] = psDTED->dfPixelSizeX;
-        padfTransform[2] = 0.0;
-        padfTransform[3] = psDTED->dfULCornerY;
-        padfTransform[4] = 0.0;
-        padfTransform[5] = psDTED->dfPixelSizeY * -1;
+        gt[0] = psDTED->dfULCornerX;
+        gt[1] = psDTED->dfPixelSizeX;
+        gt[2] = 0.0;
+        gt[3] = psDTED->dfULCornerY;
+        gt[4] = 0.0;
+        gt[5] = psDTED->dfPixelSizeY * -1;
 
         return CE_None;
     }
     else
     {
-        padfTransform[0] = psDTED->dfULCornerX + (0.5 * psDTED->dfPixelSizeX);
-        padfTransform[1] = psDTED->dfPixelSizeX;
-        padfTransform[2] = 0.0;
-        padfTransform[3] = psDTED->dfULCornerY - (0.5 * psDTED->dfPixelSizeY);
-        padfTransform[4] = 0.0;
-        padfTransform[5] = psDTED->dfPixelSizeY * -1;
+        gt[0] = psDTED->dfULCornerX + (0.5 * psDTED->dfPixelSizeX);
+        gt[1] = psDTED->dfPixelSizeX;
+        gt[2] = 0.0;
+        gt[3] = psDTED->dfULCornerY - (0.5 * psDTED->dfPixelSizeY);
+        gt[4] = 0.0;
+        gt[5] = psDTED->dfPixelSizeY * -1;
 
         return CE_None;
     }
@@ -728,21 +721,17 @@ static GDALDataset *DTEDCreateCopy(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     /*      Work out the LL origin.                                         */
     /* -------------------------------------------------------------------- */
-    double adfGeoTransform[6];
-
-    poSrcDS->GetGeoTransform(adfGeoTransform);
+    GDALGeoTransform gt;
+    poSrcDS->GetGeoTransform(gt);
 
     int nLLOriginLat =
-        (int)floor(adfGeoTransform[3] +
-                   poSrcDS->GetRasterYSize() * adfGeoTransform[5] + 0.5);
+        (int)floor(gt[3] + poSrcDS->GetRasterYSize() * gt[5] + 0.5);
 
-    int nLLOriginLong = (int)floor(adfGeoTransform[0] + 0.5);
+    int nLLOriginLong = (int)floor(gt[0] + 0.5);
 
     if (fabs(nLLOriginLat -
-             (adfGeoTransform[3] + (poSrcDS->GetRasterYSize() - 0.5) *
-                                       adfGeoTransform[5])) > 1e-10 ||
-        fabs(nLLOriginLong - (adfGeoTransform[0] + 0.5 * adfGeoTransform[1])) >
-            1e-10)
+             (gt[3] + (poSrcDS->GetRasterYSize() - 0.5) * gt[5])) > 1e-10 ||
+        fabs(nLLOriginLong - (gt[0] + 0.5 * gt[1])) > 1e-10)
     {
         CPLError(CE_Warning, CPLE_AppDefined,
                  "The corner coordinates of the source are not properly "

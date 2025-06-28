@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Oslandia <info at oslandia dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogrwasp.h"
@@ -39,9 +23,11 @@
 /*                            OGRWAsPLayer()                             */
 /************************************************************************/
 
-OGRWAsPLayer::OGRWAsPLayer(const char *pszName, VSILFILE *hFileHandle,
+OGRWAsPLayer::OGRWAsPLayer(GDALDataset *poDS, const char *pszName,
+                           VSILFILE *hFileHandle,
                            OGRSpatialReference *poSpatialRef)
-    : bMerge(false), iFeatureCount(0), sName(pszName), hFile(hFileHandle),
+    : m_poDS(poDS), bMerge(false), iFeatureCount(0), sName(pszName),
+      hFile(hFileHandle), sFirstField{}, sSecondField{}, sGeomField{},
       iFirstFieldIdx(0), iSecondFieldIdx(1), iGeomFieldIdx(0),
       poLayerDefn(new OGRFeatureDefn(pszName)),
       poSpatialReference(poSpatialRef), iOffsetFeatureBegin(VSIFTellL(hFile)),
@@ -55,17 +41,16 @@ OGRWAsPLayer::OGRWAsPLayer(const char *pszName, VSILFILE *hFileHandle,
         poSpatialReference->Reference();
 }
 
-OGRWAsPLayer::OGRWAsPLayer(const char *pszName, VSILFILE *hFileHandle,
-                           OGRSpatialReference *poSpatialRef,
-                           const CPLString &sFirstFieldParam,
-                           const CPLString &sSecondFieldParam,
-                           const CPLString &sGeomFieldParam, bool bMergeParam,
-                           double *pdfToleranceParam,
-                           double *pdfAdjacentPointToleranceParam,
-                           double *pdfPointToCircleRadiusParam)
-    : bMerge(bMergeParam), iFeatureCount(0), sName(pszName), hFile(hFileHandle),
-      sFirstField(sFirstFieldParam), sSecondField(sSecondFieldParam),
-      sGeomField(sGeomFieldParam), iFirstFieldIdx(-1), iSecondFieldIdx(-1),
+OGRWAsPLayer::OGRWAsPLayer(
+    GDALDataset *poDS, const char *pszName, VSILFILE *hFileHandle,
+    OGRSpatialReference *poSpatialRef, const CPLString &sFirstFieldParam,
+    const CPLString &sSecondFieldParam, const CPLString &sGeomFieldParam,
+    bool bMergeParam, double *pdfToleranceParam,
+    double *pdfAdjacentPointToleranceParam, double *pdfPointToCircleRadiusParam)
+    : m_poDS(poDS), bMerge(bMergeParam), iFeatureCount(0), sName(pszName),
+      hFile(hFileHandle), sFirstField(sFirstFieldParam),
+      sSecondField(sSecondFieldParam), sGeomField(sGeomFieldParam),
+      iFirstFieldIdx(-1), iSecondFieldIdx(-1),
       iGeomFieldIdx(sGeomFieldParam.empty() ? 0 : -1),
       poLayerDefn(new OGRFeatureDefn(pszName)),
       poSpatialReference(poSpatialRef),
@@ -282,7 +267,7 @@ OGRLineString *OGRWAsPLayer::Simplify(const OGRLineString &line) const
     if (pdfAdjacentPointTolerance.get() && *pdfAdjacentPointTolerance > 0)
     {
         /* remove consecutive points that are too close */
-        auto newLine = cpl::make_unique<OGRLineString>();
+        auto newLine = std::make_unique<OGRLineString>();
         const double dist = *pdfAdjacentPointTolerance;
         OGRPoint pt;
         poLine->StartPoint(&pt);
@@ -698,7 +683,7 @@ OGRErr OGRWAsPLayer::ICreateFeature(OGRFeature *poFeature)
 /*                            CreateField()                            */
 /************************************************************************/
 
-OGRErr OGRWAsPLayer::CreateField(OGRFieldDefn *poField,
+OGRErr OGRWAsPLayer::CreateField(const OGRFieldDefn *poField,
                                  CPL_UNUSED int bApproxOK)
 {
     poLayerDefn->AddFieldDefn(poField);
@@ -716,14 +701,17 @@ OGRErr OGRWAsPLayer::CreateField(OGRFieldDefn *poField,
 /*                           CreateGeomField()                          */
 /************************************************************************/
 
-OGRErr OGRWAsPLayer::CreateGeomField(OGRGeomFieldDefn *poGeomFieldIn,
+OGRErr OGRWAsPLayer::CreateGeomField(const OGRGeomFieldDefn *poGeomFieldIn,
                                      CPL_UNUSED int bApproxOK)
 {
     OGRGeomFieldDefn oFieldDefn(poGeomFieldIn);
-    if (oFieldDefn.GetSpatialRef())
+    auto poSRSOri = poGeomFieldIn->GetSpatialRef();
+    if (poSRSOri)
     {
-        oFieldDefn.GetSpatialRef()->SetAxisMappingStrategy(
-            OAMS_TRADITIONAL_GIS_ORDER);
+        auto poSRS = poSRSOri->Clone();
+        poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        oFieldDefn.SetSpatialRef(poSRS);
+        poSRS->Release();
     }
     poLayerDefn->AddGeomFieldDefn(&oFieldDefn);
 
@@ -753,7 +741,7 @@ OGRFeature *OGRWAsPLayer::GetNextRawFeature()
     if (!pszLine)
         return nullptr;
 
-    double dfValues[4];
+    double dfValues[4] = {0};
     int iNumValues = 0;
     {
         std::istringstream iss(pszLine);
@@ -786,7 +774,7 @@ OGRFeature *OGRWAsPLayer::GetNextRawFeature()
         return nullptr;
     }
 
-    auto poFeature = cpl::make_unique<OGRFeature>(poLayerDefn);
+    auto poFeature = std::make_unique<OGRFeature>(poLayerDefn);
     poFeature->SetFID(++iFeatureCount);
     for (int i = 0; i < iNumValues - 1; i++)
         poFeature->SetField(i, dfValues[i]);
@@ -809,7 +797,7 @@ OGRFeature *OGRWAsPLayer::GetNextRawFeature()
         CPLError(CE_Failure, CPLE_FileIO, "No enough values for linestring");
         return nullptr;
     }
-    auto poLine = cpl::make_unique<OGRLineString>();
+    auto poLine = std::make_unique<OGRLineString>();
     poLine->setCoordinateDimension(3);
     poLine->assignSpatialReference(poSpatialReference);
     for (int i = 0; i < iNumValuesToRead; i += 2)

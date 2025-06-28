@@ -50,7 +50,7 @@ void GNMGraph::AddVertex(GNMGFID nFID)
 
     GNMStdVertex stVertex;
     stVertex.bIsBlocked = false;
-    m_mstVertices[nFID] = stVertex;
+    m_mstVertices[nFID] = std::move(stVertex);
 }
 
 void GNMGraph::DeleteVertex(GNMGFID nFID)
@@ -85,10 +85,13 @@ void GNMGraph::AddEdge(GNMGFID nConFID, GNMGFID nSrcFID, GNMGFID nTgtFID,
     AddVertex(nSrcFID);
     AddVertex(nTgtFID);
 
-    std::map<GNMGFID, GNMStdVertex>::iterator itSrs =
-        m_mstVertices.find(nSrcFID);
-    std::map<GNMGFID, GNMStdVertex>::iterator itTgt =
-        m_mstVertices.find(nTgtFID);
+    auto itSrs = m_mstVertices.find(nSrcFID);
+    auto itTgt = m_mstVertices.find(nTgtFID);
+    if (itSrs == m_mstVertices.end() || itTgt == m_mstVertices.end())
+    {
+        CPLAssert(false);
+        return;
+    }
 
     // Insert edge to the array of edges.
     GNMStdEdge stEdge;
@@ -117,13 +120,12 @@ void GNMGraph::DeleteEdge(GNMGFID nConFID)
     m_mstEdges.erase(nConFID);
 
     // remove edge from all vertices anOutEdgeFIDs
-    for (std::map<GNMGFID, GNMStdVertex>::iterator it = m_mstVertices.begin();
-         it != m_mstVertices.end(); ++it)
+    for (auto &it : m_mstVertices)
     {
-        it->second.anOutEdgeFIDs.erase(
-            std::remove(it->second.anOutEdgeFIDs.begin(),
-                        it->second.anOutEdgeFIDs.end(), nConFID),
-            it->second.anOutEdgeFIDs.end());
+        it.second.anOutEdgeFIDs.erase(
+            std::remove(it.second.anOutEdgeFIDs.begin(),
+                        it.second.anOutEdgeFIDs.end(), nConFID),
+            it.second.anOutEdgeFIDs.end());
     }
 }
 
@@ -266,7 +268,7 @@ std::vector<GNMPATH> GNMGraph::KShortestPaths(GNMGFID nStartFID,
     if (aoFirstPath.empty())
         return A;  // return empty array if there is no path between points.
 
-    A.push_back(aoFirstPath);
+    A.push_back(std::move(aoFirstPath));
 
     size_t i, k, l;
     GNMPATH::iterator itAk, tempIt, itR;
@@ -569,7 +571,6 @@ void GNMGraph::TraceTargets(std::queue<GNMGFID> &vertexQueue,
                             std::set<GNMGFID> &markedVertIds,
                             GNMPATH &connectedIds)
 {
-    GNMCONSTVECTOR::const_iterator it;
     std::queue<GNMGFID> neighbours_queue;
 
     // See all given vertices except thouse that have been already seen.
@@ -589,11 +590,8 @@ void GNMGraph::TraceTargets(std::queue<GNMGFID> &vertexQueue,
             LPGNMCONSTVECTOR panOutcomeEdgeIDs = GetOutEdges(nCurVertID);
             if (nullptr != panOutcomeEdgeIDs)
             {
-                for (it = panOutcomeEdgeIDs->begin();
-                     it != panOutcomeEdgeIDs->end(); ++it)
+                for (const GNMGFID nCurEdgeID : *panOutcomeEdgeIDs)
                 {
-                    GNMGFID nCurEdgeID = *it;
-
                     // ISSUE: think about to return a sequence of vertices and
                     // edges (which is more universal), as now we are going to
                     // return only sequence of edges.
@@ -633,4 +631,5 @@ void GNMGraph::TraceTargets(std::queue<GNMGFID> &vertexQueue,
     if (!neighbours_queue.empty())
         TraceTargets(neighbours_queue, markedVertIds, connectedIds);
 }
+
 //! @endcond

@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2017-2018, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_json.h"
@@ -67,9 +51,9 @@ namespace cpl
 /************************************************************************/
 
 void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
-    const CPLString &osBaseURL, const CPLString &osPrefix, const char *pszJson,
-    CPLStringList &osFileList, int nMaxFilesThisQuery, int nMaxFiles,
-    bool &bIsTruncated, CPLString &osNextMarker)
+    const std::string &osBaseURL, const std::string &osPrefix,
+    const char *pszJson, CPLStringList &osFileList, int nMaxFilesThisQuery,
+    int nMaxFiles, bool &bIsTruncated, std::string &osNextMarker)
 {
 #if DEBUG_VERBOSE
     CPLDebug("SWIFT", "%s", pszJson);
@@ -81,10 +65,10 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
     if (!oDoc.LoadMemory(reinterpret_cast<const GByte *>(pszJson)))
         return;
 
-    std::vector<std::pair<CPLString, FileProp>> aoProps;
+    std::vector<std::pair<std::string, FileProp>> aoProps;
     // Count the number of occurrences of a path. Can be 1 or 2. 2 in the case
     // that both a filename and directory exist
-    std::map<CPLString, int> aoNameCount;
+    std::map<std::string, int> aoNameCount;
 
     CPLJSONArray oArray = oDoc.GetRoot().ToArray();
     for (int i = 0; i < oArray.Size(); i++)
@@ -93,7 +77,7 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
         std::string osName = oItem.GetString("name");
         GInt64 nSize = oItem.GetLong("bytes");
         std::string osLastModified = oItem.GetString("last_modified");
-        CPLString osSubdir = oItem.GetString("subdir");
+        std::string osSubdir = oItem.GetString("subdir");
         bool bHasCount = oItem.GetLong("count", -1) >= 0;
         if (!osName.empty())
         {
@@ -112,7 +96,7 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
                     prop.mTime = 0;
 
                     aoProps.push_back(
-                        std::pair<CPLString, FileProp>(osName, prop));
+                        std::pair<std::string, FileProp>(osName, prop));
                     aoNameCount[osName]++;
                 }
                 else
@@ -139,7 +123,7 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
                             CPLYMDHMSToUnixTime(&brokendowntime));
                     }
 
-                    aoProps.push_back(std::pair<CPLString, FileProp>(
+                    aoProps.push_back(std::pair<std::string, FileProp>(
                         osName.substr(osPrefix.size()), prop));
                     aoNameCount[osName.substr(osPrefix.size())]++;
                 }
@@ -149,8 +133,8 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
         {
             osNextMarker = osSubdir;
             if (osSubdir.back() == '/')
-                osSubdir.resize(osSubdir.size() - 1);
-            if (osSubdir.find(osPrefix) == 0)
+                osSubdir.pop_back();
+            if (STARTS_WITH(osSubdir.c_str(), osPrefix.c_str()))
             {
 
                 FileProp prop;
@@ -160,7 +144,7 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
                 prop.fileSize = 0;
                 prop.mTime = 0;
 
-                aoProps.push_back(std::pair<CPLString, FileProp>(
+                aoProps.push_back(std::pair<std::string, FileProp>(
                     osSubdir.substr(osPrefix.size()), prop));
                 aoNameCount[osSubdir.substr(osPrefix.size())]++;
             }
@@ -178,7 +162,7 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
 
     for (size_t i = 0; i < aoProps.size(); i++)
     {
-        CPLString osSuffix;
+        std::string osSuffix;
         if (aoNameCount[aoProps[i].first] == 2 &&
             aoProps[i].second.bIsDirectory)
         {
@@ -189,13 +173,13 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
         }
         if (nMaxFiles != 1)
         {
-            CPLString osCachedFilename =
+            std::string osCachedFilename =
                 osBaseURL + "/" + CPLAWSURLEncode(osPrefix, false) +
                 CPLAWSURLEncode(aoProps[i].first, false) + osSuffix;
 #if DEBUG_VERBOSE
             CPLDebug("SWIFT", "Cache %s", osCachedFilename.c_str());
 #endif
-            SetCachedFileProp(osCachedFilename, aoProps[i].second);
+            SetCachedFileProp(osCachedFilename.c_str(), aoProps[i].second);
         }
         osFileList.AddString((aoProps[i].first + osSuffix).c_str());
     }
@@ -212,7 +196,8 @@ class VSISwiftFSHandler final : public IVSIS3LikeFSHandler
 
   protected:
     VSICurlHandle *CreateFileHandle(const char *pszFilename) override;
-    CPLString GetURLFromFilename(const CPLString &osFilename) override;
+    std::string
+    GetURLFromFilename(const std::string &osFilename) const override;
 
     const char *GetDebugKey() const override
     {
@@ -222,7 +207,7 @@ class VSISwiftFSHandler final : public IVSIS3LikeFSHandler
     IVSIS3LikeHandleHelper *CreateHandleHelper(const char *pszURI,
                                                bool bAllowNoObject) override;
 
-    CPLString GetFSPrefix() const override
+    std::string GetFSPrefix() const override
     {
         return m_osPrefix;
     }
@@ -232,14 +217,16 @@ class VSISwiftFSHandler final : public IVSIS3LikeFSHandler
 
     void ClearCache() override;
 
+    VSIVirtualHandleUniquePtr
+    CreateWriteHandle(const char *pszFilename,
+                      CSLConstList papszOptions) override;
+
   public:
     explicit VSISwiftFSHandler(const char *pszPrefix) : m_osPrefix(pszPrefix)
     {
     }
-    ~VSISwiftFSHandler() override;
 
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError, CSLConstList papszOptions) override;
+    ~VSISwiftFSHandler() override;
 
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
@@ -259,14 +246,6 @@ class VSISwiftFSHandler final : public IVSIS3LikeFSHandler
         return osFilename;
     }
 
-    bool SupportsSequentialWrite(const char * /* pszPath */,
-                                 bool /* bAllowLocalTempFile */) override
-    {
-        return true;
-    }
-    bool SupportsRandomWrite(const char * /* pszPath */,
-                             bool /* bAllowLocalTempFile */) override;
-
     VSIFilesystemHandler *Duplicate(const char *pszPrefix) override
     {
         return new VSISwiftFSHandler(pszPrefix);
@@ -285,7 +264,7 @@ class VSISwiftHandle final : public IVSIS3LikeHandle
 
   protected:
     struct curl_slist *
-    GetCurlHeaders(const CPLString &osVerb,
+    GetCurlHeaders(const std::string &osVerb,
                    const struct curl_slist *psExistingHeaders) override;
     virtual bool Authenticate(const char *pszFilename) override;
 
@@ -296,62 +275,20 @@ class VSISwiftHandle final : public IVSIS3LikeHandle
 };
 
 /************************************************************************/
-/*                                Open()                                */
+/*                          CreateWriteHandle()                         */
 /************************************************************************/
 
-VSIVirtualHandle *VSISwiftFSHandler::Open(const char *pszFilename,
-                                          const char *pszAccess, bool bSetError,
-                                          CSLConstList papszOptions)
+VSIVirtualHandleUniquePtr
+VSISwiftFSHandler::CreateWriteHandle(const char *pszFilename,
+                                     CSLConstList papszOptions)
 {
-    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix()))
+    auto poHandleHelper =
+        CreateHandleHelper(pszFilename + GetFSPrefix().size(), false);
+    if (poHandleHelper == nullptr)
         return nullptr;
-
-    if (strchr(pszAccess, 'w') != nullptr || strchr(pszAccess, 'a') != nullptr)
-    {
-        if (strchr(pszAccess, '+') != nullptr &&
-            !SupportsRandomWrite(pszFilename, true))
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "w+ not supported for /vsiswift, unless "
-                     "CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE is set to YES");
-            errno = EACCES;
-            return nullptr;
-        }
-
-        VSISwiftHandleHelper *poHandleHelper =
-            VSISwiftHandleHelper::BuildFromURI(
-                pszFilename + GetFSPrefix().size(), GetFSPrefix().c_str());
-        if (poHandleHelper == nullptr)
-            return nullptr;
-        UpdateHandleFromMap(poHandleHelper);
-        VSIS3WriteHandle *poHandle = new VSIS3WriteHandle(
-            this, pszFilename, poHandleHelper, true, papszOptions);
-        if (!poHandle->IsOK())
-        {
-            delete poHandle;
-            return nullptr;
-        }
-        if (strchr(pszAccess, '+') != nullptr)
-        {
-            return VSICreateUploadOnCloseFile(poHandle);
-        }
-        return poHandle;
-    }
-
-    return VSICurlFilesystemHandlerBase::Open(pszFilename, pszAccess, bSetError,
-                                              papszOptions);
-}
-
-/************************************************************************/
-/*                        SupportsRandomWrite()                         */
-/************************************************************************/
-
-bool VSISwiftFSHandler::SupportsRandomWrite(const char * /* pszPath */,
-                                            bool bAllowLocalTempFile)
-{
-    return bAllowLocalTempFile &&
-           CPLTestBool(CPLGetConfigOption(
-               "CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE", "NO"));
+    auto poHandle = std::make_unique<VSIChunkedWriteHandle>(
+        this, pszFilename, poHandleHelper, papszOptions);
+    return VSIVirtualHandleUniquePtr(poHandle.release());
 }
 
 /************************************************************************/
@@ -381,8 +318,8 @@ void VSISwiftFSHandler::ClearCache()
 
 const char *VSISwiftFSHandler::GetOptions()
 {
-    static CPLString osOptions(
-        CPLString("<Options>") +
+    static std::string osOptions(
+        std::string("<Options>") +
         "  <Option name='SWIFT_STORAGE_URL' type='string' "
         "description='Storage URL. To use with SWIFT_AUTH_TOKEN'/>"
         "  <Option name='SWIFT_AUTH_TOKEN' type='string' "
@@ -424,7 +361,6 @@ VSICurlHandle *VSISwiftFSHandler::CreateFileHandle(const char *pszFilename)
         pszFilename + GetFSPrefix().size(), GetFSPrefix().c_str());
     if (poHandleHelper)
     {
-        UpdateHandleFromMap(poHandleHelper);
         return new VSISwiftHandle(this, pszFilename, poHandleHelper);
     }
     return nullptr;
@@ -434,21 +370,22 @@ VSICurlHandle *VSISwiftFSHandler::CreateFileHandle(const char *pszFilename)
 /*                         GetURLFromFilename()                         */
 /************************************************************************/
 
-CPLString VSISwiftFSHandler::GetURLFromFilename(const CPLString &osFilename)
+std::string
+VSISwiftFSHandler::GetURLFromFilename(const std::string &osFilename) const
 {
-    CPLString osFilenameWithoutPrefix = osFilename.substr(GetFSPrefix().size());
+    const std::string osFilenameWithoutPrefix =
+        osFilename.substr(GetFSPrefix().size());
 
-    VSISwiftHandleHelper *poHandleHelper = VSISwiftHandleHelper::BuildFromURI(
-        osFilenameWithoutPrefix, GetFSPrefix().c_str());
-    if (poHandleHelper == nullptr)
+    auto poHandleHelper = std::unique_ptr<VSISwiftHandleHelper>(
+        VSISwiftHandleHelper::BuildFromURI(osFilenameWithoutPrefix.c_str(),
+                                           GetFSPrefix().c_str()));
+    if (!poHandleHelper)
     {
-        return "";
+        return std::string();
     }
-    CPLString osBaseURL(poHandleHelper->GetURL());
+    std::string osBaseURL(poHandleHelper->GetURL());
     if (!osBaseURL.empty() && osBaseURL.back() == '/')
-        osBaseURL.resize(osBaseURL.size() - 1);
-    delete poHandleHelper;
-
+        osBaseURL.pop_back();
     return osBaseURL;
 }
 
@@ -469,16 +406,16 @@ VSISwiftFSHandler::CreateHandleHelper(const char *pszURI, bool)
 int VSISwiftFSHandler::Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
                             int nFlags)
 {
-    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix()))
+    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix().c_str()))
         return -1;
 
     if ((nFlags & VSI_STAT_CACHE_ONLY) != 0)
         return VSICurlFilesystemHandlerBase::Stat(pszFilename, pStatBuf,
                                                   nFlags);
 
-    CPLString osFilename(pszFilename);
+    std::string osFilename(pszFilename);
     if (osFilename.back() == '/')
-        osFilename.resize(osFilename.size() - 1);
+        osFilename.pop_back();
 
     memset(pStatBuf, 0, sizeof(VSIStatBufL));
 
@@ -501,7 +438,8 @@ int VSISwiftFSHandler::Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
                 cachedFileProp.bIsDirectory = true;
                 cachedFileProp.mTime = 0;
                 cachedFileProp.nMode = S_IFDIR;
-                SetCachedFileProp(poHandleHelper->GetURL(), cachedFileProp);
+                SetCachedFileProp(poHandleHelper->GetURL().c_str(),
+                                  cachedFileProp);
             }
 
             pStatBuf->st_size = 0;
@@ -515,9 +453,10 @@ int VSISwiftFSHandler::Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
     if (std::count(osFilename.begin(), osFilename.end(), '/') < 2)
         return -1;
 
-    char **papszContents = VSIReadDir(CPLGetPath(osFilename));
-    int nRet = CSLFindStringCaseSensitive(papszContents,
-                                          CPLGetFilename(osFilename)) >= 0
+    char **papszContents =
+        VSIReadDir(CPLGetPathSafe(osFilename.c_str()).c_str());
+    int nRet = CSLFindStringCaseSensitive(
+                   papszContents, CPLGetFilename(osFilename.c_str())) >= 0
                    ? 0
                    : -1;
     CSLDestroy(papszContents);
@@ -543,7 +482,7 @@ int VSISwiftFSHandler::Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
         CreateHandleHelper(pszFilename + GetFSPrefix().size(), true));
     if (poHandleHelper)
     {
-        SetCachedFileProp(poHandleHelper->GetURL(), cachedFileProp);
+        SetCachedFileProp(poHandleHelper->GetURL().c_str(), cachedFileProp);
     }
 
     return nRet;
@@ -560,14 +499,14 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
         CPLDebug(GetDebugKey(), "GetFileList(%s)", pszDirname);
     *pbGotFileList = false;
     CPLAssert(strlen(pszDirname) >= GetFSPrefix().size());
-    CPLString osDirnameWithoutPrefix = pszDirname + GetFSPrefix().size();
+    std::string osDirnameWithoutPrefix = pszDirname + GetFSPrefix().size();
     if (!osDirnameWithoutPrefix.empty() && osDirnameWithoutPrefix.back() == '/')
     {
-        osDirnameWithoutPrefix.resize(osDirnameWithoutPrefix.size() - 1);
+        osDirnameWithoutPrefix.pop_back();
     }
 
-    CPLString osBucket(osDirnameWithoutPrefix);
-    CPLString osObjectKey;
+    std::string osBucket(osDirnameWithoutPrefix);
+    std::string osObjectKey;
     size_t nSlashPos = osDirnameWithoutPrefix.find('/');
     if (nSlashPos != std::string::npos)
     {
@@ -576,7 +515,7 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
     }
 
     IVSIS3LikeHandleHelper *poS3HandleHelper =
-        CreateHandleHelper(osBucket, true);
+        CreateHandleHelper(osBucket.c_str(), true);
     if (poS3HandleHelper == nullptr)
     {
         return nullptr;
@@ -585,31 +524,29 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
     WriteFuncStruct sWriteFuncData;
 
     CPLStringList osFileList;  // must be left in this scope !
-    CPLString osNextMarker;    // must be left in this scope !
+    std::string osNextMarker;  // must be left in this scope !
 
-    CPLString osMaxKeys = CPLGetConfigOption("SWIFT_MAX_KEYS", "10000");
-    int nMaxFilesThisQuery = atoi(osMaxKeys);
+    std::string osMaxKeys = CPLGetConfigOption("SWIFT_MAX_KEYS", "10000");
+    int nMaxFilesThisQuery = atoi(osMaxKeys.c_str());
     if (nMaxFiles > 0 && nMaxFiles <= 100 && nMaxFiles < nMaxFilesThisQuery)
     {
         nMaxFilesThisQuery = nMaxFiles + 1;
     }
-    const CPLString osPrefix(osObjectKey.empty() ? CPLString()
-                                                 : osObjectKey + "/");
+    const std::string osPrefix(osObjectKey.empty() ? std::string()
+                                                   : osObjectKey + "/");
+
+    const CPLStringList aosHTTPOptions(CPLHTTPGetOptionsFromEnv(pszDirname));
+    const CPLHTTPRetryParameters oRetryParameters(aosHTTPOptions);
 
     while (true)
     {
+        CPLHTTPRetryContext oRetryContext(oRetryParameters);
         bool bRetry;
-        int nRetryCount = 0;
-        const int nMaxRetry = atoi(CPLGetConfigOption(
-            "GDAL_HTTP_MAX_RETRY", CPLSPrintf("%d", CPL_HTTP_MAX_RETRY)));
-        // coverity[tainted_data]
-        double dfRetryDelay = CPLAtof(CPLGetConfigOption(
-            "GDAL_HTTP_RETRY_DELAY", CPLSPrintf("%f", CPL_HTTP_RETRY_DELAY)));
         do
         {
             bRetry = false;
             poS3HandleHelper->ResetQueryParameters();
-            CPLString osBaseURL(poS3HandleHelper->GetURL());
+            std::string osBaseURL(poS3HandleHelper->GetURL());
 
             CURLM *hCurlMultiHandle = GetCurlMultiHandleFor(osBaseURL);
             CURL *hCurlHandle = curl_easy_init();
@@ -626,7 +563,8 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
             }
 
             struct curl_slist *headers = VSICurlSetOptions(
-                hCurlHandle, poS3HandleHelper->GetURL(), nullptr);
+                hCurlHandle, poS3HandleHelper->GetURL().c_str(),
+                aosHTTPOptions.List());
             // Disable automatic redirection
             unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_FOLLOWLOCATION, 0);
 
@@ -656,7 +594,7 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
             unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER,
                                        headers);
 
-            MultiPerform(hCurlMultiHandle, hCurlHandle);
+            VSICURLMultiPerform(hCurlMultiHandle, hCurlHandle);
 
             VSICURLResetHeaderAndWriterFunctions(hCurlHandle);
 
@@ -676,28 +614,24 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
             if (response_code != 200)
             {
                 // Look if we should attempt a retry
-                const double dfNewRetryDelay = CPLHTTPGetNewRetryDelay(
-                    static_cast<int>(response_code), dfRetryDelay,
-                    sWriteFuncHeaderData.pBuffer, szCurlErrBuf);
-                if (dfNewRetryDelay > 0 && nRetryCount < nMaxRetry)
+                if (oRetryContext.CanRetry(static_cast<int>(response_code),
+                                           sWriteFuncHeaderData.pBuffer,
+                                           szCurlErrBuf))
                 {
                     CPLError(CE_Warning, CPLE_AppDefined,
                              "HTTP error code: %d - %s. "
                              "Retrying again in %.1f secs",
                              static_cast<int>(response_code),
-                             poS3HandleHelper->GetURL().c_str(), dfRetryDelay);
-                    CPLSleep(dfRetryDelay);
-                    dfRetryDelay = dfNewRetryDelay;
-                    nRetryCount++;
+                             poS3HandleHelper->GetURL().c_str(),
+                             oRetryContext.GetCurrentDelay());
+                    CPLSleep(oRetryContext.GetCurrentDelay());
                     bRetry = true;
                     CPLFree(sWriteFuncData.pBuffer);
                     CPLFree(sWriteFuncHeaderData.pBuffer);
                 }
                 else
                 {
-                    CPLDebug(GetDebugKey(), "%s",
-                             sWriteFuncData.pBuffer ? sWriteFuncData.pBuffer
-                                                    : "(null)");
+                    CPLDebug(GetDebugKey(), "%s", sWriteFuncData.pBuffer);
                     CPLFree(sWriteFuncData.pBuffer);
                     CPLFree(sWriteFuncHeaderData.pBuffer);
                     delete poS3HandleHelper;
@@ -736,7 +670,7 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
 VSISwiftHandle::VSISwiftHandle(VSISwiftFSHandler *poFSIn,
                                const char *pszFilename,
                                VSISwiftHandleHelper *poHandleHelper)
-    : IVSIS3LikeHandle(poFSIn, pszFilename, poHandleHelper->GetURL()),
+    : IVSIS3LikeHandle(poFSIn, pszFilename, poHandleHelper->GetURL().c_str()),
       m_poHandleHelper(poHandleHelper)
 {
 }
@@ -755,7 +689,7 @@ VSISwiftHandle::~VSISwiftHandle()
 /************************************************************************/
 
 struct curl_slist *
-VSISwiftHandle::GetCurlHeaders(const CPLString &osVerb,
+VSISwiftHandle::GetCurlHeaders(const std::string &osVerb,
                                const struct curl_slist *psExistingHeaders)
 {
     return m_poHandleHelper->GetCurlHeaders(osVerb, psExistingHeaders);

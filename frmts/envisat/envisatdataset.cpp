@@ -8,23 +8,7 @@
  * Copyright (c) 2001, Atlantis Scientific, Inc.
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "adsrange.hpp"
@@ -38,6 +22,8 @@ CPL_C_START
 #include "EnvisatFile.h"
 #include "records.h"
 CPL_C_END
+
+#include <algorithm>
 
 /************************************************************************/
 /* ==================================================================== */
@@ -102,7 +88,8 @@ CPLErr MerisL2FlagBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
     CPLAssert(pReadBuf != nullptr);
 
     vsi_l_offset nOffset =
-        nImgOffset + nPrefixBytes + nBlockYOff * nBlockYSize * nRecordSize;
+        nImgOffset + nPrefixBytes +
+        static_cast<vsi_l_offset>(nBlockYOff) * nBlockYSize * nRecordSize;
 
     if (VSIFSeekL(fpImage, nOffset, SEEK_SET) != 0)
     {
@@ -441,8 +428,7 @@ void EnvisatDataset::ScanForGCPs_MERIS()
         return;
 
     int nTPPerColumn = nNumDSR;
-    int nTPPerLine =
-        (GetRasterXSize() + nSamplesPerTiePoint - 1) / nSamplesPerTiePoint;
+    int nTPPerLine = DIV_ROUND_UP(GetRasterXSize(), nSamplesPerTiePoint);
 
     /* -------------------------------------------------------------------- */
     /*      Find a measurement type dataset to use as a reference raster    */
@@ -535,16 +521,18 @@ void EnvisatDataset::ScanForGCPs_MERIS()
 
     GByte *pabyRecord = (GByte *)CPLMalloc(nDSRSize - 13);
 
-    GUInt32 *tpLat = ((GUInt32 *)pabyRecord) + nTPPerLine * 0; /* latitude */
-    GUInt32 *tpLon = ((GUInt32 *)pabyRecord) + nTPPerLine * 1; /* longitude */
-    GUInt32 *tpLtc =
-        ((GUInt32 *)pabyRecord) + nTPPerLine * 4; /* lat. DEM correction */
-    GUInt32 *tpLnc =
-        ((GUInt32 *)pabyRecord) + nTPPerLine * 5; /* lon. DEM correction */
+    GUInt32 *tpLat =
+        reinterpret_cast<GUInt32 *>(pabyRecord) + nTPPerLine * 0; /* latitude */
+    GUInt32 *tpLon = reinterpret_cast<GUInt32 *>(pabyRecord) +
+                     nTPPerLine * 1; /* longitude */
+    GUInt32 *tpLtc = reinterpret_cast<GUInt32 *>(pabyRecord) +
+                     nTPPerLine * 4; /* lat. DEM correction */
+    GUInt32 *tpLnc = reinterpret_cast<GUInt32 *>(pabyRecord) +
+                     nTPPerLine * 5; /* lon. DEM correction */
 
     nGCPCount = 0;
-    pasGCPList = (GDAL_GCP *)CPLCalloc(sizeof(GDAL_GCP),
-                                       arTP.getDSRCount() * nTPPerLine);
+    pasGCPList = (GDAL_GCP *)CPLCalloc(
+        sizeof(GDAL_GCP), static_cast<size_t>(arTP.getDSRCount()) * nTPPerLine);
 
     for (int ir = 0; ir < arTP.getDSRCount(); ir++)
     {
@@ -912,15 +900,13 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         EnvisatFile_Close(hEnvisatFile);
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The ENVISAT driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("ENVISAT");
         return nullptr;
     }
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    EnvisatDataset *poDS = new EnvisatDataset();
+    auto poDS = std::make_unique<EnvisatDataset>();
 
     poDS->hEnvisatFile = hEnvisatFile;
 
@@ -977,16 +963,8 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
             eDataType = GDT_Byte;
     }
 
-    const int bNative =
-#ifdef CPL_LSB
-        FALSE
-#else
-        TRUE
-#endif
-        ;
-
-    int nPrefixBytes =
-        dsr_size - ((GDALGetDataTypeSize(eDataType) / 8) * poDS->nRasterXSize);
+    const int nPrefixBytes =
+        dsr_size - (GDALGetDataTypeSizeBytes(eDataType) * poDS->nRasterXSize);
 
     /* -------------------------------------------------------------------- */
     /*      Fail out if we didn't get non-zero sizes.                       */
@@ -997,12 +975,10 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
                  "Unable to determine organization of dataset.  It would\n"
                  "appear this is an Envisat dataset, but an unsupported\n"
                  "data product.  Unable to utilize.");
-        delete poDS;
         return nullptr;
     }
 
-    poDS->fpImage = poOpenInfo->fpL;
-    poOpenInfo->fpL = nullptr;
+    std::swap(poDS->fpImage, poOpenInfo->fpL);
 
     /* -------------------------------------------------------------------- */
     /*      Try to collect GCPs.                                            */
@@ -1034,15 +1010,16 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
 
         if ((dsr_size2 == dsr_size) && !bMiltiChannel)
         {
-            poDS->SetBand(iBand + 1,
-                          new RawRasterBand(poDS, iBand + 1, poDS->fpImage,
-                                            ds_offset + nPrefixBytes,
-                                            GDALGetDataTypeSize(eDataType) / 8,
-                                            dsr_size, eDataType, bNative,
-                                            RawRasterBand::OwnFP::NO));
+            auto poBand = RawRasterBand::Create(
+                poDS.get(), iBand + 1, poDS->fpImage, ds_offset + nPrefixBytes,
+                GDALGetDataTypeSizeBytes(eDataType), dsr_size, eDataType,
+                RawRasterBand::ByteOrder::ORDER_BIG_ENDIAN,
+                RawRasterBand::OwnFP::NO);
+            if (!poBand)
+                return nullptr;
+            poBand->SetDescription(pszDSName);
+            poDS->SetBand(iBand + 1, std::move(poBand));
             iBand++;
-
-            poDS->GetRasterBand(iBand)->SetDescription(pszDSName);
         }
         /* --------------------------------------------------------------------
          */
@@ -1056,22 +1033,27 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
             if (pszProduct[8] == '1')
             {
                 // Flags
-                poDS->SetBand(iBand + 1,
-                              new RawRasterBand(poDS, iBand + 1, poDS->fpImage,
-                                                ds_offset + nPrefixBytes, 3,
-                                                dsr_size, GDT_Byte, bNative,
-                                                RawRasterBand::OwnFP::NO));
-                iBand++;
-
-                poDS->GetRasterBand(iBand)->SetDescription(pszDSName);
+                {
+                    auto poBand = RawRasterBand::Create(
+                        poDS.get(), iBand + 1, poDS->fpImage,
+                        ds_offset + nPrefixBytes, 3, dsr_size, GDT_Byte,
+                        RawRasterBand::ByteOrder::ORDER_BIG_ENDIAN,
+                        RawRasterBand::OwnFP::NO);
+                    if (!poBand)
+                        return nullptr;
+                    poBand->SetDescription(pszDSName);
+                    poDS->SetBand(iBand + 1, std::move(poBand));
+                    iBand++;
+                }
 
                 // Detector indices
-                poDS->SetBand(iBand + 1,
-                              new RawRasterBand(poDS, iBand + 1, poDS->fpImage,
-                                                ds_offset + nPrefixBytes + 1, 3,
-                                                dsr_size, GDT_Int16, bNative,
-                                                RawRasterBand::OwnFP::NO));
-                iBand++;
+                auto poBand = RawRasterBand::Create(
+                    poDS.get(), iBand + 1, poDS->fpImage,
+                    ds_offset + nPrefixBytes + 1, 3, dsr_size, GDT_Int16,
+                    RawRasterBand::ByteOrder::ORDER_BIG_ENDIAN,
+                    RawRasterBand::OwnFP::NO);
+                if (!poBand)
+                    return nullptr;
 
                 const char *pszSuffix = strstr(pszDSName, "MDS");
                 if (pszSuffix != nullptr)
@@ -1080,19 +1062,22 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
                 else
                     snprintf(szBandName, sizeof(szBandName), "%s",
                              "Detector index");
-                poDS->GetRasterBand(iBand)->SetDescription(szBandName);
+                poBand->SetDescription(szBandName);
+
+                poDS->SetBand(iBand + 1, std::move(poBand));
+                iBand++;
             }
             else if ((pszProduct[8] == '2') &&
                      (dsr_size2 >= 3 * poDS->nRasterXSize))
             {
                 int nFlagPrefixBytes = dsr_size2 - 3 * poDS->nRasterXSize;
 
-                poDS->SetBand(iBand + 1, new MerisL2FlagBand(
-                                             poDS, iBand + 1, poDS->fpImage,
-                                             ds_offset, nFlagPrefixBytes));
+                auto poBand =
+                    new MerisL2FlagBand(poDS.get(), iBand + 1, poDS->fpImage,
+                                        ds_offset, nFlagPrefixBytes);
+                poBand->SetDescription(pszDSName);
+                poDS->SetBand(iBand + 1, poBand);
                 iBand++;
-
-                poDS->GetRasterBand(iBand)->SetDescription(pszDSName);
             }
         }
         else if (STARTS_WITH_CI(pszProduct, "MER") && (pszProduct[8] == '2'))
@@ -1113,22 +1098,26 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
             {
                 nSubBandOffset =
                     ds_offset + nPrefixBytes2 + nSubBandIdx * nPixelSize;
-                poDS->SetBand(iBand + 1,
-                              new RawRasterBand(poDS, iBand + 1, poDS->fpImage,
-                                                nSubBandOffset,
-                                                nPixelSize * nSubBands,
-                                                dsr_size2, eDataType2, bNative,
-                                                RawRasterBand::OwnFP::NO));
-                iBand++;
+
+                auto poBand = RawRasterBand::Create(
+                    poDS.get(), iBand + 1, poDS->fpImage, nSubBandOffset,
+                    nPixelSize * nSubBands, dsr_size2, eDataType2,
+                    RawRasterBand::ByteOrder::ORDER_BIG_ENDIAN,
+                    RawRasterBand::OwnFP::NO);
+                if (!poBand)
+                    return nullptr;
 
                 if (nSubBands > 1)
                 {
                     snprintf(szBandName, sizeof(szBandName), "%s (%d)",
                              pszDSName, nSubBandIdx);
-                    poDS->GetRasterBand(iBand)->SetDescription(szBandName);
+                    poBand->SetDescription(szBandName);
                 }
                 else
-                    poDS->GetRasterBand(iBand)->SetDescription(pszDSName);
+                    poBand->SetDescription(pszDSName);
+
+                poDS->SetBand(iBand + 1, std::move(poBand));
+                iBand++;
             }
         }
     }
@@ -1158,9 +1147,9 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/

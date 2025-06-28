@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Thomas Bonfort <thomas.bonfort@airbus.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_VSIL_PLUGIN_H_INCLUDED
@@ -70,6 +54,8 @@ class VSIPluginFilesystemHandler : public VSIFilesystemHandler
     VSIRangeStatus GetRangeStatus(void *pFile, vsi_l_offset nOffset,
                                   vsi_l_offset nLength);
     int Eof(void *pFile);
+    int Error(void *pFile);
+    void ClearErr(void *pFile);
     size_t Write(void *pFile, const void *pBuffer, size_t nSize, size_t nCount);
     int Flush(void *pFile);
     int Truncate(void *pFile, vsi_l_offset nNewSize);
@@ -87,13 +73,10 @@ class VSIPluginFilesystemHandler : public VSIFilesystemHandler
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
     int Unlink(const char *pszFilename) override;
-    int Rename(const char *oldpath, const char * /*newpath*/) override;
+    int Rename(const char *oldpath, const char * /*newpath*/, GDALProgressFunc,
+               void *) override;
     int Mkdir(const char *pszDirname, long nMode) override;
     int Rmdir(const char *pszDirname) override;
-    char **ReadDir(const char *pszDirname) override
-    {
-        return ReadDirEx(pszDirname, 0);
-    }
     char **ReadDirEx(const char *pszDirname, int nMaxFiles) override;
     char **SiblingFiles(const char *pszFilename) override;
     int HasOptimizedReadMultiRange(const char *pszPath) override;
@@ -125,7 +108,9 @@ class VSIPluginHandle : public VSIVirtualHandle
                     const size_t *panSizes) override;
     VSIRangeStatus GetRangeStatus(vsi_l_offset nOffset,
                                   vsi_l_offset nLength) override;
+    void ClearErr() override;
     int Eof() override;
+    int Error() override;
     size_t Write(const void *pBuffer, size_t nSize, size_t nCount) override;
     int Flush() override;
     int Truncate(vsi_l_offset nNewSize) override;

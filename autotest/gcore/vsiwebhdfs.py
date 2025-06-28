@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test /vsiwebhdfs
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2018 Even Rouault <even dot rouault at spatialys dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import stat
@@ -40,6 +23,18 @@ from osgeo import gdal
 pytestmark = pytest.mark.require_curl()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def startup_and_cleanup():
+
+    options = {"WEBHDFS_USERNAME": None, "WEBHDFS_DELEGATION": None}
+
+    with gdal.config_options(options):
+        yield
+
+
+###############################################################################
+
+
 def open_for_read(uri):
     """
     Opens a test file for reading.
@@ -50,45 +45,43 @@ def open_for_read(uri):
 ###############################################################################
 
 
-def test_vsiwebhdfs_init():
+@pytest.fixture(scope="module")
+def server():
 
-    gdaltest.webhdfs_vars = {}
-    for var in ("WEBHDFS_USERNAME", "WEBHDFS_DELEGATION"):
-        gdaltest.webhdfs_vars[var] = gdal.GetConfigOption(var)
-        if gdaltest.webhdfs_vars[var] is not None:
-            gdal.SetConfigOption(var, "")
-
-
-###############################################################################
-
-
-def test_vsiwebhdfs_start_webserver():
-
-    gdaltest.webserver_process = None
-    gdaltest.webserver_port = 0
-
-    (gdaltest.webserver_process, gdaltest.webserver_port) = webserver.launch(
-        handler=webserver.DispatcherHttpHandler
-    )
-    if gdaltest.webserver_port == 0:
+    process, port = webserver.launch(handler=webserver.DispatcherHttpHandler)
+    if port == 0:
         pytest.skip()
 
-    gdaltest.webhdfs_base_connection = (
-        "/vsiwebhdfs/http://localhost:" + str(gdaltest.webserver_port) + "/webhdfs/v1"
-    )
-    gdaltest.webhdfs_redirected_url = (
-        "http://non_existing_host:" + str(gdaltest.webserver_port) + "/redirected"
-    )
+    import collections
+
+    WebServer = collections.namedtuple("WebServer", "process port")
+
+    yield WebServer(process, port)
+
+    # Clearcache needed to close all connections, since the Python server
+    # can only handle one connection at a time
+    gdal.VSICurlClearCache()
+
+    webserver.server_stop(process, port)
+
+
+@pytest.fixture(scope="module")
+def webhdfs_base_connection(server):
+
+    return f"/vsiwebhdfs/http://localhost:{server.port}/webhdfs/v1"
+
+
+@pytest.fixture(scope="module")
+def webhdfs_redirected_url(server):
+
+    return f"http://non_existing_host:{server.port}/redirected"
 
 
 ###############################################################################
 # Test VSIFOpenL()
 
 
-def test_vsiwebhdfs_open():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsiwebhdfs_open(webhdfs_base_connection, webhdfs_redirected_url):
 
     gdal.VSICurlClearCache()
 
@@ -102,7 +95,7 @@ def test_vsiwebhdfs_open():
         "0123456789data",
     )
     with webserver.install_http_handler(handler):
-        f = open_for_read(gdaltest.webhdfs_base_connection + "/foo/bar")
+        f = open_for_read(webhdfs_base_connection + "/foo/bar")
         assert f is not None
         gdal.VSIFSeekL(f, 9999990784 + 10, 0)
         assert gdal.VSIFReadL(1, 4, f).decode("ascii") == "data"
@@ -118,7 +111,7 @@ def test_vsiwebhdfs_open():
         "/webhdfs/v1/foo/bar?op=OPEN&offset=0&length=16384&user.name=root&delegation=token",
         307,
         {
-            "Location": gdaltest.webhdfs_redirected_url
+            "Location": webhdfs_redirected_url
             + "/webhdfs/v1/foo/bar?op=OPEN&offset=0&length=16384"
         },
     )
@@ -137,7 +130,7 @@ def test_vsiwebhdfs_open():
         }
     ):
         with webserver.install_http_handler(handler):
-            f = open_for_read(gdaltest.webhdfs_base_connection + "/foo/bar")
+            f = open_for_read(webhdfs_base_connection + "/foo/bar")
             assert f is not None
             assert gdal.VSIFReadL(1, 4, f).decode("ascii") == "yeah"
             gdal.VSIFCloseL(f)
@@ -146,7 +139,7 @@ def test_vsiwebhdfs_open():
 
     gdal.VSICurlClearCache()
 
-    f = open_for_read(gdaltest.webhdfs_base_connection + "/foo/bar")
+    f = open_for_read(webhdfs_base_connection + "/foo/bar")
     assert f is not None
 
     handler = webserver.SequentialHandler()
@@ -164,10 +157,7 @@ def test_vsiwebhdfs_open():
 # Test VSIStatL()
 
 
-def test_vsiwebhdfs_stat():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsiwebhdfs_stat(webhdfs_base_connection):
 
     gdal.VSICurlClearCache()
 
@@ -180,7 +170,7 @@ def test_vsiwebhdfs_stat():
         '{"FileStatus":{"type":"FILE","length":1000000}}',
     )
     with webserver.install_http_handler(handler):
-        stat_res = gdal.VSIStatL(gdaltest.webhdfs_base_connection + "/foo/bar")
+        stat_res = gdal.VSIStatL(webhdfs_base_connection + "/foo/bar")
     if stat_res is None or stat_res.size != 1000000:
         if stat_res is not None:
             print(stat_res.size)
@@ -189,7 +179,7 @@ def test_vsiwebhdfs_stat():
         pytest.fail()
 
     # Test caching
-    stat_res = gdal.VSIStatL(gdaltest.webhdfs_base_connection + "/foo/bar")
+    stat_res = gdal.VSIStatL(webhdfs_base_connection + "/foo/bar")
     assert stat_res.size == 1000000
 
     # Test missing file
@@ -202,7 +192,7 @@ def test_vsiwebhdfs_stat():
         '{"RemoteException":{"exception":"FileNotFoundException","javaClassName":"java.io.FileNotFoundException","message":"File does not exist: /unexisting"}}',
     )
     with webserver.install_http_handler(handler):
-        stat_res = gdal.VSIStatL(gdaltest.webhdfs_base_connection + "/unexisting")
+        stat_res = gdal.VSIStatL(webhdfs_base_connection + "/unexisting")
     assert stat_res is None
 
 
@@ -210,10 +200,7 @@ def test_vsiwebhdfs_stat():
 # Test ReadDir()
 
 
-def test_vsiwebhdfs_readdir():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+def test_vsiwebhdfs_readdir(webhdfs_base_connection):
 
     gdal.VSICurlClearCache()
 
@@ -226,23 +213,21 @@ def test_vsiwebhdfs_readdir():
         '{"FileStatuses":{"FileStatus":[{"type":"FILE","modificationTime":1000,"pathSuffix":"bar.baz","length":123456},{"type":"DIRECTORY","pathSuffix":"mysubdir","length":0}]}}',
     )
     with webserver.install_http_handler(handler):
-        dir_contents = gdal.ReadDir(gdaltest.webhdfs_base_connection + "/foo")
+        dir_contents = gdal.ReadDir(webhdfs_base_connection + "/foo")
     assert dir_contents == ["bar.baz", "mysubdir"]
-    stat_res = gdal.VSIStatL(gdaltest.webhdfs_base_connection + "/foo/bar.baz")
+    stat_res = gdal.VSIStatL(webhdfs_base_connection + "/foo/bar.baz")
     assert stat_res.size == 123456
     assert stat_res.mtime == 1
 
     # ReadDir on something known to be a file shouldn't cause network access
-    dir_contents = gdal.ReadDir(gdaltest.webhdfs_base_connection + "/foo/bar.baz")
+    dir_contents = gdal.ReadDir(webhdfs_base_connection + "/foo/bar.baz")
     assert dir_contents is None
 
     # Test error on ReadDir()
     handler = webserver.SequentialHandler()
     handler.add("GET", "/webhdfs/v1foo/error_test/?op=LISTSTATUS", 404)
     with webserver.install_http_handler(handler):
-        dir_contents = gdal.ReadDir(
-            gdaltest.webhdfs_base_connection + "foo/error_test/"
-        )
+        dir_contents = gdal.ReadDir(webhdfs_base_connection + "foo/error_test/")
     assert dir_contents is None
 
 
@@ -250,10 +235,8 @@ def test_vsiwebhdfs_readdir():
 # Test write
 
 
-def test_vsiwebhdfs_write():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+@gdaltest.disable_exceptions()
+def test_vsiwebhdfs_write(webhdfs_base_connection, webhdfs_redirected_url):
 
     gdal.VSICurlClearCache()
 
@@ -261,8 +244,8 @@ def test_vsiwebhdfs_write():
     handler = webserver.SequentialHandler()
     with webserver.install_http_handler(handler):
         # Missing required config options
-        with gdaltest.error_handler():
-            f = gdal.VSIFOpenL(gdaltest.webhdfs_base_connection + "/foo/bar", "wb")
+        with gdal.quiet_errors():
+            f = gdal.VSIFOpenL(webhdfs_base_connection + "/foo/bar", "wb")
         assert f is None
 
     handler = webserver.SequentialHandler()
@@ -271,7 +254,7 @@ def test_vsiwebhdfs_write():
         "/webhdfs/v1/foo/bar?op=CREATE&overwrite=true&user.name=root",
         307,
         {
-            "Location": gdaltest.webhdfs_redirected_url
+            "Location": webhdfs_redirected_url
             + "/webhdfs/v1/foo/bar?op=CREATE&overwrite=true&user.name=root"
         },
     )
@@ -285,7 +268,7 @@ def test_vsiwebhdfs_write():
         {"WEBHDFS_USERNAME": "root", "WEBHDFS_DATANODE_HOST": "localhost"}
     ):
         with webserver.install_http_handler(handler):
-            f = gdal.VSIFOpenL(gdaltest.webhdfs_base_connection + "/foo/bar", "wb")
+            f = gdal.VSIFOpenL(webhdfs_base_connection + "/foo/bar", "wb")
             assert f is not None
     assert gdal.VSIFCloseL(f) == 0
 
@@ -299,7 +282,7 @@ def test_vsiwebhdfs_write():
         "/webhdfs/v1/foo/bar?op=CREATE&overwrite=true&user.name=root",
         307,
         {
-            "Location": gdaltest.webhdfs_redirected_url
+            "Location": webhdfs_redirected_url
             + "/webhdfs/v1/foo/bar?op=CREATE&overwrite=true&user.name=root"
         },
     )
@@ -313,7 +296,7 @@ def test_vsiwebhdfs_write():
         {"WEBHDFS_USERNAME": "root", "WEBHDFS_DATANODE_HOST": "localhost"}
     ):
         with webserver.install_http_handler(handler):
-            f = gdal.VSIFOpenL(gdaltest.webhdfs_base_connection + "/foo/bar", "wb")
+            f = gdal.VSIFOpenL(webhdfs_base_connection + "/foo/bar", "wb")
             assert f is not None
 
     assert gdal.VSIFWriteL("foobar", 1, 6, f) == 6
@@ -332,8 +315,7 @@ def test_vsiwebhdfs_write():
         request.send_response(307)
         request.send_header(
             "Location",
-            gdaltest.webhdfs_redirected_url
-            + "/webhdfs/v1/foo/bar?op=APPEND&user.name=root",
+            webhdfs_redirected_url + "/webhdfs/v1/foo/bar?op=APPEND&user.name=root",
         )
         request.end_headers()
 
@@ -365,8 +347,8 @@ def test_vsiwebhdfs_write():
         {"WEBHDFS_USERNAME": "root", "WEBHDFS_DATANODE_HOST": "localhost"}
     ):
         with webserver.install_http_handler(handler):
-            with gdaltest.error_handler():
-                f = gdal.VSIFOpenL(gdaltest.webhdfs_base_connection + "/foo/bar", "wb")
+            with gdal.quiet_errors():
+                f = gdal.VSIFOpenL(webhdfs_base_connection + "/foo/bar", "wb")
                 assert f is None
 
     handler = webserver.SequentialHandler()
@@ -375,14 +357,14 @@ def test_vsiwebhdfs_write():
         "/webhdfs/v1/foo/bar?op=CREATE&overwrite=true&user.name=root",
         307,
         {
-            "Location": gdaltest.webhdfs_redirected_url
+            "Location": webhdfs_redirected_url
             + "/webhdfs/v1/foo/bar?op=CREATE&overwrite=true&user.name=root"
         },
     )
     with gdaltest.config_options({"WEBHDFS_USERNAME": "root"}):
         with webserver.install_http_handler(handler):
-            with gdaltest.error_handler():
-                f = gdal.VSIFOpenL(gdaltest.webhdfs_base_connection + "/foo/bar", "wb")
+            with gdal.quiet_errors():
+                f = gdal.VSIFOpenL(webhdfs_base_connection + "/foo/bar", "wb")
                 assert f is None
 
     # Errors during POST
@@ -395,7 +377,7 @@ def test_vsiwebhdfs_write():
         "/webhdfs/v1/foo/bar?op=CREATE&overwrite=true&user.name=root",
         307,
         {
-            "Location": gdaltest.webhdfs_redirected_url
+            "Location": webhdfs_redirected_url
             + "/webhdfs/v1/foo/bar?op=CREATE&overwrite=true&user.name=root"
         },
     )
@@ -409,7 +391,7 @@ def test_vsiwebhdfs_write():
         {"WEBHDFS_USERNAME": "root", "WEBHDFS_DATANODE_HOST": "localhost"}
     ):
         with webserver.install_http_handler(handler):
-            f = gdal.VSIFOpenL(gdaltest.webhdfs_base_connection + "/foo/bar", "wb")
+            f = gdal.VSIFOpenL(webhdfs_base_connection + "/foo/bar", "wb")
             assert f is not None
 
     assert gdal.VSIFWriteL("foobar", 1, 6, f) == 6
@@ -420,13 +402,13 @@ def test_vsiwebhdfs_write():
         "/webhdfs/v1/foo/bar?op=APPEND&user.name=root",
         307,
         {
-            "Location": gdaltest.webhdfs_redirected_url
+            "Location": webhdfs_redirected_url
             + "/webhdfs/v1/foo/bar?op=APPEND&user.name=root"
         },
     )
     handler.add("POST", "/redirected/webhdfs/v1/foo/bar?op=APPEND&user.name=root", 400)
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         with webserver.install_http_handler(handler):
             assert gdal.VSIFCloseL(f) != 0
 
@@ -435,10 +417,8 @@ def test_vsiwebhdfs_write():
 # Test Unlink()
 
 
-def test_vsiwebhdfs_unlink():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+@gdaltest.disable_exceptions()
+def test_vsiwebhdfs_unlink(webhdfs_base_connection):
 
     gdal.VSICurlClearCache()
 
@@ -446,7 +426,7 @@ def test_vsiwebhdfs_unlink():
     handler = webserver.SequentialHandler()
     handler.add("DELETE", "/webhdfs/v1/foo/bar?op=DELETE", 200, {}, '{"boolean":true}')
     with webserver.install_http_handler(handler):
-        ret = gdal.Unlink(gdaltest.webhdfs_base_connection + "/foo/bar")
+        ret = gdal.Unlink(webhdfs_base_connection + "/foo/bar")
     assert ret == 0
 
     gdal.VSICurlClearCache()
@@ -467,15 +447,15 @@ def test_vsiwebhdfs_unlink():
         {"WEBHDFS_USERNAME": "root", "WEBHDFS_DELEGATION": "token"}
     ):
         with webserver.install_http_handler(handler):
-            ret = gdal.Unlink(gdaltest.webhdfs_base_connection + "/foo/bar")
+            ret = gdal.Unlink(webhdfs_base_connection + "/foo/bar")
         assert ret == 0
 
     # Failure
     handler = webserver.SequentialHandler()
     handler.add("DELETE", "/webhdfs/v1/foo/bar?op=DELETE", 200, {}, '{"boolean":false}')
     with webserver.install_http_handler(handler):
-        with gdaltest.error_handler():
-            ret = gdal.Unlink(gdaltest.webhdfs_base_connection + "/foo/bar")
+        with gdal.quiet_errors():
+            ret = gdal.Unlink(webhdfs_base_connection + "/foo/bar")
     assert ret == -1
 
     gdal.VSICurlClearCache()
@@ -484,8 +464,8 @@ def test_vsiwebhdfs_unlink():
     handler = webserver.SequentialHandler()
     handler.add("DELETE", "/webhdfs/v1/foo/bar?op=DELETE", 404, {})
     with webserver.install_http_handler(handler):
-        with gdaltest.error_handler():
-            ret = gdal.Unlink(gdaltest.webhdfs_base_connection + "/foo/bar")
+        with gdal.quiet_errors():
+            ret = gdal.Unlink(webhdfs_base_connection + "/foo/bar")
     assert ret == -1
 
 
@@ -493,10 +473,8 @@ def test_vsiwebhdfs_unlink():
 # Test Mkdir() / Rmdir()
 
 
-def test_vsiwebhdfs_mkdir_rmdir():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
+@gdaltest.disable_exceptions()
+def test_vsiwebhdfs_mkdir_rmdir(webhdfs_base_connection):
 
     gdal.VSICurlClearCache()
 
@@ -508,7 +486,7 @@ def test_vsiwebhdfs_mkdir_rmdir():
     handler = webserver.SequentialHandler()
     handler.add("PUT", "/webhdfs/v1/foo/dir?op=MKDIRS", 200, {}, '{"boolean":true}')
     with webserver.install_http_handler(handler):
-        ret = gdal.Mkdir(gdaltest.webhdfs_base_connection + "/foo/dir", 0)
+        ret = gdal.Mkdir(webhdfs_base_connection + "/foo/dir", 0)
     assert ret == 0
 
     # Valid with all options
@@ -524,20 +502,18 @@ def test_vsiwebhdfs_mkdir_rmdir():
         {"WEBHDFS_USERNAME": "root", "WEBHDFS_DELEGATION": "token"}
     ):
         with webserver.install_http_handler(handler):
-            ret = gdal.Mkdir(
-                gdaltest.webhdfs_base_connection + "/foo/dir/", 493
-            )  # 0755
+            ret = gdal.Mkdir(webhdfs_base_connection + "/foo/dir/", 493)  # 0755
         assert ret == 0
 
     # Error
     handler = webserver.SequentialHandler()
     handler.add("PUT", "/webhdfs/v1/foo/dir_error?op=MKDIRS", 404)
     with webserver.install_http_handler(handler):
-        ret = gdal.Mkdir(gdaltest.webhdfs_base_connection + "/foo/dir_error", 0)
+        ret = gdal.Mkdir(webhdfs_base_connection + "/foo/dir_error", 0)
     assert ret != 0
 
     # Root name is invalid
-    ret = gdal.Mkdir(gdaltest.webhdfs_base_connection + "/", 0)
+    ret = gdal.Mkdir(webhdfs_base_connection + "/", 0)
     assert ret != 0
 
     # Invalid name
@@ -550,30 +526,15 @@ def test_vsiwebhdfs_mkdir_rmdir():
     handler = webserver.SequentialHandler()
     handler.add("DELETE", "/webhdfs/v1/foo/dir?op=DELETE", 200, {}, '{"boolean":true}')
     with webserver.install_http_handler(handler):
-        ret = gdal.Rmdir(gdaltest.webhdfs_base_connection + "/foo/dir")
+        ret = gdal.Rmdir(webhdfs_base_connection + "/foo/dir")
     assert ret == 0
 
     # Error
     handler = webserver.SequentialHandler()
     handler.add("DELETE", "/webhdfs/v1/foo/dir_error?op=DELETE", 404)
     with webserver.install_http_handler(handler):
-        ret = gdal.Rmdir(gdaltest.webhdfs_base_connection + "/foo/dir_error")
+        ret = gdal.Rmdir(webhdfs_base_connection + "/foo/dir_error")
     assert ret != 0
-
-
-###############################################################################
-
-
-def test_vsiwebhdfs_stop_webserver():
-
-    if gdaltest.webserver_port == 0:
-        pytest.skip()
-
-    # Clearcache needed to close all connections, since the Python server
-    # can only handle one connection at a time
-    gdal.VSICurlClearCache()
-
-    webserver.server_stop(gdaltest.webserver_process, gdaltest.webserver_port)
 
 
 ###############################################################################
@@ -663,12 +624,3 @@ def test_vsiwebhdfs_extra_1():
     gdal.VSIFCloseL(f)
 
     assert len(ret) == 1
-
-
-###############################################################################
-
-
-def test_vsiwebhdfs_cleanup():
-
-    for var in gdaltest.webhdfs_vars:
-        gdal.SetConfigOption(var, gdaltest.webhdfs_vars[var])

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test /vsiaz
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2017 Even Rouault <even dot rouault at spatialys dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -80,19 +63,19 @@ def test_vsiaz_real_server_errors():
 
     # Missing AZURE_STORAGE_ACCOUNT
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = open_for_read("/vsiaz/foo/bar")
     assert f is None and gdal.VSIGetLastErrorMsg().find("AZURE_STORAGE_ACCOUNT") >= 0
 
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = open_for_read("/vsiaz_streaming/foo/bar")
     assert f is None and gdal.VSIGetLastErrorMsg().find("AZURE_STORAGE_ACCOUNT") >= 0
 
     # Invalid AZURE_STORAGE_CONNECTION_STRING
     with gdaltest.config_option("AZURE_STORAGE_CONNECTION_STRING", "invalid"):
         gdal.ErrorReset()
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             f = open_for_read("/vsiaz/foo/bar")
         assert f is None
 
@@ -104,7 +87,7 @@ def test_vsiaz_real_server_errors():
             "CPL_AZURE_VM_API_ROOT_URL": "disabled",
         }
     ):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             f = open_for_read("/vsiaz/foo/bar")
         assert (
             f is None
@@ -119,7 +102,7 @@ def test_vsiaz_real_server_errors():
             "AZURE_STORAGE_ACCESS_KEY": "AZURE_STORAGE_ACCESS_KEY",
         }
     ):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             f = open_for_read("/vsiaz/foo/bar.baz")
         if f is not None:
             if f is not None:
@@ -129,7 +112,7 @@ def test_vsiaz_real_server_errors():
             pytest.fail(gdal.VSIGetLastErrorMsg())
 
         gdal.ErrorReset()
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             f = open_for_read("/vsiaz_streaming/foo/bar.baz")
         assert f is None, gdal.VSIGetLastErrorMsg()
 

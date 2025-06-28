@@ -3,10 +3,12 @@ add_gdal_driver(
   SOURCES ogr_wfs.h
           ogrwfsdatasource.cpp
           ogrwfsdriver.cpp
-          ogrwfsfilter.cpp
           ogrwfsjoinlayer.cpp
           ogrwfslayer.cpp
-          ogroapifdriver.cpp
-  BUILTIN)
+  PLUGIN_CAPABLE
+  NO_DEPS
+  NO_CXX_WFLAGS_EFFCXX
+  NO_WFLAG_OLD_STYLE_CAST
+)
 gdal_standard_includes(ogr_WFS)
-target_include_directories(ogr_WFS PRIVATE $<TARGET_PROPERTY:ogr_GML,SOURCE_DIR>)
+target_include_directories(ogr_WFS PRIVATE $<TARGET_PROPERTY:gmlutils,SOURCE_DIR>)

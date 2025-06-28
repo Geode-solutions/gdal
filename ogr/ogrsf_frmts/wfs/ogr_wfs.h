@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  WFS Translator
  * Purpose:  Definition of classes for OGR WFS driver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_WFS_H_INCLUDED
@@ -36,19 +19,11 @@
 
 #include "cpl_minixml.h"
 #include "ogrsf_frmts.h"
-#include "gmlreader.h"
+#include "gmlfeature.h"
 #include "cpl_http.h"
 #include "ogr_swq.h"
 
 const CPLXMLNode *WFSFindNode(const CPLXMLNode *psXML, const char *pszRootName);
-void OGRWFSRecursiveUnlink(const char *pszName);
-CPLString
-WFS_TurnSQLFilterToOGCFilter(const swq_expr_node *poExpr, OGRDataSource *poDS,
-                             OGRFeatureDefn *poFDefn, int nVersion,
-                             int bPropertyIsNotEqualToSupported,
-                             int bUseFeatureId, int bGmlObjectIdNeedsGMLPrefix,
-                             const char *pszNSPrefix, int *pbOutNeedsNullCheck);
-swq_custom_func_registrar *WFSGetCustomFuncRegistrar();
 
 const char *FindSubStringInsensitive(const char *pszStr, const char *pszSubStr);
 
@@ -99,6 +74,8 @@ class OGRWFSLayer final : public OGRLayer
     CPLString osGeometryColumnName;
     OGRwkbGeometryType eGeomType;
     GIntBig nFeatures;
+    GIntBig m_nNumberMatched = -1;
+    bool m_bHasReadAtLeastOneFeatureInThisPage = false;
     bool bCountFeaturesInGetNextFeature;
 
     int CanRunGetFeatureCountAndGetExtentTogether();
@@ -133,7 +110,6 @@ class OGRWFSLayer final : public OGRLayer
     bool bPagingActive;
     int nPagingStartIndex;
     int nFeatureRead;
-    int nFeatureCountRequested;
 
     OGRFeatureDefn *BuildLayerDefnFromFeatureClass(GMLFeatureClass *poClass);
 
@@ -143,6 +119,8 @@ class OGRWFSLayer final : public OGRLayer
 
     std::vector<std::string> m_aosSupportedCRSList{};
     OGRLayer::GetSupportedSRSListRetType m_apoSupportedCRSList{};
+
+    std::string m_osTmpDir{};
 
   public:
     OGRWFSLayer(OGRWFSDataSource *poDS, OGRSpatialReference *poSRS,
@@ -166,11 +144,8 @@ class OGRWFSLayer final : public OGRLayer
 
     virtual int TestCapability(const char *) override;
 
-    virtual void SetSpatialFilter(OGRGeometry *) override;
-    virtual void SetSpatialFilter(int iGeomField, OGRGeometry *poGeom) override
-    {
-        OGRLayer::SetSpatialFilter(iGeomField, poGeom);
-    }
+    OGRErr ISetSpatialFilter(int iGeomField,
+                             const OGRGeometry *poGeom) override;
 
     virtual OGRErr SetAttributeFilter(const char *) override;
 
@@ -179,12 +154,8 @@ class OGRWFSLayer final : public OGRLayer
     void SetExtents(double dfMinX, double dfMinY, double dfMaxX, double dfMaxY);
     void SetWGS84Extents(double dfMinX, double dfMinY, double dfMaxX,
                          double dfMaxY);
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    virtual OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                              bool bForce) override;
 
     virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
     virtual OGRErr ISetFeature(OGRFeature *poFeature) override;
@@ -194,7 +165,7 @@ class OGRWFSLayer final : public OGRLayer
     virtual OGRErr CommitTransaction() override;
     virtual OGRErr RollbackTransaction() override;
 
-    virtual OGRErr SetIgnoredFields(const char **papszFields) override;
+    virtual OGRErr SetIgnoredFields(CSLConstList papszFields) override;
 
     int HasLayerDefn()
     {
@@ -204,7 +175,7 @@ class OGRWFSLayer final : public OGRLayer
     OGRFeatureDefn *ParseSchema(const CPLXMLNode *psSchema);
     OGRFeatureDefn *BuildLayerDefn(OGRFeatureDefn *poSrcFDefn = nullptr);
 
-    OGRErr DeleteFromFilter(CPLString osOGCFilter);
+    OGRErr DeleteFromFilter(const std::string &osOGCFilter);
 
     const std::vector<CPLString> &GetLastInsertedFIDList()
     {
@@ -221,6 +192,7 @@ class OGRWFSLayer final : public OGRLayer
     }
 
     void SetOrderBy(const std::vector<OGRWFSSortDesc> &aoSortColumnsIn);
+
     bool HasGotApproximateLayerDefn()
     {
         GetLayerDefn();
@@ -231,6 +203,7 @@ class OGRWFSLayer final : public OGRLayer
     {
         return pszNS;
     }
+
     const char *GetNamespaceName()
     {
         return pszNSVal;
@@ -243,13 +216,20 @@ class OGRWFSLayer final : public OGRLayer
         m_aosSupportedCRSList = std::move(aosSupportedCRSList);
         m_apoSupportedCRSList = std::move(apoSupportedCRSList);
     }
+
     const OGRLayer::GetSupportedSRSListRetType &
     GetSupportedSRSList(int /*iGeomField*/) override
     {
         return m_apoSupportedCRSList;
     }
+
     OGRErr SetActiveSRS(int iGeomField,
                         const OGRSpatialReference *poSRS) override;
+
+    const std::string &GetTmpDir() const
+    {
+        return m_osTmpDir;
+    }
 };
 
 /************************************************************************/
@@ -283,6 +263,8 @@ class OGRWFSJoinLayer final : public OGRLayer
 
     CPLString osFeatureTypes;
 
+    std::string m_osTmpDir{};
+
     OGRWFSJoinLayer(OGRWFSDataSource *poDS, const swq_select *psSelectInfo,
                     const CPLString &osGlobalFilter);
     CPLString MakeGetFeatureURL(int bRequestHits = FALSE);
@@ -303,11 +285,8 @@ class OGRWFSJoinLayer final : public OGRLayer
 
     virtual GIntBig GetFeatureCount(int bForce = TRUE) override;
 
-    virtual void SetSpatialFilter(OGRGeometry *) override;
-    virtual void SetSpatialFilter(int iGeomField, OGRGeometry *poGeom) override
-    {
-        OGRLayer::SetSpatialFilter(iGeomField, poGeom);
-    }
+    OGRErr ISetSpatialFilter(int iGeomField,
+                             const OGRGeometry *poGeom) override;
 
     virtual OGRErr SetAttributeFilter(const char *) override;
 };
@@ -316,9 +295,8 @@ class OGRWFSJoinLayer final : public OGRLayer
 /*                           OGRWFSDataSource                           */
 /************************************************************************/
 
-class OGRWFSDataSource final : public OGRDataSource
+class OGRWFSDataSource final : public GDALDataset
 {
-    char *pszName;
     bool bRewriteFile;
     CPLXMLNode *psFileXML;
 
@@ -366,7 +344,7 @@ class OGRWFSDataSource final : public OGRDataSource
 
     CPLString osLayerMetadataCSV;
     CPLString osLayerMetadataTmpFileName;
-    OGRDataSource *poLayerMetadataDS;
+    GDALDataset *poLayerMetadataDS;
     OGRLayer *poLayerMetadataLayer;
 
     CPLString osGetCapabilities;
@@ -391,21 +369,16 @@ class OGRWFSDataSource final : public OGRDataSource
     OGRWFSDataSource();
     virtual ~OGRWFSDataSource();
 
-    int Open(const char *pszFilename, int bUpdate, char **papszOpenOptions);
-
-    virtual const char *GetName() override
-    {
-        return pszName;
-    }
+    int Open(const char *pszFilename, int bUpdate,
+             CSLConstList papszOpenOptions);
 
     virtual int GetLayerCount() override
     {
         return nLayers;
     }
+
     virtual OGRLayer *GetLayer(int) override;
     virtual OGRLayer *GetLayerByName(const char *pszLayerName) override;
-
-    virtual int TestCapability(const char *) override;
 
     virtual OGRLayer *ExecuteSQL(const char *pszSQLCommand,
                                  OGRGeometry *poSpatialFilter,
@@ -416,48 +389,59 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return bUpdate;
     }
+
     bool SupportTransactions() const
     {
         return bTransactionSupport;
     }
+
     void DisableSupportHits()
     {
         bGetFeatureSupportHits = false;
     }
+
     bool GetFeatureSupportHits() const
     {
         return bGetFeatureSupportHits;
     }
+
     const char *GetVersion()
     {
         return osVersion.c_str();
     }
 
     bool IsOldDeegree(const char *pszErrorString);
+
     bool GetNeedNAMESPACE() const
     {
         return bNeedNAMESPACE;
     }
+
     bool HasMinOperators() const
     {
         return bHasMinOperators;
     }
+
     bool HasNullCheck() const
     {
         return bHasNullCheck;
     }
+
     bool UseFeatureId() const
     {
         return bUseFeatureId;
     }
+
     bool RequiresEnvelopeSpatialFilter() const
     {
         return bRequiresEnvelopeSpatialFilter;
     }
+
     void SetGmlObjectIdNeedsGMLPrefix()
     {
         bGmlObjectIdNeedsGMLPrefix = true;
     }
+
     int DoesGmlObjectIdNeedGMLPrefix() const
     {
         return bGmlObjectIdNeedsGMLPrefix;
@@ -467,6 +451,7 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         bPropertyIsNotEqualToSupported = false;
     }
+
     bool PropertyIsNotEqualToSupported() const
     {
         return bPropertyIsNotEqualToSupported;
@@ -482,10 +467,12 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return bPagingAllowed;
     }
+
     int GetPageSize() const
     {
         return nPageSize;
     }
+
     int GetBaseStartIndex() const
     {
         return nBaseStartIndex;
@@ -498,6 +485,7 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return bKeepLayerNamePrefix;
     }
+
     const CPLString &GetBaseURL()
     {
         return osBaseURL;
@@ -507,10 +495,12 @@ class OGRWFSDataSource final : public OGRDataSource
     {
         return bEmptyAsNull;
     }
+
     bool InvertAxisOrderIfLatLong() const
     {
         return bInvertAxisOrderIfLatLong;
     }
+
     const CPLString &GetConsiderEPSGAsURN() const
     {
         return osConsiderEPSGAsURN;

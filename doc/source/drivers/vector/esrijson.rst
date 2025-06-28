@@ -19,7 +19,7 @@ The driver can scroll through such result sets
 that are spread over multiple pages (for ArcGIS servers >= 10.3). This
 is automatically enabled if URL does not contain an explicit
 *resultOffset* parameter. If it contains this parameter and scrolling is
-still desired, the FEATURE_SERVER_PAGING open option must be set to YES.
+still desired, the :oo:`FEATURE_SERVER_PAGING` open option must be set to YES.
 The page size can be explicitly set with the *resultRecordCount*
 parameter (but is subject to a server limit). If it is not set, OGR will
 set it to the maximum value allowed by the server.
@@ -49,14 +49,25 @@ The driver accepts three types of sources of data:
 -  Text passed directly and encoded in ESRI JSON
 
 Starting with GDAL 2.3, the URL/filename/text might be prefixed with
-ESRIJSON: to avoid any ambiguity with other drivers.
+ESRIJSON: to avoid any ambiguity with other drivers. Alternatively, starting
+with GDAL 3.10, specifying the ``-if ESRIJSON`` option to command line utilities
+accepting it, or ``ESRIJSON`` as the only value of the ``papszAllowedDrivers`` of
+:cpp:func:`GDALOpenEx`, also forces the driver to recognize the passed
+URL/filename/text.
+
 
 Open options
 ------------
 
--  **FEATURE_SERVER_PAGING** = YES/NO: Whether to automatically scroll
-   through results with a ArcGIS Feature Service endpoint. Has only effect
-   for ArcGIS servers >= 10.3 and layers with supportsPagination=true capability.
+|about-open-options|
+The following open options are supported:
+
+-  .. oo:: FEATURE_SERVER_PAGING
+      :choices: YES, NO
+
+      Whether to automatically scroll
+      through results with a ArcGIS Feature Service endpoint. Has only effect
+      for ArcGIS servers >= 10.3 and layers with supportsPagination=true capability.
 
 Example
 -------
@@ -66,7 +77,7 @@ server (note that this server does not support paging):
 
 ::
 
-   ogrinfo -ro -al "http://sampleserver3.arcgisonline.com/ArcGIS/rest/services/Hydrography/Watershed173811/FeatureServer/0/query?where=objectid+%3D+objectid&outfields=*&f=json"
+   ogrinfo -ro -al "https://sampleserver6.arcgisonline.com/arcgis/rest/services/PoolPermits/FeatureServer/0/query?resultRecordCount=10&f=pjson"
 
 See Also
 --------

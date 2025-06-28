@@ -9,23 +9,7 @@
  * Copyright (c) 2009, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_dxf.h"
@@ -97,7 +81,8 @@ int OGRDXFWriterLayer::TestCapability(const char *pszCap)
 /*      This is really a dummy as our fields are precreated.            */
 /************************************************************************/
 
-OGRErr OGRDXFWriterLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRDXFWriterLayer::CreateField(const OGRFieldDefn *poField,
+                                      int bApproxOK)
 
 {
     if (poFeatureDefn->GetFieldIndex(poField->GetNameRef()) >= 0 && bApproxOK)
@@ -184,7 +169,9 @@ OGRErr OGRDXFWriterLayer::WriteCore(OGRFeature *poFeature)
     /*      Also, for reasons I don't understand these ids seem to have     */
     /*      to start somewhere around 0x50 hex (80 decimal).                */
     /* -------------------------------------------------------------------- */
-    poFeature->SetFID(poDS->WriteEntityID(fp, (int)poFeature->GetFID()));
+    unsigned int nGotFID = 0;
+    poDS->WriteEntityID(fp, nGotFID, poFeature->GetFID());
+    poFeature->SetFID(nGotFID);
 
     WriteValue(100, "AcDbEntity");
 
@@ -254,7 +241,7 @@ OGRErr OGRDXFWriterLayer::WriteINSERT(OGRFeature *poFeature)
     }
     if (poTool && poTool->GetType() == OGRSTCSymbol)
     {
-        OGRStyleSymbol *poSymbol = (OGRStyleSymbol *)poTool;
+        OGRStyleSymbol *poSymbol = cpl::down_cast<OGRStyleSymbol *>(poTool);
         GBool bDefault;
 
         if (poSymbol->Color(bDefault) != nullptr && !bDefault)
@@ -357,7 +344,7 @@ OGRErr OGRDXFWriterLayer::WritePOINT(OGRFeature *poFeature)
     }
     if (poTool && poTool->GetType() == OGRSTCPen)
     {
-        OGRStylePen *poPen = (OGRStylePen *)poTool;
+        OGRStylePen *poPen = cpl::down_cast<OGRStylePen *>(poTool);
         GBool bDefault;
 
         if (poPen->Color(bDefault) != nullptr && !bDefault)
@@ -501,7 +488,7 @@ OGRErr OGRDXFWriterLayer::WriteTEXT(OGRFeature *poFeature)
 
     if (poTool && poTool->GetType() == OGRSTCLabel)
     {
-        OGRStyleLabel *poLabel = (OGRStyleLabel *)poTool;
+        OGRStyleLabel *poLabel = cpl::down_cast<OGRStyleLabel *>(poTool);
         GBool bDefault;
 
         /* --------------------------------------------------------------------
@@ -602,7 +589,7 @@ OGRErr OGRDXFWriterLayer::WriteTEXT(OGRFeature *poFeature)
                 osStyleName.Printf("AutoTextStyle-%d", nNextAutoID++);
             } while (poDS->oHeaderDS.TextStyleExists(osStyleName));
 
-            oNewTextStyles[osStyleName] = oTextStyleDef;
+            oNewTextStyles[osStyleName] = std::move(oTextStyleDef);
         }
 
         WriteValue(7, osStyleName);
@@ -821,7 +808,7 @@ OGRErr OGRDXFWriterLayer::WritePOLYLINE(OGRFeature *poFeature,
     /* -------------------------------------------------------------------- */
     if (poTool && poTool->GetType() == OGRSTCPen)
     {
-        OGRStylePen *poPen = (OGRStylePen *)poTool;
+        OGRStylePen *poPen = cpl::down_cast<OGRStylePen *>(poTool);
         GBool bDefault;
 
         if (poPen->Color(bDefault) != nullptr && !bDefault)
@@ -925,7 +912,7 @@ OGRErr OGRDXFWriterLayer::WritePOLYLINE(OGRFeature *poFeature,
             if (poDS->oHeaderDS.LookupLineType(osLineType).empty() &&
                 oNewLineTypes.count(osLineType) == 0)
             {
-                oNewLineTypes[osLineType] = adfDefinition;
+                oNewLineTypes[osLineType] = std::move(adfDefinition);
             }
 
             WriteValue(6, osLineType);
@@ -1094,7 +1081,7 @@ OGRErr OGRDXFWriterLayer::WriteHATCH(OGRFeature *poFeature, OGRGeometry *poGeom)
     // Write style brush fore color
     if (poTool && poTool->GetType() == OGRSTCBrush)
     {
-        OGRStyleBrush *poBrush = (OGRStyleBrush *)poTool;
+        OGRStyleBrush *poBrush = cpl::down_cast<OGRStyleBrush *>(poTool);
         GBool bDefault;
 
         if (poBrush->ForeColor(bDefault) != nullptr && !bDefault)
@@ -1291,7 +1278,7 @@ OGRErr OGRDXFWriterLayer::ICreateFeature(OGRFeature *poFeature)
     }
 
     // Explode geometry collections into multiple entities.
-    else if (eGType == wkbGeometryCollection)
+    else if (eGType == wkbGeometryCollection || eGType == wkbMultiPoint)
     {
         OGRGeometryCollection *poGC =
             poFeature->StealGeometry()->toGeometryCollection();
@@ -1366,4 +1353,13 @@ int OGRDXFWriterLayer::ColorStringToDXFColor(const char *pszRGB)
     }
 
     return nBestColor;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRDXFWriterLayer::GetDataset()
+{
+    return poDS;
 }

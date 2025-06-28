@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     gdal_csharp.i
  * Project:  GDAL CSharp Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2007, Tamas Szekeres
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 %include cpl_exceptions.i
@@ -36,6 +19,9 @@
 %include typemaps_csharp.i
 
 DEFINE_EXTERNAL_CLASS(OSRSpatialReferenceShadow, OSGeo.OSR.SpatialReference)
+DEFINE_EXTERNAL_CLASS(OGREnvelope, OSGeo.OGR.Envelope)
+DEFINE_EXTERNAL_CLASS(OGRFieldDomainShadow, OSGeo.OGR.FieldDomain)
+DEFINE_EXTERNAL_CLASS(GDALSubdatasetInfoShadow, OSGeo.GDAL.SubdatasetInfo)
 
 %apply (int *pList) {int *band_list, int *panHistogram_in};
 %apply (double *OUTPUT) {double *min_ret, double *max_ret};
@@ -86,6 +72,8 @@ typedef struct
 } GDALRasterIOExtraArg;
 
 DEFINE_EXTERNAL_CLASS(OGRLayerShadow, OSGeo.OGR.Layer)
+DEFINE_EXTERNAL_CLASS(OGRFeatureShadow, OSGeo.OGR.Feature)
+
 
 %define %rasterio_functions(GDALTYPE,CSTYPE)
  public CPLErr ReadRaster(int xOff, int yOff, int xSize, int ySize, CSTYPE[] buffer, int buf_xSize, int buf_ySize, int pixelSpace, int lineSpace) {
@@ -351,4 +339,61 @@ public CPLErr SetGCPs(GCP[] pGCPs, string pszGCPProjection) {
       return retval;
    }
 
+   public static Dataset BuildVRT(string dest, string[] poObjects, GDALBuildVRTOptions buildVrtAppOptions, $module.GDALProgressFuncDelegate callback, string callback_data) {
+      return wrapper_GDALBuildVRT_names(dest, poObjects, buildVrtAppOptions, callback, callback_data); 
+   }
+
+   public static Dataset BuildVRT(string dest, Dataset[] poObjects, GDALBuildVRTOptions buildVrtAppOptions, $module.GDALProgressFuncDelegate callback, string callback_data) {
+      Dataset retval = null;
+      if (poObjects.Length <= 0)
+        throw new ArgumentException("poObjects size is small (BuildVRT)");
+
+      int intPtrSize = Marshal.SizeOf(typeof(IntPtr));
+      IntPtr nativeArray = Marshal.AllocHGlobal(poObjects.Length * intPtrSize);
+      try {
+          for (int i=0; i < poObjects.Length; i++)
+            Marshal.WriteIntPtr(nativeArray, i * intPtrSize, Dataset.getCPtr(poObjects[i]).Handle);
+
+          retval  = wrapper_GDALBuildVRT_objects(dest, poObjects.Length, nativeArray, buildVrtAppOptions, callback, callback_data);
+      } finally {
+          Marshal.FreeHGlobal(nativeArray);
+      }
+      return retval;
+   }
+
+   public static Dataset MultiDimTranslate(string dest, Dataset[] poObjects, GDALMultiDimTranslateOptions multiDimAppOptions, $module.GDALProgressFuncDelegate callback, string callback_data) {
+      Dataset retval = null;
+      if (poObjects.Length <= 0)
+        throw new ArgumentException("poObjects size is small (GDALMultiDimTranslateDestName)");
+
+      int intPtrSize = Marshal.SizeOf(typeof(IntPtr));
+      IntPtr nativeArray = Marshal.AllocHGlobal(poObjects.Length * intPtrSize);
+      try {
+          for (int i=0; i < poObjects.Length; i++)
+            Marshal.WriteIntPtr(nativeArray, i * intPtrSize, Dataset.getCPtr(poObjects[i]).Handle);
+
+          retval  = wrapper_GDALMultiDimTranslateDestName(dest, poObjects.Length, nativeArray, multiDimAppOptions, callback, callback_data);
+      } finally {
+          Marshal.FreeHGlobal(nativeArray);
+      }
+      return retval;
+   }
+
 %}
+
+%rename (GetMemFileBuffer) wrapper_VSIGetMemFileBuffer;
+
+%typemap(cstype) (vsi_l_offset *pnDataLength) "out ulong";
+%typemap(imtype) (vsi_l_offset *pnDataLength) "out ulong";
+%apply (unsigned long long *OUTPUT) {(vsi_l_offset *pnDataLength)}
+%typemap(cstype) (int bUnlinkAndSeize) "bool";
+%typemap(csin) (int bUnlinkAndSeize) "$csinput ? 1 : 0";
+
+%inline {
+GByte* wrapper_VSIGetMemFileBuffer(const char *utf8_path, vsi_l_offset *pnDataLength, int bUnlinkAndSeize)
+{
+    return VSIGetMemFileBuffer(utf8_path, pnDataLength, bUnlinkAndSeize);
+}
+}
+
+%clear (vsi_l_offset *pnDataLength);

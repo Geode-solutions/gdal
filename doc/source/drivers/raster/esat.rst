@@ -24,10 +24,10 @@ ASAR and MERIS parameters contained in the ADS and GADS records
 (excluded geolocation ones) can be retrieved as key/value pairs using
 the "RECORDS" metadata domain.
 
-NOTE: Implemented as ``gdal/frmts/envisat/envisatdataset.cpp``.
+NOTE: Implemented as :source_file:`frmts/envisat/envisatdataset.cpp`.
 
-See Also: `Envisat Data
-Products <http://envisat.esa.int/dataproducts/>`__ at ESA.
+See Also: `Envisat 
+<https://earth.esa.int/eogateway/missions/envisat>`__ at ESA.
 
 Driver capabilities
 -------------------

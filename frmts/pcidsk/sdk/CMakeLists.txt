@@ -29,6 +29,7 @@ add_library(
   core/pcidskexception.cpp
   core/pcidskinterfaces.cpp
   core/pcidskopen.cpp
+  core/pcidsk_mutex.cpp
   segment/cpcidsk_array.cpp
   segment/cpcidsk_tex.cpp
   segment/cpcidskbinarysegment.cpp
@@ -72,10 +73,6 @@ target_include_directories(pcidsk_sdk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} $<TARG
                                               $<TARGET_PROPERTY:cpl,BINARY_DIR>)
 set_property(TARGET pcidsk_sdk PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
 
-if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
-  set_property(TARGET pcidsk_sdk PROPERTY UNITY_BUILD OFF)
-endif ()
-
 if (GDAL_USE_JPEG OR GDAL_USE_JPEG_INTERNAL)
     target_compile_definitions(pcidsk_sdk PRIVATE -DHAVE_LIBJPEG)
     if (GDAL_USE_JPEG_INTERNAL)
@@ -90,9 +87,4 @@ if (NOT TARGET PCIDSK::PCIDSK)
   set_target_properties(PCIDSK::PCIDSK PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR})
 endif ()
 
-if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
-  target_link_libraries(gdal_PCIDSK INTERFACE pcidsk_sdk)
-else ()
-  set_target_properties(gdal_PCIDSK PROPERTIES INTERFACE_LINK_LIBRARIES pcidsk_sdk)
-  # gdal_add_private_link_libraries(pcidsk_sdk)
-endif ()
+target_link_libraries(gdal_PCIDSK INTERFACE pcidsk_sdk)

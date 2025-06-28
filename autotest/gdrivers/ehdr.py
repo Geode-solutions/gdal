@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test EHdr format driver.
@@ -11,25 +10,10 @@
 # Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import os
 import struct
 
 import gdaltest
@@ -47,7 +31,7 @@ def test_ehdr_1():
 
     tst = gdaltest.GDALTest("EHDR", "png/rgba16.png", 2, 2042)
 
-    return tst.testCreate()
+    tst.testCreate()
 
 
 ###############################################################################
@@ -58,7 +42,7 @@ def test_ehdr_2():
 
     tst = gdaltest.GDALTest("EHDR", "byte.tif", 1, 4672)
 
-    return tst.testCreateCopy(check_gt=1, check_srs=1)
+    tst.testCreateCopy(check_gt=1, check_srs=1)
 
 
 ###############################################################################
@@ -69,7 +53,7 @@ def test_ehdr_3():
 
     tst = gdaltest.GDALTest("EHDR", "ehdr/float32.bil", 1, 27)
 
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -102,12 +86,9 @@ def test_ehdr_4():
 
     ds = None
 
+    ###############################################################################
+    # verify dataset's colortable and nodata value.
 
-###############################################################################
-# verify last dataset's colortable and nodata value.
-
-
-def test_ehdr_5():
     ds = gdal.Open("tmp/test_4.bil")
     band = ds.GetRasterBand(1)
 
@@ -137,7 +118,7 @@ def test_ehdr_6():
 
     tst = gdaltest.GDALTest("EHDR", "ehdr/float32.bil", 1, 27)
 
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -148,13 +129,17 @@ def test_ehdr_7():
 
     tst = gdaltest.GDALTest("EHDR", "int32.tif", 1, 4672)
 
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
 # Test signed 8bit integer support. (#2717)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_ehdr_8():
 
     drv = gdal.GetDriverByName("EHDR")
@@ -199,7 +184,7 @@ def test_ehdr_9():
 
 def test_ehdr_10():
     tst = gdaltest.GDALTest("EHDR", "ehdr/ehdr10.bil", 1, 8202)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -208,7 +193,7 @@ def test_ehdr_10():
 
 def test_ehdr_11():
     tst = gdaltest.GDALTest("EHDR", "ehdr/ehdr11.flt", 1, 8202)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -240,7 +225,8 @@ def test_ehdr_12():
 
 def test_ehdr_13():
 
-    gdal.Unlink("data/byte.tif.aux.xml")
+    if os.path.exists("data/byte.tif.aux.xml"):
+        gdal.Unlink("data/byte.tif.aux.xml")
 
     src_ds = gdal.Open("data/byte.tif")
     ds = gdal.GetDriverByName("EHDR").CreateCopy("/vsimem/byte.bil", src_ds)
@@ -357,7 +343,7 @@ def test_ehdr_rat():
     assert not (
         ds.GetRasterBand(1).GetDefaultRAT() or ds.GetRasterBand(1).GetColorTable()
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret = ds.GetRasterBand(1).SetDefaultRAT(gdal.RasterAttributeTable())
     assert ret != 0
     ds = None
@@ -380,20 +366,20 @@ def test_ehdr_approx_stats_flag():
     approx_ok = 1
     force = 1
     stats = ds.GetRasterBand(1).GetStatistics(approx_ok, force)
-    assert stats == [0.0, 0.0, 0.0, 0.0], "did not get expected stats"
+    assert stats == [0.0, 0.0, 0.0, 0.0]
     md = ds.GetRasterBand(1).GetMetadata()
     assert "STATISTICS_APPROXIMATE" in md, "did not get expected metadata"
 
     approx_ok = 0
     force = 0
     stats = ds.GetRasterBand(1).GetStatistics(approx_ok, force)
-    assert stats == [0.0, 0.0, 0.0, -1.0], "did not get expected stats"
+    assert stats is None
 
     ds = gdal.Open(tmpfile, gdal.GA_Update)
     approx_ok = 0
     force = 0
     stats = ds.GetRasterBand(1).GetStatistics(approx_ok, force)
-    assert stats == [0.0, 0.0, 0.0, -1.0], "did not get expected stats"
+    assert stats is None
 
     approx_ok = 0
     force = 1

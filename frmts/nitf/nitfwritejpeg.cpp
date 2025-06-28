@@ -11,23 +11,7 @@
  * Portions Copyright (c) Her majesty the Queen in right of Canada as
  * represented by the Minister of National Defence, 2006.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifdef JPEG_SUPPORTED
@@ -96,7 +80,15 @@ int NITFWriteJPEGBlock(GDALDataset *poSrcDS, VSILFILE *fp, int nBlockXOff,
                        int nRestartInterval, GDALProgressFunc pfnProgress,
                        void *pProgressData);
 
-void jpeg_vsiio_dest(j_compress_ptr cinfo, VSILFILE *outfile);
+#ifdef NITFWriteJPEGBlock
+#define jpeg_vsiio_src NITF_jpeg_vsiio_src12
+#define jpeg_vsiio_dest NITF_jpeg_vsiio_dest12
+#else
+#define jpeg_vsiio_src NITF_jpeg_vsiio_src
+#define jpeg_vsiio_dest NITF_jpeg_vsiio_dest
+#endif
+#include "../jpeg/vsidataio.h"
+#include "../jpeg/vsidataio.cpp"
 
 /************************************************************************/
 /*                         NITFWriteJPEGBlock()                         */
@@ -129,7 +121,14 @@ int NITFWriteJPEGBlock(GDALDataset *poSrcDS, VSILFILE *fp, int nBlockXOff,
 
     memset(&sCInfo, 0, sizeof(sCInfo));
     sCInfo.err = jpeg_std_error(&sJErr);
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
+#endif
     jpeg_create_compress(&sCInfo);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
     jpeg_vsiio_dest(&sCInfo, fp);
 
@@ -196,7 +195,8 @@ int NITFWriteJPEGBlock(GDALDataset *poSrcDS, VSILFILE *fp, int nBlockXOff,
     if (pabyAPP6)
     {
         /* 0xe6 = APP6 marker */
-        jpeg_write_marker(&sCInfo, 0xe6, (const JOCTET *)pabyAPP6, 23);
+        jpeg_write_marker(&sCInfo, 0xe6,
+                          reinterpret_cast<const JOCTET *>(pabyAPP6), 23);
     }
 
     /* -------------------------------------------------------------------- */
@@ -205,12 +205,12 @@ int NITFWriteJPEGBlock(GDALDataset *poSrcDS, VSILFILE *fp, int nBlockXOff,
     const int nWorkDTSize = GDALGetDataTypeSizeBytes(eWorkDT);
 
     GByte *pabyScanline = reinterpret_cast<GByte *>(
-        CPLMalloc(nBands * nBlockXSize * nWorkDTSize));
+        CPLMalloc(cpl::fits_on<int>(nBands * nBlockXSize * nWorkDTSize)));
 
     const int nXSize = poSrcDS->GetRasterXSize();
     const int nYSize = poSrcDS->GetRasterYSize();
 
-    const double nTotalPixels = static_cast<double>(nXSize * nYSize);
+    const double nTotalPixels = static_cast<double>(nXSize) * nYSize;
 
     int nBlockXSizeToRead = nBlockXSize;
     if (nBlockXSize * nBlockXOff + nBlockXSize > nXSize)
@@ -236,25 +236,42 @@ int NITFWriteJPEGBlock(GDALDataset *poSrcDS, VSILFILE *fp, int nBlockXOff,
                 GF_Read, nBlockXSize * nBlockXOff,
                 iLine + nBlockYSize * nBlockYOff, nBlockXSizeToRead, 1,
                 pabyScanline, nBlockXSizeToRead, 1, eWorkDT, nBands, anBandList,
-                nBands * nWorkDTSize, nBands * nBlockXSize * nWorkDTSize,
+                static_cast<GSpacing>(nBands) * nWorkDTSize,
+                static_cast<GSpacing>(nBands) * nWorkDTSize * nBlockXSize,
                 nWorkDTSize, nullptr);
 
-#if !defined(JPEG_LIB_MK1_OR_12BIT)
             /* Repeat the last pixel till the end of the line */
             /* to minimize discontinuity */
             if (nBlockXSizeToRead < nBlockXSize)
             {
                 for (int iBand = 0; iBand < nBands; iBand++)
                 {
-                    GByte bVal =
-                        pabyScanline[nBands * (nBlockXSizeToRead - 1) + iBand];
-                    for (int iX = nBlockXSizeToRead; iX < nBlockXSize; iX++)
+#if defined(JPEG_LIB_MK1_OR_12BIT)
+                    if (eWorkDT == GDT_UInt16)
                     {
-                        pabyScanline[nBands * iX + iBand] = bVal;
+                        GUInt16 *panScanline =
+                            reinterpret_cast<GUInt16 *>(pabyScanline);
+                        const GUInt16 nVal =
+                            panScanline[nBands * (nBlockXSizeToRead - 1) +
+                                        iBand];
+                        for (int iX = nBlockXSizeToRead; iX < nBlockXSize; iX++)
+                        {
+                            panScanline[nBands * iX + iBand] = nVal;
+                        }
+                    }
+                    else
+#endif
+                    {
+                        GByte bVal =
+                            pabyScanline[nBands * (nBlockXSizeToRead - 1) +
+                                         iBand];
+                        for (int iX = nBlockXSizeToRead; iX < nBlockXSize; iX++)
+                        {
+                            pabyScanline[nBands * iX + iBand] = bVal;
+                        }
                     }
                 }
             }
-#endif
         }
 
 #if defined(JPEG_LIB_MK1_OR_12BIT)
@@ -263,7 +280,7 @@ int NITFWriteJPEGBlock(GDALDataset *poSrcDS, VSILFILE *fp, int nBlockXOff,
         {
             GUInt16 *panScanline = reinterpret_cast<GUInt16 *>(pabyScanline);
 
-            for (int iPixel = 0; iPixel < nXSize * nBands; iPixel++)
+            for (int iPixel = 0; iPixel < nBlockXSize * nBands; iPixel++)
             {
                 if (panScanline[iPixel] > 4095)
                 {

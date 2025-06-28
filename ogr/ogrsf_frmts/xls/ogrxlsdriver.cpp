@@ -7,67 +7,33 @@
  ******************************************************************************
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_xls.h"
+#include "ogrxlsdrivercore.h"
 #include "cpl_conv.h"
-
-/************************************************************************/
-/*                           ~OGRXLSDriver()                            */
-/************************************************************************/
-
-OGRXLSDriver::~OGRXLSDriver()
-
-{
-}
-
-/************************************************************************/
-/*                              GetName()                               */
-/************************************************************************/
-
-const char *OGRXLSDriver::GetName()
-
-{
-    return "XLS";
-}
 
 /************************************************************************/
 /*                                Open()                                */
 /************************************************************************/
 
-OGRDataSource *OGRXLSDriver::Open(const char *pszFilename, int bUpdate)
+static GDALDataset *OGRXLSDriverOpen(GDALOpenInfo *poOpenInfo)
 
 {
-    if (bUpdate)
+    if ((poOpenInfo->nOpenFlags & GDAL_OF_UPDATE) != 0)
     {
         return nullptr;
     }
 
-    if (!EQUAL(CPLGetExtension(pszFilename), "XLS"))
+    if (!poOpenInfo->IsExtensionEqualToCI("XLS"))
     {
         return nullptr;
     }
 
     OGRXLSDataSource *poDS = new OGRXLSDataSource();
 
-    if (!poDS->Open(pszFilename, bUpdate))
+    if (!poDS->Open(poOpenInfo->pszFilename, false))
     {
         delete poDS;
         poDS = nullptr;
@@ -77,30 +43,19 @@ OGRDataSource *OGRXLSDriver::Open(const char *pszFilename, int bUpdate)
 }
 
 /************************************************************************/
-/*                           TestCapability()                           */
-/************************************************************************/
-
-int OGRXLSDriver::TestCapability(CPL_UNUSED const char *pszCap)
-
-{
-    return FALSE;
-}
-
-/************************************************************************/
 /*                           RegisterOGRXLS()                           */
 /************************************************************************/
 
 void RegisterOGRXLS()
 
 {
-    OGRSFDriver *poDriver = new OGRXLSDriver;
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
+        return;
 
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "MS Excel format");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "xls");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/vector/xls.html");
-    poDriver->SetMetadataItem(GDAL_DCAP_NONSPATIAL, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_MULTIPLE_VECTOR_LAYERS, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
+    GDALDriver *poDriver = new GDALDriver();
+    OGRXLSDriverSetCommonMetadata(poDriver);
 
-    OGRSFDriverRegistrar::GetRegistrar()->RegisterDriver(poDriver);
+    poDriver->pfnOpen = OGRXLSDriverOpen;
+
+    GetGDALDriverManager()->RegisterDriver(poDriver);
 }

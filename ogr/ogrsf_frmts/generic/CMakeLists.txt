@@ -26,6 +26,7 @@ add_library(
   ogrsf_generic OBJECT
   ogrsfdriverregistrar.cpp
   ogrlayer.cpp
+  ogrlayerarrow.cpp
   ogrdatasource.cpp
   ogrsfdriver.cpp
   # handled in parent directory. ogrregisterall.cpp
@@ -36,8 +37,8 @@ add_library(
   ogrunionlayer.cpp
   ogrlayerpool.cpp
   ogrlayerdecorator.cpp
+  ogrlayerwithtranslatefeature.cpp
   ogreditablelayer.cpp
-  ogremulatedtransaction.cpp
   ogrmutexeddatasource.cpp
   ogrmutexedlayer.cpp
   ograrrowarrayhelper.cpp)
@@ -47,6 +48,6 @@ target_compile_options(ogrsf_generic PRIVATE ${GDAL_CXX_WARNING_FLAGS} ${WFLAG_O
 target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:ogrsf_generic>)
 set_property(TARGET ogrsf_generic PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
 
-if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
-  set_property(SOURCE ogr_gensql.cpp PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
-endif ()
+if (OGR_ENABLE_DRIVER_TAB AND NOT OGR_ENABLE_DRIVER_TAB_PLUGIN)
+target_compile_definitions(ogrsf_generic PRIVATE -DHAVE_MITAB)
+endif()

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for SRP driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2012-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -38,11 +21,26 @@ from osgeo import gdal, osr
 
 pytestmark = pytest.mark.require_driver("SRP")
 
+
+@pytest.fixture(scope="module", autouse=True)
+def setup_and_cleanup():
+
+    yield
+
+    try:
+        os.unlink("data/srp/USRP_PCB0/TRANSH01.THF.aux.xml")
+    except OSError:
+        pass
+
+
 ###############################################################################
 # Read USRP dataset with PCB=0
 
 
-def test_srp_1(filename="srp/USRP_PCB0/FKUSRP01.IMG"):
+@pytest.mark.parametrize("pcb", (0, 4, 8))
+def test_srp_1(pcb):
+
+    filename = f"srp/USRP_PCB{pcb}/FKUSRP01.IMG"
 
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(32600 + 17)
@@ -81,30 +79,13 @@ def test_srp_1(filename="srp/USRP_PCB0/FKUSRP01.IMG"):
 
 
 ###############################################################################
-# Read USRP dataset with PCB=4
-
-
-def test_srp_2():
-    return test_srp_1("srp/USRP_PCB4/FKUSRP01.IMG")
-
-
-###############################################################################
-# Read USRP dataset with PCB=8
-
-
-def test_srp_3():
-    return test_srp_1("srp/USRP_PCB8/FKUSRP01.IMG")
-
-
-###############################################################################
 # Read from TRANSH01.THF file.
 
 
 def test_srp_4():
 
     tst = gdaltest.GDALTest("SRP", "srp/USRP_PCB0/TRANSH01.THF", 1, 24576)
-    ret = tst.testOpen()
-    return ret
+    tst.testOpen()
 
 
 ###############################################################################
@@ -113,9 +94,8 @@ def test_srp_4():
 
 def test_srp_5():
 
-    gdal.SetConfigOption("SRP_SINGLE_GEN_IN_THF_AS_DATASET", "FALSE")
-    ds = gdal.Open("data/srp/USRP_PCB0/TRANSH01.THF")
-    gdal.SetConfigOption("SRP_SINGLE_GEN_IN_THF_AS_DATASET", None)
+    with gdal.config_option("SRP_SINGLE_GEN_IN_THF_AS_DATASET", "FALSE"):
+        ds = gdal.Open("data/srp/USRP_PCB0/TRANSH01.THF")
     subdatasets = ds.GetMetadata("SUBDATASETS")
     assert (
         subdatasets["SUBDATASET_1_NAME"].replace("\\", "/")
@@ -153,16 +133,3 @@ def test_srp_6():
         filename_absolute=1,
     )
     tst.testOpen()
-
-
-###############################################################################
-# Cleanup
-
-
-def test_srp_cleanup():
-
-    # FIXME ?
-    os.unlink("data/srp/USRP_PCB0/TRANSH01.THF.aux.xml")
-
-
-###############################################################################

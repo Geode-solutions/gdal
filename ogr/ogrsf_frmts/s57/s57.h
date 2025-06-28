@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  S-57 Translator
  * Purpose:  Declarations for S-57 translator not including the
@@ -11,23 +10,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef S57_H_INCLUDED
@@ -138,20 +121,24 @@ class CPL_DLL S57ClassRegistrar
     // attribute table methods.
     // int         GetMaxAttrIndex() { return nAttrMax; }
     const S57AttrInfo *GetAttrInfo(int i);
+
     const char *GetAttrName(int i)
     {
         return GetAttrInfo(i) == nullptr ? nullptr
                                          : aoAttrInfos[i]->osName.c_str();
     }
+
     const char *GetAttrAcronym(int i)
     {
         return GetAttrInfo(i) == nullptr ? nullptr
                                          : aoAttrInfos[i]->osAcronym.c_str();
     }
+
     char GetAttrType(int i)
     {
         return GetAttrInfo(i) == nullptr ? '\0' : aoAttrInfos[i]->chType;
     }
+
 #define SAT_ENUM 'E'
 #define SAT_LIST 'L'
 #define SAT_FLOAT 'F'
@@ -163,6 +150,7 @@ class CPL_DLL S57ClassRegistrar
     {
         return GetAttrInfo(i) == nullptr ? '\0' : aoAttrInfos[i]->chClass;
     }
+
     int FindAttrByAcronym(const char *);
 };
 
@@ -194,6 +182,7 @@ class S57ClassContentExplorer
     {
         return SelectClassByIndex(0);
     }
+
     bool NextClass()
     {
         return SelectClassByIndex(iCurrentClass + 1);
@@ -319,21 +308,20 @@ class CPL_DLL S57Reader
     OGRFeature *AssembleFeature(DDFRecord *, OGRFeatureDefn *);
 
     void ApplyObjectClassAttributes(DDFRecord *, OGRFeature *);
-    // cppcheck-suppress functionStatic
-    void GenerateLNAMAndRefs(DDFRecord *, OGRFeature *);
+    static void GenerateLNAMAndRefs(DDFRecord *, OGRFeature *);
     void GenerateFSPTAttributes(DDFRecord *, OGRFeature *);
 
     void AssembleSoundingGeometry(DDFRecord *, OGRFeature *);
     // cppcheck-suppress functionStatic
     void AssemblePointGeometry(DDFRecord *, OGRFeature *);
     void AssembleLineGeometry(DDFRecord *, OGRFeature *);
-    void AssembleAreaGeometry(DDFRecord *, OGRFeature *);
+    void AssembleAreaGeometry(const DDFRecord *, OGRFeature *);
 
     bool FetchPoint(int, int, double *, double *, double * = nullptr);
     bool FetchLine(DDFRecord *, int, int, OGRLineString *);
 
     OGRFeatureDefn *FindFDefn(DDFRecord *);
-    int ParseName(DDFField *, int = 0, int * = nullptr);
+    int ParseName(const DDFField *, int = 0, int * = nullptr);
 
     // cppcheck-suppress functionStatic
     bool ApplyRecordUpdate(DDFRecord *, DDFRecord *);
@@ -347,6 +335,7 @@ class CPL_DLL S57Reader
 
     void SetClassBased(S57ClassRegistrar *, S57ClassContentExplorer *);
     bool SetOptions(char **);
+
     int GetOptionFlags()
     {
         return nOptionFlags;
@@ -354,10 +343,12 @@ class CPL_DLL S57Reader
 
     int Open(int bTestOpen);
     void Close();
+
     DDFModule *GetModule()
     {
         return poModule;
     }
+
     const char *GetDSNM()
     {
         return pszDSNM;

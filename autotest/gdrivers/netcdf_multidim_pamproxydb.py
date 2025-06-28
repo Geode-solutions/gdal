@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test multidimensional support in netCDF driver
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2021, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import sys
@@ -49,7 +32,7 @@ if len(sys.argv) == 2 and sys.argv[1] == "-test_netcdf_multidim_cache_pamproxydb
         assert ar
         transpose = ar.Transpose([1, 0])
         assert transpose.Cache()
-        with gdaltest.error_handler():
+        with gdaltest.disable_exceptions():
             # Cannot cache twice the same array
             assert transpose.Cache() is False
 
@@ -59,7 +42,8 @@ if len(sys.argv) == 2 and sys.argv[1] == "-test_netcdf_multidim_cache_pamproxydb
 
         return transpose.Read()
 
-    transposed_data = get_transposed_and_cache()
+    with gdaltest.disable_exceptions():
+        transposed_data = get_transposed_and_cache()
 
     def check_cache_exists():
         cache_ds = gdal.OpenEx(
@@ -108,8 +92,9 @@ if len(sys.argv) == 2 and sys.argv[1] == "-test_netcdf_multidim_cache_pamproxydb
 
     check_cache_really_working()
 
-    gdal.Unlink(tmpfilename)
-    gdal.Unlink("tmp/tmppamproxydir/000000_tmp_tmpdirreadonly_test.nc.gmac")
+    with gdaltest.disable_exceptions():
+        gdal.Unlink(tmpfilename)
+        gdal.Unlink("tmp/tmppamproxydir/000000_tmp_tmpdirreadonly_test.nc.gmac")
 
     print("success")
     sys.exit(0)

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Arc/Info Binary Grid Translator
  * Purpose:  Grid file reading code.
@@ -9,30 +8,18 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2007-2010, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "aigrid.h"
 
+#ifndef CPL_IGNORE_RET_VAL_INT_defined
+#define CPL_IGNORE_RET_VAL_INT_defined
+
 CPL_INLINE static void CPL_IGNORE_RET_VAL_INT(CPL_UNUSED int unused)
 {
 }
+#endif
 
 /************************************************************************/
 /*                    AIGProcessRaw32bitFloatBlock()                    */
@@ -616,7 +603,7 @@ CPLErr AIGReadBlock(VSILFILE *fp, GUInt32 nBlockOffset, int nBlockSize,
     if (VSIFSeekL(fp, nBlockOffset, SEEK_SET) != 0 ||
         VSIFReadL(pabyRaw, nBlockSize + 2, 1, fp) != 1)
     {
-        memset(panData, 0, nBlockXSize * nBlockYSize * 4);
+        memset(panData, 0, sizeof(int32_t) * nBlockXSize * nBlockYSize);
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Read of %d bytes from offset %d for grid block failed.",
                  nBlockSize + 2, nBlockOffset);
@@ -629,7 +616,7 @@ CPLErr AIGReadBlock(VSILFILE *fp, GUInt32 nBlockOffset, int nBlockSize,
     /* -------------------------------------------------------------------- */
     if (nBlockSize != (pabyRaw[0] * 256 + pabyRaw[1]) * 2)
     {
-        memset(panData, 0, nBlockXSize * nBlockYSize * 4);
+        memset(panData, 0, sizeof(int32_t) * nBlockXSize * nBlockYSize);
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Block is corrupt, block size was %d, but expected to be %d.",
                  (pabyRaw[0] * 256 + pabyRaw[1]) * 2, nBlockSize);
@@ -695,7 +682,7 @@ CPLErr AIGReadBlock(VSILFILE *fp, GUInt32 nBlockOffset, int nBlockSize,
 
     if (nMinSize > 4)
     {
-        memset(panData, 0, nBlockXSize * nBlockYSize * 4);
+        memset(panData, 0, sizeof(int32_t) * nBlockXSize * nBlockYSize);
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Corrupt 'minsize' of %d in block header.  Read aborted.",
                  nMinSize);
@@ -779,21 +766,15 @@ CPLErr AIGReadBlock(VSILFILE *fp, GUInt32 nBlockOffset, int nBlockSize,
 
         if (eErr == CE_Failure)
         {
-            static int bHasWarned = FALSE;
-
             for (i = 0; i < nBlockXSize * nBlockYSize; i++)
                 panData[i] = ESRI_GRID_NO_DATA;
 
-            if (!bHasWarned)
-            {
-                CPLError(CE_Warning, CPLE_AppDefined,
+            CPLErrorOnce(CE_Warning, CPLE_AppDefined,
                          "Unsupported Arc/Info Binary Grid tile of type 0x%X"
                          " encountered.\n"
                          "This and subsequent unsupported tile types set to"
                          " no data value.\n",
                          nMagic);
-                bHasWarned = TRUE;
-            }
         }
     }
 

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  MSG Native Reader
  * Purpose:  Base class for reading in the headers of MSG native images
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2005, Frans van den Bergh <fvdbergh@csir.co.za>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef MSG_READER_CORE_H
@@ -67,9 +50,8 @@ class Msg_reader_core
   public:
     explicit Msg_reader_core(const char *fname);
     explicit Msg_reader_core(VSILFILE *fp);
-    virtual ~Msg_reader_core()
-    {
-    }
+
+    virtual ~Msg_reader_core();
 
     bool get_open_success() const
     {
@@ -87,6 +69,7 @@ class Msg_reader_core
     {
         return _lines;
     }
+
     unsigned int get_columns() const
     {
         return _columns;
@@ -107,18 +90,22 @@ class Msg_reader_core
     {
         return _year;
     }
+
     unsigned int get_month() const
     {
         return _month;
     }
+
     unsigned int get_day() const
     {
         return _day;
     }
+
     unsigned int get_hour() const
     {
         return _hour;
     }
+
     unsigned int get_minute() const
     {
         return _minute;
@@ -128,6 +115,7 @@ class Msg_reader_core
     {
         return _line_start;
     }
+
     unsigned int get_col_start() const
     {
         return _col_start;
@@ -137,14 +125,17 @@ class Msg_reader_core
     {
         return _col_dir_step;
     }
+
     float get_line_dir_step() const
     {
         return _line_dir_step;
     }
+
     float get_hrv_col_dir_step() const
     {
         return _hrv_col_dir_step;
     }
+
     float get_hrv_line_dir_step() const
     {
         return _hrv_line_dir_step;
@@ -154,22 +145,27 @@ class Msg_reader_core
     {
         return _f_data_offset;
     }
+
     unsigned int get_visir_bytes_per_line() const
     {
         return _visir_bytes_per_line;
     }
+
     unsigned int get_visir_packet_size() const
     {
         return _visir_packet_size;
     }
+
     unsigned int get_hrv_bytes_per_line() const
     {
         return _hrv_bytes_per_line;
     }
+
     unsigned int get_hrv_packet_size() const
     {
         return _hrv_packet_size;
     }
+
     unsigned int get_interline_spacing() const
     {
         return _interline_spacing;
@@ -184,6 +180,7 @@ class Msg_reader_core
     {
         return _calibration;
     }
+
     const IMAGE_DESCRIPTION_RECORD &get_image_description_record() const
     {
         return _img_desc_record;

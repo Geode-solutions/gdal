@@ -10,23 +10,7 @@
  * Copyright (c) 2017, Ari Jolma
  * Copyright (c) 2017, Finnish Environment Institute
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -46,55 +30,51 @@
 using namespace WCSUtils;
 
 /************************************************************************/
-/*                         GetExtent()                                  */
+/*                         GetNativeExtent()                            */
 /*                                                                      */
 /************************************************************************/
 
-std::vector<double> WCSDataset110::GetExtent(int nXOff, int nYOff, int nXSize,
-                                             int nYSize,
-                                             CPL_UNUSED int nBufXSize,
-                                             CPL_UNUSED int nBufYSize)
+std::vector<double> WCSDataset110::GetNativeExtent(int nXOff, int nYOff,
+                                                   int nXSize, int nYSize,
+                                                   CPL_UNUSED int nBufXSize,
+                                                   CPL_UNUSED int nBufYSize)
 {
     std::vector<double> extent;
 
     // outer edges of outer pixels.
-    extent.push_back(adfGeoTransform[0] + (nXOff)*adfGeoTransform[1]);
-    extent.push_back(adfGeoTransform[3] +
-                     (nYOff + nYSize) * adfGeoTransform[5]);
-    extent.push_back(adfGeoTransform[0] +
-                     (nXOff + nXSize) * adfGeoTransform[1]);
-    extent.push_back(adfGeoTransform[3] + (nYOff)*adfGeoTransform[5]);
+    extent.push_back(m_gt[0] + (nXOff)*m_gt[1]);
+    extent.push_back(m_gt[3] + (nYOff + nYSize) * m_gt[5]);
+    extent.push_back(m_gt[0] + (nXOff + nXSize) * m_gt[1]);
+    extent.push_back(m_gt[3] + (nYOff)*m_gt[5]);
 
     bool no_shrink = CPLGetXMLBoolean(psService, "OuterExtents");
 
     // WCS 1.1 extents are centers of outer pixels.
     if (!no_shrink)
     {
-        extent[2] -= adfGeoTransform[1] * 0.5;
-        extent[0] += adfGeoTransform[1] * 0.5;
-        extent[1] -= adfGeoTransform[5] * 0.5;
-        extent[3] += adfGeoTransform[5] * 0.5;
+        extent[2] -= m_gt[1] * 0.5;
+        extent[0] += m_gt[1] * 0.5;
+        extent[1] -= m_gt[5] * 0.5;
+        extent[3] += m_gt[5] * 0.5;
     }
 
     double dfXStep, dfYStep;
 
     if (!no_shrink)
     {
-        dfXStep = (nXSize / (double)nBufXSize) * adfGeoTransform[1];
-        dfYStep = (nYSize / (double)nBufYSize) * adfGeoTransform[5];
+        dfXStep = (nXSize / (double)nBufXSize) * m_gt[1];
+        dfYStep = (nYSize / (double)nBufYSize) * m_gt[5];
         // Carefully adjust bounds for pixel centered values at new
         // sampling density.
         if (nBufXSize != nXSize || nBufYSize != nYSize)
         {
-            dfXStep = (nXSize / (double)nBufXSize) * adfGeoTransform[1];
-            dfYStep = (nYSize / (double)nBufYSize) * adfGeoTransform[5];
+            dfXStep = (nXSize / (double)nBufXSize) * m_gt[1];
+            dfYStep = (nYSize / (double)nBufYSize) * m_gt[5];
 
-            extent[0] =
-                nXOff * adfGeoTransform[1] + adfGeoTransform[0] + dfXStep * 0.5;
+            extent[0] = nXOff * m_gt[1] + m_gt[0] + dfXStep * 0.5;
             extent[2] = extent[0] + (nBufXSize - 1) * dfXStep;
 
-            extent[3] =
-                nYOff * adfGeoTransform[5] + adfGeoTransform[3] + dfYStep * 0.5;
+            extent[3] = nYOff * m_gt[5] + m_gt[3] + dfYStep * 0.5;
             extent[1] = extent[3] + (nBufYSize - 1) * dfYStep;
         }
     }
@@ -102,8 +82,8 @@ std::vector<double> WCSDataset110::GetExtent(int nXOff, int nYOff, int nXSize,
     {
         double adjust =
             CPLAtof(CPLGetXMLValue(psService, "BufSizeAdjust", "0.0"));
-        dfXStep = (nXSize / ((double)nBufXSize + adjust)) * adfGeoTransform[1];
-        dfYStep = (nYSize / ((double)nBufYSize + adjust)) * adfGeoTransform[5];
+        dfXStep = (nXSize / ((double)nBufXSize + adjust)) * m_gt[1];
+        dfYStep = (nYSize / ((double)nBufYSize + adjust)) * m_gt[5];
     }
 
     extent.push_back(dfXStep);
@@ -117,11 +97,10 @@ std::vector<double> WCSDataset110::GetExtent(int nXOff, int nYOff, int nXSize,
 /*                                                                      */
 /************************************************************************/
 
-CPLString WCSDataset110::GetCoverageRequest(bool scaled,
-                                            CPL_UNUSED int nBufXSize,
-                                            CPL_UNUSED int nBufYSize,
-                                            const std::vector<double> &extent,
-                                            CPLString osBandList)
+std::string WCSDataset110::GetCoverageRequest(bool scaled, int /* nBufXSize */,
+                                              int /* nBufYSize */,
+                                              const std::vector<double> &extent,
+                                              const std::string &osBandList)
 {
     CPLString osRequest;
 
@@ -178,8 +157,8 @@ CPLString WCSDataset110::GetCoverageRequest(bool scaled,
         bbox_2 = extent[3];  // max Y
         bbox_3 = extent[2];  // max X
     }
-    CPLString request = CPLGetXMLValue(psService, "ServiceURL", "");
-    request = CPLURLAddKVP(request, "SERVICE", "WCS");
+    std::string request = CPLGetXMLValue(psService, "ServiceURL", "");
+    request = CPLURLAddKVP(request.c_str(), "SERVICE", "WCS");
     request += CPLString().Printf(
         "&VERSION=%s&REQUEST=GetCoverage&IDENTIFIER=%s"
         "&FORMAT=%s&BOUNDINGBOX=%.15g,%.15g,%.15g,%.15g,%s%s",
@@ -235,21 +214,23 @@ CPLString WCSDataset110::GetCoverageRequest(bool scaled,
     CPLString extra = CPLGetXMLValue(psService, "Parameters", "");
     if (extra != "")
     {
-        std::vector<CPLString> pairs = Split(extra, "&");
+        std::vector<std::string> pairs = Split(extra.c_str(), "&");
         for (unsigned int i = 0; i < pairs.size(); ++i)
         {
-            std::vector<CPLString> pair = Split(pairs[i], "=");
-            request = CPLURLAddKVP(request, pair[0], pair[1]);
+            std::vector<std::string> pair = Split(pairs[i].c_str(), "=");
+            request =
+                CPLURLAddKVP(request.c_str(), pair[0].c_str(), pair[1].c_str());
         }
     }
     extra = CPLGetXMLValue(psService, "GetCoverageExtra", "");
     if (extra != "")
     {
-        std::vector<CPLString> pairs = Split(extra, "&");
+        std::vector<std::string> pairs = Split(extra.c_str(), "&");
         for (unsigned int i = 0; i < pairs.size(); ++i)
         {
-            std::vector<CPLString> pair = Split(pairs[i], "=");
-            request = CPLURLAddKVP(request, pair[0], pair[1]);
+            std::vector<std::string> pair = Split(pairs[i].c_str(), "=");
+            request =
+                CPLURLAddKVP(request.c_str(), pair[0].c_str(), pair[1].c_str());
         }
     }
     CPLDebug("WCS", "Requesting %s", request.c_str());
@@ -261,34 +242,35 @@ CPLString WCSDataset110::GetCoverageRequest(bool scaled,
 /*                                                                      */
 /************************************************************************/
 
-CPLString WCSDataset110::DescribeCoverageRequest()
+std::string WCSDataset110::DescribeCoverageRequest()
 {
-    CPLString request = CPLGetXMLValue(psService, "ServiceURL", "");
-    request = CPLURLAddKVP(request, "SERVICE", "WCS");
-    request = CPLURLAddKVP(request, "REQUEST", "DescribeCoverage");
-    request = CPLURLAddKVP(request, "VERSION",
+    std::string request = CPLGetXMLValue(psService, "ServiceURL", "");
+    request = CPLURLAddKVP(request.c_str(), "SERVICE", "WCS");
+    request = CPLURLAddKVP(request.c_str(), "REQUEST", "DescribeCoverage");
+    request = CPLURLAddKVP(request.c_str(), "VERSION",
                            CPLGetXMLValue(psService, "Version", "1.1.0"));
-    request = CPLURLAddKVP(request, "IDENTIFIERS",
+    request = CPLURLAddKVP(request.c_str(), "IDENTIFIERS",
                            CPLGetXMLValue(psService, "CoverageName", ""));
-    request = CPLURLAddKVP(request, "FORMAT", "text/xml");
     CPLString extra = CPLGetXMLValue(psService, "Parameters", "");
     if (extra != "")
     {
-        std::vector<CPLString> pairs = Split(extra, "&");
+        std::vector<std::string> pairs = Split(extra.c_str(), "&");
         for (unsigned int i = 0; i < pairs.size(); ++i)
         {
-            std::vector<CPLString> pair = Split(pairs[i], "=");
-            request = CPLURLAddKVP(request, pair[0], pair[1]);
+            std::vector<std::string> pair = Split(pairs[i].c_str(), "=");
+            request =
+                CPLURLAddKVP(request.c_str(), pair[0].c_str(), pair[1].c_str());
         }
     }
     extra = CPLGetXMLValue(psService, "DescribeCoverageExtra", "");
     if (extra != "")
     {
-        std::vector<CPLString> pairs = Split(extra, "&");
+        std::vector<std::string> pairs = Split(extra.c_str(), "&");
         for (unsigned int i = 0; i < pairs.size(); ++i)
         {
-            std::vector<CPLString> pair = Split(pairs[i], "=");
-            request = CPLURLAddKVP(request, pair[0], pair[1]);
+            std::vector<std::string> pair = Split(pairs[i].c_str(), "=");
+            request =
+                CPLURLAddKVP(request.c_str(), pair[0].c_str(), pair[1].c_str());
         }
     }
     return request;
@@ -373,9 +355,9 @@ bool WCSDataset110::ExtractGridInfo()
     std::vector<double> origin =
         Flist(Split(CPLGetXMLValue(psGCRS, "GridOrigin", ""), " ", swap));
 
-    std::vector<CPLString> offset_1 =
+    std::vector<std::string> offset_1 =
         Split(CPLGetXMLValue(psGCRS, "GridOffsets", ""), " ");
-    std::vector<CPLString> offset_2;
+    std::vector<std::string> offset_2;
     size_t n = offset_1.size();
     if (n % 2 != 0)
     {
@@ -388,7 +370,14 @@ bool WCSDataset110::ExtractGridInfo()
     {
         CPLString s = offset_1.back();
         offset_1.erase(offset_1.end() - 1);
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
         offset_2.insert(offset_2.begin(), s);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     }
     std::vector<std::vector<double>> offsets;
     if (swap)
@@ -461,11 +450,12 @@ bool WCSDataset110::ExtractGridInfo()
         CPLString osBBCRS = ParseCRS(psNode);
         if (strstr(osBBCRS, ":imageCRS"))
         {
-            std::vector<CPLString> bbox = ParseBoundingBox(psNode);
+            std::vector<std::string> bbox = ParseBoundingBox(psNode);
             if (bbox.size() >= 2)
             {
-                std::vector<int> low = Ilist(Split(bbox[0], " "), 0, 2);
-                std::vector<int> high = Ilist(Split(bbox[1], " "), 0, 2);
+                std::vector<int> low = Ilist(Split(bbox[0].c_str(), " "), 0, 2);
+                std::vector<int> high =
+                    Ilist(Split(bbox[1].c_str(), " "), 0, 2);
                 if (low[0] == 0 && low[1] == 0)
                 {
                     size.push_back(high[0]);
@@ -489,7 +479,7 @@ bool WCSDataset110::ExtractGridInfo()
         CPLString osBBCRS = ParseCRS(psNode);
         if (osBBCRS == osCRS)
         {
-            std::vector<CPLString> bbox = ParseBoundingBox(psNode);
+            std::vector<std::string> bbox = ParseBoundingBox(psNode);
             bool not_rot =
                 (offsets[0].size() == 1 && offsets[1].size() == 1) ||
                 ((swap && offsets[0][0] == 0.0 && offsets[1][1] == 0.0) ||
@@ -497,9 +487,9 @@ bool WCSDataset110::ExtractGridInfo()
             if (bbox.size() >= 2 && not_rot)
             {
                 std::vector<double> low =
-                    Flist(Split(bbox[0], " ", axis_order_swap), 0, 2);
+                    Flist(Split(bbox[0].c_str(), " ", axis_order_swap), 0, 2);
                 std::vector<double> high =
-                    Flist(Split(bbox[1], " ", axis_order_swap), 0, 2);
+                    Flist(Split(bbox[1].c_str(), " ", axis_order_swap), 0, 2);
                 double c1 = offsets[0][0];
                 double c2 =
                     offsets[1].size() == 1 ? offsets[1][0] : offsets[1][1];
@@ -651,7 +641,8 @@ bool WCSDataset110::ExtractGridInfo()
             if (CPLGetXMLValue(psService, "BandIdentifier", nullptr) == nullptr)
             {
                 bServiceDirty = true;
-                CPLSetXMLValue(psService, "BandIdentifier", osBandIdentifier);
+                CPLSetXMLValue(psService, "BandIdentifier",
+                               osBandIdentifier.c_str());
             }
 
             if (CPLGetXMLValue(psService, "BandCount", nullptr) == nullptr)
@@ -679,7 +670,8 @@ bool WCSDataset110::ExtractGridInfo()
 /*                      ParseCapabilities()                             */
 /************************************************************************/
 
-CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities, CPLString url)
+CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities,
+                                        const std::string &url)
 {
     CPLStripXMLNamespace(Capabilities, nullptr, TRUE);
 
@@ -692,7 +684,7 @@ CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities, CPLString url)
     }
 
     char **metadata = nullptr;
-    CPLString path = "WCS_GLOBAL#";
+    std::string path = "WCS_GLOBAL#";
 
     CPLString key = path + "version";
     metadata = CSLSetNameValue(metadata, key, Version());
@@ -710,14 +702,10 @@ CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities, CPLString url)
     }
 
     // identification metadata
-    CPLString path2 = path;
-    std::vector<CPLString> keys2;
-    keys2.push_back("Title");
-    keys2.push_back("Abstract");
-    keys2.push_back("Fees");
-    keys2.push_back("AccessConstraints");
-    CPLXMLNode *service = AddSimpleMetaData(&metadata, Capabilities, path2,
-                                            "ServiceIdentification", keys2);
+    std::string path2 = path;
+    CPLXMLNode *service = AddSimpleMetaData(
+        &metadata, Capabilities, path2, "ServiceIdentification",
+        {"Title", "Abstract", "Fees", "AccessConstraints"});
     CPLString kw = GetKeywords(service, "Keywords", "Keyword");
     if (kw != "")
     {
@@ -733,51 +721,39 @@ CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities, CPLString url)
 
     // provider metadata
     path2 = path;
-    keys2.clear();
-    keys2.push_back("ProviderName");
-    CPLXMLNode *provider = AddSimpleMetaData(&metadata, Capabilities, path2,
-                                             "ServiceProvider", keys2);
+    CPLXMLNode *provider = AddSimpleMetaData(
+        &metadata, Capabilities, path2, "ServiceProvider", {"ProviderName"});
     if (provider)
     {
         CPLXMLNode *site = CPLGetXMLNode(provider, "ProviderSite");
         if (site)
         {
-            CPLString path3 = path2 + "ProviderSite";
+            std::string path3 = path2 + "ProviderSite";
             CPLString value =
                 CPLGetXMLValue(CPLGetXMLNode(site, "href"), nullptr, "");
-            metadata = CSLSetNameValue(metadata, path3, value);
+            metadata = CSLSetNameValue(metadata, path3.c_str(), value);
         }
-        CPLString path3 = path2;
-        std::vector<CPLString> keys3;
-        keys3.push_back("IndividualName");
-        keys3.push_back("PositionName");
-        keys3.push_back("Role");
-        CPLXMLNode *contact = AddSimpleMetaData(&metadata, provider, path3,
-                                                "ServiceContact", keys3);
+        std::string path3 = std::move(path2);
+        CPLXMLNode *contact =
+            AddSimpleMetaData(&metadata, provider, path3, "ServiceContact",
+                              {"IndividualName", "PositionName", "Role"});
         if (contact)
         {
-            CPLString path4 = path3;
-            std::vector<CPLString> keys4;
-            keys4.push_back("HoursOfService");
-            keys4.push_back("ContactInstructions");
-            CPLXMLNode *info = AddSimpleMetaData(&metadata, contact, path4,
-                                                 "ContactInfo", keys4);
+            std::string path4 = std::move(path3);
+            CPLXMLNode *info =
+                AddSimpleMetaData(&metadata, contact, path4, "ContactInfo",
+                                  {"HoursOfService", "ContactInstructions"});
             if (info)
             {
-                CPLString path5 = path4;
-                std::vector<CPLString> keys5;
-                keys5.push_back("DeliveryPoint");
-                keys5.push_back("City");
-                keys5.push_back("AdministrativeArea");
-                keys5.push_back("PostalCode");
-                keys5.push_back("Country");
-                keys5.push_back("ElectronicMailAddress");
-                CPLString path6 = path4;
-                std::vector<CPLString> keys6;
-                keys6.push_back("Voice");
-                keys6.push_back("Facsimile");
-                AddSimpleMetaData(&metadata, info, path5, "Address", keys5);
-                AddSimpleMetaData(&metadata, info, path6, "Phone", keys6);
+                std::string path5 = path4;
+                std::string path6 = path4;
+                AddSimpleMetaData(&metadata, info, path5, "Address",
+                                  {"DeliveryPoint", "City",
+                                   "AdministrativeArea", "PostalCode",
+                                   "Country", "ElectronicMailAddress"});
+                AddSimpleMetaData(&metadata, info, path6, "Phone",
+                                  {"Voice", "Facsimile"});
+                CPL_IGNORE_RET_VAL(path4);
             }
         }
     }
@@ -808,7 +784,7 @@ CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities, CPLString url)
     // if DescribeCoverageURL looks wrong, we change it
     if (DescribeCoverageURL.find("localhost") != std::string::npos)
     {
-        DescribeCoverageURL = URLRemoveKey(url, "request");
+        DescribeCoverageURL = URLRemoveKey(url.c_str(), "request");
     }
 
     // service metadata (in 2.0)
@@ -877,7 +853,7 @@ CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities, CPLString url)
             name = CPLURLAddKVP(name, "version", this->Version());
 
             CPLXMLNode *node = CPLGetXMLNode(summary, "CoverageId");
-            CPLString id;
+            std::string id;
             if (node)
             {
                 id = CPLGetXMLValue(node, nullptr, "");
@@ -899,24 +875,22 @@ CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities, CPLString url)
                     return CE_Failure;
                 }
             }
-            name = CPLURLAddKVP(name, "coverage", id);
+            name = CPLURLAddKVP(name, "coverage", id.c_str());
             name = "WCS:" + name;
             metadata = CSLSetNameValue(metadata, key2, name);
 
             key2 = path3 + "DESC";
-            CPLString desc;
 
             node = CPLGetXMLNode(summary, "Title");
             if (node)
             {
-                desc = CPLGetXMLValue(node, nullptr, "");
+                metadata = CSLSetNameValue(metadata, key2,
+                                           CPLGetXMLValue(node, nullptr, ""));
             }
             else
             {
-                desc = id;
+                metadata = CSLSetNameValue(metadata, key2, id.c_str());
             }
-
-            metadata = CSLSetNameValue(metadata, key2, desc);
 
             // todo: compose global bounding box from WGS84BoundingBox and
             // BoundingBox
@@ -931,7 +905,7 @@ CPLErr WCSDataset110::ParseCapabilities(CPLXMLNode *Capabilities, CPLString url)
 }
 
 void WCSDataset110::ParseCoverageCapabilities(CPLXMLNode *capabilities,
-                                              const CPLString &coverage,
+                                              const std::string &coverage,
                                               CPLXMLNode *metadata)
 {
     CPLStripXMLNamespace(capabilities, nullptr, TRUE);

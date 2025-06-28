@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for OGR XLS driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -56,6 +39,7 @@ def test_ogr_xls_1():
 
     lyr = ds.GetLayer(0)
     assert lyr.GetName() == "Feuille1", "bad layer name"
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
 
     assert lyr.GetGeomType() == ogr.wkbNone, "bad layer geometry type"
 
@@ -102,14 +86,12 @@ def test_ogr_xls_2():
     if drv is None:
         pytest.skip()
 
-    gdal.SetConfigOption("OGR_XLS_HEADERS", "DISABLE")
-    ds = ogr.Open("data/xls/test972000xp.xls")
+    with gdal.config_option("OGR_XLS_HEADERS", "DISABLE"):
+        ds = ogr.Open("data/xls/test972000xp.xls")
 
-    lyr = ds.GetLayer(0)
+        lyr = ds.GetLayer(0)
 
-    assert lyr.GetFeatureCount() == 4
-
-    gdal.SetConfigOption("OGR_XLS_HEADERS", None)
+        assert lyr.GetFeatureCount() == 4
 
 
 ###############################################################################
@@ -122,14 +104,12 @@ def test_ogr_xls_3():
     if drv is None:
         pytest.skip()
 
-    gdal.SetConfigOption("OGR_XLS_FIELD_TYPES", "STRING")
-    ds = ogr.Open("data/xls/test972000xp.xls")
+    with gdal.config_option("OGR_XLS_FIELD_TYPES", "STRING"):
+        ds = ogr.Open("data/xls/test972000xp.xls")
 
-    lyr = ds.GetLayer(0)
+        lyr = ds.GetLayer(0)
 
-    assert lyr.GetLayerDefn().GetFieldDefn(0).GetType() == ogr.OFTString
-
-    gdal.SetConfigOption("OGR_XLS_FIELD_TYPES", None)
+        assert lyr.GetLayerDefn().GetFieldDefn(0).GetType() == ogr.OFTString
 
 
 ###############################################################################

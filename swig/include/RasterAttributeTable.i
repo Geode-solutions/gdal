@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     RAT.i
  * Project:  GDAL Python Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 //************************************************************************
@@ -134,6 +117,20 @@ public:
         return GDALRATGetValueAsDouble( self, iRow, iCol );
     }
 
+#if defined(SWIGPYTHON)
+    CPLErr ReadValuesIOAsString( int iField, int iStartRow, int iLength, char **ppszData ) {
+        return GDALRATValuesIOAsString(self, GF_Read, iField, iStartRow, iLength, ppszData);
+    }
+
+    CPLErr ReadValuesIOAsInteger( int iField, int iStartRow, int iLength, int *pnData ) {
+        return GDALRATValuesIOAsInteger(self, GF_Read, iField, iStartRow, iLength, pnData);
+    }
+
+    CPLErr ReadValuesIOAsDouble( int iField, int iStartRow, int iLength, double *pdfData ) {
+        return GDALRATValuesIOAsDouble(self, GF_Read, iField, iStartRow, iLength, pdfData);
+    }
+#endif
+
     %apply ( tostring argin ) { (const char* pszValue) };
     void SetValueAsString( int iRow, int iCol, const char *pszValue ) {
         GDALRATSetValueAsString( self, iRow, iCol, pszValue );
@@ -191,6 +188,10 @@ public:
 
     GDALRATTableType GetTableType() {
         return GDALRATGetTableType( self );
+    }
+
+    void RemoveStatistics() {
+        GDALRATRemoveStatistics(self);
     }
 }
 

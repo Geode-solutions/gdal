@@ -7,29 +7,15 @@
  ******************************************************************************
  * Copyright (c) 2010-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_pdf.h"
 #include "pdfcreatecopy.h"
 #include "memdataset.h"
 #include "pdfcreatefromcomposition.h"
+
+#include <cmath>
 
 /************************************************************************/
 /*                      PDFWritableVectorDataset()                      */
@@ -98,18 +84,22 @@ GDALDataset *PDFWritableVectorDataset::Create(const char *pszName, int nXSize,
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *PDFWritableVectorDataset::ICreateLayer(const char *pszLayerName,
-                                                 OGRSpatialReference *poSRS,
-                                                 OGRwkbGeometryType eType,
-                                                 char **)
+OGRLayer *
+PDFWritableVectorDataset::ICreateLayer(const char *pszLayerName,
+                                       const OGRGeomFieldDefn *poGeomFieldDefn,
+                                       CSLConstList /*papszOptions*/)
 {
+    const auto eType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSRS =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
+
     /* -------------------------------------------------------------------- */
     /*      Create the layer object.                                        */
     /* -------------------------------------------------------------------- */
-    auto poSRSClone = poSRS;
-    if (poSRSClone)
+    OGRSpatialReference *poSRSClone = nullptr;
+    if (poSRS)
     {
-        poSRSClone = poSRSClone->Clone();
+        poSRSClone = poSRS->Clone();
         poSRSClone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     }
     OGRLayer *poLayer =
@@ -117,8 +107,8 @@ OGRLayer *PDFWritableVectorDataset::ICreateLayer(const char *pszLayerName,
     if (poSRSClone)
         poSRSClone->Release();
 
-    papoLayers =
-        (OGRLayer **)CPLRealloc(papoLayers, (nLayers + 1) * sizeof(OGRLayer *));
+    papoLayers = static_cast<OGRLayer **>(
+        CPLRealloc(papoLayers, (nLayers + 1) * sizeof(OGRLayer *)));
     papoLayers[nLayers] = poLayer;
     nLayers++;
 
@@ -199,7 +189,7 @@ OGRErr PDFWritableVectorDataset::SyncToDisk()
     {
         nWidth = 1024;
         const double dfHeight = nWidth * dfRatio;
-        if (dfHeight < 1 || dfHeight > INT_MAX || CPLIsNan(dfHeight))
+        if (dfHeight < 1 || dfHeight > INT_MAX || std::isnan(dfHeight))
         {
             CPLError(CE_Failure, CPLE_AppDefined, "Invalid image dimensions");
             return OGRERR_FAILURE;
@@ -210,7 +200,7 @@ OGRErr PDFWritableVectorDataset::SyncToDisk()
     {
         nHeight = 1024;
         const double dfWidth = nHeight / dfRatio;
-        if (dfWidth < 1 || dfWidth > INT_MAX || CPLIsNan(dfWidth))
+        if (dfWidth < 1 || dfWidth > INT_MAX || std::isnan(dfWidth))
         {
             CPLError(CE_Failure, CPLE_AppDefined, "Invalid image dimensions");
             return OGRERR_FAILURE;
@@ -218,17 +208,17 @@ OGRErr PDFWritableVectorDataset::SyncToDisk()
         nWidth = static_cast<int>(dfWidth);
     }
 
-    double adfGeoTransform[6];
-    adfGeoTransform[0] = sGlobalExtent.MinX;
-    adfGeoTransform[1] = (sGlobalExtent.MaxX - sGlobalExtent.MinX) / nWidth;
-    adfGeoTransform[2] = 0;
-    adfGeoTransform[3] = sGlobalExtent.MaxY;
-    adfGeoTransform[4] = 0;
-    adfGeoTransform[5] = -(sGlobalExtent.MaxY - sGlobalExtent.MinY) / nHeight;
+    GDALGeoTransform gt;
+    gt[0] = sGlobalExtent.MinX;
+    gt[1] = (sGlobalExtent.MaxX - sGlobalExtent.MinX) / nWidth;
+    gt[2] = 0;
+    gt[3] = sGlobalExtent.MaxY;
+    gt[4] = 0;
+    gt[5] = -(sGlobalExtent.MaxY - sGlobalExtent.MinY) / nHeight;
 
     // Do again a check against 0, because the above divisions might
     // transform a difference close to 0, to plain 0.
-    if (adfGeoTransform[1] == 0 || adfGeoTransform[5] == 0)
+    if (gt[1] == 0 || gt[5] == 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Cannot compute spatial extent of features");
@@ -343,7 +333,7 @@ OGRErr PDFWritableVectorDataset::SyncToDisk()
     GDALDataset *poSrcDS =
         MEMDataset::Create("MEM:::", nWidth, nHeight, 0, GDT_Byte, nullptr);
 
-    poSrcDS->SetGeoTransform(adfGeoTransform);
+    poSrcDS->SetGeoTransform(gt);
 
     OGRSpatialReference *poSRS = papoLayers[0]->GetSpatialRef();
     if (poSRS)
@@ -373,9 +363,9 @@ OGRErr PDFWritableVectorDataset::SyncToDisk()
         else
             osLayerName = papszLayerNames[i];
 
-        oWriter.WriteOGRLayer((OGRDataSourceH)this, i, pszOGRDisplayField,
-                              pszOGRLinkField, osLayerName, bWriteOGRAttributes,
-                              iObj);
+        oWriter.WriteOGRLayer(GDALDataset::ToHandle(this), i,
+                              pszOGRDisplayField, pszOGRLinkField, osLayerName,
+                              bWriteOGRAttributes, iObj);
     }
 
     CSLDestroy(papszLayerNames);

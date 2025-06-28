@@ -10,29 +10,14 @@
  * Copyright (c) 2001-2008, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
 #include "gifabstractdataset.h"
+#include "gifdrivercore.h"
 
 /************************************************************************/
 /* ==================================================================== */
@@ -96,7 +81,7 @@ BIGGifRasterBand::BIGGifRasterBand(BIGGIFDataset *poDSIn, int nBackground)
 CPLErr BIGGifRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
                                     void *pImage)
 {
-    BIGGIFDataset *poGDS = (BIGGIFDataset *)poDS;
+    BIGGIFDataset *poGDS = cpl::down_cast<BIGGIFDataset *>(poDS);
 
     CPLAssert(nBlockXOff == 0);
 
@@ -235,7 +220,7 @@ CPLErr BIGGIFDataset::ReOpen()
             /* while closing and then destroying this temporary dataset */
             const char *apszOptions[] = {"COMPRESS=LZW", "SPARSE_OK=YES",
                                          nullptr};
-            CPLString osTempFilename = CPLGenerateTempFilename("biggif");
+            CPLString osTempFilename = CPLGenerateTempFilenameSafe("biggif");
 
             osTempFilename += ".tif";
 
@@ -294,14 +279,12 @@ CPLErr BIGGIFDataset::ReOpen()
 GDALDataset *BIGGIFDataset::Open(GDALOpenInfo *poOpenInfo)
 
 {
-    if (!Identify(poOpenInfo) || poOpenInfo->fpL == nullptr)
+    if (!GIFDriverIdentify(poOpenInfo))
         return nullptr;
 
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The GIF driver does not support update access to existing"
-                 " files.\n");
+        ReportUpdateNotSupportedByDriver("GIF");
         return nullptr;
     }
 
@@ -372,22 +355,13 @@ GDALDataset *BIGGIFDataset::Open(GDALOpenInfo *poOpenInfo)
 void GDALRegister_BIGGIF()
 
 {
-    if (GDALGetDriverByName("BIGGIF") != nullptr)
+    if (GDALGetDriverByName(BIGGIF_DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
-
-    poDriver->SetDescription("BIGGIF");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                              "Graphics Interchange Format (.gif)");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/gif.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "gif");
-    poDriver->SetMetadataItem(GDAL_DMD_MIMETYPE, "image/gif");
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
+    BIGGIFDriverSetCommonMetadata(poDriver);
 
     poDriver->pfnOpen = BIGGIFDataset::Open;
-    poDriver->pfnIdentify = GIFAbstractDataset::Identify;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
 }

@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) PCRaster owners
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "csf.h"
@@ -298,14 +282,14 @@ CPLErr PCRasterRasterBand::IWriteBlock(CPL_UNUSED int nBlockXoff,
         REAL8 west = 0.0;
         REAL8 north = 0.0;
         REAL8 cellSize = 1.0;
-        double transform[6];
-        if (this->poDS->GetGeoTransform(transform) == CE_None)
+        GDALGeoTransform gt;
+        if (this->poDS->GetGeoTransform(gt) == CE_None)
         {
-            if (transform[2] == 0.0 && transform[4] == 0.0)
+            if (gt[2] == 0.0 && gt[4] == 0.0)
             {
-                west = static_cast<REAL8>(transform[0]);
-                north = static_cast<REAL8>(transform[3]);
-                cellSize = static_cast<REAL8>(transform[1]);
+                west = static_cast<REAL8>(gt[0]);
+                north = static_cast<REAL8>(gt[3]);
+                cellSize = static_cast<REAL8>(gt[1]);
             }
         }
         (void)RputXUL(d_dataset->map(), west);

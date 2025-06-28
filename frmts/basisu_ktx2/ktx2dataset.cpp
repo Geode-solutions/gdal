@@ -7,28 +7,13 @@
  ******************************************************************************
  * Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_pam.h"
 #include "common.h"
 #include "include_basisu_sdk.h"
+#include "ktx2drivercore.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -48,7 +33,6 @@ class KTX2Dataset final : public GDALPamDataset
     void *m_pEncodedData = nullptr;
     void *m_pDecodedData = nullptr;
     uint32_t m_nLineStride = 0;
-    KTX2Dataset *m_poParent = nullptr;
     uint32_t m_iLayer = 0;
     uint32_t m_iFace = 0;
     uint32_t m_iLevel = 0;
@@ -63,7 +47,6 @@ class KTX2Dataset final : public GDALPamDataset
     KTX2Dataset(uint32_t iLayer, uint32_t iFace, void *pEncodedData);
     KTX2Dataset(KTX2Dataset *poParent, uint32_t iLevel);
 
-    static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
     static GDALDataset *CreateCopy(const char *pszFilename,
                                    GDALDataset *poSrcDS, int bStrict,
@@ -89,23 +72,6 @@ class KTX2RasterBand final : public GDALPamRasterBand
 };
 
 /************************************************************************/
-/*                                Identify()                            */
-/************************************************************************/
-
-int KTX2Dataset::Identify(GDALOpenInfo *poOpenInfo)
-{
-    constexpr GByte KTX2Signature[] = {0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32,
-                                       0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A};
-    if (STARTS_WITH(poOpenInfo->pszFilename, "KTX2:"))
-        return true;
-    return poOpenInfo->fpL != nullptr &&
-           poOpenInfo->nHeaderBytes >=
-               static_cast<int>(sizeof(KTX2Signature)) &&
-           memcmp(poOpenInfo->pabyHeader, KTX2Signature,
-                  sizeof(KTX2Signature)) == 0;
-}
-
-/************************************************************************/
 /*                           KTX2Dataset()                              */
 /************************************************************************/
 
@@ -120,8 +86,8 @@ KTX2Dataset::KTX2Dataset(uint32_t iLayer, uint32_t iFace, void *pEncodedData)
 /************************************************************************/
 
 KTX2Dataset::KTX2Dataset(KTX2Dataset *poParent, uint32_t iLevel)
-    : m_transcoderRef(poParent->m_transcoderRef), m_poParent(poParent),
-      m_iLayer(poParent->m_iLayer), m_iFace(poParent->m_iFace), m_iLevel(iLevel)
+    : m_transcoderRef(poParent->m_transcoderRef), m_iLayer(poParent->m_iLayer),
+      m_iFace(poParent->m_iFace), m_iLevel(iLevel)
 {
     basist::ktx2_image_level_info level_info;
     CPL_IGNORE_RET_VAL(m_transcoderRef.get_image_level_info(
@@ -259,7 +225,7 @@ GDALRasterBand *KTX2RasterBand::GetOverview(int nIdx)
 
 GDALDataset *KTX2Dataset::Open(GDALOpenInfo *poOpenInfo)
 {
-    if (!Identify(poOpenInfo) || poOpenInfo->eAccess == GA_Update)
+    if (!KTX2DriverIdentify(poOpenInfo) || poOpenInfo->eAccess == GA_Update)
         return nullptr;
 
     VSILFILE *fpL = nullptr;
@@ -297,7 +263,7 @@ GDALDataset *KTX2Dataset::Open(GDALOpenInfo *poOpenInfo)
     }
     const uint32_t nSize = static_cast<uint32_t>(nSizeLarge);
 
-    auto poDS = cpl::make_unique<KTX2Dataset>(
+    auto poDS = std::make_unique<KTX2Dataset>(
         nLayer != static_cast<uint32_t>(-1) ? nLayer : 0,
         nFace != static_cast<uint32_t>(-1) ? nFace : 0, pabyRet);
     auto &transcoder = poDS->m_transcoder;
@@ -409,7 +375,7 @@ GDALDataset *KTX2Dataset::Open(GDALOpenInfo *poOpenInfo)
             if (level_index > 0)
             {
                 auto poOverviewDS =
-                    cpl::make_unique<KTX2Dataset>(poDS.get(), level_index);
+                    std::make_unique<KTX2Dataset>(poDS.get(), level_index);
                 for (int i = 1; i <= l_nBands; ++i)
                 {
                     poOverviewDS->SetBand(
@@ -455,25 +421,12 @@ GDALDataset *KTX2Dataset::CreateCopy(const char *pszFilename,
 
 void GDALRegister_KTX2()
 {
-    if (GDALGetDriverByName("KTX2") != nullptr)
+    if (GDALGetDriverByName(KTX2_DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
+    KTX2DriverSetCommonMetadata(poDriver);
 
-    poDriver->SetDescription("KTX2");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "KTX2 texture format");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/ktx2.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "ktx2");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES, "Byte");
-
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-
-    poDriver->SetMetadataItem(
-        GDAL_DMD_CREATIONOPTIONLIST,
-        GDAL_KTX2_BASISU_GetCreationOptions(/* bIsKTX2 = */ true).c_str());
-
-    poDriver->pfnIdentify = KTX2Dataset::Identify;
     poDriver->pfnOpen = KTX2Dataset::Open;
     poDriver->pfnCreateCopy = KTX2Dataset::CreateCopy;
 

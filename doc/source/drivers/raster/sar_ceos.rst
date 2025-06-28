@@ -13,7 +13,7 @@ main imagery file.
 
 This driver works with most Radarsat, JERS-1 and ERS data products, including
 single look complex products; however, it is unlikely to work for
-non-Radar CEOS products. The simpler `CEOS <#CEOS>`__ driver is often
+non-Radar CEOS products. The simpler :ref:`raster.ceos` driver is often
 appropriate for these.
 
 This driver will attempt to read 15 lat/long GCPS by sampling the
@@ -62,7 +62,7 @@ the matrix are complex values, while the diagonal values are real
 
 The identities of the bands are also reflected in the metadata.
 
-NOTE: Implemented as ``gdal/frmts/ceos2/sar_ceosdataset.cpp``.
+NOTE: Implemented as :source_file:`frmts/ceos2/sar_ceosdataset.cpp`.
 
 Driver capabilities
 -------------------

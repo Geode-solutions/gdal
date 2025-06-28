@@ -10,23 +10,7 @@
  *  Copyright (c) 2016 Alexandr Borzykh
  *  Copyright (c) 2016 NextGIS, <info@nextgis.com>
  *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in all
- *  copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
+  * SPDX-License-Identifier: MIT
  *******************************************************************************/
 
 #include "cpl_port.h"
@@ -196,23 +180,23 @@ long CADHandle::getAsLong( const CADHandle& ref_handle ) const
         {
             case 0x06:
             {
-                return static_cast<long>((CPLSM(static_cast<GInt64>(getAsLong(ref_handle.handleOrOffset))) +
-                        CPLSM(static_cast<GInt64>(1))).v());
+                return static_cast<long>((CPLSM(static_cast<int64_t>(getAsLong(ref_handle.handleOrOffset))) +
+                        CPLSM(static_cast<int64_t>(1))).v());
             }
             case 0x08:
             {
-                return static_cast<long>((CPLSM(static_cast<GInt64>(getAsLong(ref_handle.handleOrOffset))) -
-                        CPLSM(static_cast<GInt64>(1))).v());
+                return static_cast<long>((CPLSM(static_cast<int64_t>(getAsLong(ref_handle.handleOrOffset))) -
+                        CPLSM(static_cast<int64_t>(1))).v());
             }
             case 0x0A:
             {
-                return static_cast<long>((CPLSM(static_cast<GInt64>(getAsLong(ref_handle.handleOrOffset))) +
-                        CPLSM(static_cast<GInt64>(getAsLong(handleOrOffset)))).v());
+                return static_cast<long>((CPLSM(static_cast<int64_t>(getAsLong(ref_handle.handleOrOffset))) +
+                        CPLSM(static_cast<int64_t>(getAsLong(handleOrOffset)))).v());
             }
             case 0x0C:
             {
-                return static_cast<long>((CPLSM(static_cast<GInt64>(getAsLong(ref_handle.handleOrOffset))) -
-                        CPLSM(static_cast<GInt64>(getAsLong(handleOrOffset)))).v());
+                return static_cast<long>((CPLSM(static_cast<int64_t>(getAsLong(ref_handle.handleOrOffset))) -
+                        CPLSM(static_cast<int64_t>(getAsLong(handleOrOffset)))).v());
             }
         }
     }
@@ -345,7 +329,15 @@ CADVariant::CADVariant( long julianday, long milliseconds ) :
     dateTimeVal = static_cast<time_t>( dfUnix + dfSeconds );
 
     char str_buff[256] = "Invalid date";
-    struct tm *poLocaltime = localtime(&dateTimeVal);
+#if HAVE_LOCALTIME_R
+    struct tm localtime_tm;
+    const struct tm *poLocaltime = localtime_r(&dateTimeVal, &localtime_tm);
+#elif defined(_WIN32)
+    struct tm localtime_tm;
+    const struct tm *poLocaltime = localtime_s(&localtime_tm, &dateTimeVal) == 0 ? &localtime_tm : nullptr;
+#else
+    const struct tm *poLocaltime = localtime(&dateTimeVal);
+#endif
     if(poLocaltime)
         strftime(str_buff, 255, "%Y-%m-%d %H:%M:%S", poLocaltime);
     stringVal = str_buff;

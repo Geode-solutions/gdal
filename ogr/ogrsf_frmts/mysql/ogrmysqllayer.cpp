@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2004, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_mysql.h"
@@ -35,12 +19,7 @@
 /*                           OGRMySQLLayer()                            */
 /************************************************************************/
 
-OGRMySQLLayer::OGRMySQLLayer()
-    : poFeatureDefn(nullptr), poSRS(nullptr),
-      nSRSId(-2),  // we haven't even queried the database for it yet.
-      iNextShapeId(0), poDS(nullptr), pszQueryStatement(nullptr),
-      nResultOffset(0), pszGeomColumn(nullptr), pszGeomColumnTable(nullptr),
-      nGeomType(0), bHasFid(FALSE), pszFIDColumn(nullptr), hResultSet(nullptr)
+OGRMySQLLayer::OGRMySQLLayer(OGRMySQLDataSource *poDSIn) : poDS(poDSIn)
 {
 }
 
@@ -57,15 +36,20 @@ OGRMySQLLayer::~OGRMySQLLayer()
                  (int)m_nFeaturesRead, poFeatureDefn->GetName());
     }
 
+    if (poFeatureDefn && poFeatureDefn->GetGeomFieldCount() > 0)
+    {
+        auto poGeomFieldDefn = dynamic_cast<OGRMySQLGeomFieldDefn *>(
+            poFeatureDefn->GetGeomFieldDefn(0));
+        if (poGeomFieldDefn)
+            poGeomFieldDefn->UnsetDataSource();
+    }
+
     OGRMySQLLayer::ResetReading();
 
     CPLFree(pszGeomColumn);
     CPLFree(pszGeomColumnTable);
     CPLFree(pszFIDColumn);
     CPLFree(pszQueryStatement);
-
-    if (poSRS != nullptr)
-        poSRS->Release();
 
     if (poFeatureDefn)
         poFeatureDefn->Release();
@@ -119,6 +103,7 @@ OGRFeature *OGRMySQLLayer::GetNextFeature()
         delete poFeature;
     }
 }
+
 /************************************************************************/
 /*                          RecordToFeature()                           */
 /*                                                                      */
@@ -351,17 +336,29 @@ int OGRMySQLLayer::FetchSRSId()
 /*                           GetSpatialRef()                            */
 /************************************************************************/
 
-OGRSpatialReference *OGRMySQLLayer::GetSpatialRef()
+const OGRSpatialReference *OGRMySQLGeomFieldDefn::GetSpatialRef() const
 
 {
+    if (!poDS)
+        return poSRS;
+
     if (poSRS == nullptr && nSRSId > -1)
     {
         poSRS = poDS->FetchSRS(nSRSId);
         if (poSRS != nullptr)
-            poSRS->Reference();
+            const_cast<OGRSpatialReference *>(poSRS)->Reference();
         else
             nSRSId = poDS->GetUnknownSRID();
     }
 
     return poSRS;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRMySQLLayer::GetDataset()
+{
+    return poDS;
 }

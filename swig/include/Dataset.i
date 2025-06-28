@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     Dataset.i
  * Project:  GDAL Python Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2005, Kevin Ruland
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 %{
@@ -288,12 +271,31 @@ public:
     }
   }
 
+#ifdef SWIGJAVA
+  %rename (CloseInternal) Close;
+  %javamethodmodifiers Close() "private";
+#endif
+  CPLErr Close() {
+     return GDALClose(self);
+  }
+
   GDALDriverShadow* GetDriver() {
     return (GDALDriverShadow*) GDALGetDatasetDriver( self );
   }
 
   GDALRasterBandShadow* GetRasterBand(int nBand ) {
     return (GDALRasterBandShadow*) GDALGetRasterBand( self, nBand );
+  }
+
+  bool IsThreadSafe(int nScopeFlags)
+  {
+      return GDALDatasetIsThreadSafe(self, nScopeFlags, nullptr);
+  }
+
+%newobject GetThreadSafeDataset;
+  GDALDatasetShadow* GetThreadSafeDataset(int nScopeFlags)
+  {
+      return GDALGetThreadSafeDataset(self, nScopeFlags, nullptr);
   }
 
 %newobject GetRootGroup;
@@ -308,6 +310,16 @@ public:
   char const *GetProjectionRef() {
     return GDALGetProjectionRef( self );
   }
+
+#ifdef SWIGPYTHON
+  int GetRefCount() {
+    return OGR_DS_GetRefCount(self);
+  }
+
+  int GetSummaryRefCount() {
+    return OGR_DS_GetSummaryRefCount(self);
+  }
+#endif
 
   %newobject GetSpatialRef;
   OSRSpatialReferenceShadow *GetSpatialRef() {
@@ -366,6 +378,45 @@ public:
   CPLErr SetGeoTransform( double argin[6] ) {
     return GDALSetGeoTransform( self, argin );
   }
+
+
+#if defined(SWIGCSHARP)
+  %feature( "kwargs" ) GetExtent;
+  CPLErr GetExtent(OGREnvelope* extent, OSRSpatialReferenceShadow* srs = NULL) {
+    return GDALGetExtent(self, extent, srs);
+  }
+#elif defined(SWIGPYTHON)
+  %feature( "kwargs" ) GetExtent;
+  void GetExtent(double argout[4], int* isvalid, OSRSpatialReferenceShadow* srs = NULL) {
+    CPLErr eErr = GDALGetExtent(self, (OGREnvelope*)argout, srs);
+    *isvalid = (eErr == CE_None);
+    return;
+  }
+#else
+  CPLErr GetExtent(double argout[4], OSRSpatialReferenceShadow* srs = NULL) {
+    return GDALGetExtent(self, (OGREnvelope*)argout, srs);
+  }
+#endif
+
+
+#if defined(SWIGCSHARP)
+  %feature( "kwargs" ) GetExtentWGS84LongLat;
+  CPLErr GetExtentWGS84LongLat(OGREnvelope* extent) {
+    return GDALGetExtentWGS84LongLat(self, extent);
+  }
+#elif defined(SWIGPYTHON)
+  %feature( "kwargs" ) GetExtentWGS84LongLat;
+  void GetExtentWGS84LongLat(double argout[4], int* isvalid) {
+    CPLErr eErr = GDALGetExtentWGS84LongLat(self, (OGREnvelope*)argout);
+    *isvalid = (eErr == CE_None);
+    return;
+  }
+#else
+  CPLErr GetExtentWGS84LongLat(double argout[4]) {
+    return GDALGetExtentWGS84LongLat(self, (OGREnvelope*)argout);
+  }
+#endif
+
 
   // The (int,int*) arguments are typemapped.  The name of the first argument
   // becomes the kwarg name for it.
@@ -501,7 +552,7 @@ public:
     GIntBig band_space = (buf_band_space == 0) ? 0 : *buf_band_space;
 
     GIntBig min_buffer_size =
-      ComputeDatasetRasterIOSize (nxsize, nysize, GDALGetDataTypeSize( ntype ) / 8,
+      ComputeDatasetRasterIOSize (nxsize, nysize, GDALGetDataTypeSizeBytes( ntype ),
                                   band_list ? band_list : GDALGetRasterCount(self), pband_list, band_list,
                                   pixel_space, line_space, band_space, FALSE);
     if (min_buffer_size == 0)
@@ -529,7 +580,11 @@ public:
 #endif
 
 %apply (int *optional_int) { (GDALDataType *buf_type) };
+#if defined(SWIGCSHARP)
+%apply int PINNED[] {int *pband_list};
+#else
 %apply (int nList, int *pList ) { (int band_list, int *pband_list ) };
+#endif
 CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
                     int *buf_xsize = 0, int *buf_ysize = 0,
                     GDALDataType *buf_type = 0,
@@ -552,7 +607,11 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
                                  band_list, pband_list, options);
 }
 %clear (GDALDataType *buf_type);
+#if defined(SWIGCSHARP)
+%clear int *pband_list;
+#else
 %clear (int band_list, int *pband_list );
+#endif
 
 /* NEEDED */
 /* GetSubDatasets */
@@ -563,11 +622,11 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
 %feature("kwargs") BeginAsyncReader;
 %newobject BeginAsyncReader;
 %apply (int nList, int *pList ) { (int band_list, int *pband_list ) };
-%apply (int nLenKeepObject, char *pBufKeepObject, void* pyObject) { (int buf_len, char *buf_string, void* pyObject) };
+%apply (size_t nLenKeepObject, char *pBufKeepObject, void* pyObject) { (size_t buf_len, char *buf_string, void* pyObject) };
 %apply (int *optional_int) { (int*) };
   GDALAsyncReaderShadow* BeginAsyncReader(
        int xOff, int yOff, int xSize, int ySize,
-       int buf_len, char *buf_string, void* pyObject,
+       size_t buf_len, char *buf_string, void* pyObject,
        int buf_xsize, int buf_ysize, GDALDataType bufType = (GDALDataType)0,
        int band_list = 0, int *pband_list = 0, int nPixelSpace = 0,
        int nLineSpace = 0, int nBandSpace = 0, char **options = 0)  {
@@ -605,7 +664,7 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
     }
 
     int nBCount = (band_list) != 0 ? band_list : GDALGetRasterCount(self);
-    int nMinSize = nxsize * nysize * nBCount * (GDALGetDataTypeSize(ntype) / 8);
+    uint64_t nMinSize = (uint64_t)nxsize * nysize * nBCount * GDALGetDataTypeSizeBytes(ntype);
     if (buf_string == NULL || buf_len < nMinSize)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Buffer is too small");
@@ -648,7 +707,7 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
   }
 
 %clear(int band_list, int *pband_list);
-%clear (int buf_len, char *buf_string, void* pyObject);
+%clear (size_t buf_len, char *buf_string, void* pyObject);
 %clear(int*);
 
   void EndAsyncReader(GDALAsyncReaderShadow* ario){
@@ -689,7 +748,7 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
         }
         else
         {
-            nBandSpace = GDALGetDataTypeSize(eBufType) / 8;
+            nBandSpace = GDALGetDataTypeSizeBytes(eBufType);
             nPixelSpace = nBandSpace * band_list;
         }
         CPLVirtualMem* vmem = GDALDatasetGetVirtualMem( self,
@@ -783,6 +842,20 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
     return layer;
   }
 
+  /* Note that datasources own their layers */
+#ifndef SWIGJAVA
+  %feature( "kwargs" ) CreateLayer;
+#endif
+  OGRLayerShadow *CreateLayerFromGeomFieldDefn(const char* name,
+              OGRGeomFieldDefnShadow* geom_field,
+              char** options=0) {
+    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetCreateLayerFromGeomFieldDefn( self,
+                                  name,
+                                  geom_field,
+                                  options);
+    return layer;
+  }
+
 #ifndef SWIGJAVA
   %feature( "kwargs" ) CopyLayer;
 #endif
@@ -801,32 +874,12 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
     return GDALDatasetDeleteLayer(self, index);
   }
 
-  int GetLayerCount() {
-    return GDALDatasetGetLayerCount(self);
-  }
-
   bool IsLayerPrivate( int index ) {
     return GDALDatasetIsLayerPrivate(self, index);
   }
 
-#ifdef SWIGJAVA
-  OGRLayerShadow *GetLayerByIndex( int index ) {
-#else
-  OGRLayerShadow *GetLayerByIndex( int index=0) {
-#endif
-    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetGetLayer(self, index);
-    return layer;
-  }
 
-  OGRLayerShadow *GetLayerByName( const char* layer_name) {
-    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetGetLayerByName(self, layer_name);
-    return layer;
-  }
 
-  void ResetReading()
-  {
-    GDALDatasetResetReading( self );
-  }
 
 #ifdef SWIGPYTHON
 %newobject GetNextFeature;
@@ -838,15 +891,18 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
                                     GDALProgressFunc callback = NULL,
                                     void* callback_data=NULL )
   {
-    return GDALDatasetGetNextFeature( self, ppoBelongingLayer, pdfProgressPct,
+    OGRLayerH hLayer = NULL;
+    OGRFeatureShadow* feat = (OGRFeatureShadow*)GDALDatasetGetNextFeature( self, &hLayer, pdfProgressPct,
                                       callback, callback_data );
+    *ppoBelongingLayer = (OGRLayerShadow*)hLayer;
+    return feat;
   }
 #else
     // FIXME: return layer
 %newobject GetNextFeature;
   OGRFeatureShadow* GetNextFeature()
   {
-    return GDALDatasetGetNextFeature( self, NULL, NULL, NULL, NULL );
+    return (OGRFeatureShadow*)GDALDatasetGetNextFeature( self, NULL, NULL, NULL, NULL );
   }
 #endif
 
@@ -885,6 +941,49 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
 
 #endif /* defined(SWIGPYTHON) || defined(SWIGJAVA) */
 
+
+#ifdef SWIGJAVA
+  OGRLayerShadow *GetLayerByIndex( int index ) {
+#elif SWIGPYTHON
+  OGRLayerShadow *GetLayerByIndex( int index=0) {
+#else
+  OGRLayerShadow *GetLayer( int index ) {
+#endif
+    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetGetLayer(self, index);
+    return layer;
+  }
+
+  OGRLayerShadow *GetLayerByName(const char* layer_name) {
+    OGRLayerShadow* layer = (OGRLayerShadow*) GDALDatasetGetLayerByName(self, layer_name);
+    return layer;
+  }
+
+  void ResetReading()
+  {
+    GDALDatasetResetReading(self);
+  }
+
+  int GetLayerCount() {
+    return GDALDatasetGetLayerCount(self);
+  }
+
+#ifdef SWIGCSHARP
+
+  %newobject GetNextFeature;
+  OGRFeatureShadow *GetNextFeature( OGRLayerShadow** ppoBelongingLayer = NULL,
+                                    double* pdfProgressPct = NULL,
+                                    GDALProgressFunc callback = NULL,
+                                    void* callback_data=NULL )
+  {
+    OGRLayerH hLayer = NULL;
+    OGRFeatureShadow* feat = (OGRFeatureShadow*)GDALDatasetGetNextFeature( self, &hLayer, pdfProgressPct,
+                                      callback, callback_data );
+    *ppoBelongingLayer = (OGRLayerShadow*)hLayer;
+    return feat;
+  }
+
+
+#endif
 
 OGRErr AbortSQL() {
     return GDALDatasetAbortSQL(self);
@@ -930,7 +1029,14 @@ OGRErr AbortSQL() {
   %apply Pointer NONNULL {OGRFieldDomainShadow* fieldDomain};
   bool AddFieldDomain(OGRFieldDomainShadow* fieldDomain)
   {
-      return GDALDatasetAddFieldDomain(self, (OGRFieldDomainH)fieldDomain, NULL);
+      char* pszReason = NULL;
+      if( !GDALDatasetAddFieldDomain(self, (OGRFieldDomainH)fieldDomain, &pszReason) )
+      {
+          CPLError(CE_Failure, CPLE_AppDefined, "%s", pszReason);
+          CPLFree(pszReason);
+          return false;
+      }
+      return true;
   }
   %clear OGRFieldDomainShadow* fieldDomain;
 

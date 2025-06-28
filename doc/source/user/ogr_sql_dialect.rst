@@ -11,10 +11,14 @@ The GDALDataset supports executing commands against a datasource via the
 any sort of command could be handled this way, in practice the mechanism is
 used to provide a subset of SQL SELECT capability to applications.  This
 page discusses the generic SQL implementation implemented within OGR, and
-issue with driver specific SQL support.
+issues with driver specific SQL support.
 
-An alternate "dialect", the SQLite dialect, can be used
-instead of the OGRSQL dialect. Refer to the :ref:`sql_sqlite_dialect` page for more details.
+The ``OGRSQL`` dialect can be requested with the ``OGRSQL`` string passed
+as the dialect parameter of :cpp:func:`GDALDataset::ExecuteSQL`, or with the
+`-dialect` option switch of the :ref:`ogrinfo` or :ref:`ogr2ogr` utilities.
+
+An alternate dialect, the ``SQLite`` dialect, can be used
+instead of the ``OGRSQL`` dialect. Refer to the :ref:`sql_sqlite_dialect` page for more details.
 
 The OGRLayer class also supports applying an attribute query filter to
 features returned using the :cpp:func:`OGRLayer::SetAttributeFilter()` method.  The
@@ -79,10 +83,12 @@ The general syntax of a SELECT statement is:
 List Operators
 ++++++++++++++
 
-The field list is a comma separate list of the fields to be carried into
+The field list is a comma-separated list of the fields to be carried into
 the output features from the source layer.  They will appear on output features
 in the order they appear on in the field list, so the field list may be used
-to re-order the fields.
+to re-order the fields. The special character ``*`` is taken to mean "all fields".
+The syntax ``* EXCLUDE ([fields])`` can be used to select all fields except those
+listed in parentheses.
 
 A special form of the field list uses the DISTINCT keyword.  This returns a
 list of all the distinct values of the named attribute.  When the DISTINCT
@@ -101,16 +107,23 @@ memory may be used for datasets with a large number of distinct values.
 
 There are also several summarization operators that may be applied to columns.
 When a summarization operator is applied to any field, then all fields must
-have summarization operators applied.   The summarization operators are
-COUNT (a count of instances), AVG (numerical average), SUM (numerical sum),
-MIN (lexical or numerical minimum), and MAX (lexical or numerical maximum).
+have summarization operators applied.   The summarization operators are:
+
+- COUNT: count of instances
+- AVG: numerical average:
+- SUM: numerical sum
+- MIN: lexical or numerical minimum
+- MAX: lexical or numerical maximum
+- STDDEV_POP: (GDAL >= 3.10) numerical population standard deviation. Applied on Date/DateTime/Time fields, this returns a value in seconds.
+- STDDEV_SAMP: (GDAL >= 3.10) numerical `sample standard deviation <https://en.wikipedia.org/wiki/Standard_deviation#Sample_standard_deviation>`__.  Applied on Date/DateTime/Time fields, this returns a value in seconds.
+
 This example produces a variety of summarization information on parcel
 property values:
 
 .. code-block::
 
     SELECT MIN(prop_value), MAX(prop_value), AVG(prop_value), SUM(prop_value),
-        COUNT(prop_value) FROM polylayer WHERE prov_name = 'Ontario'
+        COUNT(prop_value), STDDEV_POP(prop_value) FROM polylayer WHERE prov_name = 'Ontario'
 
 It is also possible to apply the COUNT() operator to a DISTINCT SELECT to get
 a count of distinct values, for instance:
@@ -132,7 +145,7 @@ really meaningful when performing joins.  It is further demonstrated in
 the JOIN section.
 
 Field definitions can also be complex expressions using arithmetic, and
-functional operators.   However, the DISTINCT keyword, and summarization
+functional operators. However, the DISTINCT keyword, and summarization
 operators like MIN, MAX, AVG and SUM may not be applied to expression fields.
 Boolean resulting expressions (comparisons, logical operators) can also be used.
 
@@ -272,11 +285,22 @@ The available logical operators are
 ``IN``.
 Most of the operators are self explanatory, but it is worth noting that ``!=``
 is the same as ``<>``, the string equality is
-case insensitive, but the ``<``, ``>``, ``<=`` and ``>=`` operators *are* case sensitive. 
+case insensitive, but the ``<``, ``>``, ``<=`` and ``>=`` operators *are* case sensitive.
 
 Starting with GDAL 3.1, LIKE is case sensitive, and ILIKE is case insensitive.
 In previous versions, LIKE was also case insensitive. If the old behavior is
-wished in GDAL 3.1, the :decl_configoption:`OGR_SQL_LIKE_AS_ILIKE` can be set to ``YES``.
+wished in GDAL 3.1, the :config:`OGR_SQL_LIKE_AS_ILIKE` can be set to ``YES``.
+
+Starting with GDAL 3.9, for layers declaring the OLCStringsAsUTF8 capability
+(that is the content of their fields of String type is UTF-8 encoded),
+UTF-8 characters are taken into account by ``LIKE`` and ``ILIKE`` operators.
+For ILIKE case insensitive comparisons, this is restricted to the
+`ASCII <https://en.wikipedia.org/wiki/Basic_Latin_(Unicode_block)>`__,
+`Latin-1 Supplement <https://en.wikipedia.org/wiki/Latin-1_Supplement_(Unicode_block)>`__,
+`Latin Extended-A <https://en.wikipedia.org/wiki/Latin_Extended-A>`__,
+`Latin Extended-B <https://en.wikipedia.org/wiki/Latin_Extended-B>`__,
+`Greek and Coptic <https://en.wikipedia.org/wiki/Greek_and_Coptic>`__
+and `Cyrillic <https://en.wikipedia.org/wiki/Greek_and_Coptic>`__ Unicode categories.
 
 The value argument to the ``LIKE`` and ``ILIKE`` operators is a pattern against which
 the value string is matched.  In this pattern percent (%) matches any number of
@@ -524,14 +548,18 @@ the SELECT list.
 When accessing field values, the special fields will take precedence over
 other fields in the data source with the same names.
 
-FID
-+++
+Feature id (FID)
+++++++++++++++++
 
 Normally the feature id is a special property of a feature and not treated
 as an attribute of the feature.  In some cases it is convenient to be able to
 utilize the feature id in queries and result sets as a regular field.  To do
-so use the name ``FID``.  The field wildcard expansions will not include
-the feature id, but it may be explicitly included using a syntax like:
+so use the name ``FID``. If the layer has a named FID column
+(:cpp:func:`OGRLayer::GetFIDColumn` != ""),
+this name may also be used.
+
+The field wildcard expansions will not include the feature id, but it may be
+explicitly included using a syntax like:
 
 .. code-block::
 
@@ -544,7 +572,8 @@ The OGR SQL dialect adds the geometry field of the datasource to the result set
 by default. Users do not need to select the geometry explicitly but it is still
 possible to do so. Common use case is when geometry is the only field that is needed.
 In this case the name of the geometry field to be used in the SQL statement is the
-name returned by :cpp:func:`OGRLayer::GetGeometryColumn`. If the method returns
+name returned by :cpp:func:`OGRLayer::GetGeometryColumn`, and also
+"Geometry Column = ..." in :program:`ogrinfo` output. If the method returns
 an empty string then a special name "_ogr_geometry_" must be used. The name begins
 with an underscore and SQL syntax requires that it must appear between double quotes.
 In addition the command line interpreter may require that double quotes are escaped
@@ -553,7 +582,7 @@ and the final SELECT statement could look like:
 .. code-block::
 
     SELECT "_ogr_geometry_" FROM nation
-    
+
 OGR_GEOMETRY
 ++++++++++++
 
@@ -611,6 +640,25 @@ For example we can select the annotation features as:
 .. code-block::
 
     SELECT * FROM nation WHERE OGR_STYLE LIKE 'LABEL%'
+
+
+It is possible to use the ``OGR_STYLE`` field name as a special field name in
+the field selection as an alternate way of setting the :cpp:func:`OGRFeature::SetStyleString`
+value, typically by aliasing another field or a string literal.
+
+.. code-block::
+
+    SELECT *, 'BRUSH(fc:#01234567)' AS OGR_STYLE FROM source_layer
+
+
+By default, the OGR_STYLE field will still be visible as a regular field. If this
+is undesirable, starting with GDAL 3.10, it can be hidden by adding the HIDDEN
+keyword at the end of the field specification.
+
+.. code-block::
+
+    SELECT * EXCLUDE(my_style_field), my_style_field AS OGR_STYLE HIDDEN FROM source_layer
+
 
 CREATE INDEX
 ------------
@@ -672,43 +720,3 @@ supported on datasources that declare the ODsCDeleteLayer capability.
 .. code-block::
 
     DROP TABLE nation
-
-ExecuteSQL()
-------------
-
-SQL is executed against an GDALDataset, not against a specific layer.  The
-call looks like this:
-
-.. code-block:: cpp
-
-    OGRLayer * GDALDataset::ExecuteSQL( const char *pszSQLCommand,
-                                        OGRGeometry *poSpatialFilter,
-                                        const char *pszDialect );
-
-The ``pszDialect`` argument is in theory intended to allow for support of
-different command languages against a provider, but for now applications
-should always pass an empty (not NULL) string to get the default dialect.
-
-The ``poSpatialFilter`` argument is a geometry used to select a bounding rectangle
-for features to be returned in a manner similar to the
-:cpp:func:`OGRLayer::SetSpatialFilter` method.  It may be NULL for no special spatial
-restriction.
-
-The result of an ExecuteSQL() call is usually a temporary OGRLayer representing
-the results set from the statement.  This is the case for a SELECT statement
-for instance.  The returned temporary layer should be released with
-:cpp:func:`GDALDataset::ReleaseResultsSet` method when no longer needed.  Failure
-to release it before the datasource is destroyed may result in a crash.
-
-Non-OGR SQL
------------
-
-All OGR drivers for database systems: :ref:`vector.mysql`, :ref:`vector.pg`,
-:ref:`vector.oci`, :ref:`vector.sqlite`, :ref:`vector.odbc`, :ref:`vector.pgeo`,
-:ref:`vector.hana` and :ref:`vector.mssqlspatial`,
-override the :cpp:func:`GDALDataset::ExecuteSQL` function with dedicated implementation
-and, by default, pass the SQL statements directly to the underlying RDBMS.
-In these cases the SQL syntax varies in some particulars from OGR SQL.
-Also, anything possible in SQL can then be accomplished for these particular
-databases.  Only the result of SQL WHERE statements will be returned as
-layers.

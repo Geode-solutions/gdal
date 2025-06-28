@@ -6,28 +6,13 @@
  * Copyright (c) 2011
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "blockdir/blocklayer.h"
 #include "blockdir/blockfile.h"
 #include "pcidsk_exception.h"
+#include "core/pcidsk_utils.h"
 
 using namespace PCIDSK;
 
@@ -107,8 +92,7 @@ void BlockLayer::AllocateBlocks(uint64 nOffset, uint64 nSize)
     uint32 iStartBlock = (uint32) (nOffset / nBlockSize);
     uint32 nStartOffset = (uint32) (nOffset % nBlockSize);
 
-    uint32 nNumBlocks = (uint32)
-        ((nSize + nStartOffset + nBlockSize - 1) / nBlockSize);
+    uint32 nNumBlocks = (uint32) DIV_ROUND_UP(nSize + nStartOffset, nBlockSize);
 
     for (uint32 iBlock = 0; iBlock < nNumBlocks; iBlock++)
     {
@@ -144,8 +128,7 @@ bool BlockLayer::AreBlocksAllocated(uint64 nOffset, uint64 nSize)
     uint32 iStartBlock = (uint32) (nOffset / nBlockSize);
     uint32 nStartOffset = (uint32) (nOffset % nBlockSize);
 
-    uint32 nNumBlocks = (uint32)
-        ((nSize + nStartOffset + nBlockSize - 1) / nBlockSize);
+    uint32 nNumBlocks = (uint32) DIV_ROUND_UP(nSize + nStartOffset, nBlockSize);
 
     for (uint32 iBlock = 0; iBlock < nNumBlocks; iBlock++)
     {
@@ -183,8 +166,7 @@ uint32 BlockLayer::GetContiguousCount(uint64 nOffset, uint64 nSize)
     uint32 iStartBlock = (uint32) (nOffset / nBlockSize);
     uint32 nStartOffset = (uint32) (nOffset % nBlockSize);
 
-    uint32 nNumBlocks = (uint32)
-        ((nSize + nStartOffset + nBlockSize - 1) / nBlockSize);
+    uint32 nNumBlocks = (uint32) DIV_ROUND_UP(nSize + nStartOffset, nBlockSize);
 
     BlockInfo * psStartBlock = GetBlockInfo(iStartBlock);
 
@@ -226,7 +208,7 @@ void BlockLayer::FreeBlocks(uint64 nOffset, uint64 nSize)
 {
     uint32 nBlockSize = mpoBlockDir->GetBlockSize();
 
-    uint32 iStartBlock = (uint32) ((nOffset + nBlockSize - 1) / nBlockSize);
+    uint32 iStartBlock = (uint32) DIV_ROUND_UP(nOffset, nBlockSize);
     uint32 iEndBlock = (uint32) ((nOffset + nSize) / nBlockSize);
 
     uint32 nNumBlocks = iStartBlock < iEndBlock ? iEndBlock - iStartBlock : 0;
@@ -420,8 +402,7 @@ void BlockLayer::Resize(uint64 nLayerSize)
     uint32 nBlockSize = mpoBlockDir->GetBlockSize();
 
     // Check how many blocks are needed.
-    uint32 nNeededBlocks =
-        (uint32) ((nLayerSize + nBlockSize - 1) / nBlockSize);
+    uint32 nNeededBlocks = (uint32) DIV_ROUND_UP(nLayerSize, nBlockSize);
 
     // Create new blocks.
     if (nNeededBlocks > nBlockCount)

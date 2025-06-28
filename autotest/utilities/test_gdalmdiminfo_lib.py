@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  test librarified gdalmdiminfo
@@ -10,52 +9,16 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even.rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
-import json
-import os
+import pathlib
 import struct
 
+import gdaltest
 import pytest
 
 from osgeo import gdal, osr
-
-###############################################################################
-# Validate against schema
-
-
-def _validate(res):
-    try:
-        import jsonschema
-    except ImportError:
-        return
-
-    if isinstance(res, str):
-        res = json.loads(res)
-
-    schema_filename = "../../gdal/data/gdalmdiminfo_output.schema.json"
-    if not os.path.exists(schema_filename):
-        return
-
-    jsonschema.validate(res, json.loads(open(schema_filename, "rt").read()))
-
 
 ###############################################################################
 # Test with non multidim dataset
@@ -68,7 +31,7 @@ def test_gdalmdiminfo_lib_non_multidim_dataset():
     with pytest.raises(TypeError):
         gdal.MultiDimInfo(ds)
 
-    with pytest.raises(TypeError):
+    with pytest.raises(Exception):
         gdal.MultiDimInfo("../gcore/data/byte.tif")
 
 
@@ -81,7 +44,7 @@ def test_gdalmdiminfo_lib_empty_mem_dataset():
     drv = gdal.GetDriverByName("MEM")
     ds = drv.CreateMultiDimensional("")
     ret = gdal.MultiDimInfo(ds)
-    _validate(ret)
+    gdaltest.validate_json(ret, "gdalmdiminfo_output.schema.json")
 
     assert ret == {"type": "group", "driver": "MEM", "name": "/"}
 
@@ -128,7 +91,7 @@ def test_gdalmdiminfo_lib_mem_dataset():
     attr.WriteString("bar")
 
     ret = gdal.MultiDimInfo(ds, detailed=True, as_text=True)
-    _validate(ret)
+    gdaltest.validate_json(ret, "gdalmdiminfo_output.schema.json")
 
     expected = """{
   "type": "group",
@@ -224,7 +187,7 @@ def test_gdalmdiminfo_lib_mem_dataset():
     assert ret == expected
 
     ret = gdal.MultiDimInfo(ds, array="ar_compound", detailed=True, as_text=True)
-    _validate(ret)
+    gdaltest.validate_json(ret, "gdalmdiminfo_output.schema.json")
 
     expected = """{
   "type": "array",
@@ -282,6 +245,17 @@ def test_gdalmdiminfo_lib_arrayoption():
         "../gdrivers/data/netcdf/with_bounds.nc", arrayoptions=["SHOW_BOUNDS=NO"]
     )
     assert len(ret["arrays"]) == 1
+
+
+###############################################################################
+# Test path argument
+
+
+@pytest.mark.require_driver("netCDF")
+def test_gdalmdiminfo_lib_path_input():
+
+    ret = gdal.MultiDimInfo(pathlib.Path("../gdrivers/data/netcdf/with_bounds.nc"))
+    assert ret is not None
 
 
 ###############################################################################

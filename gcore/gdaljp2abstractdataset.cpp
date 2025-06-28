@@ -9,23 +9,7 @@
  * Copyright (c) 2002, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -45,6 +29,7 @@
 #include "gdal_priv.h"
 #include "gdaljp2metadata.h"
 #include "ogrsf_frmts.h"
+#include "memdataset.h"
 
 /*! @cond Doxygen_Suppress */
 
@@ -104,7 +89,6 @@ void GDALJP2AbstractDataset::LoadJP2Metadata(GDALOpenInfo *poOpenInfo,
                                  : CPLGetConfigOption("GDAL_GEOREF_SOURCES",
                                                       "PAM,INTERNAL,WORLDFILE");
     size_t nInternalIdx = osGeorefSources.ifind("INTERNAL");
-    // coverity[tainted_data]
     if (nInternalIdx != std::string::npos &&
         (nInternalIdx == 0 || osGeorefSources[nInternalIdx - 1] == ',') &&
         (nInternalIdx + strlen("INTERNAL") == osGeorefSources.size() ||
@@ -113,28 +97,27 @@ void GDALJP2AbstractDataset::LoadJP2Metadata(GDALOpenInfo *poOpenInfo,
         osGeorefSources.replace(nInternalIdx, strlen("INTERNAL"),
                                 "GEOJP2,GMLJP2,MSIG");
     }
-    char **papszTokens = CSLTokenizeString2(osGeorefSources, ",", 0);
+    const CPLStringList aosTokens(CSLTokenizeString2(osGeorefSources, ",", 0));
     m_bGotPAMGeorefSrcIndex = true;
-    m_nPAMGeorefSrcIndex = CSLFindString(papszTokens, "PAM");
-    const int nGEOJP2Index = CSLFindString(papszTokens, "GEOJP2");
-    const int nGMLJP2Index = CSLFindString(papszTokens, "GMLJP2");
-    const int nMSIGIndex = CSLFindString(papszTokens, "MSIG");
-    m_nWORLDFILEIndex = CSLFindString(papszTokens, "WORLDFILE");
+    m_nPAMGeorefSrcIndex = aosTokens.FindString("PAM");
+    const int nGEOJP2Index = aosTokens.FindString("GEOJP2");
+    const int nGMLJP2Index = aosTokens.FindString("GMLJP2");
+    const int nMSIGIndex = aosTokens.FindString("MSIG");
+    m_nWORLDFILEIndex = aosTokens.FindString("WORLDFILE");
 
     if (bGeorefSourcesConfigOption)
     {
-        for (char **papszIter = papszTokens; *papszIter; ++papszIter)
+        for (const char *pszToken : aosTokens)
         {
-            if (!EQUAL(*papszIter, "PAM") && !EQUAL(*papszIter, "GEOJP2") &&
-                !EQUAL(*papszIter, "GMLJP2") && !EQUAL(*papszIter, "MSIG") &&
-                !EQUAL(*papszIter, "WORLDFILE") && !EQUAL(*papszIter, "NONE"))
+            if (!EQUAL(pszToken, "PAM") && !EQUAL(pszToken, "GEOJP2") &&
+                !EQUAL(pszToken, "GMLJP2") && !EQUAL(pszToken, "MSIG") &&
+                !EQUAL(pszToken, "WORLDFILE") && !EQUAL(pszToken, "NONE"))
             {
                 CPLError(CE_Warning, CPLE_AppDefined,
-                         "Unhandled value %s in GEOREF_SOURCES", *papszIter);
+                         "Unhandled value %s in GEOREF_SOURCES", pszToken);
             }
         }
     }
-    CSLDestroy(papszTokens);
 
     /* -------------------------------------------------------------------- */
     /*      Check for georeferencing information.                           */
@@ -155,10 +138,10 @@ void GDALJP2AbstractDataset::LoadJP2Metadata(GDALOpenInfo *poOpenInfo,
         m_oSRS = oJP2Geo.m_oSRS;
         if (!m_oSRS.IsEmpty())
             m_nProjectionGeorefSrcIndex = nIndexUsed;
-        bGeoTransformValid = CPL_TO_BOOL(oJP2Geo.bHaveGeoTransform);
+        bGeoTransformValid = oJP2Geo.m_bHaveGeoTransform;
         if (bGeoTransformValid)
             m_nGeoTransformGeorefSrcIndex = nIndexUsed;
-        memcpy(adfGeoTransform, oJP2Geo.adfGeoTransform, sizeof(double) * 6);
+        m_gt = oJP2Geo.m_gt;
         nGCPCount = oJP2Geo.nGCPCount;
         if (nGCPCount)
             m_nGCPGeorefSrcIndex = nIndexUsed;
@@ -224,26 +207,24 @@ void GDALJP2AbstractDataset::LoadJP2Metadata(GDALOpenInfo *poOpenInfo,
         {
             GDALMultiDomainMetadata oLocalMDMD;
             oLocalMDMD.XMLInit(psXMLNode, FALSE);
-            char **papszDomainList = oLocalMDMD.GetDomainList();
-            char **papszIter = papszDomainList;
             GDALDataset::SetMetadata(oLocalMDMD.GetMetadata());
-            while (papszIter && *papszIter)
+            for (const char *pszDomain : cpl::Iterate(
+                     static_cast<CSLConstList>(oLocalMDMD.GetDomainList())))
             {
-                if (!EQUAL(*papszIter, "") &&
-                    !EQUAL(*papszIter, "IMAGE_STRUCTURE"))
+                if (!EQUAL(pszDomain, "") &&
+                    !EQUAL(pszDomain, "IMAGE_STRUCTURE"))
                 {
-                    if (GDALDataset::GetMetadata(*papszIter) != nullptr)
+                    if (GDALDataset::GetMetadata(pszDomain) != nullptr)
                     {
                         CPLDebug(
                             "GDALJP2",
                             "GDAL metadata overrides metadata in %s domain "
                             "over metadata read from other boxes",
-                            *papszIter);
+                            pszDomain);
                     }
-                    GDALDataset::SetMetadata(oLocalMDMD.GetMetadata(*papszIter),
-                                             *papszIter);
+                    GDALDataset::SetMetadata(oLocalMDMD.GetMetadata(pszDomain),
+                                             pszDomain);
                 }
-                ++papszIter;
             }
             CPLDestroyXMLNode(psXMLNode);
         }
@@ -284,10 +265,10 @@ void GDALJP2AbstractDataset::LoadJP2Metadata(GDALOpenInfo *poOpenInfo,
          !bGeoTransformValid))
     {
         bGeoTransformValid |=
-            GDALReadWorldFile2(pszOverrideFilename, nullptr, adfGeoTransform,
+            GDALReadWorldFile2(pszOverrideFilename, nullptr, m_gt,
                                poOpenInfo->GetSiblingFiles(),
                                &pszWldFilename) ||
-            GDALReadWorldFile2(pszOverrideFilename, ".wld", adfGeoTransform,
+            GDALReadWorldFile2(pszOverrideFilename, ".wld", m_gt,
                                poOpenInfo->GetSiblingFiles(), &pszWldFilename);
         if (bGeoTransformValid)
         {
@@ -321,8 +302,8 @@ char **GDALJP2AbstractDataset::GetFileList()
         GDALCanReliablyUseSiblingFileList(pszWldFilename) &&
         CSLFindString(papszFileList, pszWldFilename) == -1)
     {
-        double l_adfGeoTransform[6];
-        GetGeoTransform(l_adfGeoTransform);
+        GDALGeoTransform l_gt;
+        GetGeoTransform(l_gt);
         // GetGeoTransform() can modify m_nGeoTransformGeorefSrcIndex
         // cppcheck-suppress knownConditionTrueFalse
         if (m_nGeoTransformGeorefSrcIndex == m_nWORLDFILEIndex)
@@ -349,10 +330,6 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
     char **papszGMLJP2 = GetMetadata("xml:gml.root-instance");
     if (papszGMLJP2 == nullptr)
         return;
-    GDALDriver *const poMemDriver =
-        static_cast<GDALDriver *>(GDALGetDriverByName("Memory"));
-    if (poMemDriver == nullptr)
-        return;
 
     CPLErr eLastErr = CPLGetLastErrorType();
     int nLastErrNo = CPLGetLastErrorNo();
@@ -370,6 +347,8 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
         CPLDestroyXMLNode(psRoot);
         return;
     }
+
+    const std::string osTmpDir = VSIMemGenerateHiddenFilename("gmljp2");
 
     // Find feature collections.
     int nLayersAtCC = 0;
@@ -454,7 +433,8 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
 
             if (psFC != nullptr)
             {
-                osGMLTmpFile = CPLSPrintf("/vsimem/gmljp2/%p/my.gml", this);
+                osGMLTmpFile =
+                    CPLFormFilenameSafe(osTmpDir.c_str(), "my.gml", nullptr);
                 // Create temporary .gml file.
                 CPLSerializeXMLTreeToFile(psFC, osGMLTmpFile);
             }
@@ -489,8 +469,8 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
                                     CPLSPrintf("xml:%s", pszBoxName));
                                 if (papszBoxData != nullptr)
                                 {
-                                    osXSDTmpFile = CPLSPrintf(
-                                        "/vsimem/gmljp2/%p/my.xsd", this);
+                                    osXSDTmpFile = CPLFormFilenameSafe(
+                                        osTmpDir.c_str(), "my.xsd", nullptr);
                                     CPL_IGNORE_RET_VAL(
                                         VSIFCloseL(VSIFileFromMemBuffer(
                                             osXSDTmpFile,
@@ -534,8 +514,8 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
                     for (int i = 0; i < nLayers; ++i)
                     {
                         if (poMemDS == nullptr)
-                            poMemDS = poMemDriver->Create("", 0, 0, 0,
-                                                          GDT_Unknown, nullptr);
+                            poMemDS = MEMDataset::Create("", 0, 0, 0,
+                                                         GDT_Unknown, nullptr);
                         OGRLayer *poSrcLyr = poTmpDS->GetLayer(i);
                         const char *const pszLayerName =
                             bIsGC
@@ -546,9 +526,6 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
                                              poSrcLyr->GetName());
                         poMemDS->CopyLayer(poSrcLyr, pszLayerName, nullptr);
                     }
-
-                    // If there was no schema, a .gfs might have been generated.
-                    VSIUnlink(CPLSPrintf("/vsimem/gmljp2/%p/my.gfs", this));
                 }
             }
             else
@@ -557,10 +534,7 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
                          "No GML driver found to read feature collection");
             }
 
-            if (!STARTS_WITH(osGMLTmpFile, "/vsicurl/"))
-                VSIUnlink(osGMLTmpFile);
-            if (!osXSDTmpFile.empty())
-                VSIUnlink(osXSDTmpFile);
+            VSIRmdirRecursive(osTmpDir.c_str());
         }
     }
 
@@ -598,8 +572,8 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
 
             // Create temporary .kml file.
             CPLXMLNode *const psKML = psGCorGMLJP2FeaturesChildIter->psChild;
-            CPLString osKMLTmpFile(
-                CPLSPrintf("/vsimem/gmljp2/%p/my.kml", this));
+            const CPLString osKMLTmpFile(
+                VSIMemGenerateHiddenFilename("my.kml"));
             CPLSerializeXMLTreeToFile(psKML, osKMLTmpFile);
 
             GDALDatasetUniquePtr poTmpDS(GDALDataset::Open(
@@ -610,8 +584,8 @@ void GDALJP2AbstractDataset::LoadVectorLayers(int bOpenRemoteResources)
                 for (int i = 0; i < nLayers; ++i)
                 {
                     if (poMemDS == nullptr)
-                        poMemDS = poMemDriver->Create("", 0, 0, 0, GDT_Unknown,
-                                                      nullptr);
+                        poMemDS = MEMDataset::Create("", 0, 0, 0, GDT_Unknown,
+                                                     nullptr);
                     OGRLayer *const poSrcLyr = poTmpDS->GetLayer(i);
                     const char *pszLayerName =
                         CPLSPrintf("Annotation_%d_%s", ++nAnnotations,
@@ -664,8 +638,7 @@ char **GDALJP2AbstractDataset::GetMetadata(const char *pszDomain)
             m_aosImageStructureMetadata.Assign(
                 CSLDuplicate(GDALGeorefPamDataset::GetMetadata(pszDomain)),
                 true);
-            CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
-            CPLErrorStateBackuper oErrorStateBackuper;
+            CPLErrorStateBackuper oErrorStateBackuper(CPLQuietErrorHandler);
             const char *pszReversibility =
                 GDALGetJPEG2000Reversibility(GetDescription(), fp);
             if (pszReversibility)

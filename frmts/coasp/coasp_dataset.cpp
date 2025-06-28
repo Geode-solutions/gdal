@@ -13,23 +13,7 @@
  * Copyright (c) 2007, Philippe Vachon
  * Copyright (c) 2009-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -68,6 +52,7 @@ class COASPMetadataReader
     COASPMetadataItem *GetNextItem();
     COASPMetadataItem *GetItem(int nItem);
     int GotoMetadataItem(const char *pszName);
+
     int GetCurrentItem() const
     {
         return nCurrentItem;
@@ -85,11 +70,13 @@ class COASPMetadataItem
     COASPMetadataItem() : pszItemName(nullptr), pszItemValue(nullptr)
     {
     }
+
     COASPMetadataItem(char *pszItemName, char *pszItemValue);
     ~COASPMetadataItem();
 
     char *GetItemName();
     char *GetItemValue();
+
     static int GetType()
     {
         return TYPE_GENERIC;
@@ -112,11 +99,14 @@ class COASPMetadataGeorefGridItem : public COASPMetadataItem
   public:
     COASPMetadataGeorefGridItem(int nId, int nPixels, int nLines, double ndLat,
                                 double ndLong);
+
     static const char *GetItemName()
     {
         return "georef_grid";
     }
+
     static GDAL_GCP *GetItemValue();
+
     static int GetType()
     {
         return TYPE_GEOREF;
@@ -273,6 +263,7 @@ class COASPDataset final : public GDALDataset
           fpBinVV(nullptr), pszFileName(nullptr)
     {
     }
+
     ~COASPDataset();
 
     static GDALDataset *Open(GDALOpenInfo *);
@@ -316,11 +307,12 @@ CPLErr COASPRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
     }
 
     /* 8 bytes per pixel: 4 bytes I, 4 bytes Q */
-    unsigned long nByteNum = poDS->GetRasterXSize() * 8 * nBlockYOff;
+    const vsi_l_offset nByteNum =
+        static_cast<vsi_l_offset>(poDS->GetRasterXSize()) * 8 * nBlockYOff;
 
     VSIFSeekL(this->fp, nByteNum, SEEK_SET);
-    int nReadSize =
-        (GDALGetDataTypeSize(eDataType) / 8) * poDS->GetRasterXSize();
+    const int nReadSize =
+        GDALGetDataTypeSizeBytes(eDataType) * poDS->GetRasterXSize();
     VSIFReadL((char *)pImage, 1, nReadSize, this->fp);
 
 #ifdef CPL_LSB
@@ -385,9 +377,7 @@ GDALDataset *COASPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The COASP driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("COASP");
         return nullptr;
     }
 
@@ -401,8 +391,9 @@ GDALDataset *COASPDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->pszFileName = VSIStrdup(poOpenInfo->pszFilename);
 
     /* determine the file name prefix */
-    char *pszBaseName = VSIStrdup(CPLGetBasename(poDS->pszFileName));
-    char *pszDir = VSIStrdup(CPLGetPath(poDS->pszFileName));
+    char *pszBaseName =
+        VSIStrdup(CPLGetBasenameSafe(poDS->pszFileName).c_str());
+    char *pszDir = VSIStrdup(CPLGetPathSafe(poDS->pszFileName).c_str());
     const char *pszExt = "rc";
     int nNull = static_cast<int>(strlen(pszBaseName)) - 1;
     if (nNull <= 0)
@@ -484,9 +475,9 @@ GDALDataset *COASPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* Horizontal transmit, horizontal receive */
     psChan[0] = 'h';
     psChan[1] = 'h';
-    const char *pszFilename = CPLFormFilename(pszDir, pszBase, pszExt);
+    std::string osFilename = CPLFormFilenameSafe(pszDir, pszBase, pszExt);
 
-    poDS->fpBinHH = VSIFOpenL(pszFilename, "r");
+    poDS->fpBinHH = VSIFOpenL(osFilename.c_str(), "r");
 
     if (poDS->fpBinHH != nullptr)
     {
@@ -498,9 +489,9 @@ GDALDataset *COASPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* Horizontal transmit, vertical receive */
     psChan[0] = 'h';
     psChan[1] = 'v';
-    pszFilename = CPLFormFilename(pszDir, pszBase, pszExt);
+    osFilename = CPLFormFilenameSafe(pszDir, pszBase, pszExt);
 
-    poDS->fpBinHV = VSIFOpenL(pszFilename, "r");
+    poDS->fpBinHV = VSIFOpenL(osFilename.c_str(), "r");
 
     if (poDS->fpBinHV != nullptr)
     {
@@ -511,9 +502,9 @@ GDALDataset *COASPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* Vertical transmit, horizontal receive */
     psChan[0] = 'v';
     psChan[1] = 'h';
-    pszFilename = CPLFormFilename(pszDir, pszBase, pszExt);
+    osFilename = CPLFormFilenameSafe(pszDir, pszBase, pszExt);
 
-    poDS->fpBinVH = VSIFOpenL(pszFilename, "r");
+    poDS->fpBinVH = VSIFOpenL(osFilename.c_str(), "r");
 
     if (poDS->fpBinVH != nullptr)
     {
@@ -524,9 +515,9 @@ GDALDataset *COASPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* Vertical transmit, vertical receive */
     psChan[0] = 'v';
     psChan[1] = 'v';
-    pszFilename = CPLFormFilename(pszDir, pszBase, pszExt);
+    osFilename = CPLFormFilenameSafe(pszDir, pszBase, pszExt);
 
-    poDS->fpBinVV = VSIFOpenL(pszFilename, "r");
+    poDS->fpBinVV = VSIFOpenL(osFilename.c_str(), "r");
 
     if (poDS->fpBinVV != nullptr)
     {

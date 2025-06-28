@@ -12,7 +12,7 @@ GeoJSONSeq: sequence of GeoJSON features
 This driver implements read/creation support for features encoded
 individually as `GeoJSON <http://geojson.org/>`__ Feature objects,
 separated by newline (LF) (`Newline Delimited
-JSON <http://ndjson.org/>`__) or record-separator (RS) characters (`RFC
+JSON <https://github.com/ndjson/ndjson-spec>`__) or record-separator (RS) characters (`RFC
 8142 <https://tools.ietf.org/html/rfc8142>`__ standard: GeoJSON Text
 Sequences)
 
@@ -46,36 +46,106 @@ The driver accepts three types of sources of data:
 -  Text passed directly as filename, and encoded as GeoJSON sequences
 
 The URL/filename/text might be prefixed with GeoJSONSeq: to avoid any
-ambiguity with other drivers.
+ambiguity with other drivers. Alternatively, starting
+with GDAL 3.10, specifying the ``-if GeoJSONSeq`` option to command line utilities
+accepting it, or ``GeoJSONSeq`` as the only value of the ``papszAllowedDrivers`` of
+:cpp:func:`GDALOpenEx`, also forces the driver to recognize the passed
+URL/filename/text.
 
 Configuration options
 ---------------------
 
-The following :ref:`configuration option <configoptions>` is
-available:
+|about-config-options|
+The following configuration option is available:
 
--  :decl_configoption:`OGR_GEOJSON_MAX_OBJ_SIZE` (GDAL >= 3.5.2): size in
-   MBytes of the maximum accepted single feature, default value is 200MB.
-   Or 0 to allow for a unlimited size.
+-  :copy-config:`OGR_GEOJSON_MAX_OBJ_SIZE`
 
 Layer creation options
 ----------------------
 
--  **RS**\ =YES/NO: whether to start records with the RS=0x1E character,
-   so as to be compatible with the `RFC
-   8142 <https://tools.ietf.org/html/rfc8142>`__ standard. Defaults to
-   NO, unless the filename extension is "geojsons"
--  **COORDINATE_PRECISION** = int_number: Maximum number of figures
-   after decimal separator to write in coordinates. Default to 7.
-   "Smart" truncation will occur to remove trailing zeros.
--  **SIGNIFICANT_FIGURES** = int_number: Maximum number of significant
-   figures when writing floating-point numbers. Default to 17. If
-   explicitly specified, and COORDINATE_PRECISION is not, this will also
-   apply to coordinates.
--  **ID_FIELD**\ =string. Name of the source field that must be written
-   as the 'id' member of Feature objects.
--  **ID_TYPE**\ =AUTO/String/Integer. Type of the 'id' member of Feature
-   objects.
+|about-layer-creation-options|
+The following layer creation options are supported:
+
+-  .. lco:: RS
+      :choices: YES, NO
+
+      whether to start records with the RS=0x1E character,
+      so as to be compatible with the `RFC
+      8142 <https://tools.ietf.org/html/rfc8142>`__ standard. Defaults to
+      NO, unless the filename extension is "geojsons"
+
+-  .. lco:: COORDINATE_PRECISION
+      :choices: <integer>
+      :default: 7
+
+      Maximum number of figures
+      after decimal separator to write in coordinates.
+      "Smart" truncation will occur to remove trailing zeros.
+
+-  .. lco:: SIGNIFICANT_FIGURES
+      :choices: <integer>
+      :default: 17
+
+      Maximum number of significant
+      figures when writing floating-point numbers. If
+      explicitly specified, and :lco:`COORDINATE_PRECISION` is not, this will also
+      apply to coordinates.
+
+-  .. lco:: ID_FIELD
+
+      Name of the source field that must be written
+      as the 'id' member of Feature objects.
+
+-  .. lco:: ID_TYPE
+      :choices: AUTO, String, Integer
+
+      Type of the 'id' member of Feature objects.
+
+-  .. lco:: WRITE_NON_FINITE_VALUES
+      :choices: YES, NO
+      :default: NO
+      :since: 3.8
+
+      Whether to write
+      NaN / Infinity values. Such values are not allowed in strict JSON
+      mode, but some JSON parsers (libjson-c >= 0.12 for example) can
+      understand them as they are allowed by ECMAScript.
+
+-  .. lco:: AUTODETECT_JSON_STRINGS
+      :choices: YES, NO
+      :default: YES
+      :since: 3.8
+
+      Whether to try to interpret string fields as JSON arrays or objects
+      if they start and end with brackets and braces, even if they do
+      not have their subtype set to JSON.
+
+-  .. lco:: WRITE_BBOX
+      :choices: YES, NO
+      :default: NO
+      :since: 3.10
+
+      Set to YES to write a bbox property with the bounding box of the
+      geometry at the feature level.
+
+Geometry coordinate precision
+-----------------------------
+
+.. versionadded:: GDAL 3.9
+
+On creation, the GeoJSONSeq driver supports using the geometry coordinate
+precision, from the :cpp:class:`OGRGeomCoordinatePrecision` settings of the
+:cpp:class:`OGRGeomFieldDefn`. Those settings are used to round the coordinates
+of the geometry of the features to an appropriate decimal precision.
+
+.. note::
+
+    The :lco:`COORDINATE_PRECISION` layer creation option has precedence over
+    the values set on the :cpp:class:`OGRGeomFieldDefn`.
+
+The value of those geometry coordinate precision is *not* serialized in the
+generated file, hence on reading, the driver will not advertise a geometry
+coordinate precision.
 
 See Also
 --------
@@ -85,6 +155,7 @@ See Also
    GeoJSON Format.
 -  `RFC 8142 <https://tools.ietf.org/html/rfc8142>`__ standard: GeoJSON
    Text Sequences (RS separator)
--  `Newline Delimited JSON <http://ndjson.org/>`__
 -  `GeoJSONL <https://www.interline.io/blog/geojsonl-extracts/>`__: An
    optimized format for large geographic datasets
+-  `JSON streaming on Wikipedia <https://en.wikipedia.org/wiki/JSON_streaming>`__: An
+   overview over formats for concatenated JSON in a single file

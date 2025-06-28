@@ -8,23 +8,7 @@
  * Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -52,7 +36,7 @@ class ERSDataset final : public RawDataset
     GDALDataset *poDepFile;
 
     int bGotTransform;
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
 
     CPLString osRawFilename;
@@ -89,8 +73,8 @@ class ERSDataset final : public RawDataset
     ~ERSDataset() override;
 
     CPLErr FlushCache(bool bAtClosing) override;
-    CPLErr GetGeoTransform(double *padfTransform) override;
-    CPLErr SetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
     char **GetFileList(void) override;
@@ -124,12 +108,6 @@ ERSDataset::ERSDataset()
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     m_oGCPSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -529,29 +507,29 @@ void ERSDataset::WriteProjectionInfo(const char *pszProj, const char *pszDatum,
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr ERSDataset::GetGeoTransform(double *padfTransform)
+CPLErr ERSDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (bGotTransform)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
-    return GDALPamDataset::GetGeoTransform(padfTransform);
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr ERSDataset::SetGeoTransform(double *padfTransform)
+CPLErr ERSDataset::SetGeoTransform(const GDALGeoTransform &gt)
 
 {
-    if (memcmp(padfTransform, adfGeoTransform, sizeof(double) * 6) == 0)
+    if (m_gt == gt)
         return CE_None;
 
-    if (adfGeoTransform[2] != 0 || adfGeoTransform[4] != 0)
+    if (gt[2] != 0 || gt[4] != 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Rotated and skewed geotransforms not currently supported for "
@@ -560,18 +538,18 @@ CPLErr ERSDataset::SetGeoTransform(double *padfTransform)
     }
 
     bGotTransform = TRUE;
-    memcpy(adfGeoTransform, padfTransform, sizeof(double) * 6);
+    m_gt = gt;
 
     bHDRDirty = TRUE;
 
     poHeader->Set("RasterInfo.CellInfo.Xdimension",
-                  CPLString().Printf("%.15g", fabs(adfGeoTransform[1])));
+                  CPLString().Printf("%.15g", fabs(m_gt[1])));
     poHeader->Set("RasterInfo.CellInfo.Ydimension",
-                  CPLString().Printf("%.15g", fabs(adfGeoTransform[5])));
+                  CPLString().Printf("%.15g", fabs(m_gt[5])));
     poHeader->Set("RasterInfo.RegistrationCoord.Eastings",
-                  CPLString().Printf("%.15g", adfGeoTransform[0]));
+                  CPLString().Printf("%.15g", m_gt[0]));
     poHeader->Set("RasterInfo.RegistrationCoord.Northings",
-                  CPLString().Printf("%.15g", adfGeoTransform[3]));
+                  CPLString().Printf("%.15g", m_gt[3]));
 
     if (CPLAtof(poHeader->Find("RasterInfo.RegistrationCellX", "0")) != 0.0 ||
         CPLAtof(poHeader->Find("RasterInfo.RegistrationCellY", "0")) != 0.0)
@@ -881,15 +859,17 @@ int ERSProxyRasterBand::GetOverviewCount()
 GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
 
 {
-    if (GetRecLevel())
+    if (!Identify(poOpenInfo) || poOpenInfo->fpL == nullptr)
+        return nullptr;
+
+    int &nRecLevel = GetRecLevel();
+    // cppcheck-suppress knownConditionTrueFalse
+    if (nRecLevel)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Attempt at recursively opening ERS dataset");
         return nullptr;
     }
-
-    if (!Identify(poOpenInfo) || poOpenInfo->fpL == nullptr)
-        return nullptr;
 
     /* -------------------------------------------------------------------- */
     /*      Ingest the file as a tree of header nodes.                      */
@@ -928,7 +908,7 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    ERSDataset *poDS = new ERSDataset();
+    auto poDS = std::make_unique<ERSDataset>();
     poDS->poHeader = poHeader;
     poDS->eAccess = poOpenInfo->eAccess;
 
@@ -942,7 +922,6 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     if (!GDALCheckDatasetDimensions(poDS->nRasterXSize, poDS->nRasterYSize) ||
         !GDALCheckBandCount(nBands, FALSE))
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -950,9 +929,16 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /*     Get the HeaderOffset if it exists in the header                  */
     /* -------------------------------------------------------------------- */
     GIntBig nHeaderOffset = 0;
-    if (poHeader->Find("HeaderOffset") != nullptr)
+    const char *pszHeaderOffset = poHeader->Find("HeaderOffset");
+    if (pszHeaderOffset != nullptr)
     {
-        nHeaderOffset = atoi(poHeader->Find("HeaderOffset"));
+        nHeaderOffset = CPLAtoGIntBig(pszHeaderOffset);
+        if (nHeaderOffset < 0)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Illegal value for HeaderOffset: %s", pszHeaderOffset);
+            return nullptr;
+        }
     }
 
     /* -------------------------------------------------------------------- */
@@ -996,7 +982,7 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Figure out the name of the target file.                         */
     /* -------------------------------------------------------------------- */
-    CPLString osPath = CPLGetPath(poOpenInfo->pszFilename);
+    CPLString osPath = CPLGetPathSafe(poOpenInfo->pszFilename);
     CPLString osDataFile = poHeader->Find("DataFile", "");
 
     if (osDataFile.length() == 0)  // just strip off extension.
@@ -1005,7 +991,7 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
         osDataFile = osDataFile.substr(0, osDataFile.find_last_of('.'));
     }
 
-    CPLString osDataFilePath = CPLFormFilename(osPath, osDataFile, nullptr);
+    CPLString osDataFilePath = CPLFormFilenameSafe(osPath, osDataFile, nullptr);
 
     /* -------------------------------------------------------------------- */
     /*      DataSetType = Translated files are links to things like ecw     */
@@ -1013,7 +999,6 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (EQUAL(poHeader->Find("DataSetType", ""), "Translated"))
     {
-        int &nRecLevel = GetRecLevel();
         nRecLevel++;
         poDS->poDepFile = GDALDataset::FromHandle(
             GDALOpen(osDataFilePath, poOpenInfo->eAccess));
@@ -1050,7 +1035,7 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
         else
             poDS->fpImage = VSIFOpenL(osDataFilePath, "r");
 
-        poDS->osRawFilename = osDataFilePath;
+        poDS->osRawFilename = std::move(osDataFilePath);
 
         if (poDS->fpImage != nullptr && nBands > 0)
         {
@@ -1060,31 +1045,41 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
             if (nBands > knIntMax / iWordSize ||
                 poDS->nRasterXSize > knIntMax / (nBands * iWordSize))
             {
-                CPLError(CE_Failure, CPLE_AppDefined, "int overflow");
-                delete poDS;
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "int overflow: too large nBands and/or nRasterXSize");
                 return nullptr;
             }
 
             if (!RAWDatasetCheckMemoryUsage(
                     poDS->nRasterXSize, poDS->nRasterYSize, nBands, iWordSize,
                     iWordSize, iWordSize * nBands * poDS->nRasterXSize,
-                    nHeaderOffset, iWordSize * poDS->nRasterXSize,
+                    nHeaderOffset,
+                    static_cast<vsi_l_offset>(iWordSize) * poDS->nRasterXSize,
                     poDS->fpImage))
             {
-                delete poDS;
+                return nullptr;
+            }
+            if (nHeaderOffset > std::numeric_limits<GIntBig>::max() -
+                                    static_cast<GIntBig>(nBands - 1) *
+                                        iWordSize * poDS->nRasterXSize)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "int overflow: too large nHeaderOffset");
                 return nullptr;
             }
 
             for (int iBand = 0; iBand < nBands; iBand++)
             {
                 // Assume pixel interleaved.
-                poDS->SetBand(
-                    iBand + 1,
-                    new ERSRasterBand(
-                        poDS, iBand + 1, poDS->fpImage,
-                        nHeaderOffset + iWordSize * iBand * poDS->nRasterXSize,
-                        iWordSize, iWordSize * nBands * poDS->nRasterXSize,
-                        eType, bNative));
+                auto poBand = std::make_unique<ERSRasterBand>(
+                    poDS.get(), iBand + 1, poDS->fpImage,
+                    nHeaderOffset + static_cast<vsi_l_offset>(iWordSize) *
+                                        iBand * poDS->nRasterXSize,
+                    iWordSize, iWordSize * nBands * poDS->nRasterXSize, eType,
+                    bNative);
+                if (!poBand->IsValid())
+                    return nullptr;
+                poDS->SetBand(iBand + 1, std::move(poBand));
             }
         }
     }
@@ -1094,7 +1089,6 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poDS->nBands == 0)
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -1149,30 +1143,30 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poHeader->Find("RasterInfo.RegistrationCoord.Eastings", nullptr))
     {
         poDS->bGotTransform = TRUE;
-        poDS->adfGeoTransform[0] = CPLAtof(
+        poDS->m_gt[0] = CPLAtof(
             poHeader->Find("RasterInfo.RegistrationCoord.Eastings", ""));
-        poDS->adfGeoTransform[1] =
+        poDS->m_gt[1] =
             CPLAtof(poHeader->Find("RasterInfo.CellInfo.Xdimension", "1.0"));
-        poDS->adfGeoTransform[2] = 0.0;
-        poDS->adfGeoTransform[3] = CPLAtof(
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[3] = CPLAtof(
             poHeader->Find("RasterInfo.RegistrationCoord.Northings", ""));
-        poDS->adfGeoTransform[4] = 0.0;
-        poDS->adfGeoTransform[5] =
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] =
             -CPLAtof(poHeader->Find("RasterInfo.CellInfo.Ydimension", "1.0"));
     }
     else if (poHeader->Find("RasterInfo.RegistrationCoord.Latitude", nullptr) &&
              poHeader->Find("RasterInfo.CellInfo.Xdimension", nullptr))
     {
         poDS->bGotTransform = TRUE;
-        poDS->adfGeoTransform[0] = ERSDMS2Dec(
+        poDS->m_gt[0] = ERSDMS2Dec(
             poHeader->Find("RasterInfo.RegistrationCoord.Longitude", ""));
-        poDS->adfGeoTransform[1] =
+        poDS->m_gt[1] =
             CPLAtof(poHeader->Find("RasterInfo.CellInfo.Xdimension", ""));
-        poDS->adfGeoTransform[2] = 0.0;
-        poDS->adfGeoTransform[3] = ERSDMS2Dec(
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[3] = ERSDMS2Dec(
             poHeader->Find("RasterInfo.RegistrationCoord.Latitude", ""));
-        poDS->adfGeoTransform[4] = 0.0;
-        poDS->adfGeoTransform[5] =
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] =
             -CPLAtof(poHeader->Find("RasterInfo.CellInfo.Ydimension", ""));
     }
 
@@ -1198,10 +1192,8 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poDS->bGotTransform)
     {
-        poDS->adfGeoTransform[0] -= dfCellX * poDS->adfGeoTransform[1] +
-                                    dfCellY * poDS->adfGeoTransform[2];
-        poDS->adfGeoTransform[3] -= dfCellX * poDS->adfGeoTransform[4] +
-                                    dfCellY * poDS->adfGeoTransform[5];
+        poDS->m_gt[0] -= dfCellX * poDS->m_gt[1] + dfCellY * poDS->m_gt[2];
+        poDS->m_gt[3] -= dfCellX * poDS->m_gt[4] + dfCellY * poDS->m_gt[5];
     }
 
     /* -------------------------------------------------------------------- */
@@ -1295,8 +1287,8 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poSRS == nullptr)
     {
         // try aux
-        GDALDataset *poAuxDS = GDALFindAssociatedAuxFile(
-            poOpenInfo->pszFilename, GA_ReadOnly, poDS);
+        auto poAuxDS = std::unique_ptr<GDALDataset>(GDALFindAssociatedAuxFile(
+            poOpenInfo->pszFilename, GA_ReadOnly, poDS.get()));
         if (poAuxDS)
         {
             poSRS = poAuxDS->GetSpatialRef();
@@ -1304,16 +1296,14 @@ GDALDataset *ERSDataset::Open(GDALOpenInfo *poOpenInfo)
             {
                 poDS->m_oSRS = *poSRS;
             }
-
-            GDALClose(poAuxDS);
         }
     }
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/
@@ -1352,7 +1342,7 @@ GDALDataset *ERSDataset::Create(const char *pszFilename, int nXSize, int nYSize,
     /* -------------------------------------------------------------------- */
     CPLString osBinFile, osErsFile;
 
-    if (EQUAL(CPLGetExtension(pszFilename), "ers"))
+    if (EQUAL(CPLGetExtensionSafe(pszFilename).c_str(), "ers"))
     {
         osErsFile = pszFilename;
         osBinFile = osErsFile.substr(0, osErsFile.length() - 4);
@@ -1367,6 +1357,7 @@ GDALDataset *ERSDataset::Create(const char *pszFilename, int nXSize, int nYSize,
     /*      Work out some values we will write.                             */
     /* -------------------------------------------------------------------- */
     const char *pszCellType = "Unsigned8BitInteger";
+    CPL_IGNORE_RET_VAL(pszCellType);  // Make CSA happy
 
     if (eType == GDT_Byte)
         pszCellType = "Unsigned8BitInteger";
@@ -1408,8 +1399,8 @@ GDALDataset *ERSDataset::Create(const char *pszFilename, int nXSize, int nYSize,
         return nullptr;
     }
 
-    GUIntBig nSize =
-        nXSize * (GUIntBig)nYSize * nBandsIn * (GDALGetDataTypeSize(eType) / 8);
+    const GUIntBig nSize = static_cast<GUIntBig>(nXSize) * nYSize * nBandsIn *
+                           GDALGetDataTypeSizeBytes(eType);
     GByte byZero = 0;
     if (VSIFSeekL(fpBin, nSize - 1, SEEK_SET) != 0 ||
         VSIFWriteL(&byZero, 1, 1, fpBin) != 1)
@@ -1464,7 +1455,7 @@ GDALDataset *ERSDataset::Create(const char *pszFilename, int nXSize, int nYSize,
     /*      Reopen.                                                         */
     /* -------------------------------------------------------------------- */
     GDALOpenInfo oOpenInfo(osErsFile, GA_Update);
-    ERSDataset *poDS = (ERSDataset *)Open(&oOpenInfo);
+    ERSDataset *poDS = cpl::down_cast<ERSDataset *>(Open(&oOpenInfo));
     if (poDS == nullptr)
         return nullptr;
 

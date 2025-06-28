@@ -9,23 +9,7 @@
  ******************************************************************************
  * Copyright (c) 2002, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_oci.h"
@@ -35,11 +19,10 @@
 /*                           OGROCILayer()                               */
 /************************************************************************/
 
-OGROCILayer::OGROCILayer()
+OGROCILayer::OGROCILayer(OGROCIDataSource *poDSIn) : poDS(poDSIn)
 
 {
     poFeatureDefn = nullptr;
-    poDS = nullptr;
     poStatement = nullptr;
 
     pszQueryStatement = nullptr;
@@ -198,7 +181,7 @@ OGRFeature *OGROCILayer::GetNextRawFeature()
 
         if (poFeature->GetGeometryRef() != nullptr && hLastGeom != nullptr)
             poSession->Failed(OCIObjectFree(poSession->hEnv, poSession->hError,
-                                            (dvoid *)hLastGeom,
+                                            static_cast<dvoid *>(hLastGeom),
                                             (ub2)OCI_OBJECTFREE_FORCE));
 
         hLastGeom = nullptr;
@@ -245,20 +228,23 @@ int OGROCILayer::ExecuteQuery(const char *pszReqQuery)
     {
         OCIDefine *hGDefine = nullptr;
 
-        if (poSession->Failed(OCIDefineByPos(poStatement->GetStatement(),
-                                             &hGDefine, poSession->hError,
-                                             (ub4)iGeomColumn + 1,
-                                             (dvoid *)nullptr, (sb4)0, SQLT_NTY,
-                                             (dvoid *)nullptr, (ub2 *)nullptr,
-                                             (ub2 *)nullptr, (ub4)OCI_DEFAULT),
-                              "OCIDefineByPos(geometry)"))
+        if (poSession->Failed(
+                OCIDefineByPos(poStatement->GetStatement(), &hGDefine,
+                               poSession->hError, (ub4)iGeomColumn + 1,
+                               static_cast<dvoid *>(nullptr), (sb4)0, SQLT_NTY,
+                               static_cast<dvoid *>(nullptr),
+                               static_cast<ub2 *>(nullptr),
+                               static_cast<ub2 *>(nullptr), (ub4)OCI_DEFAULT),
+                "OCIDefineByPos(geometry)"))
             return FALSE;
 
         if (poSession->Failed(
                 OCIDefineObject(hGDefine, poSession->hError,
-                                poSession->hGeometryTDO, (dvoid **)&hLastGeom,
-                                (ub4 *)nullptr, (dvoid **)&hLastGeomInd,
-                                (ub4 *)nullptr),
+                                poSession->hGeometryTDO,
+                                reinterpret_cast<dvoid **>(&hLastGeom),
+                                static_cast<ub4 *>(nullptr),
+                                reinterpret_cast<dvoid **>(&hLastGeomInd),
+                                static_cast<ub4 *>(nullptr)),
                 "OCIDefineObject"))
             return FALSE;
     }
@@ -287,16 +273,18 @@ OGRGeometry *OGROCILayer::TranslateGeometry()
     /* -------------------------------------------------------------------- */
     int nElemCount, nOrdCount;
 
-    if (poSession->Failed(OCICollSize(poSession->hEnv, poSession->hError,
-                                      (OCIColl *)(hLastGeom->sdo_elem_info),
-                                      &nElemCount),
-                          "OCICollSize(sdo_elem_info)"))
+    if (poSession->Failed(
+            OCICollSize(poSession->hEnv, poSession->hError,
+                        reinterpret_cast<OCIColl *>(hLastGeom->sdo_elem_info),
+                        &nElemCount),
+            "OCICollSize(sdo_elem_info)"))
         return nullptr;
 
-    if (poSession->Failed(OCICollSize(poSession->hEnv, poSession->hError,
-                                      (OCIColl *)(hLastGeom->sdo_ordinates),
-                                      &nOrdCount),
-                          "OCICollSize(sdo_ordinates)"))
+    if (poSession->Failed(
+            OCICollSize(poSession->hEnv, poSession->hError,
+                        reinterpret_cast<OCIColl *>(hLastGeom->sdo_ordinates),
+                        &nOrdCount),
+            "OCICollSize(sdo_ordinates)"))
         return nullptr;
 
     /* -------------------------------------------------------------------- */
@@ -307,7 +295,7 @@ OGRGeometry *OGROCILayer::TranslateGeometry()
     if (poSession->Failed(OCINumberToInt(poSession->hError,
                                          &(hLastGeom->sdo_gtype),
                                          (uword)sizeof(int), OCI_NUMBER_SIGNED,
-                                         (dvoid *)&nGType),
+                                         static_cast<dvoid *>(&nGType)),
                           "OCINumberToInt(GType)"))
         return nullptr;
 
@@ -327,12 +315,12 @@ OGRGeometry *OGROCILayer::TranslateGeometry()
         double dfX, dfY, dfZ = 0.0;
 
         OCINumberToReal(poSession->hError, &(hLastGeom->sdo_point.x),
-                        (uword)sizeof(double), (dvoid *)&dfX);
+                        (uword)sizeof(double), static_cast<dvoid *>(&dfX));
         OCINumberToReal(poSession->hError, &(hLastGeom->sdo_point.y),
-                        (uword)sizeof(double), (dvoid *)&dfY);
+                        (uword)sizeof(double), static_cast<dvoid *>(&dfY));
         if (hLastGeomInd->sdo_point.z == OCI_IND_NOTNULL)
             OCINumberToReal(poSession->hError, &(hLastGeom->sdo_point.z),
-                            (uword)sizeof(double), (dvoid *)&dfZ);
+                            (uword)sizeof(double), static_cast<dvoid *>(&dfZ));
 
         if (nDimension == 3)
             return new OGRPoint(dfX, dfY, dfZ);
@@ -474,33 +462,38 @@ int OGROCILayer::LoadElementInfo(int iElement, int nElemCount,
     /*      Get the details about element from the elem_info array.         */
     /* -------------------------------------------------------------------- */
     OCICollGetElem(poSession->hEnv, poSession->hError,
-                   (OCIColl *)(hLastGeom->sdo_elem_info), (sb4)(iElement + 0),
-                   (boolean *)&bExists, (dvoid **)&hNumber, nullptr);
+                   reinterpret_cast<OCIColl *>(hLastGeom->sdo_elem_info),
+                   (sb4)(iElement + 0), reinterpret_cast<boolean *>(&bExists),
+                   reinterpret_cast<dvoid **>(&hNumber), nullptr);
     OCINumberToInt(poSession->hError, hNumber, (uword)sizeof(ub4),
-                   OCI_NUMBER_UNSIGNED, (dvoid *)pnStartOrdinal);
+                   OCI_NUMBER_UNSIGNED, static_cast<dvoid *>(pnStartOrdinal));
 
     OCICollGetElem(poSession->hEnv, poSession->hError,
-                   (OCIColl *)(hLastGeom->sdo_elem_info), (sb4)(iElement + 1),
-                   (boolean *)&bExists, (dvoid **)&hNumber, nullptr);
+                   reinterpret_cast<OCIColl *>(hLastGeom->sdo_elem_info),
+                   (sb4)(iElement + 1), reinterpret_cast<boolean *>(&bExists),
+                   reinterpret_cast<dvoid **>(&hNumber), nullptr);
     OCINumberToInt(poSession->hError, hNumber, (uword)sizeof(ub4),
-                   OCI_NUMBER_UNSIGNED, (dvoid *)pnEType);
+                   OCI_NUMBER_UNSIGNED, static_cast<dvoid *>(pnEType));
 
     OCICollGetElem(poSession->hEnv, poSession->hError,
-                   (OCIColl *)(hLastGeom->sdo_elem_info), (sb4)(iElement + 2),
-                   (boolean *)&bExists, (dvoid **)&hNumber, nullptr);
+                   reinterpret_cast<OCIColl *>(hLastGeom->sdo_elem_info),
+                   (sb4)(iElement + 2), reinterpret_cast<boolean *>(&bExists),
+                   reinterpret_cast<dvoid **>(&hNumber), nullptr);
     OCINumberToInt(poSession->hError, hNumber, (uword)sizeof(ub4),
-                   OCI_NUMBER_UNSIGNED, (dvoid *)pnInterpretation);
+                   OCI_NUMBER_UNSIGNED, static_cast<dvoid *>(pnInterpretation));
 
     if (iElement < nElemCount - 3)
     {
         ub4 nNextStartOrdinal;
 
         OCICollGetElem(poSession->hEnv, poSession->hError,
-                       (OCIColl *)(hLastGeom->sdo_elem_info),
-                       (sb4)(iElement + 3), (boolean *)&bExists,
-                       (dvoid **)&hNumber, nullptr);
+                       reinterpret_cast<OCIColl *>(hLastGeom->sdo_elem_info),
+                       (sb4)(iElement + 3),
+                       reinterpret_cast<boolean *>(&bExists),
+                       reinterpret_cast<dvoid **>(&hNumber), nullptr);
         OCINumberToInt(poSession->hError, hNumber, (uword)sizeof(ub4),
-                       OCI_NUMBER_UNSIGNED, (dvoid *)&nNextStartOrdinal);
+                       OCI_NUMBER_UNSIGNED,
+                       static_cast<dvoid *>(&nNextStartOrdinal));
 
         *pnElemOrdCount = nNextStartOrdinal - *pnStartOrdinal;
     }
@@ -740,13 +733,15 @@ OGRGeometry *OGROCILayer::TranslateGeometryElement(int *piElement, int nGType,
         OGROCISession *poSession = poDS->GetSession();
 
         if (poSession->Failed(OCICollSize(poSession->hEnv, poSession->hError,
-                                          (OCIColl *)(hLastGeom->sdo_elem_info),
+                                          reinterpret_cast<OCIColl *>(
+                                              hLastGeom->sdo_elem_info),
                                           &nElemCount),
                               "OCICollSize(sdo_elem_info)"))
             return nullptr;
 
         if (poSession->Failed(OCICollSize(poSession->hEnv, poSession->hError,
-                                          (OCIColl *)(hLastGeom->sdo_ordinates),
+                                          reinterpret_cast<OCIColl *>(
+                                              hLastGeom->sdo_ordinates),
                                           &nTotalOrdCount),
                               "OCICollSize(sdo_ordinates)"))
             return nullptr;
@@ -819,22 +814,25 @@ int OGROCILayer::GetOrdinalPoint(int iOrdinal, int nDimension, double *pdfX,
     OCINumber *hNumber;
 
     OCICollGetElem(poSession->hEnv, poSession->hError,
-                   (OCIColl *)(hLastGeom->sdo_ordinates), (sb4)iOrdinal + 0,
-                   (boolean *)&bExists, (dvoid **)&hNumber, nullptr);
+                   reinterpret_cast<OCIColl *>(hLastGeom->sdo_ordinates),
+                   (sb4)iOrdinal + 0, reinterpret_cast<boolean *>(&bExists),
+                   reinterpret_cast<dvoid **>(&hNumber), nullptr);
     OCINumberToReal(poSession->hError, hNumber, (uword)sizeof(double),
-                    (dvoid *)pdfX);
+                    static_cast<dvoid *>(pdfX));
     OCICollGetElem(poSession->hEnv, poSession->hError,
-                   (OCIColl *)(hLastGeom->sdo_ordinates), (sb4)iOrdinal + 1,
-                   (boolean *)&bExists, (dvoid **)&hNumber, nullptr);
+                   reinterpret_cast<OCIColl *>(hLastGeom->sdo_ordinates),
+                   (sb4)iOrdinal + 1, reinterpret_cast<boolean *>(&bExists),
+                   reinterpret_cast<dvoid **>(&hNumber), nullptr);
     OCINumberToReal(poSession->hError, hNumber, (uword)sizeof(double),
-                    (dvoid *)pdfY);
+                    static_cast<dvoid *>(pdfY));
     if (nDimension == 3)
     {
         OCICollGetElem(poSession->hEnv, poSession->hError,
-                       (OCIColl *)(hLastGeom->sdo_ordinates), (sb4)iOrdinal + 2,
-                       (boolean *)&bExists, (dvoid **)&hNumber, nullptr);
+                       reinterpret_cast<OCIColl *>(hLastGeom->sdo_ordinates),
+                       (sb4)iOrdinal + 2, reinterpret_cast<boolean *>(&bExists),
+                       reinterpret_cast<dvoid **>(&hNumber), nullptr);
         OCINumberToReal(poSession->hError, hNumber, (uword)sizeof(double),
-                        (dvoid *)pdfZ);
+                        static_cast<dvoid *>(pdfZ));
     }
 
     return TRUE;
@@ -963,4 +961,13 @@ const char *OGROCILayer::GetGeometryColumn()
         return pszGeomName;
     else
         return "";
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGROCILayer::GetDataset()
+{
+    return poDS;
 }

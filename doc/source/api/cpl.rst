@@ -1,3 +1,8 @@
+..
+   The documentation displayed on this page is automatically generated from
+   Doxygen comments using the Breathe extension. Edits to the documentation
+   can be made by making changes in the appropriate .cpp files.
+
 .. _cpl_api:
 
 ================================================================================
@@ -91,3 +96,11 @@ cpl_vsi.h
 .. seealso::
 
    :ref:`cpl_cpp_api`.
+
+
+.. below is an allow-list for spelling checker.
+
+.. spelling:word-list::
+    subdir
+    subsubdir
+

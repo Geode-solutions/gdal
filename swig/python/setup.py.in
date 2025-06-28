@@ -10,11 +10,15 @@
 import os
 import sys
 from glob import glob
+from pathlib import Path
 
+import setuptools
 from setuptools.command.build_ext import build_ext
 from setuptools import setup
 from setuptools import find_packages
 from setuptools import Extension
+
+version = '@GDAL_PYTHON_VERSION@'
 
 # If CXX is defined in the environment, it will be used to link the .so
 # but setuptools will be confused if it is made of several words like 'ccache g++'
@@ -70,6 +74,7 @@ def get_numpy_include():
     _set_builtin("__NUMPY_SETUP__", False)
 
     import numpy
+    print('Using numpy ' + numpy.__version__)
     return numpy.get_include()
 
 
@@ -144,19 +149,70 @@ def has_flag(compiler, flagname):
     return True
 
 # ---------------------------------------------------------------------------
+# BEGIN monkey patching of setuptools.command.easy_install.easy_install class
+# ---------------------------------------------------------------------------
+
+# "python setup.py install" uses setuptools.command.easy_install internally
+# When installing the .exe wrapper executable for our command line utilities,
+# that class removes the installed .py scripts themselves. Which we do not want,
+# since they may be directly used by users. So we do a monkey patching of
+# easy_install.install_wrapper_scripts to install a modified
+# easy_install.delete_blockers method that does NOT remove .py files
+if sys.platform == 'win32' and int(setuptools.__version__.split('.')[0]) < 80:
+    from setuptools.command.easy_install import easy_install
+
+    original_install_wrapper_scripts = easy_install.install_wrapper_scripts
+
+    def monkey_patched_install_wrapper_scripts(self, dist):
+        original_delete_blockers = easy_install.delete_blockers
+        def monkey_patched_delete_blockers(self, blockers):
+            blockers = filter(lambda x: not x.endswith('.py'), blockers)
+            return original_delete_blockers(self, blockers)
+
+        easy_install.delete_blockers = monkey_patched_delete_blockers
+        try:
+            return original_install_wrapper_scripts(self, dist)
+        finally:
+             easy_install.delete_blockers = original_delete_blockers
+
+    easy_install.install_wrapper_scripts = monkey_patched_install_wrapper_scripts
+
+# ---------------------------------------------------------------------------
+# END monkey patching of setuptools.command.easy_install.easy_install class
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Imports
 # ---------------------------------------------------------------------------
 
 numpy_include_dir = '.'
-try:
-    numpy_include_dir = get_numpy_include()
-    HAVE_NUMPY = numpy_include_dir != '.'
-    if not HAVE_NUMPY:
-        print("WARNING: numpy found, but numpy headers were not found!  Array support will not be enabled")
-except ImportError:
-    HAVE_NUMPY = False
-    print('WARNING: numpy not available!  Array support will not be enabled')
+numpy_error_msg = ""
 
+do_numpy_detection = True
+if "GDAL_PYTHON_BINDINGS_WITHOUT_NUMPY" in os.environ:
+    v = os.environ["GDAL_PYTHON_BINDINGS_WITHOUT_NUMPY"].upper()
+    if v in ('YES', '1', 'ON', 'TRUE'):
+        do_numpy_detection = False
+    elif v not in ('NO', '0', 'OFF', 'FALSE'):
+        raise Exception("Unrecognized value for GDAL_PYTHON_BINDINGS_WITHOUT_NUMPY")
+
+if do_numpy_detection:
+    try:
+        numpy_include_dir = get_numpy_include()
+        HAVE_NUMPY = numpy_include_dir != '.'
+        if not HAVE_NUMPY:
+            numpy_error_msg = "numpy found, but numpy headers were not found!"
+    except ImportError:
+        HAVE_NUMPY = False
+        numpy_error_msg = "numpy not available!"
+
+    if not HAVE_NUMPY:
+        if "GDAL_PYTHON_BINDINGS_WITHOUT_NUMPY" in os.environ:
+            print("WARNING: " + numpy_error_msg + " Array support will not be enabled.")
+        else:
+            raise Exception(numpy_error_msg + " This error may happen if you build/install using setup.py directly, but should normally not happen if you install using pip install. If you still want to build the bindings without numpy support, define the GDAL_PYTHON_BINDINGS_WITHOUT_NUMPY environment variable")
+else:
+    HAVE_NUMPY = False
 
 class gdal_ext(build_ext):
 
@@ -220,10 +276,27 @@ class gdal_ext(build_ext):
                             if has_flag(self.compiler, clang_flag):
                                 ext.extra_compile_args += [clang_flag]
 
+        if "GDAL_PYTHON_CXXFLAGS" in os.environ:
+            for ext in self.extensions:
+                ext.extra_compile_args += os.environ["GDAL_PYTHON_CXXFLAGS"].split(" ")
+
         build_ext.build_extensions(self)
 
     def finalize_options(self):
         global include_dirs, library_dirs
+
+        try:
+            library_version = self.get_gdal_config("version")
+            for suffix in ("dev", "beta", "RC"):
+                pos = library_version.find(suffix)
+                if pos > 0:
+                    library_version = library_version[0:pos]
+            library_version_num = [int(x) for x in library_version.split('.')]
+            gdal_python_version = [int(x) for x in version.split('.')]
+            if library_version_num < gdal_python_version:
+                raise Exception(f"Python bindings of GDAL {version} require at least libgdal {version}, but {library_version} was found")
+        except gdal_config_error:
+            pass
 
         include_dirs_found = self.include_dirs is not None or len(include_dirs) != 0
 
@@ -265,6 +338,20 @@ class gdal_ext(build_ext):
         # the Extension() instantiations below because we want to use the same
         # logic to resolve the location of gdal-config throughout.
         ext.extra_compile_args.extend(self.extra_cflags)
+
+        # Work around "swig/python detected a memory leak" bug
+        # Cf https://github.com/swig/swig/issues/2638#issuecomment-2345002698
+        if self.get_compiler() == 'msvc':
+            ext.extra_compile_args.append("/DSWIG_PYTHON_SILENT_MEMLEAK")
+        else:
+            ext.extra_compile_args.append("-DSWIG_PYTHON_SILENT_MEMLEAK")
+
+        # Add -isysroot on osx if used in cmake
+        if '@CMAKE_OSX_SYSROOT@':
+            ext.extra_compile_args.extend(['-isysroot', '@CMAKE_OSX_SYSROOT@'])
+            ext.extra_link_args.extend(['-isysroot', '@CMAKE_OSX_SYSROOT@'])
+
+
         return build_ext.build_extension(self, ext)
 
 
@@ -322,11 +409,10 @@ package_dir = {'osgeo': 'osgeo', '': utils_package_root}
 readme = open('README.rst', encoding="utf-8").read()
 
 name = 'GDAL'
-version = '@GDAL_PYTHON_VERSION@'
 author = "Frank Warmerdam"
 author_email = "warmerdam@pobox.com"
-maintainer = "Howard Butler"
-maintainer_email = "hobu.inc@gmail.com"
+maintainer = "GDAL contributors"
+maintainer_email = "gdal-dev@lists.osgeo.org"
 description = "GDAL: Geospatial Data Abstraction Library"
 license_type = "MIT"
 url = "http://www.gdal.org"
@@ -347,6 +433,26 @@ classifiers = [
 
 exclude_package_data = {'': ['CMakeLists.txt']}
 
+scripts = sorted([x for x in filter(lambda x: not '__init__.py' in x,
+                 glob("gdal-utils/osgeo_utils/*.py"))], reverse=True)  # command line scripts
+
+def define_entry_points(scripts, entry_points=None):
+    """
+    Return a dict defining scripts that get installed to PYTHONHOME/Scripts.
+
+        console_scripts : [
+            # CLI_command = dirname.filename
+            'gdal_edit = osgeo_utils.gdal_edit',
+            'gdal_merge = osgeo_utils.gdal_merge',
+            ... ]
+    """
+    console_scripts = []
+    for f in scripts:
+        name = Path(f).stem  # 'gdal_edit' from 'gdal_edit.py'
+        console_scripts.append([f"{name} = osgeo_utils.{name}:main"])
+    entry_points = {"console_scripts": console_scripts}
+    return entry_points
+
 setup(
     name=name,
     version=version,
@@ -362,7 +468,7 @@ setup(
     packages=packages,
     package_dir=package_dir,
     url=url,
-    python_requires='>=3.6.0',
+    python_requires='>=3.8.0',
     ext_modules=ext_modules,
     scripts=glob(utils_package_root + '/scripts/*.py'),
     # This must *not* be conditionalized by HAVE_NUMPY, since this is for a "pip install gdal[numpy]" type of installation
@@ -370,4 +476,5 @@ setup(
     zip_safe=False,
     cmdclass=dict(build_ext=gdal_ext),
     exclude_package_data = exclude_package_data,
+    entry_points=define_entry_points(scripts),
 )

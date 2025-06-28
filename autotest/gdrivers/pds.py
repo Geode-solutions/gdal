@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for PDS driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -54,11 +37,10 @@ def test_pds_1():
         0,
         -926.115274429321289,
     )
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", "-0.5")
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", "-0.5")
-    tst.testOpen(check_prj=expected_prj, check_gt=expected_gt)
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", None)
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", None)
+    with gdal.config_options(
+        {"PDS_SampleProjOffset_Shift": "-0.5", "PDS_LineProjOffset_Shift": "-0.5"}
+    ):
+        tst.testOpen(check_prj=expected_prj, check_gt=expected_gt)
 
 
 ###############################################################################
@@ -86,11 +68,10 @@ def test_pds_2():
         0.0,
         -75.000002980232239,
     )
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", "-0.5")
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", "-0.5")
-    tst.testOpen(check_prj=expected_prj, check_gt=expected_gt)
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", None)
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", None)
+    with gdal.config_options(
+        {"PDS_SampleProjOffset_Shift": "-0.5", "PDS_LineProjOffset_Shift": "-0.5"}
+    ):
+        tst.testOpen(check_prj=expected_prj, check_gt=expected_gt)
 
     ds = gdal.Open("data/pds/fl73n003_truncated.img")
     assert ds.GetRasterBand(1).GetNoDataValue() == 7
@@ -110,17 +91,15 @@ def test_pds_2():
 def test_pds_3():
 
     # Shut down warning about missing projection
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
+    with gdal.quiet_errors():
 
-    tst = gdaltest.GDALTest("PDS", "pds/EN0001426030M_truncated.IMG", 1, 1367)
+        tst = gdaltest.GDALTest("PDS", "pds/EN0001426030M_truncated.IMG", 1, 1367)
 
-    gt_expected = (0, 1, 0, 0, 0, 1)
-    tst.testOpen(check_gt=gt_expected)
+        gt_expected = (0, 1, 0, 0, 0, 1)
+        tst.testOpen(check_gt=gt_expected)
 
-    ds = gdal.Open("data/pds/EN0001426030M_truncated.IMG")
-    assert ds.GetRasterBand(1).GetNoDataValue() == 0
-
-    gdal.PopErrorHandler()
+        ds = gdal.Open("data/pds/EN0001426030M_truncated.IMG")
+        assert ds.GetRasterBand(1).GetNoDataValue() == 0
 
 
 ###############################################################################
@@ -138,11 +117,10 @@ def test_pds_4():
         0.0,
         -1.0113804322107001,
     )
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", "-0.5")
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", "-0.5")
-    tst.testOpen(check_gt=gt_expected)
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", None)
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", None)
+    with gdal.config_options(
+        {"PDS_SampleProjOffset_Shift": "-0.5", "PDS_LineProjOffset_Shift": "-0.5"}
+    ):
+        tst.testOpen(check_gt=gt_expected)
 
 
 ###############################################################################
@@ -152,7 +130,7 @@ def test_pds_4():
 def test_pds_5():
 
     tst = gdaltest.GDALTest("PDS", "pds/pds_3355.lbl", 1, 2748)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -169,11 +147,10 @@ def test_pds_6():
 
     gt_expected = (-6139197.5, 0.5, 0.0, 936003.0, 0.0, -0.5)
 
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", "-0.5")
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", "-0.5")
-    tst.testOpen(check_gt=gt_expected)
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", None)
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", None)
+    with gdal.config_options(
+        {"PDS_SampleProjOffset_Shift": "-0.5", "PDS_LineProjOffset_Shift": "-0.5"}
+    ):
+        tst.testOpen(check_gt=gt_expected)
 
     ds = gdal.Open("data/pds/ESP_013951_1955_RED.LBL")
 
@@ -215,11 +192,10 @@ def test_pds_7():
     PARAMETER["false_easting",0],
     PARAMETER["false_northing",0],UNIT["metre",1]]"""
 
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", "-0.5")
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", "-0.5")
-    tst.testOpen(check_prj=prj_expected, check_gt=gt_expected)
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", None)
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", None)
+    with gdal.config_options(
+        {"PDS_SampleProjOffset_Shift": "-0.5", "PDS_LineProjOffset_Shift": "-0.5"}
+    ):
+        tst.testOpen(check_prj=prj_expected, check_gt=gt_expected)
 
 
 ###############################################################################
@@ -230,31 +206,27 @@ def test_pds_7():
 def test_pds_8():
 
     # values for MAGELLAN FMAP data.
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", "1.5")
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", "1.5")
-    gdal.SetConfigOption("PDS_SampleProjOffset_Mult", "1.0")
-    gdal.SetConfigOption("PDS_LineProjOffset_Mult", "-1.0")
+    options = {
+        "PDS_SampleProjOffset_Shift": "1.5",
+        "PDS_LineProjOffset_Shift": "1.5",
+        "PDS_SampleProjOffset_Mult": "1.0",
+        "PDS_LineProjOffset_Mult": "-1.0",
+    }
 
-    tst = gdaltest.GDALTest("PDS", "pds/mc02_truncated.img", 1, 47151)
+    with gdal.config_options(options):
 
-    expected_gt = (
-        10670237.134337425,
-        926.11527442932129,
-        0.0,
-        -3854028.7145376205,
-        0.0,
-        -926.11527442932129,
-    )
+        tst = gdaltest.GDALTest("PDS", "pds/mc02_truncated.img", 1, 47151)
 
-    result = tst.testOpen(check_gt=expected_gt)
+        expected_gt = (
+            10670237.134337425,
+            926.11527442932129,
+            0.0,
+            -3854028.7145376205,
+            0.0,
+            -926.11527442932129,
+        )
 
-    # clear config settings
-    gdal.SetConfigOption("PDS_SampleProjOffset_Shift", None)
-    gdal.SetConfigOption("PDS_LineProjOffset_Shift", None)
-    gdal.SetConfigOption("PDS_SampleProjOffset_Mult", None)
-    gdal.SetConfigOption("PDS_LineProjOffset_Mult", None)
-
-    return result
+        tst.testOpen(check_gt=expected_gt)
 
 
 ###############################################################################
@@ -323,7 +295,7 @@ END
 """,
     )
 
-    with gdaltest.error_handler():
+    with pytest.raises(Exception):
         gdal.Open("/vsimem/pds_10")
 
     gdal.FileFromMemBuffer(
@@ -335,7 +307,7 @@ END
 """,
     )
 
-    with gdaltest.error_handler():
+    with pytest.raises(Exception):
         gdal.Open("/vsimem/pds_10")
 
     gdal.Unlink("/vsimem/pds_10")
@@ -350,7 +322,7 @@ END
 def test_pds_line_offset_not_multiple_of_record():
 
     tst = gdaltest.GDALTest("PDS", "pds/map_000_038_truncated.lbl", 1, 14019)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -364,7 +336,7 @@ def test_pds_band_storage_type_line_interleaved():
     tst = gdaltest.GDALTest(
         "PDS", "pds/hsp00017ba0_01_ra218s_trr3_truncated.lbl", 1, 64740
     )
-    return tst.testOpen()
+    tst.testOpen()
 
 
 def test_pds_oblique_cylindrical_read():

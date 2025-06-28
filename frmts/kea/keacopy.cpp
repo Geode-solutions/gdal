@@ -6,24 +6,7 @@
  *
  *  This file is part of LibKEA.
  *
- *  Permission is hereby granted, free of charge, to any person
- *  obtaining a copy of this software and associated documentation
- *  files (the "Software"), to deal in the Software without restriction,
- *  including without limitation the rights to use, copy, modify,
- *  merge, publish, distribute, sublicense, and/or sell copies of the
- *  Software, and to permit persons to whom the Software is furnished
- *  to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be
- *  included in all copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *  OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- *  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
- *  ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
- *  CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
- *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *
  */
 
@@ -55,7 +38,7 @@ static bool KEACopyRasterData(GDALRasterBand *pBand,
     unsigned int nYSize = pBand->GetYSize();
 
     // allocate some space
-    int nPixelSize = GDALGetDataTypeSize(eGDALType) / 8;
+    const int nPixelSize = GDALGetDataTypeSizeBytes(eGDALType);
     void *pData = VSIMalloc3(nPixelSize, nBlockSize, nBlockSize);
     if (pData == nullptr)
     {
@@ -63,10 +46,10 @@ static bool KEACopyRasterData(GDALRasterBand *pBand,
         return false;
     }
     // for progress
-    int nTotalBlocks =
-        static_cast<int>(std::ceil((double)nXSize / (double)nBlockSize) *
-                         std::ceil((double)nYSize / (double)nBlockSize));
-    int nBlocksComplete = 0;
+    const uint64_t nTotalBlocks =
+        static_cast<uint64_t>(DIV_ROUND_UP(nXSize, nBlockSize)) *
+        DIV_ROUND_UP(nYSize, nBlockSize);
+    uint64_t nBlocksComplete = 0;
     double dLastFraction = -1;
     // go through the image
     for (unsigned int nY = 0; nY < nYSize; nY += nBlockSize)
@@ -128,7 +111,6 @@ static bool KEACopyRasterData(GDALRasterBand *pBand,
     return true;
 }
 
-constexpr int RAT_CHUNKSIZE = 1000;
 // copies the raster attribute table
 static void KEACopyRAT(GDALRasterBand *pBand, kealib::KEAImageIO *pImageIO,
                        int nBand)
@@ -249,12 +231,12 @@ static void KEACopyRAT(GDALRasterBand *pBand, kealib::KEAImageIO *pImageIO,
         int numRows = gdalAtt->GetRowCount();
         keaAtt->addRows(numRows);
 
-        int *pnIntBuffer = new int[RAT_CHUNKSIZE];
-        int64_t *pnInt64Buffer = new int64_t[RAT_CHUNKSIZE];
-        double *pfDoubleBuffer = new double[RAT_CHUNKSIZE];
-        for (int ni = 0; ni < numRows; ni += RAT_CHUNKSIZE)
+        int *pnIntBuffer = new int[kealib::KEA_ATT_CHUNK_SIZE];
+        int64_t *pnInt64Buffer = new int64_t[kealib::KEA_ATT_CHUNK_SIZE];
+        double *pfDoubleBuffer = new double[kealib::KEA_ATT_CHUNK_SIZE];
+        for (int ni = 0; ni < numRows; ni += kealib::KEA_ATT_CHUNK_SIZE)
         {
-            int nLength = RAT_CHUNKSIZE;
+            int nLength = kealib::KEA_ATT_CHUNK_SIZE;
             if ((ni + nLength) > numRows)
             {
                 nLength = numRows - ni;
@@ -444,16 +426,16 @@ static void KEACopySpatialInfo(GDALDataset *pDataset,
 {
     kealib::KEAImageSpatialInfo *pSpatialInfo = pImageIO->getSpatialInfo();
 
-    double padfTransform[6];
-    if (pDataset->GetGeoTransform(padfTransform) == CE_None)
+    GDALGeoTransform gt;
+    if (pDataset->GetGeoTransform(gt) == CE_None)
     {
         // convert back from GDAL's array format
-        pSpatialInfo->tlX = padfTransform[0];
-        pSpatialInfo->xRes = padfTransform[1];
-        pSpatialInfo->xRot = padfTransform[2];
-        pSpatialInfo->tlY = padfTransform[3];
-        pSpatialInfo->yRot = padfTransform[4];
-        pSpatialInfo->yRes = padfTransform[5];
+        pSpatialInfo->tlX = gt[0];
+        pSpatialInfo->xRes = gt[1];
+        pSpatialInfo->xRot = gt[2];
+        pSpatialInfo->tlY = gt[3];
+        pSpatialInfo->yRot = gt[4];
+        pSpatialInfo->yRes = gt[5];
     }
 
     const char *pszProjection = pDataset->GetProjectionRef();

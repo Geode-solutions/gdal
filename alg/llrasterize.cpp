@@ -8,23 +8,7 @@
  * Copyright (c) 2000, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -40,8 +24,6 @@
 #include <vector>
 
 #include "gdal_alg.h"
-
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /*                       dllImageFilledPolygon()                        */
@@ -77,7 +59,9 @@ void GDALdllImageFilledPolygon(int nRasterXSize, int nRasterYSize,
                                int nPartCount, const int *panPartSize,
                                const double *padfX, const double *padfY,
                                const double *dfVariant,
-                               llScanlineFunc pfnScanlineFunc, void *pCBData)
+                               llScanlineFunc pfnScanlineFunc,
+                               GDALRasterizeInfo *pCBData,
+                               bool bAvoidBurningSamePoints)
 {
     if (!nPartCount)
     {
@@ -89,6 +73,9 @@ void GDALdllImageFilledPolygon(int nRasterXSize, int nRasterYSize,
         n += panPartSize[part];
 
     std::vector<int> polyInts(n);
+    std::vector<int> polyInts2;
+    if (bAvoidBurningSamePoints)
+        polyInts2.resize(n);
 
     double dminy = padfY[0];
     double dmaxy = padfY[0];
@@ -123,6 +110,7 @@ void GDALdllImageFilledPolygon(int nRasterXSize, int nRasterYSize,
 
         int part = 0;
         int ints = 0;
+        int ints2 = 0;
 
         for (int i = 0; i < n; i++)
         {
@@ -169,7 +157,6 @@ void GDALdllImageFilledPolygon(int nRasterXSize, int nRasterYSize,
 
                 // AE: DO NOT skip bottom horizontal segments
                 // -Fill them separately-
-                // They are not taken into account twice.
                 if (padfX[ind1] > padfX[ind2])
                 {
                     const int horizontal_x1 =
@@ -181,9 +168,17 @@ void GDALdllImageFilledPolygon(int nRasterXSize, int nRasterYSize,
                         continue;
 
                     // Fill the horizontal segment (separately from the rest).
-                    pfnScanlineFunc(pCBData, y, horizontal_x1,
-                                    horizontal_x2 - 1,
-                                    (dfVariant == nullptr) ? 0 : dfVariant[0]);
+                    if (bAvoidBurningSamePoints)
+                    {
+                        polyInts2[ints2++] = horizontal_x1;
+                        polyInts2[ints2++] = horizontal_x2;
+                    }
+                    else
+                    {
+                        pfnScanlineFunc(
+                            pCBData, y, horizontal_x1, horizontal_x2 - 1,
+                            dfVariant == nullptr ? 0 : dfVariant[0]);
+                    }
                 }
                 // else: Skip top horizontal segments.
                 // They are already filled in the regular loop.
@@ -200,6 +195,7 @@ void GDALdllImageFilledPolygon(int nRasterXSize, int nRasterYSize,
         }
 
         std::sort(polyInts.begin(), polyInts.begin() + ints);
+        std::sort(polyInts2.begin(), polyInts2.begin() + ints2);
 
         for (int i = 0; i + 1 < ints; i += 2)
         {
@@ -207,6 +203,24 @@ void GDALdllImageFilledPolygon(int nRasterXSize, int nRasterYSize,
             {
                 pfnScanlineFunc(pCBData, y, polyInts[i], polyInts[i + 1] - 1,
                                 dfVariant == nullptr ? 0 : dfVariant[0]);
+            }
+        }
+
+        for (int i2 = 0, i = 0; i2 + 1 < ints2; i2 += 2)
+        {
+            if (polyInts2[i2] <= maxx && polyInts2[i2 + 1] > minx)
+            {
+                // "synchronize" polyInts[i] with polyInts2[i2]
+                while (i + 1 < ints && polyInts[i] < polyInts2[i2])
+                    i += 2;
+                // Only burn if we don't have a common segment between
+                // polyInts[] and polyInts2[]
+                if (i + 1 >= ints || polyInts[i] != polyInts2[i2])
+                {
+                    pfnScanlineFunc(pCBData, y, polyInts2[i2],
+                                    polyInts2[i2 + 1] - 1,
+                                    dfVariant == nullptr ? 0 : dfVariant[0]);
+                }
             }
         }
     }
@@ -219,7 +233,7 @@ void GDALdllImageFilledPolygon(int nRasterXSize, int nRasterYSize,
 void GDALdllImagePoint(int nRasterXSize, int nRasterYSize, int nPartCount,
                        const int * /*panPartSize*/, const double *padfX,
                        const double *padfY, const double *padfVariant,
-                       llPointFunc pfnPointFunc, void *pCBData)
+                       llPointFunc pfnPointFunc, GDALRasterizeInfo *pCBData)
 {
     for (int i = 0; i < nPartCount; i++)
     {
@@ -241,7 +255,7 @@ void GDALdllImagePoint(int nRasterXSize, int nRasterYSize, int nPartCount,
 void GDALdllImageLine(int nRasterXSize, int nRasterYSize, int nPartCount,
                       const int *panPartSize, const double *padfX,
                       const double *padfY, const double *padfVariant,
-                      llPointFunc pfnPointFunc, void *pCBData)
+                      llPointFunc pfnPointFunc, GDALRasterizeInfo *pCBData)
 {
     if (!nPartCount)
         return;
@@ -259,8 +273,7 @@ void GDALdllImageLine(int nRasterXSize, int nRasterYSize, int nPartCount,
             double dfVariant = 0.0;
             double dfVariant1 = 0.0;
             if (padfVariant != nullptr &&
-                static_cast<GDALRasterizeInfo *>(pCBData)->eBurnValueSource !=
-                    GBV_UserBurnValue)
+                pCBData->eBurnValueSource != GBV_UserBurnValue)
             {
                 dfVariant = padfVariant[n + j - 1];
                 dfVariant1 = padfVariant[n + j];
@@ -367,15 +380,19 @@ void GDALdllImageLine(int nRasterXSize, int nRasterYSize, int nPartCount,
 /*      will be drawn with the burn value.                              */
 /************************************************************************/
 
-void GDALdllImageLineAllTouched(int nRasterXSize, int nRasterYSize,
-                                int nPartCount, const int *panPartSize,
-                                const double *padfX, const double *padfY,
-                                const double *padfVariant,
-                                llPointFunc pfnPointFunc, void *pCBData,
-                                int bAvoidBurningSamePoints,
-                                bool bIntersectOnly)
+void GDALdllImageLineAllTouched(
+    int nRasterXSize, int nRasterYSize, int nPartCount, const int *panPartSize,
+    const double *padfX, const double *padfY, const double *padfVariant,
+    llPointFunc pfnPointFunc, GDALRasterizeInfo *pCBData,
+    bool bAvoidBurningSamePoints, bool bIntersectOnly)
 
 {
+    // This is an epsilon to detect geometries that are aligned with pixel
+    // coordinates. Hard to find the right value. We put it to that value
+    // to satisfy the scenarios of https://github.com/OSGeo/gdal/issues/7523
+    // and https://github.com/OSGeo/gdal/issues/6414
+    constexpr double EPSILON_INTERSECT_ONLY = 1e-4;
+
     if (!nPartCount)
         return;
 
@@ -421,12 +438,15 @@ void GDALdllImageLineAllTouched(int nRasterXSize, int nRasterYSize,
             }
 
             // Special case for vertical lines.
-            if (floor(dfX) == floor(dfXEnd) || fabs(dfX - dfXEnd) < .01)
+
+            if (fabs(dfX - dfXEnd) < .01)
             {
                 if (bIntersectOnly)
                 {
-                    if (std::abs(dfX - std::round(dfX)) < 0.01 &&
-                        std::abs(dfXEnd - std::round(dfXEnd)) < 0.01)
+                    if (std::abs(dfX - std::round(dfX)) <
+                            EPSILON_INTERSECT_ONLY &&
+                        std::abs(dfXEnd - std::round(dfXEnd)) <
+                            EPSILON_INTERSECT_ONLY)
                         continue;
                 }
 
@@ -438,7 +458,8 @@ void GDALdllImageLineAllTouched(int nRasterXSize, int nRasterYSize,
 
                 const int iX = static_cast<int>(floor(dfXEnd));
                 int iY = static_cast<int>(floor(dfY));
-                int iYEnd = static_cast<int>(floor(dfYEnd));
+                int iYEnd =
+                    static_cast<int>(floor(dfYEnd - EPSILON_INTERSECT_ONLY));
 
                 if (iX < 0 || iX >= nRasterXSize)
                     continue;
@@ -498,12 +519,14 @@ void GDALdllImageLineAllTouched(int nRasterXSize, int nRasterYSize,
                 (dfXEnd - dfX);  // Per unit change in iX.
 
             // Special case for horizontal lines.
-            if (floor(dfY) == floor(dfYEnd) || fabs(dfY - dfYEnd) < .01)
+            if (fabs(dfY - dfYEnd) < .01)
             {
                 if (bIntersectOnly)
                 {
-                    if (std::abs(dfY - std::round(dfY)) < 0.01 &&
-                        std::abs(dfYEnd - std::round(dfYEnd)) < 0.01)
+                    if (std::abs(dfY - std::round(dfY)) <
+                            EPSILON_INTERSECT_ONLY &&
+                        std::abs(dfYEnd - std::round(dfYEnd)) <
+                            EPSILON_INTERSECT_ONLY)
                         continue;
                 }
 
@@ -515,7 +538,8 @@ void GDALdllImageLineAllTouched(int nRasterXSize, int nRasterYSize,
 
                 int iX = static_cast<int>(floor(dfX));
                 const int iY = static_cast<int>(floor(dfY));
-                int iXEnd = static_cast<int>(floor(dfXEnd));
+                int iXEnd =
+                    static_cast<int>(floor(dfXEnd - EPSILON_INTERSECT_ONLY));
 
                 if (iY < 0 || iY >= nRasterYSize)
                     continue;

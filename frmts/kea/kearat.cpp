@@ -6,24 +6,7 @@
  *
  *  This file is part of LibKEA.
  *
- *  Permission is hereby granted, free of charge, to any person
- *  obtaining a copy of this software and associated documentation
- *  files (the "Software"), to deal in the Software without restriction,
- *  including without limitation the rights to use, copy, modify,
- *  merge, publish, distribute, sublicense, and/or sell copies of the
- *  Software, and to permit persons to whom the Software is furnished
- *  to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be
- *  included in all copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *  OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- *  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
- *  ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
- *  CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
- *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *
  */
 
@@ -48,7 +31,7 @@ KEARasterAttributeTable::KEARasterAttributeTable(
             // column
             continue;
         }
-        m_aoFields.push_back(sKEAField);
+        m_aoFields.push_back(std::move(sKEAField));
     }
     m_poKEATable = poKEATable;
     m_poBand = poBand;
@@ -314,7 +297,7 @@ int KEARasterAttributeTable::GetRowCount() const
 const char *KEARasterAttributeTable::GetValueAsString(int iRow,
                                                       int iField) const
 {
-    // Get ValuesIO do do the work
+    /// Let ValuesIO do the work.
     char *apszStrList[1];
     if ((const_cast<KEARasterAttributeTable *>(this))
             ->ValuesIO(GF_Read, iField, iRow, 1, apszStrList) != CE_None)
@@ -331,7 +314,7 @@ const char *KEARasterAttributeTable::GetValueAsString(int iRow,
 
 int KEARasterAttributeTable::GetValueAsInt(int iRow, int iField) const
 {
-    // Get ValuesIO do do the work
+    // Let ValuesIO do the work.
     int nValue = 0;
     if ((const_cast<KEARasterAttributeTable *>(this))
             ->ValuesIO(GF_Read, iField, iRow, 1, &nValue) != CE_None)
@@ -344,7 +327,7 @@ int KEARasterAttributeTable::GetValueAsInt(int iRow, int iField) const
 
 double KEARasterAttributeTable::GetValueAsDouble(int iRow, int iField) const
 {
-    // Get ValuesIO do do the work
+    // Let ValuesIO do the work.
     double dfValue = 0.0;
     if ((const_cast<KEARasterAttributeTable *>(this))
             ->ValuesIO(GF_Read, iField, iRow, 1, &dfValue) != CE_None)
@@ -355,23 +338,24 @@ double KEARasterAttributeTable::GetValueAsDouble(int iRow, int iField) const
     return dfValue;
 }
 
-void KEARasterAttributeTable::SetValue(int iRow, int iField,
-                                       const char *pszValue)
+CPLErr KEARasterAttributeTable::SetValue(int iRow, int iField,
+                                         const char *pszValue)
 {
-    // Get ValuesIO do do the work
-    ValuesIO(GF_Write, iField, iRow, 1, const_cast<char **>(&pszValue));
+    // Let ValuesIO do the work.
+    char *apszValues[1] = {const_cast<char *>(pszValue)};
+    return ValuesIO(GF_Write, iField, iRow, 1, apszValues);
 }
 
-void KEARasterAttributeTable::SetValue(int iRow, int iField, double dfValue)
+CPLErr KEARasterAttributeTable::SetValue(int iRow, int iField, double dfValue)
 {
-    // Get ValuesIO do do the work
-    ValuesIO(GF_Write, iField, iRow, 1, &dfValue);
+    // Let ValuesIO do the work.
+    return ValuesIO(GF_Write, iField, iRow, 1, &dfValue);
 }
 
-void KEARasterAttributeTable::SetValue(int iRow, int iField, int nValue)
+CPLErr KEARasterAttributeTable::SetValue(int iRow, int iField, int nValue)
 {
-    // Get ValuesIO do do the work
-    ValuesIO(GF_Write, iField, iRow, 1, &nValue);
+    // Let ValuesIO do the work.
+    return ValuesIO(GF_Write, iField, iRow, 1, &nValue);
 }
 
 CPLErr KEARasterAttributeTable::ValuesIO(GDALRWFlag eRWFlag, int iField,
@@ -907,7 +891,7 @@ CPLErr KEARasterAttributeTable::CreateColumn(const char *pszFieldName,
     }*/
     CPLMutexHolderD(&m_hMutex);
 
-    std::string strUsage = "Generic";
+    const char *strUsage = "Generic";
     switch (eFieldUsage)
     {
         case GFU_PixelCount:
@@ -955,8 +939,7 @@ CPLErr KEARasterAttributeTable::CreateColumn(const char *pszFieldName,
         }
 
         // assume we can just grab this now
-        kealib::KEAATTField sKEAField = m_poKEATable->getField(pszFieldName);
-        m_aoFields.push_back(sKEAField);
+        m_aoFields.push_back(m_poKEATable->getField(pszFieldName));
     }
     catch (kealib::KEAException &e)
     {

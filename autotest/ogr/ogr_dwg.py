@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test DWG Driver.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2017, Jorge Gustavo Rocha <jgr at geomaster dot pt>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import json
@@ -64,6 +47,7 @@ def test_ogr_dwg_1():
     layer = ds.GetLayer(0)
 
     assert layer.GetName() == "entities", "layer name is expected to be entities."
+    assert layer.GetDataset().GetDescription() == ds.GetDescription()
 
     defn = layer.GetLayerDefn()
 
@@ -102,6 +86,7 @@ def test_ogr_dwg_2():
         zero = ds.GetLayer(0)
 
         assert zero.GetName() == "blocks", "layer name is expected to be blocks."
+        assert zero.GetDataset().GetDescription() == ds.GetDescription()
 
         layer = ds.GetLayer("entities")
         defn = layer.GetLayerDefn()

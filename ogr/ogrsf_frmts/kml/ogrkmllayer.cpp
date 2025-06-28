@@ -9,23 +9,7 @@
  * Copyright (c) 2006, Christopher Condit
  * Copyright (c) 2007-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -55,15 +39,13 @@ char *OGR_G_ExportToKML(OGRGeometryH hGeometry, const char *pszAltitudeMode);
 /*                           OGRKMLLayer()                              */
 /************************************************************************/
 
-OGRKMLLayer::OGRKMLLayer(const char *pszName, OGRSpatialReference *poSRSIn,
-                         bool bWriterIn, OGRwkbGeometryType eReqType,
-                         OGRKMLDataSource *poDSIn)
+OGRKMLLayer::OGRKMLLayer(const char *pszName,
+                         const OGRSpatialReference *poSRSIn, bool bWriterIn,
+                         OGRwkbGeometryType eReqType, OGRKMLDataSource *poDSIn)
     : poDS_(poDSIn),
       poSRS_(poSRSIn ? new OGRSpatialReference(nullptr) : nullptr),
-      poCT_(nullptr), poFeatureDefn_(new OGRFeatureDefn(pszName)),
-      iNextKMLId_(0), nTotalKMLCount_(-1), bWriter_(bWriterIn),
-      nLayerNumber_(0), nWroteFeatureCount_(0), bSchemaWritten_(false),
-      pszName_(CPLStrdup(pszName)), nLastAsked(-1), nLastCount(-1)
+      poFeatureDefn_(new OGRFeatureDefn(pszName)), bWriter_(bWriterIn),
+      pszName_(CPLStrdup(pszName))
 {
     // KML should be created as WGS84.
     if (poSRSIn != nullptr)
@@ -170,18 +152,17 @@ OGRFeature *OGRKMLLayer::GetNextFeature()
 
     while (true)
     {
-        Feature *poFeatureKML =
-            poKMLFile->getFeature(iNextKMLId_++, nLastAsked, nLastCount);
+        auto poFeatureKML = std::unique_ptr<Feature>(
+            poKMLFile->getFeature(iNextKMLId_++, nLastAsked, nLastCount));
 
         if (poFeatureKML == nullptr)
             return nullptr;
 
-        OGRFeature *poFeature = new OGRFeature(poFeatureDefn_);
+        auto poFeature = std::make_unique<OGRFeature>(poFeatureDefn_);
 
         if (poFeatureKML->poGeom)
         {
-            poFeature->SetGeometryDirectly(poFeatureKML->poGeom);
-            poFeatureKML->poGeom = nullptr;
+            poFeature->SetGeometry(std::move(poFeatureKML->poGeom));
         }
 
         // Add fields.
@@ -191,9 +172,6 @@ OGRFeature *OGRKMLLayer::GetNextFeature()
                             poFeatureKML->sDescription.c_str());
         poFeature->SetFID(iNextKMLId_ - 1);
 
-        // Clean up.
-        delete poFeatureKML;
-
         if (poFeature->GetGeometryRef() != nullptr && poSRS_ != nullptr)
         {
             poFeature->GetGeometryRef()->assignSpatialReference(poSRS_);
@@ -202,12 +180,11 @@ OGRFeature *OGRKMLLayer::GetNextFeature()
         // Check spatial/attribute filters.
         if ((m_poFilterGeom == nullptr ||
              FilterGeometry(poFeature->GetGeometryRef())) &&
-            (m_poAttrQuery == nullptr || m_poAttrQuery->Evaluate(poFeature)))
+            (m_poAttrQuery == nullptr ||
+             m_poAttrQuery->Evaluate(poFeature.get())))
         {
-            return poFeature;
+            return poFeature.release();
         }
-
-        delete poFeature;
     }
 
 #endif /* HAVE_EXPAT */
@@ -355,7 +332,11 @@ OGRErr OGRKMLLayer::ICreateFeature(OGRFeature *poFeature)
         VSIFPrintfL(fp, "<Folder><name>%s</name>\n", pszName_);
     }
 
-    VSIFPrintfL(fp, "  <Placemark>\n");
+    ++nWroteFeatureCount_;
+    char *pszEscapedLayerName = OGRGetXML_UTF8_EscapedString(GetDescription());
+    VSIFPrintfL(fp, "  <Placemark id=\"%s." CPL_FRMT_GIB "\">\n",
+                pszEscapedLayerName, nWroteFeatureCount_);
+    CPLFree(pszEscapedLayerName);
 
     if (poFeature->GetFID() == OGRNullFID)
         poFeature->SetFID(iNextKMLId_++);
@@ -423,7 +404,7 @@ OGRErr OGRKMLLayer::ICreateFeature(OGRFeature *poFeature)
                 OGRStyleTool *poTool = oSM.GetPart(i);
                 if (poTool && poTool->GetType() == OGRSTCPen)
                 {
-                    poPen = (OGRStylePen *)poTool;
+                    poPen = cpl::down_cast<OGRStylePen *>(poTool);
                     break;
                 }
                 delete poTool;
@@ -552,9 +533,7 @@ OGRErr OGRKMLLayer::ICreateFeature(OGRFeature *poFeature)
             poWGS84Geom = poFeature->GetGeometryRef();
         }
 
-        // TODO - porting
-        // pszGeometry = poFeature->GetGeometryRef()->exportToKML();
-        pszGeometry = OGR_G_ExportToKML((OGRGeometryH)poWGS84Geom,
+        pszGeometry = OGR_G_ExportToKML(OGRGeometry::ToHandle(poWGS84Geom),
                                         poDS_->GetAltitudeMode());
         if (pszGeometry != nullptr)
         {
@@ -577,7 +556,6 @@ OGRErr OGRKMLLayer::ICreateFeature(OGRFeature *poFeature)
     }
 
     VSIFPrintfL(fp, "  </Placemark>\n");
-    nWroteFeatureCount_++;
     return OGRERR_NONE;
 }
 
@@ -617,7 +595,8 @@ int OGRKMLLayer::TestCapability(const char *pszCap)
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRKMLLayer::CreateField(OGRFieldDefn *poField, CPL_UNUSED int bApproxOK)
+OGRErr OGRKMLLayer::CreateField(const OGRFieldDefn *poField,
+                                CPL_UNUSED int bApproxOK)
 {
     if (!bWriter_ || iNextKMLId_ != 0)
         return OGRERR_FAILURE;
@@ -635,4 +614,13 @@ OGRErr OGRKMLLayer::CreateField(OGRFieldDefn *poField, CPL_UNUSED int bApproxOK)
 void OGRKMLLayer::SetLayerNumber(int nLayer)
 {
     nLayerNumber_ = nLayer;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRKMLLayer::GetDataset()
+{
+    return poDS_;
 }

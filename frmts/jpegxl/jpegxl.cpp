@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_error.h"
@@ -39,6 +23,8 @@
 
 #include "jxl_headers.h"
 
+#include "jpegxldrivercore.h"
+
 namespace
 {
 struct VSILFileReleaser
@@ -50,6 +36,8 @@ struct VSILFileReleaser
     }
 };
 }  // namespace
+
+constexpr float MIN_DISTANCE = 0.01f;
 
 /************************************************************************/
 /*                        JPEGXLDataset                                 */
@@ -85,8 +73,8 @@ class JPEGXLDataset final : public GDALJP2AbstractDataset
 
   protected:
     CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                     GDALDataType, int, int *, GSpacing, GSpacing, GSpacing,
-                     GDALRasterIOExtraArg *psExtraArg) override;
+                     GDALDataType, int, BANDMAP_TYPE, GSpacing, GSpacing,
+                     GSpacing, GDALRasterIOExtraArg *psExtraArg) override;
 
   public:
     ~JPEGXLDataset();
@@ -209,20 +197,6 @@ CPLErr JPEGXLRasterBand::IReadBlock(int /*nBlockXOff*/, int nBlockYOff,
 }
 
 /************************************************************************/
-/*                      IsJPEGXLContainer()                             */
-/************************************************************************/
-
-static bool IsJPEGXLContainer(GDALOpenInfo *poOpenInfo)
-{
-    constexpr const GByte abyJXLContainerSignature[] = {
-        0x00, 0x00, 0x00, 0x0C, 'J', 'X', 'L', ' ', 0x0D, 0x0A, 0x87, 0x0A};
-    return (poOpenInfo->nHeaderBytes >=
-                static_cast<int>(sizeof(abyJXLContainerSignature)) &&
-            memcmp(poOpenInfo->pabyHeader, abyJXLContainerSignature,
-                   sizeof(abyJXLContainerSignature)) == 0);
-}
-
-/************************************************************************/
 /*                         Identify()                                   */
 /************************************************************************/
 
@@ -230,6 +204,9 @@ int JPEGXLDataset::Identify(GDALOpenInfo *poOpenInfo)
 {
     if (poOpenInfo->fpL == nullptr)
         return false;
+
+    if (poOpenInfo->IsExtensionEqualToCI("jxl"))
+        return true;
 
     // See
     // https://github.com/libjxl/libjxl/blob/c98f133f3f5e456caaa2ba00bc920e923b713abc/lib/jxl/decode.cc#L107-L138
@@ -367,11 +344,9 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
                 {
                     CPL_LSBPTR32(&nTiffDirStart);
                 }
-                const std::string osTmpFilename =
-                    CPLSPrintf("/vsimem/jxl/%p", this);
-                VSILFILE *fpEXIF = VSIFileFromMemBuffer(
-                    osTmpFilename.c_str(), abyBoxBuffer.data() + 4,
-                    abyBoxBuffer.size() - 4, false);
+                VSILFILE *fpEXIF =
+                    VSIFileFromMemBuffer(nullptr, abyBoxBuffer.data() + 4,
+                                         abyBoxBuffer.size() - 4, false);
                 int nExifOffset = 0;
                 int nInterOffset = 0;
                 int nGPSOffset = 0;
@@ -500,6 +475,12 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
                 else if (info.bits_per_sample <= 16)
                     eDT = GDT_UInt16;
             }
+            else if (info.exponent_bits_per_sample == 5)
+            {
+                // Float16
+                CPLDebug("JXL", "16-bit floating point data");
+                eDT = GDT_Float32;
+            }
             else if (info.exponent_bits_per_sample == 8)
             {
                 eDT = GDT_Float32;
@@ -599,6 +580,7 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
 #endif
         else if (status == JXL_DEC_COLOR_ENCODING)
         {
+#ifdef HAVE_JxlDecoderDefaultPixelFormat
             JxlPixelFormat format = {
                 static_cast<uint32_t>(nBands),
                 eDT == GDT_Byte     ? JXL_TYPE_UINT8
@@ -606,6 +588,7 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
                                     : JXL_TYPE_FLOAT,
                 JXL_NATIVE_ENDIAN, 0 /* alignment */
             };
+#endif
 
             bool bIsDefaultColorEncoding = false;
             JxlColorEncoding color_encoding;
@@ -613,7 +596,10 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
             // Check if the color profile is the default one we set on creation.
             // If so, do not expose it as ICC color profile
             if (JXL_DEC_SUCCESS == JxlDecoderGetColorAsEncodedProfile(
-                                       m_decoder.get(), &format,
+                                       m_decoder.get(),
+#ifdef HAVE_JxlDecoderDefaultPixelFormat
+                                       &format,
+#endif
                                        JXL_COLOR_PROFILE_TARGET_DATA,
                                        &color_encoding))
             {
@@ -658,13 +644,19 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
             {
                 size_t icc_size = 0;
                 if (JXL_DEC_SUCCESS ==
-                    JxlDecoderGetICCProfileSize(m_decoder.get(), &format,
+                    JxlDecoderGetICCProfileSize(m_decoder.get(),
+#ifdef HAVE_JxlDecoderDefaultPixelFormat
+                                                &format,
+#endif
                                                 JXL_COLOR_PROFILE_TARGET_DATA,
                                                 &icc_size))
                 {
                     std::vector<GByte> icc(icc_size);
                     if (JXL_DEC_SUCCESS == JxlDecoderGetColorAsICCProfile(
-                                               m_decoder.get(), &format,
+                                               m_decoder.get(),
+#ifdef HAVE_JxlDecoderDefaultPixelFormat
+                                               &format,
+#endif
                                                JXL_COLOR_PROFILE_TARGET_DATA,
                                                icc.data(), icc_size))
                     {
@@ -887,7 +879,7 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
                             osName.size() + 1) == JXL_DEC_SUCCESS &&
                         osName != CPLSPrintf("Band %d", i))
                     {
-                        osBandName = osName;
+                        osBandName = std::move(osName);
                     }
                 }
             }
@@ -1494,7 +1486,7 @@ void JPEGXLDataset::GetDecodedImage(void *pabyOutputData,
     }
 
     // Rescale from 8-bits/16-bits
-    if (m_nBits < GDALGetDataTypeSize(eDT))
+    if (m_nBits < GDALGetDataTypeSizeBits(eDT))
     {
         const auto Rescale = [this, eDT](void *pBuffer, int nChannels)
         {
@@ -1539,7 +1531,7 @@ CPLErr JPEGXLDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                                 int nXSize, int nYSize, void *pData,
                                 int nBufXSize, int nBufYSize,
                                 GDALDataType eBufType, int nBandCount,
-                                int *panBandMap, GSpacing nPixelSpace,
+                                BANDMAP_TYPE panBandMap, GSpacing nPixelSpace,
                                 GSpacing nLineSpace, GSpacing nBandSpace,
                                 GDALRasterIOExtraArg *psExtraArg)
 
@@ -1683,7 +1675,7 @@ GDALPamDataset *JPEGXLDataset::OpenStaticPAM(GDALOpenInfo *poOpenInfo)
     if (!Identify(poOpenInfo))
         return nullptr;
 
-    auto poDS = cpl::make_unique<JPEGXLDataset>();
+    auto poDS = std::make_unique<JPEGXLDataset>();
     if (!poDS->Open(poOpenInfo))
         return nullptr;
 
@@ -1710,7 +1702,7 @@ GDALDataset *JPEGXLDataset::OpenStatic(GDALOpenInfo *poOpenInfo)
             if (nOrientation >= 2 && nOrientation <= 8)
             {
                 std::unique_ptr<GDALDataset> poOriDS(poDS);
-                auto poOrientedDS = cpl::make_unique<GDALOrientedDataset>(
+                auto poOrientedDS = std::make_unique<GDALOrientedDataset>(
                     std::move(poOriDS),
                     static_cast<GDALOrientedDataset::Origin>(nOrientation));
                 poDS = poOrientedDS.release();
@@ -1766,9 +1758,8 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
     char **papszXMP = poSrcDS->GetMetadata("xml:XMP");
 
     const bool bWriteGeoJP2 = CPLFetchBool(papszOptions, "WRITE_GEOJP2", true);
-    double adfGeoTransform[6];
-    const bool bHasGeoTransform =
-        poSrcDS->GetGeoTransform(adfGeoTransform) == CE_None;
+    GDALGeoTransform gt;
+    const bool bHasGeoTransform = poSrcDS->GetGeoTransform(gt) == CE_None;
     const OGRSpatialReference *poSRS = poSrcDS->GetSpatialRef();
     const int nGCPCount = poSrcDS->GetGCPCount();
     char **papszRPCMD = poSrcDS->GetMetadata("RPC");
@@ -1780,7 +1771,7 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
         if (poSRS)
             oJP2Metadata.SetSpatialRef(poSRS);
         if (bHasGeoTransform)
-            oJP2Metadata.SetGeoTransform(adfGeoTransform);
+            oJP2Metadata.SetGeoTransform(gt);
         if (nGCPCount)
         {
             const OGRSpatialReference *poSRSGCP = poSrcDS->GetGCPSpatialRef();
@@ -1814,16 +1805,35 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
         }
     }
 
+    constexpr int DEFAULT_EFFORT = 5;
+    const int nEffort = atoi(CSLFetchNameValueDef(
+        papszOptions, "EFFORT", CPLSPrintf("%d", DEFAULT_EFFORT)));
+    const char *pszDistance = CSLFetchNameValue(papszOptions, "DISTANCE");
+    const char *pszQuality = CSLFetchNameValue(papszOptions, "QUALITY");
+    const char *pszAlphaDistance =
+        CSLFetchNameValue(papszOptions, "ALPHA_DISTANCE");
     const char *pszLossLessCopy =
         CSLFetchNameValueDef(papszOptions, "LOSSLESS_COPY", "AUTO");
-    if (EQUAL(pszLossLessCopy, "AUTO") || CPLTestBool(pszLossLessCopy))
+    if ((EQUAL(pszLossLessCopy, "AUTO") && !pszDistance && !pszQuality &&
+         !pszAlphaDistance && nEffort == DEFAULT_EFFORT) ||
+        (!EQUAL(pszLossLessCopy, "AUTO") && CPLTestBool(pszLossLessCopy)))
     {
         void *pJPEGXLContent = nullptr;
         size_t nJPEGXLContent = 0;
-        if (poSrcDS->ReadCompressedData(
-                "JXL", 0, 0, poSrcDS->GetRasterXSize(),
-                poSrcDS->GetRasterYSize(), poSrcDS->GetRasterCount(), nullptr,
-                &pJPEGXLContent, &nJPEGXLContent, nullptr) == CE_None)
+        const bool bSrcIsJXL =
+            (poSrcDS->ReadCompressedData(
+                 "JXL", 0, 0, poSrcDS->GetRasterXSize(),
+                 poSrcDS->GetRasterYSize(), poSrcDS->GetRasterCount(), nullptr,
+                 &pJPEGXLContent, &nJPEGXLContent, nullptr) == CE_None);
+        if (bSrcIsJXL && (pszDistance || pszQuality || pszAlphaDistance ||
+                          nEffort != DEFAULT_EFFORT))
+        {
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "LOSSLESS_COPY=YES not supported when EFFORT, QUALITY, "
+                     "DISTANCE or ALPHA_DISTANCE are specified");
+            return nullptr;
+        }
+        else if (bSrcIsJXL)
         {
             CPLDebug("JPEGXL", "Lossless copy from source dataset");
             GByte abySizeAndBoxName[8];
@@ -1836,7 +1846,8 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
                                    nJPEGXLContent);
 
                 size_t nInsertPos = 0;
-                if (abyData[0] == 0xff && abyData[1] == 0x0a)
+                if (abyData.size() >= 2 && abyData[0] == 0xff &&
+                    abyData[1] == 0x0a)
                 {
                     // If we get a "naked" codestream, insert it into a
                     // ISOBMFF-based container
@@ -2077,10 +2088,6 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
     }
 
     const char *pszLossLess = CSLFetchNameValue(papszOptions, "LOSSLESS");
-    const char *pszDistance = CSLFetchNameValue(papszOptions, "DISTANCE");
-    const char *pszQuality = CSLFetchNameValue(papszOptions, "QUALITY");
-    const char *pszAlphaDistance =
-        CSLFetchNameValue(papszOptions, "ALPHA_DISTANCE");
 
     const bool bLossless = (pszLossLess == nullptr && pszDistance == nullptr &&
                             pszQuality == nullptr) ||
@@ -2136,18 +2143,19 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
             }
             else
             {
-                fDistance = static_cast<float>(
-                    6.4 + pow(2.5, (30 - quality) / 5.0f) / 6.25f);
+                fDistance =
+                    static_cast<float>(53.0 / 3000.0 * quality * quality -
+                                       23.0 / 20.0 * quality + 25.0);
             }
         }
-        if (fDistance >= 0.0f && fDistance < 0.1f)
-            fDistance = 0.1f;
+        if (fDistance >= 0.0f && fDistance < MIN_DISTANCE)
+            fDistance = MIN_DISTANCE;
 
         if (pszAlphaDistance)
         {
             fAlphaDistance = static_cast<float>(CPLAtof(pszAlphaDistance));
-            if (fAlphaDistance > 0.0f && fAlphaDistance < 0.1f)
-                fAlphaDistance = 0.1f;
+            if (fAlphaDistance > 0.0f && fAlphaDistance < MIN_DISTANCE)
+                fAlphaDistance = MIN_DISTANCE;
         }
     }
 
@@ -2179,7 +2187,7 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
     const int nBits =
         ((eDT == GDT_Byte || eDT == GDT_UInt16) && pszNBits != nullptr)
             ? atoi(pszNBits)
-            : GDALGetDataTypeSize(eDT);
+            : GDALGetDataTypeSizeBits(eDT);
 
     JxlBasicInfo basic_info;
     JxlEncoderInitBasicInfo(&basic_info);
@@ -2289,7 +2297,7 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
 #endif
 
 #ifdef HAVE_JxlEncoderFrameSettingsCreate
-    JxlEncoderOptions *opts =
+    JxlEncoderFrameSettings *opts =
         JxlEncoderFrameSettingsCreate(encoder.get(), nullptr);
 #else
     JxlEncoderOptions *opts = JxlEncoderOptionsCreate(encoder.get(), nullptr);
@@ -2319,7 +2327,11 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
         }
 #endif
 
+#ifdef HAVE_JxlEncoderSetFrameLossless
+        JxlEncoderSetFrameLossless(opts, TRUE);
+#else
         JxlEncoderOptionsSetLossless(opts, TRUE);
+#endif
         basic_info.uses_original_profile = JXL_TRUE;
     }
     else
@@ -2336,7 +2348,6 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
         }
     }
 
-    const int nEffort = atoi(CSLFetchNameValueDef(papszOptions, "EFFORT", "5"));
 #ifdef HAVE_JxlEncoderFrameSettingsSetOption
     if (JxlEncoderFrameSettingsSetOption(opts, JXL_ENC_FRAME_SETTING_EFFORT,
                                          nEffort) != JXL_ENC_SUCCESS)
@@ -2583,6 +2594,17 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
                     return nullptr;
                 }
             }
+            else if (!bLossless)
+            {
+                // By default libjxl applies lossless encoding for extra channels
+                if (JXL_ENC_SUCCESS !=
+                    JxlEncoderSetExtraChannelDistance(opts, nIndex, fDistance))
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "JxlEncoderSetExtraChannelDistance failed");
+                    return nullptr;
+                }
+            }
 #endif
         }
     }
@@ -2728,13 +2750,14 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
             JxlColorEncodingSetToSRGB(&color_encoding,
                                       basic_info.num_color_channels ==
                                           1 /*is_gray*/);
-            if (JXL_ENC_SUCCESS !=
-                JxlEncoderSetColorEncoding(encoder.get(), &color_encoding))
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "JxlEncoderSetColorEncoding() failed");
-                return nullptr;
-            }
+            // libjxl until commit
+            // https://github.com/libjxl/libjxl/commits/c70c9d0bdc03f77d6bd8d9c3c56d4dac1b9b1652
+            // needs JxlEncoderSetColorEncoding()
+            // But post it (308b5f1eed81becac506569080e4490cc486660c,
+            // "Use chunked frame adapter instead of image bundle in
+            // EncodeFrame. (#2983)"), this errors out.
+            CPL_IGNORE_RET_VAL(
+                JxlEncoderSetColorEncoding(encoder.get(), &color_encoding));
 
             const auto nDataSize = GDALGetDataTypeSizeBytes(eDT);
             if (nDataSize <= 0 ||
@@ -2988,82 +3011,9 @@ void GDALRegister_JPEGXL()
 
     GDALDriver *poDriver = new GDALDriver();
 
-    poDriver->SetDescription("JPEGXL");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "JPEG-XL");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/jpegxl.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "jxl");
-    poDriver->SetMetadataItem(GDAL_DMD_MIMETYPE, "image/jxl");
-
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES,
-                              "Byte UInt16 Float32");
-
-#ifdef HAVE_JXL_BOX_API
-    const char *pszOpenOptions =
-        "<OpenOptionList>\n"
-        "   <Option name='APPLY_ORIENTATION' type='boolean' "
-        "description='whether to take into account EXIF Orientation to "
-        "rotate/flip the image' default='NO'/>\n"
-        "</OpenOptionList>\n";
-    poDriver->SetMetadataItem(GDAL_DMD_OPENOPTIONLIST, pszOpenOptions);
-#endif
-
-    poDriver->SetMetadataItem(
-        GDAL_DMD_CREATIONOPTIONLIST,
-        "<CreationOptionList>\n"
-        "   <Option name='LOSSLESS' type='boolean' description='Whether JPEGXL "
-        "compression should be lossless' default='YES'/>"
-        "   <Option name='LOSSLESS_COPY' type='string-select' "
-        "description='Whether conversion should be lossless' default='AUTO'>"
-        "     <Value>AUTO</Value>"
-        "     <Value>YES</Value>"
-        "     <Value>NO</Value>"
-        "   </Option>"
-        "   <Option name='EFFORT' type='int' description='Level of effort "
-        "1(fast)-9(slow)' default='5'/>"
-        "   <Option name='DISTANCE' type='float' description='Distance level "
-        "for lossy compression (0=mathematically lossless, 1.0=visually "
-        "lossless, usual range [0.5,3])' default='1.0' min='0.1' max='15.0'/>"
-#ifdef HAVE_JxlEncoderSetExtraChannelDistance
-        "  <Option name='ALPHA_DISTANCE' type='float' "
-        "description='Distance level for alpha channel "
-        "(-1=same as non-alpha channels, "
-        "0=mathematically lossless, 1.0=visually lossless, "
-        "usual range [0.5,3])' default='-1' min='-1' max='15.0'/>"
-#endif
-        "   <Option name='QUALITY' type='float' description='Alternative "
-        "setting to DISTANCE to specify lossy compression, roughly matching "
-        "libjpeg quality setting in the [0,100] range' default='90' max='100'/>"
-        "   <Option name='NBITS' type='int' description='BITS for sub-byte "
-        "files (1-7), sub-uint16_t (9-15)'/>"
-        "   <Option name='SOURCE_ICC_PROFILE' description='ICC profile encoded "
-        "in Base64' type='string'/>\n"
-#ifdef HAVE_JXL_THREADS
-        "   <Option name='NUM_THREADS' type='string' description='Number of "
-        "worker threads for compression. Can be set to ALL_CPUS' "
-        "default='ALL_CPUS'/>"
-#endif
-#ifdef HAVE_JXL_BOX_API
-        "   <Option name='WRITE_EXIF_METADATA' type='boolean' "
-        "description='Whether to write EXIF_ metadata in a Exif box' "
-        "default='YES'/>"
-        "   <Option name='WRITE_XMP' type='boolean' description='Whether to "
-        "write xml:XMP metadata in a xml box' default='YES'/>"
-        "   <Option name='WRITE_GEOJP2' type='boolean' description='Whether to "
-        "write georeferencing in a jumb.uuid box' default='YES'/>"
-        "   <Option name='COMPRESS_BOXES' type='boolean' description='Whether "
-        "to decompress Exif/XMP/GeoJP2 boxes' default='NO'/>"
-#endif
-        "</CreationOptionList>\n");
-
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-
-#ifdef HAVE_JxlEncoderInitExtraChannelInfo
-    poDriver->SetMetadataItem("JXL_ENCODER_SUPPORT_EXTRA_CHANNELS", "YES");
-#endif
-
-    poDriver->pfnIdentify = JPEGXLDataset::Identify;
+    JPEGXLDriverSetCommonMetadata(poDriver);
     poDriver->pfnOpen = JPEGXLDataset::OpenStatic;
+    poDriver->pfnIdentify = JPEGXLDataset::Identify;
     poDriver->pfnCreateCopy = JPEGXLDataset::CreateCopy;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);

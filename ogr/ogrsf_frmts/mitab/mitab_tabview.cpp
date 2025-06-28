@@ -12,28 +12,13 @@
  * Copyright (c) 1999-2002, Daniel Morissette
  * Copyright (c) 2014, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 
 #include "cpl_port.h"
 #include "mitab.h"
 
+#include <cassert>
 #include <cctype>
 #include <cstddef>
 #include <cstdio>
@@ -59,12 +44,12 @@
  *
  * Constructor.
  **********************************************************************/
-TABView::TABView()
-    : m_pszFname(nullptr), m_eAccessMode(TABRead), m_papszTABFile(nullptr),
-      m_pszVersion(nullptr), m_papszTABFnames(nullptr), m_papoTABFiles(nullptr),
-      m_numTABFiles(0), m_nMainTableIndex(-1), m_papszFieldNames(nullptr),
-      m_papszWhereClause(nullptr), m_poRelation(nullptr),
-      m_bRelFieldsCreated(FALSE)
+TABView::TABView(GDALDataset *poDS)
+    : IMapInfoFile(poDS), m_pszFname(nullptr), m_eAccessMode(TABRead),
+      m_papszTABFile(nullptr), m_pszVersion(nullptr), m_papszTABFnames(nullptr),
+      m_papoTABFiles(nullptr), m_numTABFiles(0), m_nMainTableIndex(-1),
+      m_papszFieldNames(nullptr), m_papszWhereClause(nullptr),
+      m_poRelation(nullptr), m_bRelFieldsCreated(FALSE)
 {
 }
 
@@ -190,6 +175,7 @@ int TABView::OpenForRead(const char *pszFname,
         }
 
         CPLFree(m_pszFname);
+        m_pszFname = nullptr;
         return -1;
     }
 
@@ -219,6 +205,7 @@ int TABView::OpenForRead(const char *pszFname,
             CPLErrorReset();
 
         CPLFree(m_pszFname);
+        m_pszFname = nullptr;
 
         return -1;
     }
@@ -280,7 +267,7 @@ int TABView::OpenForRead(const char *pszFname,
         TABAdjustFilenameExtension(m_papszTABFnames[iFile]);
 #endif
 
-        m_papoTABFiles[iFile] = new TABFile;
+        m_papoTABFiles[iFile] = new TABFile(m_poDS);
 
         if (m_papoTABFiles[iFile]->Open(m_papszTABFnames[iFile], m_eAccessMode,
                                         bTestOpenNoError) != 0)
@@ -379,11 +366,12 @@ int TABView::OpenForWrite(const char *pszFname)
         m_papszTABFnames = CSLAppendPrintf(m_papszTABFnames, "%s%s%d.tab",
                                            pszPath, pszBasename, iFile + 1);
 #ifndef _WIN32
-        /* coverity[var_deref_op] */
+        assert(m_papszTABFnames);
+        assert(m_papszTABFnames[iFile]);
         TABAdjustFilenameExtension(m_papszTABFnames[iFile]);
 #endif
 
-        m_papoTABFiles[iFile] = new TABFile;
+        m_papoTABFiles[iFile] = new TABFile(m_poDS);
 
         if (m_papoTABFiles[iFile]->Open(m_papszTABFnames[iFile], m_eAccessMode,
                                         FALSE, GetCharset()) != 0)
@@ -1023,7 +1011,7 @@ int TABView::GetBounds(double &dXMin, double &dYMin, double &dXMax,
 }
 
 /**********************************************************************
- *                   TABView::GetExtent()
+ *                   TABView::IGetExtent()
  *
  * Fetch extent of the data currently stored in the dataset.
  *
@@ -1032,7 +1020,7 @@ int TABView::GetBounds(double &dXMin, double &dYMin, double &dXMax,
  *
  * Returns OGRERR_NONE/OGRRERR_FAILURE.
  **********************************************************************/
-OGRErr TABView::GetExtent(OGREnvelope *psExtent, int bForce)
+OGRErr TABView::IGetExtent(int iGeomField, OGREnvelope *psExtent, bool bForce)
 {
     if (m_nMainTableIndex == -1)
     {
@@ -1042,7 +1030,8 @@ OGRErr TABView::GetExtent(OGREnvelope *psExtent, int bForce)
         return OGRERR_FAILURE;
     }
 
-    return m_papoTABFiles[m_nMainTableIndex]->GetExtent(psExtent, bForce);
+    return m_papoTABFiles[m_nMainTableIndex]->GetExtent(iGeomField, psExtent,
+                                                        bForce);
 }
 
 /**********************************************************************

@@ -1,7 +1,10 @@
 add_gdal_driver(
   TARGET gdal_MBTiles
   SOURCES mbtilesdataset.cpp
-  BUILTIN)
+  BUILTIN
+  NO_CXX_WFLAGS_EFFCXX
+  NO_WFLAG_OLD_STYLE_CAST
+)
 gdal_standard_includes(gdal_MBTiles)
 target_include_directories(gdal_MBTiles PRIVATE ${GDAL_VECTOR_FORMAT_SOURCE_DIR}/mvt)
 if (GDAL_USE_ZLIB_INTERNAL)
@@ -26,5 +29,5 @@ if (NOT GDAL_USE_JSONC_INTERNAL)
   gdal_target_link_libraries(gdal_MBTiles PRIVATE ${JSONC_TARGET})
 endif ()
 target_include_directories(
-  gdal_MBTiles PRIVATE ${GDAL_VECTOR_FORMAT_SOURCE_DIR}/geojson ${GDAL_VECTOR_FORMAT_SOURCE_DIR}/gpkg
+  gdal_MBTiles PRIVATE ${GDAL_VECTOR_FORMAT_SOURCE_DIR}/gpkg
                        ${GDAL_VECTOR_FORMAT_SOURCE_DIR}/sqlite)

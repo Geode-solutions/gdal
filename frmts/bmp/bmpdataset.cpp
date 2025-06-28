@@ -9,23 +9,7 @@
  * Copyright (c) 2002, Andrey Kiselev <dron@remotesensing.org>
  * Copyright (c) 2007-2010, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -174,12 +158,14 @@ typedef struct
 } BMPInfoHeader;
 
 // Info header size in bytes:
-const unsigned int BIH_WIN4SIZE = 40;  // for BMPT_WIN4
-#if 0                                  /* Unused */
-const unsigned int  BIH_WIN5SIZE = 57; // for BMPT_WIN5
+constexpr unsigned int BIH_WIN4SIZE = 40;  // for BMPT_WIN4
+#if 0
+/* Unused */
+constexpr unsigned int  BIH_WIN5SIZE = 57; // for BMPT_WIN5
 #endif
-const unsigned int BIH_OS21SIZE = 12;  // for BMPT_OS21
-const unsigned int BIH_OS22SIZE = 64;  // for BMPT_OS22
+constexpr unsigned int BIH_OS21SIZE = 12;       // for BMPT_OS21
+constexpr unsigned int BIH_OS22SIZE = 64;       // for BMPT_OS22
+constexpr unsigned int BIH_BITMAPV5SIZE = 124;  // for BITMAPV5HEADER
 
 // We will use plain byte array instead of this structure, but declaration
 // provided for reference
@@ -234,17 +220,17 @@ class BMPDataset final : public GDALPamDataset
     int nColorElems;
     GByte *pabyColorTable;
     GDALColorTable *poColorTable;
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     int bGeoTransformValid;
     bool m_bNewFile = false;
-    vsi_l_offset m_nLargeFileSize = 0;
+    vsi_l_offset m_nFileSize = 0;
 
     char *pszFilename;
     VSILFILE *fp;
 
   protected:
     CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                     GDALDataType, int, int *, GSpacing nPixelSpace,
+                     GDALDataType, int, BANDMAP_TYPE, GSpacing nPixelSpace,
                      GSpacing nLineSpace, GSpacing nBandSpace,
                      GDALRasterIOExtraArg *psExtraArg) override;
 
@@ -258,8 +244,8 @@ class BMPDataset final : public GDALPamDataset
                                int nBandsIn, GDALDataType eType,
                                char **papszParamList);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
-    CPLErr SetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 };
 
 /************************************************************************/
@@ -343,7 +329,7 @@ BMPRasterBand::~BMPRasterBand()
 CPLErr BMPRasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
                                  void *pImage)
 {
-    BMPDataset *poGDS = (BMPDataset *)poDS;
+    BMPDataset *poGDS = cpl::down_cast<BMPDataset *>(poDS);
     vsi_l_offset iScanOffset = 0;
 
     if (poGDS->sInfoHeader.iHeight > 0)
@@ -401,7 +387,7 @@ CPLErr BMPRasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
             // in quadruplet should be discarded as it has no meaning.
             // That is why we always use 3 byte count in the following
             // pabyTemp index.
-            ((GByte *)pImage)[i] = *pabyTemp;
+            static_cast<GByte *>(pImage)[i] = *pabyTemp;
             pabyTemp += iBytesPerPixel;
         }
     }
@@ -416,7 +402,7 @@ CPLErr BMPRasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
         // 8-bit, support BMPC_BITFIELDS channel mask indicators,
         // and generalize band handling.
 
-        GUInt16 *pScan16 = (GUInt16 *)pabyScan;
+        GUInt16 *pScan16 = reinterpret_cast<GUInt16 *>(pabyScan);
 #ifdef CPL_MSB
         GDALSwapWords(pScan16, sizeof(GUInt16), nBlockXSize, 0);
 #endif
@@ -546,7 +532,7 @@ CPLErr BMPRasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
 
 CPLErr BMPRasterBand::IWriteBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 {
-    BMPDataset *poGDS = (BMPDataset *)poDS;
+    BMPDataset *poGDS = cpl::down_cast<BMPDataset *>(poDS);
 
     CPLAssert(poGDS != nullptr && nBlockXOff >= 0 && nBlockYOff >= 0 &&
               pImage != nullptr);
@@ -593,7 +579,7 @@ CPLErr BMPRasterBand::IWriteBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 
 GDALColorTable *BMPRasterBand::GetColorTable()
 {
-    BMPDataset *poGDS = (BMPDataset *)poDS;
+    BMPDataset *poGDS = cpl::down_cast<BMPDataset *>(poDS);
 
     return poGDS->poColorTable;
 }
@@ -604,7 +590,7 @@ GDALColorTable *BMPRasterBand::GetColorTable()
 
 CPLErr BMPRasterBand::SetColorTable(GDALColorTable *poColorTable)
 {
-    BMPDataset *poGDS = (BMPDataset *)poDS;
+    BMPDataset *poGDS = cpl::down_cast<BMPDataset *>(poDS);
 
     if (poColorTable)
     {
@@ -618,8 +604,8 @@ CPLErr BMPRasterBand::SetColorTable(GDALColorTable *poColorTable)
         GUInt32 iULong = CPL_LSBWORD32(poGDS->sInfoHeader.iClrUsed);
         VSIFWriteL(&iULong, 4, 1, poGDS->fp);
         poGDS->pabyColorTable = (GByte *)CPLRealloc(
-            poGDS->pabyColorTable,
-            poGDS->nColorElems * poGDS->sInfoHeader.iClrUsed);
+            poGDS->pabyColorTable, static_cast<size_t>(poGDS->nColorElems) *
+                                       poGDS->sInfoHeader.iClrUsed);
         if (!poGDS->pabyColorTable)
             return CE_Failure;
 
@@ -639,9 +625,10 @@ CPLErr BMPRasterBand::SetColorTable(GDALColorTable *poColorTable)
 
         VSIFSeekL(poGDS->fp, BFH_SIZE + poGDS->sInfoHeader.iSize, SEEK_SET);
         if (VSIFWriteL(poGDS->pabyColorTable, 1,
-                       poGDS->nColorElems * poGDS->sInfoHeader.iClrUsed,
-                       poGDS->fp) <
-            poGDS->nColorElems * (GUInt32)poGDS->sInfoHeader.iClrUsed)
+                       static_cast<size_t>(poGDS->nColorElems) *
+                           poGDS->sInfoHeader.iClrUsed,
+                       poGDS->fp) < static_cast<size_t>(poGDS->nColorElems) *
+                                        poGDS->sInfoHeader.iClrUsed)
         {
             return CE_Failure;
         }
@@ -658,7 +645,7 @@ CPLErr BMPRasterBand::SetColorTable(GDALColorTable *poColorTable)
 
 GDALColorInterp BMPRasterBand::GetColorInterpretation()
 {
-    BMPDataset *poGDS = (BMPDataset *)poDS;
+    BMPDataset *poGDS = cpl::down_cast<BMPDataset *>(poDS);
 
     if (poGDS->sInfoHeader.iBitCount == 24 ||
         poGDS->sInfoHeader.iBitCount == 32 ||
@@ -719,16 +706,17 @@ BMPComprRasterBand::BMPComprRasterBand(BMPDataset *poDSIn, int nBandIn)
         return;
     }
 
-    if (poDSIn->sFileHeader.iSize <= poDSIn->sFileHeader.iOffBits ||
-        poDSIn->sFileHeader.iSize - poDSIn->sFileHeader.iOffBits > knIntMax)
+    if (poDSIn->m_nFileSize <= poDSIn->sFileHeader.iOffBits ||
+        poDSIn->m_nFileSize - poDSIn->sFileHeader.iOffBits > knIntMax)
     {
         CPLError(CE_Failure, CPLE_NotSupported, "Invalid header");
         return;
     }
 
-    GUInt32 iComprSize =
-        poDSIn->sFileHeader.iSize - poDSIn->sFileHeader.iOffBits;
-    GUInt32 iUncomprSize = poDS->GetRasterXSize() * poDS->GetRasterYSize();
+    const GUInt32 iComprSize = static_cast<GUInt32>(
+        poDSIn->m_nFileSize - poDSIn->sFileHeader.iOffBits);
+    const GUInt32 iUncomprSize =
+        poDS->GetRasterXSize() * poDS->GetRasterYSize();
 
 #ifdef DEBUG
     CPLDebug("BMP", "RLE compression detected.");
@@ -951,13 +939,6 @@ BMPDataset::BMPDataset()
 
     memset(&sFileHeader, 0, sizeof(sFileHeader));
     memset(&sInfoHeader, 0, sizeof(sInfoHeader));
-
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -973,9 +954,9 @@ BMPDataset::~BMPDataset()
         // Extend the file with zeroes if needed
         VSIFSeekL(fp, 0, SEEK_END);
 
-        if (VSIFTellL(fp) < m_nLargeFileSize)
+        if (VSIFTellL(fp) < m_nFileSize)
         {
-            VSIFTruncateL(fp, m_nLargeFileSize);
+            VSIFTruncateL(fp, m_nFileSize);
         }
     }
 
@@ -991,25 +972,25 @@ BMPDataset::~BMPDataset()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr BMPDataset::GetGeoTransform(double *padfTransform)
+CPLErr BMPDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
     if (bGeoTransformValid)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(adfGeoTransform[0]) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
-    if (GDALPamDataset::GetGeoTransform(padfTransform) == CE_None)
+    if (GDALPamDataset::GetGeoTransform(gt) == CE_None)
         return CE_None;
 
 #ifdef notdef
     // See http://trac.osgeo.org/gdal/ticket/3578
     if (sInfoHeader.iXPelsPerMeter > 0 && sInfoHeader.iYPelsPerMeter > 0)
     {
-        padfTransform[1] = sInfoHeader.iXPelsPerMeter;
-        padfTransform[5] = -sInfoHeader.iYPelsPerMeter;
-        padfTransform[0] = -0.5 * padfTransform[1];
-        padfTransform[3] = -0.5 * padfTransform[5];
+        gt[1] = sInfoHeader.iXPelsPerMeter;
+        gt[5] = -sInfoHeader.iYPelsPerMeter;
+        gt[0] = -0.5 * gt[1];
+        gt[3] = -0.5 * gt[5];
         return CE_None;
     }
 #endif
@@ -1021,14 +1002,14 @@ CPLErr BMPDataset::GetGeoTransform(double *padfTransform)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr BMPDataset::SetGeoTransform(double *padfTransform)
+CPLErr BMPDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
     if (pszFilename && bGeoTransformValid)
     {
-        memcpy(adfGeoTransform, padfTransform, sizeof(double) * 6);
+        m_gt = gt;
 
         CPLErr eErr = CE_None;
-        if (GDALWriteWorldFile(pszFilename, "wld", adfGeoTransform) == FALSE)
+        if (GDALWriteWorldFile(pszFilename, "wld", m_gt.data()) == FALSE)
         {
             CPLError(CE_Failure, CPLE_FileIO, "Can't write world file.");
             eErr = CE_Failure;
@@ -1036,7 +1017,7 @@ CPLErr BMPDataset::SetGeoTransform(double *padfTransform)
         return eErr;
     }
 
-    return GDALPamDataset::SetGeoTransform(padfTransform);
+    return GDALPamDataset::SetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -1051,7 +1032,7 @@ CPLErr BMPDataset::SetGeoTransform(double *padfTransform)
 CPLErr BMPDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                              int nXSize, int nYSize, void *pData, int nBufXSize,
                              int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, int *panBandMap,
+                             int nBandCount, BANDMAP_TYPE panBandMap,
                              GSpacing nPixelSpace, GSpacing nLineSpace,
                              GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg)
@@ -1087,7 +1068,7 @@ int BMPDataset::Identify(GDALOpenInfo *poOpenInfo)
            sizeof(uint32_t));
     CPL_LSBPTR32(&nInfoHeaderSize);
     // Check against the maximum known size
-    if (nInfoHeaderSize > BIH_OS22SIZE)
+    if (nInfoHeaderSize > BIH_BITMAPV5SIZE)
         return FALSE;
 
     return TRUE;
@@ -1122,17 +1103,18 @@ GDALDataset *BMPDataset::Open(GDALOpenInfo *poOpenInfo)
 #ifdef CPL_MSB
     CPL_SWAP32PTR(&poDS->sFileHeader.iOffBits);
 #endif
-    poDS->sFileHeader.iSize = (GUInt32)sStat.st_size;
+    poDS->m_nFileSize = sStat.st_size;
 
 #ifdef BMP_DEBUG
-    CPLDebug("BMP", "File size %d bytes.", poDS->sFileHeader.iSize);
+    CPLDebug("BMP", "File size " CPL_FRMT_GUIB " bytes.",
+             static_cast<GUIntBig>(poDS->m_nFileSize));
     CPLDebug("BMP", "Image offset 0x%x bytes from file start.",
              poDS->sFileHeader.iOffBits);
 #endif
 
     // Validatate iOffBits
     if (poDS->sFileHeader.iOffBits <= BFH_SIZE + SIZE_OF_INFOHEADER_SIZE ||
-        poDS->sFileHeader.iOffBits >= poDS->sFileHeader.iSize)
+        poDS->sFileHeader.iOffBits >= poDS->m_nFileSize)
     {
         delete poDS;
         return nullptr;
@@ -1396,12 +1378,12 @@ GDALDataset *BMPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for world file.                                           */
     /* -------------------------------------------------------------------- */
-    poDS->bGeoTransformValid = GDALReadWorldFile(
-        poOpenInfo->pszFilename, nullptr, poDS->adfGeoTransform);
+    poDS->bGeoTransformValid =
+        GDALReadWorldFile(poOpenInfo->pszFilename, nullptr, poDS->m_gt.data());
 
     if (!poDS->bGeoTransformValid)
-        poDS->bGeoTransformValid = GDALReadWorldFile(
-            poOpenInfo->pszFilename, ".wld", poDS->adfGeoTransform);
+        poDS->bGeoTransformValid = GDALReadWorldFile(poOpenInfo->pszFilename,
+                                                     ".wld", poDS->m_gt.data());
 
     /* -------------------------------------------------------------------- */
     /*      Initialize any PAM information.                                 */
@@ -1507,7 +1489,8 @@ GDALDataset *BMPDataset::Create(const char *pszFilename, int nXSize, int nYSize,
     {
         poDS->sInfoHeader.iClrUsed = 1 << poDS->sInfoHeader.iBitCount;
         poDS->pabyColorTable =
-            (GByte *)CPLMalloc(poDS->nColorElems * poDS->sInfoHeader.iClrUsed);
+            (GByte *)CPLMalloc(static_cast<size_t>(poDS->nColorElems) *
+                               poDS->sInfoHeader.iClrUsed);
         for (unsigned int i = 0; i < poDS->sInfoHeader.iClrUsed; i++)
         {
             poDS->pabyColorTable[i * poDS->nColorElems] =
@@ -1544,7 +1527,7 @@ GDALDataset *BMPDataset::Create(const char *pszFilename, int nXSize, int nYSize,
 
     const vsi_l_offset nLargeImageSize =
         static_cast<vsi_l_offset>(nScanSize) * poDS->sInfoHeader.iHeight;
-    poDS->m_nLargeFileSize = poDS->sFileHeader.iOffBits + nLargeImageSize;
+    poDS->m_nFileSize = poDS->sFileHeader.iOffBits + nLargeImageSize;
     if (nLargeImageSize > std::numeric_limits<uint32_t>::max())
     {
         CPLError(CE_Warning, CPLE_AppDefined,
@@ -1554,7 +1537,7 @@ GDALDataset *BMPDataset::Create(const char *pszFilename, int nXSize, int nYSize,
         poDS->sFileHeader.iSize = std::numeric_limits<uint32_t>::max();
         poDS->sInfoHeader.iSizeImage = std::numeric_limits<uint32_t>::max();
     }
-    else if (poDS->m_nLargeFileSize > std::numeric_limits<uint32_t>::max())
+    else if (poDS->m_nFileSize > std::numeric_limits<uint32_t>::max())
     {
         CPLError(CE_Warning, CPLE_AppDefined,
                  "File too big for its size to fit in a 32 bit integer! "
@@ -1565,7 +1548,7 @@ GDALDataset *BMPDataset::Create(const char *pszFilename, int nXSize, int nYSize,
     }
     else
     {
-        poDS->sFileHeader.iSize = static_cast<uint32_t>(poDS->m_nLargeFileSize);
+        poDS->sFileHeader.iSize = static_cast<uint32_t>(poDS->m_nFileSize);
         poDS->sInfoHeader.iSizeImage = static_cast<uint32_t>(nLargeImageSize);
     }
 
@@ -1627,9 +1610,10 @@ GDALDataset *BMPDataset::Create(const char *pszFilename, int nXSize, int nYSize,
     if (poDS->sInfoHeader.iClrUsed)
     {
         if (VSIFWriteL(poDS->pabyColorTable, 1,
-                       poDS->nColorElems * poDS->sInfoHeader.iClrUsed,
+                       static_cast<size_t>(poDS->nColorElems) *
+                           poDS->sInfoHeader.iClrUsed,
                        poDS->fp) !=
-            poDS->nColorElems * poDS->sInfoHeader.iClrUsed)
+            static_cast<size_t>(poDS->nColorElems) * poDS->sInfoHeader.iClrUsed)
         {
             CPLError(CE_Failure, CPLE_FileIO,
                      "Error writing color table.  Is disk full?");

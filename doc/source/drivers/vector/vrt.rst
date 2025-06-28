@@ -1,7 +1,7 @@
 .. _vector.vrt:
 
-VRT -- Virtual Format
-=====================
+VRT -- OGR Virtual Format
+=========================
 
 .. shortname:: VRT
 
@@ -19,8 +19,6 @@ The virtual files are currently normally prepared by hand.
 
 Driver capabilities
 -------------------
-
-.. supports_create::
 
 .. supports_georeferencing::
 
@@ -47,12 +45,11 @@ an **OGRVRTLayer** (or **OGRVRTWarpedLayer** or **OGRVRTUnionLayer**) child for
 each layer in the virtual
 datasource, and a **Metadata** element.
 
-A `XML schema of the OGR VRT
-format <https://github.com/OSGeo/gdal/blob/master/data/ogrvrt.xsd>`__ is
-available. When GDAL is configured with libXML2
+An XML schema of the OGR VRT format is provided in :source_file:`ogr/ogrsf_frmts/vrt/data/ogrvrt.xsd`.
+When GDAL is configured with libXML2
 support, that schema will be used to validate the VRT documents.
 Non-conformities will be reported only as warnings. That validation can
-be disabled by setting the :decl_configoption:`GDAL_XML_VALIDATION`
+be disabled by setting the :config:`GDAL_XML_VALIDATION`
 configuration option to "NO".
 
 Metadata element
@@ -167,61 +164,93 @@ layer name, and may have the following subelements:
 - **GeometryField** (optional): This element is used to define how the
   geometry for features should be derived.
 
-  If not provided the geometry of the source feature is copied directly.
-  The type of geometry encoding is indicated with the **encoding**
-  attribute which may have the value "WKT", "WKB" or "PointFromColumns".
-
-  If the encoding is "WKT" or "WKB" then the **field** attribute will
-  have the name of the field containing the WKT or WKB geometry.
-
-  If the encoding is "PointFromColumns" then the **x**, **y**, **z** and
-  **m** attributes will have the names of the columns to be used for the
-  X, Y, Z and M coordinates. The **z** and **m** attributes are optional
-  (m only supported since OGR 2.1.1).
-
-  The optional **reportSrcColumn** attribute can be used to specify
-  whether the source geometry fields (the fields set in the **field**,
-  **x**, **y**, **z**, **m** attributes) should be reported as fields of
-  the VRT layer. It defaults to TRUE. If set to FALSE, the source
-  geometry fields will only be used to build the geometry of the
-  features of the VRT layer.
-
-  The GeometryField element can be repeated as
-  many times as necessary to create multiple geometry fields. It accepts a
-  **name** attribute (recommended) that will be used to define the VRT
-  geometry field name. When **encoding** is not specified, the **field**
-  attribute will be used to determine the corresponding geometry field
-  name in the source layer. If neither **encoding** nor **field** are
-  specified, it is assumed that the name of source geometry field is the
-  value of the **name** attribute.
-
-  The optional **nullable** attribute can be used
-  to specify whether the geometry field is nullable. It defaults to
-  "true".
-
-  When several geometry fields are used, the following child elements of
-  **GeometryField** can be defined to explicitly set the geometry type,
-  SRS, source region, or extent.
-
-  *  **GeometryType** (optional) : same syntax as OGRVRTLayer-level
-     **GeometryType**.
-  *  **SRS** (optional) : same syntax as OGRVRTLayer-level **LayerSRS**
-     (note SRS vs LayerSRS)
-  *  **SrcRegion** (optional) : same syntax as OGRVRTLayer-level
-     **SrcRegion**
-  *  **ExtentXMin**, **ExtentYMin**, **ExtentXMax** and **ExtentXMax**
-     (optional) : same syntax as OGRVRTLayer-level elements of same name
-
+  The GeometryField element can be repeated as many times as necessary to create
+  multiple geometry fields.
   If no **GeometryField** element is specified, all the geometry fields of
   the source layer will be exposed by the VRT layer. In order not to
   expose any geometry field of the source layer, you need to specify
   OGRVRTLayer-level **GeometryType** element to wkbNone.
 
+  The following attributes can be defined:
+
+  * **name** = string (recommended, and mandatory if the VRT will expose multiple geometry fields)
+
+    Name that will be used to define the VRT geometry field name. If not set,
+    empty string is used.
+
+  * **encoding** = Direct/WKT/WKB/PointFromColumns (optional)
+
+    Type of geometry encoding.
+
+    If the encoding is "Direct" or not specified, then the **field** attribute must
+    be set to the name of the source geometry field, if there are multiple source
+    geometry fields. If neither **encoding** nor **field** are
+    specified, it is assumed that the name of source geometry field is the
+    value of the **name** attribute.
+
+    If the encoding is "WKT" or "WKB" then the **field** attribute must be set to
+    the name of the source field containing the WKT or WKB geometry.
+
+    If the encoding is "PointFromColumns" then the **x**, **y**, **z** and
+    **m** attributes must be set to the names of the columns to be used for the
+    X, Y, Z and M coordinates. The **z** and **m** attributes are optional.
+
+  * **field** = string (conditional)
+
+    Name of the source field (or source geometry field for **encoding** = Direct)
+    from which this GeometryField should fetch geometries. This must be set
+    if **encoding** is WKT or WKB.
+
+  * **x**, **y**, **z**, **m** = string (conditional)
+
+    Name of the source fields for the X, Y, Z and M coordinates when
+    **encoding** = PointFromColumns
+
+  * **reportSrcColumn** = true/false (optional)
+
+    Specify whether the source geometry fields (the fields set in the **field**,
+    **x**, **y**, **z**, **m** attributes) should also be included as fields of
+    the VRT layer. It defaults to true. If set to false, the source
+    geometry fields will only be used to build the geometry of the
+    features of the VRT layer.
+
+    Note that reportSrcColumn=true is taken into account only if no explicit
+    **Field** element is defined and when **encoding** is not "Direct".
+    If at least one field is explicitly defined, and reporting of the source
+    geometry field is desired, an explicit **Field** element for it must be defined.
+
+  * **nullable** = true/false (optional)
+
+    The optional **nullable** attribute can be used
+    to specify whether the geometry field is nullable. It defaults to
+    "true".
+
+  The following child elements of **GeometryField** can be defined:
+
+  *  **GeometryType** (optional) : same syntax as OGRVRTLayer-level
+     **GeometryType**. Useful when there are multiple geometry fields.
+  *  **SRS** (optional) : same syntax as OGRVRTLayer-level **LayerSRS**
+     (note SRS vs LayerSRS). Useful when there are multiple geometry fields.
+  *  **SrcRegion** (optional) : same syntax as OGRVRTLayer-level
+     **SrcRegion**. Useful when there are multiple geometry fields.
+  *  **ExtentXMin**, **ExtentYMin**, **ExtentXMax** and **ExtentXMax**
+     (optional) : same syntax as OGRVRTLayer-level elements of same name.
+     Useful when there are multiple geometry fields.
+  *  **XYResolution** (optional, GDAL >= 3.9):
+     Resolution for the coordinate precision of the X and Y coordinates.
+     Expressed in the units of the X and Y axis of the SRS
+  *  **ZResolution** (optional, GDAL >= 3.9):
+     Resolution for the coordinate precision of the Z coordinates.
+     Expressed in the units of the Z axis of the SRS
+  *  **MResolution** (optional, GDAL >= 3.9):
+     Resolution for the coordinate precision of the M coordinates.
+
+
 - **SrcRegion** (optional) : This element is used to
-  define an initial spatial filter for the source features. This spatial
+  define an initial spatial filter for the source features, such that only features intersecting ``SrcRegion`` will be returned in the VRT layer. This spatial
   filter will be combined with any spatial filter explicitly set on the
   VRT layer with the SetSpatialFilter() method. The value of the element
-  must be a valid WKT string defining a polygon. An optional **clip**
+  must be a valid WKT string defining a geometry in the spatial reference system of the source layer. An optional **clip**
   attribute can be set to "TRUE" to clip the geometries to the source
   region, otherwise the source geometries are not modified.
 
@@ -244,6 +273,8 @@ layer name, and may have the following subelements:
      is nullable. It defaults to "true".
   *  **unique** can be used to specify whether the field
      has a unique constraint. It defaults to "false". (GDAL >= 3.2)
+  *  **alternativeName**: the field alternative name. (GDAL >= 3.7)
+  *  **comment**: the field comment. (GDAL >= 3.7)
 
 - **FeatureCount** (optional) : This element is used to
   define the feature count of the layer (when no spatial or attribute
@@ -543,3 +574,7 @@ Other Notes
    that is possible. For instance if the source is an RDBMS. You can
    turn off that feature by setting the *useSpatialSubquery* attribute
    of the GeometryField element to FALSE.
+-  .vrt files starting with
+   - <OGRVRTDataSource> open with ogrinfo, etc.
+   - <VRTDataset> open with gdalinfo, etc.
+

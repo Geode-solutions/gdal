@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Hierarchical Data Format Release 5 (HDF5)
  * Purpose:  Header file for HDF5 datasets reader.
@@ -9,23 +8,7 @@
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef HDF5DATASET_H_INCLUDED_
@@ -36,6 +19,8 @@
 
 #include "cpl_list.h"
 #include "gdal_pam.h"
+
+#include <map>
 
 #ifdef ENABLE_HDF5_GLOBAL_LOCK
 #include <mutex>
@@ -101,10 +86,13 @@ hid_t GDAL_HDF5Open(const std::string &osFilename);
 #endif
 
 class HDF5Dataset;
+class HDF5EOSParser;
 class BAGDataset;
+class S100BaseDataset;
 
 namespace GDAL
 {
+class HDF5Group;
 
 /************************************************************************/
 /*                         HDF5SharedResources                          */
@@ -114,15 +102,28 @@ class HDF5SharedResources
 {
     friend class ::HDF5Dataset;
     friend class ::BAGDataset;
+    friend class ::S100BaseDataset;
 
+    std::weak_ptr<HDF5SharedResources> m_poSelf{};
     bool m_bReadOnly = true;
     hid_t m_hHDF5 = 0;
     CPLString m_osFilename{};
     std::shared_ptr<GDALPamMultiDim> m_poPAM{};
+    std::unique_ptr<HDF5EOSParser> m_poHDF5EOSParser{};
+    std::map<std::string, std::vector<std::shared_ptr<GDALDimension>>>
+        m_oMapEOSGridNameToDimensions{};
+    std::map<std::string, std::vector<std::shared_ptr<GDALDimension>>>
+        m_oMapEOSSwathNameToDimensions{};
+    std::map<std::string, std::shared_ptr<GDALMDArray>> m_oRefKeeper{};
+
+    explicit HDF5SharedResources(const std::string &osFilename);
 
   public:
-    explicit HDF5SharedResources(const std::string &osFilename);
+    static std::shared_ptr<HDF5SharedResources>
+    Create(const std::string &osFilename);
     ~HDF5SharedResources();
+
+    std::shared_ptr<HDF5Group> GetRootGroup();
 
     const std::string &GetFilename() const
     {
@@ -133,6 +134,7 @@ class HDF5SharedResources
     {
         return m_hHDF5;
     }
+
     inline bool IsReadOnly() const
     {
         return m_bReadOnly;
@@ -141,6 +143,48 @@ class HDF5SharedResources
     const std::shared_ptr<GDALPamMultiDim> &GetPAM()
     {
         return m_poPAM;
+    }
+
+    const HDF5EOSParser *GetHDF5EOSParser() const
+    {
+        return m_poHDF5EOSParser.get();
+    }
+
+    void RegisterEOSGridDimensions(
+        const std::string &osGridName,
+        const std::vector<std::shared_ptr<GDALDimension>> &apoDims)
+    {
+        m_oMapEOSGridNameToDimensions[osGridName] = apoDims;
+    }
+
+    std::vector<std::shared_ptr<GDALDimension>>
+    GetEOSGridDimensions(const std::string &osGridName) const
+    {
+        auto oIter = m_oMapEOSGridNameToDimensions.find(osGridName);
+        if (oIter == m_oMapEOSGridNameToDimensions.end())
+            return {};
+        return oIter->second;
+    }
+
+    void RegisterEOSSwathDimensions(
+        const std::string &osSwathName,
+        const std::vector<std::shared_ptr<GDALDimension>> &apoDims)
+    {
+        m_oMapEOSSwathNameToDimensions[osSwathName] = apoDims;
+    }
+
+    std::vector<std::shared_ptr<GDALDimension>>
+    GetEOSSwathDimensions(const std::string &osSwathName) const
+    {
+        auto oIter = m_oMapEOSSwathNameToDimensions.find(osSwathName);
+        if (oIter == m_oMapEOSSwathNameToDimensions.end())
+            return {};
+        return oIter->second;
+    }
+
+    void KeepRef(const std::shared_ptr<GDALMDArray> &poArray)
+    {
+        m_oRefKeeper[poArray->GetFullName()] = poArray;
     }
 };
 
@@ -154,7 +198,7 @@ class HDF5SharedResources
 class HDF5Dataset CPL_NON_FINAL : public GDALPamDataset
 {
   protected:
-    hid_t hHDF5;
+    hid_t m_hHDF5 = -1;
     hid_t hGroupID;  // H handler interface.
     char **papszSubDatasets;
     int nDatasetType;
@@ -163,19 +207,21 @@ class HDF5Dataset CPL_NON_FINAL : public GDALPamDataset
     HDF5GroupObjects *poH5RootGroup; /* Contain hdf5 Groups information */
     std::shared_ptr<GDALGroup> m_poRootGroup{};
 
+    CPLStringList m_aosMetadata{};
+
     HDF5EOSParser m_oHDFEOSParser{};
 
     CPLErr ReadGlobalAttributes(int);
     CPLErr HDF5ListGroupObjects(HDF5GroupObjects *, int);
-    CPLErr CreateMetadata(HDF5GroupObjects *, int);
+    static CPLErr CreateMetadata(hid_t hHDF5, HDF5GroupObjects *, int,
+                                 bool bPrefixWithDatasetName,
+                                 CPLStringList &aosMetadata);
 
     HDF5GroupObjects *HDF5FindDatasetObjects(HDF5GroupObjects *, const char *);
     HDF5GroupObjects *HDF5FindDatasetObjectsbyPath(HDF5GroupObjects *,
                                                    const char *);
     char *CreatePath(HDF5GroupObjects *);
-    void DestroyH5Objects(HDF5GroupObjects *);
-
-    static const char *GetDataTypeName(hid_t);
+    static void DestroyH5Objects(HDF5GroupObjects *);
 
     /**
      * Reads an array of double attributes from the HDF5 metadata.
@@ -196,10 +242,9 @@ class HDF5Dataset CPL_NON_FINAL : public GDALPamDataset
     CPLErr HDF5ReadDoubleAttr(const char *pszAttrName, double **pdfValues,
                               int *nLen = nullptr);
 
-  public:
-    char **papszMetadata;
-    HDF5GroupObjects *poH5CurrentObject;
+    CPL_DISALLOW_COPY_ASSIGN(HDF5Dataset)
 
+  public:
     HDF5Dataset();
     ~HDF5Dataset();
 
@@ -210,10 +255,11 @@ class HDF5Dataset CPL_NON_FINAL : public GDALPamDataset
 
     static GDALDataset *Open(GDALOpenInfo *);
     static GDALDataset *OpenMultiDim(GDALOpenInfo *);
-    static std::shared_ptr<GDALGroup>
-    OpenGroup(std::shared_ptr<GDAL::HDF5SharedResources> poSharedResources);
-    static int Identify(GDALOpenInfo *);
+    static std::shared_ptr<GDALGroup> OpenGroup(
+        const std::shared_ptr<GDAL::HDF5SharedResources> &poSharedResources);
 
+    static bool IsNativeCFloat16(hid_t hDataType);
+    static const char *GetDataTypeName(hid_t);
     static GDALDataType GetDataType(hid_t);
 };
 

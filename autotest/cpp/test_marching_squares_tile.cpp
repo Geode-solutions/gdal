@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL algorithms
  * Purpose:  Tests for the marching squares algorithm
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018, Hugo Mercier, <hugo dot mercier at oslandia dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_unit_test.h"
@@ -34,16 +17,25 @@
 #include "marching_squares/point.h"
 #include "marching_squares/level_generator.h"
 #include "marching_squares/contour_generator.h"
+#include <limits>
 #include <map>
 #include <fstream>
 
 #include "gtest_include.h"
 
-namespace marching_squares
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
+
+namespace test_marching_squares_tile
 {
+using namespace marching_squares;
+
 struct Writer
 {
     typedef std::pair<Point, Point> Segment;
+
     static bool coordEquals(double a, double b)
     {
         return (a - b) * (a - b) < 0.001;
@@ -62,8 +54,14 @@ struct Writer
     // check if a segment is in a set of borders
     bool segmentInBorders(int levelIdx, const Segment &segmentToTest) const
     {
-        std::vector<Segment> segments = borders.find(levelIdx)->second;
-        for (Segment &s : segments)
+        const auto iter = borders.find(levelIdx);
+        if (iter == borders.end())
+        {
+            CPLAssert(false);
+            return false;
+        }
+        const auto &segments = iter->second;
+        for (const Segment &s : segments)
         {
             // (A,B) == (A,B) || (A,B) == (B,A)
             if (((coordEquals(s.first.x, segmentToTest.first.x)) &&
@@ -78,11 +76,18 @@ struct Writer
         }
         return false;
     }
+
     // check if a segment is in a set of contours
     bool segmentInContours(int levelIdx, const Segment &segmentToTest) const
     {
-        std::vector<Segment> segments = contours.find(levelIdx)->second;
-        for (Segment &s : segments)
+        const auto iter = contours.find(levelIdx);
+        if (iter == contours.end())
+        {
+            CPLAssert(false);
+            return false;
+        }
+        const auto &segments = iter->second;
+        for (const Segment &s : segments)
         {
             // (A,B) == (A,B) || (A,B) == (B,A)
             if (((coordEquals(s.first.x, segmentToTest.first.x)) &&
@@ -101,6 +106,7 @@ struct Writer
     void beginningOfLine()
     {
     }
+
     void endOfLine()
     {
     }
@@ -109,11 +115,6 @@ struct Writer
     std::map<int, std::vector<Segment>> borders;
     const bool polygonize = true;
 };
-}  // namespace marching_squares
-
-namespace
-{
-using namespace marching_squares;
 
 // Common fixture with test data
 struct test_ms_tile : public ::testing::Test
@@ -127,7 +128,8 @@ TEST_F(test_ms_tile, dummy)
     // only one pixel of value 2.0
     // levels = 0, 10
     std::vector<double> data = {2.0};
-    IntervalLevelRangeIterator levels(0.0, 10.0);
+    IntervalLevelRangeIterator levels(0.0, 10.0,
+                                      -std::numeric_limits<double>::infinity());
     Writer writer;
 
     ContourGenerator<Writer, IntervalLevelRangeIterator> cg(
@@ -161,7 +163,9 @@ TEST_F(test_ms_tile, tile_one_pixel)
     // levels = 0, 10
     std::vector<double> data = {2.0};
     const double levels[] = {0.0};
-    FixedLevelRangeIterator levelGenerator(levels, 1);
+    FixedLevelRangeIterator levelGenerator(
+        levels, 1, -std::numeric_limits<double>::infinity(),
+        std::numeric_limits<double>::infinity());
     Writer writer;
 
     ContourGenerator<Writer, FixedLevelRangeIterator> cg(
@@ -195,7 +199,8 @@ TEST_F(test_ms_tile, tile_one_pixel_two)
     // only one pixel of value 2.0
     // levels = 2, 10
     std::vector<double> data = {2.0};
-    IntervalLevelRangeIterator levels(2.0, 10.0);
+    IntervalLevelRangeIterator levels(2.0, 10.0,
+                                      -std::numeric_limits<double>::infinity());
     Writer writer;
 
     ContourGenerator<Writer, IntervalLevelRangeIterator> cg(
@@ -287,7 +292,8 @@ TEST_F(test_ms_tile, tile_two_pixels)
 
     std::vector<double> data = {10.0, 7.0};
     {
-        IntervalLevelRangeIterator levels(8.0, 10.0);
+        IntervalLevelRangeIterator levels(
+            8.0, 10.0, -std::numeric_limits<double>::infinity());
         Writer writer;
         ContourGenerator<Writer, IntervalLevelRangeIterator> cg(
             2, 1, /* hasNoData */ false, NaN, writer, levels);
@@ -409,7 +415,8 @@ TEST_F(test_ms_tile, tile_four_pixels)
     //  NaN                 NaN                NaN                NaN
     std::vector<double> data = {10.0, 7.0, 4.0, 5.0};
     {
-        IntervalLevelRangeIterator levels(8.0, 10.0);
+        IntervalLevelRangeIterator levels(
+            8.0, 10.0, -std::numeric_limits<double>::infinity());
         Writer writer;
         ContourGenerator<Writer, IntervalLevelRangeIterator> cg(
             2, 2, /* hasNoData */ false, NaN, writer, levels);
@@ -482,7 +489,9 @@ TEST_F(test_ms_tile, tile_four_pixels_2)
     std::vector<double> data = {155.0, 155.01, 154.99, 155.0};
     {
         const double levels[] = {155.0};
-        FixedLevelRangeIterator levelGenerator(levels, 1);
+        FixedLevelRangeIterator levelGenerator(
+            levels, 1, -std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity());
         Writer writer;
         ContourGenerator<Writer, FixedLevelRangeIterator> cg(
             2, 2, /* hasNoData */ false, NaN, writer, levelGenerator);
@@ -497,4 +506,8 @@ TEST_F(test_ms_tile, tile_four_pixels_2)
         EXPECT_EQ(writer.borders[1].size(), size_t(12));
     }
 }
-}  // namespace
+}  // namespace test_marching_squares_tile
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif

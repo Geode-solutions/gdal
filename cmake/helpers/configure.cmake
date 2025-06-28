@@ -20,6 +20,7 @@ include(CheckCSourceCompiles)
 include(CheckCXXSourceCompiles)
 # include (CompilerFlags)
 include(CheckCXXSymbolExists)
+include(CMakePushCheckState)
 
 set(GDAL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
@@ -44,6 +45,26 @@ check_type_size("long int" SIZEOF_LONG_INT)
 check_type_size("void*" SIZEOF_VOIDP)
 check_type_size("size_t" SIZEOF_SIZE_T)
 
+# Check whether the type `_Float16` exists, and whether type
+# conversions work (there might be linker problems)
+check_cxx_source_compiles(
+    "
+      #ifdef GDAL_DISABLE_FLOAT16
+        Explicitly disable _Float16 support
+      #endif
+      int main() {
+        _Float16 h = 1;
+        float f = h;
+        double d = h;
+        return f != 0 && d != 0 ? 0 : 1;
+      }
+    "
+    HAVE__FLOAT16)
+
+check_function_exists(ctime_r HAVE_CTIME_R)
+check_function_exists(gmtime_r HAVE_GMTIME_R)
+check_function_exists(localtime_r HAVE_LOCALTIME_R)
+
 if(MSVC AND NOT BUILD_SHARED_LIBS)
   set(CPL_DISABLE_DLL 1)
 endif()
@@ -58,7 +79,6 @@ if (MSVC)
   set(HAVE_SEARCH_H 1)
   set(HAVE_DIRECT_H 1)
 
-  set(HAVE_LOCALTIME_R 0)
   set(HAVE_DLFCN_H 1)
 
   set(VSI_STAT64 _stat64)
@@ -144,6 +164,12 @@ else ()
   check_function_exists(getrlimit HAVE_GETRLIMIT)
   check_symbol_exists(RLIMIT_AS "sys/resource.h" HAVE_RLIMIT_AS)
 
+  # For internal libjson-c
+  check_include_file(sys/random.h HAVE_SYS_RANDOM_H)
+  if (HAVE_SYS_RANDOM_H)
+    check_symbol_exists(getrandom "sys/random.h" HAVE_GETRANDOM)
+  endif()
+
   check_function_exists(ftell64 HAVE_FTELL64)
   if (HAVE_FTELL64)
     set(VSI_FTELL64 "ftell64")
@@ -217,13 +243,13 @@ else ()
         #endif
         #include <sys/types.h>
         #include <sys/stat.h>
-        int main() { struct _stat64 buf; _wstat64( \"\", &buf ); return 0; }
+        int main() { struct _stat64 buf; wchar_t path = 0; _wstat64( &path, &buf ); return 0; }
     "
-    NO_UNIX_STDIO_64)
+    WINDOWS_STAT64)
 
-  if (NO_UNIX_STDIO_64)
+  if (WINDOWS_STAT64)
     set(VSI_STAT64 _stat64)
-    set(VSI_STAT64_T __stat64)
+    set(VSI_STAT64_T _stat64)
   endif ()
 
   check_function_exists(fopen64 HAVE_FOPEN64)
@@ -248,7 +274,7 @@ else ()
   # available at build time.
   # This is also necessary for Mac Catalyst builds.
   # Cf https://lists.osgeo.org/pipermail/gdal-dev/2022-August/056174.html
-  if (${CMAKE_SYSTEM_NAME} MATCHES "iOS" OR ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  if (${CMAKE_SYSTEM_NAME} MATCHES "iOS|visionOS|tvOS|watchOS|Darwin")
     set(VSI_FOPEN64 "fopen")
     set(VSI_FTRUNCATE64 "ftruncate")
     set(VSI_FTELL64 "ftell")
@@ -358,6 +384,53 @@ else ()
     set(DONT_DEPRECATE_SPRINTF 1)
     add_definitions(-DDONT_DEPRECATE_SPRINTF)
   endif ()
+
+  check_cxx_source_compiles(
+    "
+    #include <shared_mutex>
+    int main(int argc, const char * argv[]) {
+        std::shared_mutex smtx;
+        smtx.lock_shared();
+        smtx.unlock_shared();
+        return 0;
+    }
+    "
+    HAVE_SHARED_MUTEX
+  )
+
+  # std::atomic<int64_t> requires linking against -latomic on 32-bit architectures
+  # that need native support for 64-bit atomic operations.
+  # cf https://lists.osgeo.org/pipermail/gdal-dev/2025-May/060508.html
+  check_cxx_source_compiles(
+    "
+    #include <atomic>
+    #include <cstdint>
+    int main(int argc, const char * argv[]) {
+        std::atomic<uint64_t> x;
+        return x;
+    }
+    "
+    HAVE_ATOMIC_UINT64_T
+  )
+  if (NOT HAVE_ATOMIC_UINT64_T)
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_LIBRARIES "atomic")
+    check_cxx_source_compiles(
+      "
+      #include <atomic>
+      #include <cstdint>
+      int main(int argc, const char * argv[]) {
+          std::atomic<uint64_t> x;
+          return x;
+      }
+      "
+      HAVE_ATOMIC_UINT64_T_WITH_ATOMIC
+    )
+    cmake_pop_check_state()
+    if (NOT HAVE_ATOMIC_UINT64_T_WITH_ATOMIC)
+      message(FATAL_ERROR "Cannot find libatomic needed to have support for std::atomic<uint64_t>")
+    endif()
+  endif()
 
   check_include_file("linux/userfaultfd.h" HAVE_USERFAULTFD_H)
 endif ()

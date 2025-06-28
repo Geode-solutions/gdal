@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     python_strings.i
  * Project:  GDAL Python Interface
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2009, Even Rouault
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 %{
@@ -102,6 +85,44 @@ static char* GDALPythonObjectToCStr(PyObject* pyObject, int* pbToFree)
       return NULL;
   }
 }
+
+static char * GDALPythonPathToCStr(PyObject* pyObject, int* pbToFree) CPL_UNUSED;
+static char * GDALPythonPathToCStr(PyObject* pyObject, int* pbToFree)
+{
+    PyObject* os = PyImport_ImportModule("os");
+    if (os == NULL)
+    {
+        return NULL;
+    }
+
+    PyObject* pathLike = PyObject_GetAttrString(os, "PathLike");
+    if (pathLike == NULL)
+    {
+        Py_DECREF(os);
+        return NULL;
+    }
+
+    if (!PyObject_IsInstance(pyObject, pathLike))
+    {
+        Py_DECREF(pathLike);
+        Py_DECREF(os);
+        return NULL;
+    }
+
+    PyObject* str = PyObject_Str(pyObject);
+    char* ret = NULL;
+    if (str != NULL)
+    {
+        ret = GDALPythonObjectToCStr(str, pbToFree);
+        Py_DECREF(str);
+    }
+
+    Py_DECREF(pathLike);
+    Py_DECREF(os);
+
+    return ret;
+}
+
 
 static void GDALPythonFreeCStr(void* ptr, int bToFree) CPL_UNUSED;
 static void GDALPythonFreeCStr(void* ptr, int bToFree)

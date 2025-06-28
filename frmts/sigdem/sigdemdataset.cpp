@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018, Paul Austin <paul.austin@revolsys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "sigdemdataset.h"
@@ -149,12 +133,12 @@ SIGDEMDataset::SIGDEMDataset(const SIGDEMHeader &sHeaderIn)
     this->nRasterXSize = sHeader.nCols;
     this->nRasterYSize = sHeader.nRows;
 
-    this->adfGeoTransform[0] = sHeader.dfMinX;
-    this->adfGeoTransform[1] = sHeader.dfXDim;
-    this->adfGeoTransform[2] = 0.0;
-    this->adfGeoTransform[3] = sHeader.dfMaxY;
-    this->adfGeoTransform[4] = 0.0;
-    this->adfGeoTransform[5] = -sHeader.dfYDim;
+    m_gt[0] = sHeader.dfMinX;
+    m_gt[1] = sHeader.dfXDim;
+    m_gt[2] = 0.0;
+    m_gt[3] = sHeader.dfMaxY;
+    m_gt[4] = 0.0;
+    m_gt[5] = -sHeader.dfYDim;
 }
 
 SIGDEMDataset::~SIGDEMDataset()
@@ -177,8 +161,8 @@ GDALDataset *SIGDEMDataset::CreateCopy(const char *pszFilename,
                                        void *pProgressData)
 {
     const int nBands = poSrcDS->GetRasterCount();
-    double adfGeoTransform[6] = {};
-    if (poSrcDS->GetGeoTransform(adfGeoTransform) != CE_None)
+    GDALGeoTransform gt;
+    if (poSrcDS->GetGeoTransform(gt) != CE_None)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "SIGDEM driver requires a valid GeoTransform.");
@@ -210,7 +194,7 @@ GDALDataset *SIGDEMDataset::CreateCopy(const char *pszFilename,
 
     SIGDEMHeader sHeader;
     sHeader.nCoordinateSystemId = nCoordinateSystemId;
-    sHeader.dfMinX = adfGeoTransform[0];
+    sHeader.dfMinX = gt[0];
     const char *pszMin = band->GetMetadataItem("STATISTICS_MINIMUM");
     if (pszMin == nullptr)
     {
@@ -220,7 +204,7 @@ GDALDataset *SIGDEMDataset::CreateCopy(const char *pszFilename,
     {
         sHeader.dfMinZ = CPLAtof(pszMin);
     }
-    sHeader.dfMaxY = adfGeoTransform[3];
+    sHeader.dfMaxY = gt[3];
     const char *pszMax = band->GetMetadataItem("STATISTICS_MAXIMUM");
     if (pszMax == nullptr)
     {
@@ -232,8 +216,8 @@ GDALDataset *SIGDEMDataset::CreateCopy(const char *pszFilename,
     }
     sHeader.nCols = poSrcDS->GetRasterXSize();
     sHeader.nRows = poSrcDS->GetRasterYSize();
-    sHeader.dfXDim = adfGeoTransform[1];
-    sHeader.dfYDim = -adfGeoTransform[5];
+    sHeader.dfXDim = gt[1];
+    sHeader.dfYDim = -gt[5];
     sHeader.dfMaxX = sHeader.dfMinX + sHeader.nCols * sHeader.dfXDim;
     sHeader.dfMinY = sHeader.dfMaxY - sHeader.nRows * sHeader.dfYDim;
     sHeader.dfOffsetX = sHeader.dfMinX;
@@ -278,7 +262,8 @@ GDALDataset *SIGDEMDataset::CreateCopy(const char *pszFilename,
     {
         if (!EQUAL(pszProjection, ""))
         {
-            CPLString osPrjFilename = CPLResetExtension(pszFilename, "prj");
+            const CPLString osPrjFilename =
+                CPLResetExtensionSafe(pszFilename, "prj");
             VSILFILE *fpProj = VSIFOpenL(osPrjFilename, "wt");
             if (fpProj != nullptr)
             {
@@ -315,9 +300,9 @@ GDALDataset *SIGDEMDataset::CreateCopy(const char *pszFilename,
     }
 }
 
-CPLErr SIGDEMDataset::GetGeoTransform(double *padfTransform)
+CPLErr SIGDEMDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 
@@ -369,12 +354,13 @@ GDALDataset *SIGDEMDataset::Open(GDALOpenInfo *poOpenInfo)
     else
     {
         CPLString osPrjFilename =
-            CPLResetExtension(poOpenInfo->pszFilename, "prj");
+            CPLResetExtensionSafe(poOpenInfo->pszFilename, "prj");
         VSIStatBufL sStatBuf;
         int nRet = VSIStatL(osPrjFilename, &sStatBuf);
         if (nRet != 0 && VSIIsCaseSensitiveFS(osPrjFilename))
         {
-            osPrjFilename = CPLResetExtension(poOpenInfo->pszFilename, "PRJ");
+            osPrjFilename =
+                CPLResetExtensionSafe(poOpenInfo->pszFilename, "PRJ");
             nRet = VSIStatL(osPrjFilename, &sStatBuf);
         }
 
@@ -412,7 +398,7 @@ GDALDataset *SIGDEMDataset::Open(GDALOpenInfo *poOpenInfo)
     }
     SIGDEMDataset *poDS = new SIGDEMDataset(sHeader);
 
-    poDS->m_oSRS = oSRS;
+    poDS->m_oSRS = std::move(oSRS);
 
     poDS->fpImage = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;

@@ -12,27 +12,10 @@
 #  Copyright (c) 2016 Alexandr Borzykh
 #  Copyright (c) 2016-2019, NextGIS <info@nextgis.com>
 #
-#  Permission is hereby granted, free of charge, to any person obtaining a copy
-#  of this software and associated documentation files (the "Software"), to deal
-#  in the Software without restriction, including without limitation the rights
-#  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-#  copies of the Software, and to permit persons to whom the Software is
-#  furnished to do so, subject to the following conditions:
-#
-#  The above copyright notice and this permission notice shall be included in all
-#  copies or substantial portions of the Software.
-#
-#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-#  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-#  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-#  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-#  SOFTWARE.
+# SPDX-License-Identifier: MIT
 ################################################################################
 
 
-import gdaltest
 import ogrtest
 import pytest
 
@@ -55,6 +38,7 @@ def test_ogr_cad_2():
     layer = ds.GetLayer(0)
 
     assert layer.GetName() == "0", "layer name is expected to be default = 0."
+    assert layer.GetDataset().GetDescription() == ds.GetDescription()
 
     defn = layer.GetLayerDefn()
     assert defn.GetFieldCount() == 5, (
@@ -257,9 +241,7 @@ def test_ogr_cad_4():
 
     feat = layer.GetNextFeature()
 
-    assert not ogrtest.check_feature_geometry(
-        feat, "POINT (50 50 0)"
-    ), "got feature which does not fit expectations."
+    ogrtest.check_feature_geometry(feat, "POINT (50 50 0)")
 
 
 ###############################################################################
@@ -278,9 +260,7 @@ def test_ogr_cad_5():
 
     feat = layer.GetNextFeature()
 
-    assert not ogrtest.check_feature_geometry(
-        feat, "LINESTRING (50 50 0,100 100 0)"
-    ), "got feature which does not fit expectations."
+    ogrtest.check_feature_geometry(feat, "LINESTRING (50 50 0,100 100 0)")
 
 
 ###############################################################################
@@ -302,15 +282,18 @@ def test_ogr_cad_6():
 
     feat = layer.GetNextFeature()
 
-    assert not ogrtest.check_feature_geometry(feat, "POINT(0.7413 1.7794 0)")
+    ogrtest.check_feature_geometry(feat, "POINT(0.7413 1.7794 0)")
+
+
+@pytest.mark.xfail(reason="cannot be sure iconv is builtin")
+def test_ogr_cad_6bis():
+
+    ds = gdal.OpenEx("data/cad/text_mtext_attdef_r2000.dwg", allowed_drivers=["CAD"])
+    layer = ds.GetLayer(0)
+    feat = layer.GetNextFeature()
 
     expected_style = 'LABEL(f:"Arial",t:"Русские буквы",c:#FFFFFFFF)'
-    if feat.GetStyleString() != expected_style:
-        gdaltest.post_reason(
-            "Got unexpected style string:\n%s\ninstead of:\n%s."
-            % (feat.GetStyleString(), expected_style)
-        )
-        return "expected_fail"  # cannot sure iconv is buildin
+    assert feat.GetStyleString() == expected_style
 
 
 ###############################################################################
@@ -325,7 +308,7 @@ def test_ogr_cad_7():
     feat = layer.GetNextFeature()
     feat = layer.GetNextFeature()
 
-    assert not ogrtest.check_feature_geometry(feat, "POINT(2.8139 5.7963 0)")
+    ogrtest.check_feature_geometry(feat, "POINT(2.8139 5.7963 0)")
 
     expected_style = 'LABEL(f:"Arial",t:"English letters",c:#FFFFFFFF)'
     assert (
@@ -349,9 +332,7 @@ def test_ogr_cad_8():
     feat = layer.GetNextFeature()
     feat = layer.GetNextFeature()
 
-    assert not ogrtest.check_feature_geometry(
-        feat, "POINT(4.98953601938918 2.62670161690571 0)"
-    )
+    ogrtest.check_feature_geometry(feat, "POINT(4.98953601938918 2.62670161690571 0)")
 
     expected_style = 'LABEL(f:"Arial",t:"TESTTAG",c:#FFFFFFFF)'
     assert (
@@ -368,8 +349,5 @@ def test_ogr_cad_8():
 
 def test_ogr_cad_9():
 
-    with gdaltest.error_handler():
-        ds = gdal.OpenEx("data/cad/AC1018_signature.dwg", allowed_drivers=["CAD"])
-    assert ds is None
-    msg = gdal.GetLastErrorMsg()
-    assert "does not support this version" in msg
+    with pytest.raises(Exception, match=r".*does not support this version.*"):
+        gdal.OpenEx("data/cad/AC1018_signature.dwg", allowed_drivers=["CAD"])

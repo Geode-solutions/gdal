@@ -8,23 +8,7 @@
  * Copyright (c) 2003, Frank Warmerdam
  * Copyright (c) 2008, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <wchar.h>
@@ -183,17 +167,14 @@ bool CPLODBCDriverInstaller::FindMdbToolsDriverLib(CPLString &osDriverFile)
         if (VSIStat(pszDrvCfg, &sStatBuf) == 0 && VSI_ISDIR(sStatBuf.st_mode))
         {
             // Find default library in custom directory
-            const char *pszDriverFile =
-                CPLFormFilename(pszDrvCfg, "libmdbodbc.so", nullptr);
-            CPLAssert(nullptr != pszDriverFile);
-
-            strLibPath = pszDriverFile;
+            strLibPath =
+                CPLFormFilenameSafe(pszDrvCfg, "libmdbodbc.so", nullptr);
         }
 
         if (LibraryExists(strLibPath.c_str()))
         {
             // Save custom driver path
-            osDriverFile = strLibPath;
+            osDriverFile = std::move(strLibPath);
             return true;
         }
     }
@@ -232,14 +213,12 @@ bool CPLODBCDriverInstaller::FindMdbToolsDriverLib(CPLString &osDriverFile)
     {
         for (const char *pszLibName : apszLibNames)
         {
-            const char *pszDriverFile =
-                CPLFormFilename(pszPath, pszLibName, nullptr);
-            CPLAssert(nullptr != pszDriverFile);
-
-            if (LibraryExists(pszDriverFile))
+            const std::string osDriverFileAttempt =
+                CPLFormFilenameSafe(pszPath, pszLibName, nullptr);
+            if (LibraryExists(osDriverFileAttempt.c_str()))
             {
                 // Save default driver path
-                osDriverFile = pszDriverFile;
+                osDriverFile = osDriverFileAttempt;
                 return true;
             }
         }
@@ -278,7 +257,7 @@ bool CPLODBCDriverInstaller::LibraryExists(const char *pszLibPath)
 
 void CPLODBCDriverInstaller::InstallMdbToolsDriver()
 {
-#ifdef WIN32
+#ifdef _WIN32
     return;
 #else
     static std::once_flag oofDriverInstallAttempted;
@@ -304,8 +283,7 @@ void CPLODBCDriverInstaller::InstallMdbToolsDriver()
                 CPLAssert(!osDriverFile.empty());
                 CPLDebug("ODBC", "MDB Tools driver: %s", osDriverFile.c_str());
 
-                CPLString driverName("Microsoft Access Driver (*.mdb)");
-                CPLString driver(driverName);
+                std::string driver("Microsoft Access Driver (*.mdb)");
                 driver += '\0';
                 driver += "Driver=";
                 driver += osDriverFile;  // Found by FindDriverLib()
@@ -614,13 +592,22 @@ bool CPLODBCSession::ConnectToMsAccess(const char *pszName,
     const auto Connect =
         [this, &pszName](const char *l_pszDSNStringTemplate, bool bVerboseError)
     {
-        char *pszDSN = static_cast<char *>(
-            CPLMalloc(strlen(pszName) + strlen(l_pszDSNStringTemplate) + 100));
-        /* coverity[tainted_string] */
-        snprintf(pszDSN, strlen(pszName) + strlen(l_pszDSNStringTemplate) + 100,
-                 l_pszDSNStringTemplate, pszName);
-        CPLDebug("ODBC", "EstablishSession(%s)", pszDSN);
-        int bError = !EstablishSession(pszDSN, nullptr, nullptr);
+        std::string osDSN;
+        constexpr const char *PCT_S = "%s";
+        const char *pszPctS = strstr(l_pszDSNStringTemplate, PCT_S);
+        if (!pszPctS)
+        {
+            osDSN = l_pszDSNStringTemplate;
+        }
+        else
+        {
+            osDSN.assign(l_pszDSNStringTemplate,
+                         pszPctS - l_pszDSNStringTemplate);
+            osDSN += pszName;
+            osDSN += (pszPctS + strlen(PCT_S));
+        }
+        CPLDebug("ODBC", "EstablishSession(%s)", osDSN.c_str());
+        int bError = !EstablishSession(osDSN.c_str(), nullptr, nullptr);
         if (bError)
         {
             if (bVerboseError)
@@ -628,13 +615,11 @@ bool CPLODBCSession::ConnectToMsAccess(const char *pszName,
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "Unable to initialize ODBC connection to DSN for %s,\n"
                          "%s",
-                         pszDSN, GetLastError());
+                         osDSN.c_str(), GetLastError());
             }
-            CPLFree(pszDSN);
             return false;
         }
 
-        CPLFree(pszDSN);
         return true;
     };
 
@@ -711,6 +696,16 @@ int CPLODBCSession::EstablishSession(const char *pszDSN, const char *pszUserid,
     if (pszPassword == nullptr)
         pszPassword = "";
 
+    std::string osDSN(pszDSN);
+#if defined(_WIN32)
+    if (CPLTestBool(CPLGetConfigOption("GDAL_FILENAME_IS_UTF8", "YES")))
+    {
+        char *pszTemp = CPLRecode(pszDSN, CPL_ENC_UTF8, "CP_ACP");
+        osDSN = pszTemp;
+        CPLFree(pszTemp);
+    }
+#endif
+
     bool bFailed = false;
     if (strstr(pszDSN, "=") != nullptr)
     {
@@ -720,7 +715,7 @@ int CPLODBCSession::EstablishSession(const char *pszDSN, const char *pszUserid,
 
         bFailed = CPL_TO_BOOL(Failed(SQLDriverConnect(
             m_hDBC, nullptr,
-            reinterpret_cast<SQLCHAR *>(const_cast<char *>(pszDSN)),
+            reinterpret_cast<SQLCHAR *>(const_cast<char *>(osDSN.c_str())),
             static_cast<SQLSMALLINT>(strlen(pszDSN)), szOutConnString,
             sizeof(szOutConnString), &nOutConnStringLen, SQL_DRIVER_NOPROMPT)));
     }
@@ -728,7 +723,8 @@ int CPLODBCSession::EstablishSession(const char *pszDSN, const char *pszUserid,
     {
         CPLDebug("ODBC", "SQLConnect(%s)", pszDSN);
         bFailed = CPL_TO_BOOL(Failed(SQLConnect(
-            m_hDBC, reinterpret_cast<SQLCHAR *>(const_cast<char *>(pszDSN)),
+            m_hDBC,
+            reinterpret_cast<SQLCHAR *>(const_cast<char *>(osDSN.c_str())),
             SQL_NTS, reinterpret_cast<SQLCHAR *>(const_cast<char *>(pszUserid)),
             SQL_NTS,
             reinterpret_cast<SQLCHAR *>(const_cast<char *>(pszPassword)),
@@ -848,10 +844,18 @@ int CPLODBCStatement::ExecuteSQL(const char *pszStatement)
 #endif
 
     // SQL_NTS=-3 is a valid value for SQLExecDirect.
-    // coverity[negative_returns]
-    if (Failed(SQLExecDirect(
-            m_hStmt, reinterpret_cast<SQLCHAR *>(m_pszStatement), SQL_NTS)))
+    if (Failed(SQLExecDirect(m_hStmt,
+                             reinterpret_cast<SQLCHAR *>(m_pszStatement),
+#ifdef __COVERITY__
+
+                             static_cast<SQLINTEGER>(strlen(m_pszStatement))
+#else
+                             SQL_NTS
+#endif
+                                 )))
+    {
         return FALSE;
+    }
 
     return CollectResultsInfo();
 }
@@ -1600,6 +1604,7 @@ int CPLODBCStatement::Failed(int nResultCode)
 
     return TRUE;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -1636,6 +1641,24 @@ void CPLODBCStatement::Append(const char *pszText)
 
     strcpy(m_pszStatement + m_nStatementLen, pszText);
     m_nStatementLen += nTextLen;
+}
+
+/************************************************************************/
+/*                      Append(const std::string &)                     */
+/************************************************************************/
+
+/**
+ * Append text to internal command.
+ *
+ * The passed text is appended to the internal SQL command text.
+ *
+ * @param s text to append.
+ */
+
+void CPLODBCStatement::Append(const std::string &s)
+
+{
+    Append(s.c_str());
 }
 
 /************************************************************************/

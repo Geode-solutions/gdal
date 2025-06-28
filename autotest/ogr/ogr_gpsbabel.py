@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for OGR GPSBabel driver.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2010, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -56,7 +39,7 @@ pytestmark = [
 def startup_and_cleanup():
 
     # Check that the GPX driver has read support
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         if ogr.Open("data/gpx/test.gpx") is None:
             assert "Expat" in gdal.GetLastErrorMsg()
             pytest.skip("GDAL build without Expat support")
@@ -123,3 +106,36 @@ def test_ogr_gpsbabel_3():
     assert not (
         res.find("$GPRMC") == -1 or res.find("$GPGGA") == -1 or res.find("$GPGSA") == -1
     ), "did not get expected result"
+
+
+###############################################################################
+# Test features=
+
+
+@pytest.mark.parametrize("features", ["waypoints", "tracks", "routes"])
+def test_ogr_gpsbabel_features_in_connection_string(features):
+
+    ds = ogr.Open(f"GPSBABEL:gpx:features={features}:data/gpx/test.gpx")
+    assert ds
+    assert ds.GetLayerCount() == (1 if features == "waypoints" else 2)
+    assert ds.GetLayer(0).GetName() == features
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize(
+    "connection_string",
+    [
+        "GPSBABEL:",
+        "GPSBABEL:wrong_driver",
+        "GPSBABEL:gpx:wrong_file",
+        "GPSBABEL:gpx:features=wrong_feature:data/gpx/test.gpx",
+        "GPSBABEL:gpx:features=waypoints",
+    ],
+)
+def test_ogr_gpsbabel_bad_connection_string(connection_string):
+
+    with pytest.raises(Exception):
+        ogr.Open(connection_string)

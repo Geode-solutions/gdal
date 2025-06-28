@@ -1,170 +1,207 @@
 # CMake4GDAL project is distributed under MIT license. See accompanying file LICENSE.txt.
 
-# Documentation rules
 find_package(Doxygen)
-if (DOXYGEN_FOUND)
-  set(TARGET_HTML_DIR ${CMAKE_BINARY_DIR}/html)
-  file(MAKE_DIRECTORY ${TARGET_HTML_DIR})
-  # Generate translated docs. Should go first, because index.html page should be overwritten with the main one later
-  add_custom_command(
-    OUTPUT ${TARGET_HTML_DIR}/header.html ${TARGET_HTML_DIR}/footer.html ${TARGET_HTML_DIR}/stylesheet.css
-    COMMAND ${DOXYGEN_EXECUTABLE} -w html header.html footer.html stylesheet.css
-    WORKING_DIRECTORY ${TARGET_HTML_DIR})
-  # Generate Russian document
-  set(GDAL_DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-  set(GDAL_DOXYGEN_PROJECT_NAME "RU")
-  set(GDAL_DOXYGEN_LANGUAGE "Russian")
-  set(GDAL_DOXYGEN_JAVADOC_AUTOBRIEF "NO")
-  set(GDAL_DOXYGEN_EXTRACT_LOCAL_CLASSES "YES")
-  set(GDAL_DOXYGEN_INPUT "gdal_building_ru.dox gdal_datamodel_ru.dox gdal_tutorial_ru.dox index_ru.dox")
-  set(GDAL_DOXYGEN_EXAMPLE_PATH "")
-  set(GDAL_DOXYGEN_IMAGE_PATH "")
-  set(GDAL_DOXYGEN_LAYOUT_FILE "")
-  set(GDAL_ENABLED_SECTIONS "")
-  set(GDAL_GENERATE_HTML "YES")
-  set(GDAL_FILE_PATTERNS
-      "*.h \
-                           *.cpp \
-                           *.c \
-                           *.dox")
-  set(GDAL_GENERATE_MAN "NO")
-  configure_file(${GDAL_CMAKE_TEMPLATE_PATH}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_ru)
-  add_custom_command(
-    OUTPUT ${TARGET_HTML_DIR}/index_ru.html
-    COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_ru
-    MAIN_DEPENDENCY ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_ru
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/ru)
-  add_custom_command(
-    OUTPUT ${TARGET_HTML_DIR}/header_ru.html
-    COMMAND
-      ${CMAKE_COMMAND} ARGS -Dinfile:FILEPATH=${TARGET_HTML_DIR}/header.html
-      -Doutfile:FILEPATH=${TARGET_HTML_DIR}/header_ru.html -Dfrom:STRING="iso-8859-1" -Dto:STRING="utf-8" -P
-      ${CMAKE_CURRENT_SOURCE_DIR}/ReplaceStr.cmake
-    MAIN_DEPENDENCY ${TARGET_HTML_DIR}/header.html
-    WORKING_DIRECTORY ${TARGET_HTML_DIR})
-  # generate Brazilian document
-  set(GDAL_DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-  set(GDAL_DOXYGEN_PROJECT_NAME "BR")
-  set(GDAL_DOXYGEN_LANGUAGE "Brazilian")
-  set(GDAL_DOXYGEN_JAVADOC_AUTOBRIEF "NO")
-  set(GDAL_DOXYGEN_EXTRACT_LOCAL_CLASSES "YES")
-  set(GDAL_DOXYGEN_INPUT "gdal_building_br.dox gdal_datamodel_br.dox gdal_tutorial_br.dox index_br.dox")
-  set(GDAL_DOXYGEN_EXAMPLE_PATH "")
-  set(GDAL_DOXYGEN_IMAGE_PATH "")
-  set(GDAL_ENABLED_SECTIONS "")
-  set(GDAL_DOXYGEN_LAYOUT_FILE "")
-  set(GDAL_GENERATE_HTML "YES")
-  set(GDAL_FILE_PATTERNS "*.h *.cpp *.c *.dox")
-  set(GDAL_GENERATE_MAN "NO")
-  configure_file(${GDAL_CMAKE_TEMPLATE_PATH}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_br)
-  add_custom_command(
-    OUTPUT ${TARGET_HTML_DIR}/index_br.html
-    COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_br
-    MAIN_DEPENDENCY ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_br
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/br)
-  add_custom_command(
-    OUTPUT ${TARGET_HTML_DIR}/header_br.html
-    COMMAND ${CMAKE_COMMAND} -E copy ${TARGET_HTML_DIR}/header.html ${TARGET_HTML_DIR}/header_br.html
-    DEPENDS ${TARGET_HTML_DIR}/header.html)
+find_program(SPHINX_BUILD sphinx-build)
 
-  # run main doxygen
-  set(GDAL_DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-  set(GDAL_DOXYGEN_PROJECT_NAME "GDAL")
-  set(GDAL_DOXYGEN_LANGUAGE "English")
-  set(GDAL_DOXYGEN_JAVADOC_AUTOBRIEF "YES")
-  set(GDAL_DOXYGEN_EXTRACT_LOCAL_CLASSES "NO")
-  set(GDAL_ENABLED_SECTIONS "")
-  set(GDAL_GENERATE_HTML "YES")
-  set(GDAL_DOXYGEN_INCLUDE_PATH "${CMAKE_BINARY_DIR}/port ${CMAKE_BINARY_DIR}/gcore")
-  set(GDAL_DOXYGEN_INPUT
-      "port gcore frmts/gdalallregister.cpp alg frmts/vrt \
-               doc apps ogr ogr/ogrsf_frmts ogr/ogrsf_frmts/generic \
-               ogr/ogrsf_frmts/geojson/ogrgeojsonwriter.cpp \
-               ogr/ogrsf_frmts/kml/ogr2kmlgeometry.cpp \
-               swig/python/scripts gnm")
-  set(GDAL_DOXYGEN_EXAMPLE_PATH "apps frmts frmts/jdem")
-  set(GDAL_DOXYGEN_IMAGE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/grid)
-  set(GDAL_DOXYGEN_LAYOUT_FILE ${CMAKE_SOURCE_DIR}/DoxygenLayout.xml)
-  set(GDAL_GENERATE_MAN "NO")
-  configure_file(${GDAL_CMAKE_TEMPLATE_PATH}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_main)
-  add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/html/index.html
-    COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_main
-    MAIN_DEPENDENCY ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_main
-    ${TARGET_HTML_DIR}/header.html ${TARGET_HTML_DIR}/index_ru.html ${TARGET_HTML_DIR}/index_br.html
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-  # copy rest of files for html generation
-  file(
-    GLOB
-    OTHER_DOCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/act-logo.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/cadcorp_logo.jpg
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/foss4g2013.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/foss4g2014.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/foss4g2017.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/i3-logo.jpg
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/ingres-logo.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/OSGeo_project.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/safe-logo.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/src-logo.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/images/waypoint_logo.png
-    ${CMAKE_CURRENT_SOURCE_DIR}/grid/*.png
-    ${CMAKE_SOURCE_DIR}/frmts/*.html
-    ${CMAKE_SOURCE_DIR}/frmts/*/frmt_*.html
-    ${CMAKE_SOURCE_DIR}/frmts/openjpeg/*.xml
-    ${CMAKE_SOURCE_DIR}/frmts/wms/frmt_*.xml
-    ${CMAKE_SOURCE_DIR}/ogr/ogrsf_frmts/*/frmt_*.html
-    ${CMAKE_SOURCE_DIR}/ogr/ogrsf_frmts/*/dev_*.html
-    ${CMAKE_SOURCE_DIR}/ogr/ogrsf_frmts/gpkg/geopackage_aspatial.html
-    ${CMAKE_SOURCE_DIR}/ogr/*.gif
-    ${CMAKE_SOURCE_DIR}/data/gdalicon.png
-    ${CMAKE_SOURCE_DIR}/ogr/ogrsf_frmts/ogr_formats.html
-    ${CMAKE_SOURCE_DIR}/ogr/ogrsf_frmts/ogr_formats.html
-    ${CMAKE_SOURCE_DIR}/ogr/ogr_feature_style.html)
-  add_custom_target(_copy_other_docs) # FIXME: are there any way without internal custom target?
-  foreach (f ${OTHER_DOCS})
+if ((NOT "${CMAKE_BINARY_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
+    AND DOXYGEN_FOUND
+    AND SPHINX_BUILD)
+    set(BUILD_DOCS_DEFAULT ON)
+else()
+    set(BUILD_DOCS_DEFAULT OFF)
+endif()
+
+option(BUILD_DOCS "Set to ON to define documentation targets: 'html', 'latexpdf', 'man', 'doxygen_xml', 'doxygen_html' " ${BUILD_DOCS_DEFAULT})
+
+option(DOXYGEN_FAIL_ON_WARNINGS "Set to ON to fail the build if Doxygen produces warnings" OFF)
+
+if (BUILD_DOCS)
+    if ("${CMAKE_BINARY_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
+        message(FATAL_ERROR "BUILD_DOCS=ON not compatible of in-source builds (CMAKE_SOURCE_DIR=CMAKE_BINARY_DIR)")
+    endif()
+    if (NOT DOXYGEN_FOUND)
+        message(FATAL_ERROR "BUILD_DOCS=ON requires Doxygen")
+    endif()
+    if (NOT SPHINX_BUILD)
+        message(FATAL_ERROR "BUILD_DOCS=ON requires sphinx-build")
+    endif()
+
+    ####################################################################################################
+    # Sphinx configuration
+    ####################################################################################################
+
+    # Determine environment variables so that Sphinx can load the gdal Python module without installing it.
+    include(GdalSetRuntimeEnv)
+    gdal_set_runtime_env(BUILD_RUN_ENV)
+
+    set(SPHINX_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/build)
+    set(SPHINX_BUILD_OPTS "--jobs=auto" "--show-traceback")
+    file(MAKE_DIRECTORY ${SPHINX_BUILD_DIR})
+    file(MAKE_DIRECTORY ${SPHINX_BUILD_DIR}/html_extra)
+
+    file(GLOB_RECURSE SPHINX_SOURCE_FILES CONFIGURE_DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/source/*.rst
+            ${CMAKE_CURRENT_SOURCE_DIR}/source/*.py)
+
+    ####################################################################################################
+    # Doxygen XML and HTML outputs
+    ####################################################################################################
+
+    # Create a dependency between source files and Doxygen
+    file(GLOB_RECURSE DOXYGEN_SOURCE_FILES CONFIGURE_DEPENDS
+            ${CMAKE_SOURCE_DIR}/alg/*.cpp
+            ${CMAKE_SOURCE_DIR}/app/*.cpp
+            ${CMAKE_SOURCE_DIR}/frmts/gdalallregister.cpp
+            ${CMAKE_SOURCE_DIR}/frmts/vrt/*.cpp
+            ${CMAKE_SOURCE_DIR}/gcore/*.cpp
+            ${CMAKE_SOURCE_DIR}/ogr/*.cpp
+            ${CMAKE_SOURCE_DIR}/port/*.cpp
+            ${CMAKE_SOURCE_DIR}/gnm/*.cpp
+    )
+
+    # Use configure_file to copy the Doxygen file into our build directory.
+    # This causes CMake to re-run if the contents of the Doxyfile change.
+    configure_file(${CMAKE_SOURCE_DIR}/Doxyfile ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_base)
+
+    # Read the contents of the copied Doxyfile, so that we can write modified versions
+    # for XML and HTML outputs
+    file(READ ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_base DOXYFILE_CONTENTS)
+
+    if (DOXYGEN_FAIL_ON_WARNINGS) 
+            string(JOIN "\n" DOXYFILE_CONTENTS
+                   ${DOXYFILE_CONTENTS}
+                   "WARN_AS_ERROR=FAIL_ON_WARNINGS_PRINT")
+    endif()
+
+    # Doxygen XML outputs
+    # TODO <ndash> replacement?
+    string(JOIN "\n" DOXYFILE_XML_CONTENTS
+            ${DOXYFILE_CONTENTS}
+            "GENERATE_HTML=NO"
+            "GENERATE_XML=YES"
+            "XML_OUTPUT=${SPHINX_BUILD_DIR}/xml"
+            "XML_PROGRAMLISTING=NO"
+            "PREDEFINED+=DOXYGEN_XML"
+    )
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_xml ${DOXYFILE_XML_CONTENTS})
     add_custom_command(
-      TARGET _copy_other_docs
-      PRE_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy ${f} ${CMAKE_BINARY_DIR}/html)
-  endforeach ()
-  add_custom_target(
-    documents
-    DEPENDS ${CMAKE_BINARY_DIR}/html/index.html
-            ${CMAKE_BINARY_DIR}/html/index_ru.html
-            ${CMAKE_BINARY_DIR}/html/index_br.html
-            ${CMAKE_BINARY_DIR}/html/header.html
-            ${CMAKE_BINARY_DIR}/html/footer.html
-            ${CMAKE_BINARY_DIR}/html/stylesheet.css
-            ${CMAKE_BINARY_DIR}/html/header_br.html
-            ${CMAKE_BINARY_DIR}/html/header_ru.html
-            _copy_other_docs)
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/doxygen_xml.stamp
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_xml ${DOXYGEN_SOURCE_FILES}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_xml
+            COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/doxygen_xml.stamp
+    )
 
-  # Build man
-  set(GDAL_DOXYGEN_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-  set(GDAL_DOXYGEN_PROJECT_NAME "GDAL")
-  set(GDAL_DOXYGEN_LANGUAGE "English")
-  set(GDAL_DOXYGEN_JAVADOC_AUTOBRIEF "YES")
-  set(GDAL_ENABLED_SECTIONS "man")
-  set(GDAL_DOXYGEN_EXTRACT_LOCAL_CLASSES "NO")
-  set(GDAL_DOXYGEN_INPUT "apps swig/python/scripts")
-  set(GDAL_FILE_PATTERNS "*.cpp *.dox")
-  set(GDAL_GENERATE_HTML "NO")
-  set(GDAL_DOXYGEN_EXAMPLE_PATH
-      "apps \
-             frmts \
-             frmts/jdem")
-  set(GDAL_DOXYGEN_IMAGE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/grid)
-  set(GDAL_DOXYGEN_LAYOUT_FILE "/dev/null")
-  set(GDAL_GENERATE_MAN "YES")
-  configure_file(${GDAL_CMAKE_TEMPLATE_PATH}/Doxyfile.in ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_man)
-  add_custom_command(
-    OUTPUT ${CMAKE_BINARY_DIR}/man/man1/gdalinfo.1 ${CMAKE_BINARY_DIR}/man/man1/gdal-config.1
-           ${CMAKE_BINARY_DIR}/man/man1/ogrlinfo.1 ${CMAKE_BINARY_DIR}/man/man1/ogr2ogr.1
-    COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_man
-    MAIN_DEPENDENCY ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_man
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-  add_custom_target(manpages DEPENDS ${CMAKE_BINARY_DIR}/man/man1/gdalinfo.1 ${CMAKE_BINARY_DIR}/man/man1/gdal-config.1
-                                     ${CMAKE_BINARY_DIR}/man/man1/ogrlinfo.1 ${CMAKE_BINARY_DIR}/man/man1/ogr2ogr.1)
+    add_custom_target(doxygen_xml
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/doxygen_xml.stamp
+    )
+
+    # Doxygen HTML outputs
+    string(JOIN "\n" DOXYFILE_HTML_CONTENTS
+            "${DOXYFILE_CONTENTS}"
+            "HTML_OUTPUT=${SPHINX_BUILD_DIR}/html_extra/doxygen"
+            "INLINE_INHERITED_MEMB=YES"
+    )
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_html ${DOXYFILE_HTML_CONTENTS})
+    add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/doxygen_html.stamp
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_html ${DOXYGEN_SOURCE_FILES}
+            COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_html
+            COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/doxygen_html.stamp
+    )
+    add_custom_target(doxygen_html
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/doxygen_html.stamp
+    )
+
+    ####################################################################################################
+    # Sphinx outputs
+    ####################################################################################################
+
+    # Sphinx HTML documentation
+    add_custom_command(
+            OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/html.stamp"
+            DEPENDS gdalapps doxygen_xml python_binding
+                    ${SPHINX_SOURCE_FILES}
+                    COMMAND ${CMAKE_COMMAND} -E env ${BUILD_RUN_ENV} BUILDDIR=${SPHINX_BUILD_DIR}
+                    ${SPHINX_BUILD} -M html
+                                    ${CMAKE_CURRENT_SOURCE_DIR}/source
+                                    ${SPHINX_BUILD_DIR}
+                                    ${SPHINX_BUILD_OPTS}
+                                    "--fail-on-warning"
+            COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_CURRENT_BINARY_DIR}/html.stamp"
+    )
+
+    add_custom_target(html
+            DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/html.stamp
+    )
+
+    # Sphinx PDF documentation
+    set(GDAL_DOC_PDF ${CMAKE_CURRENT_BINARY_DIR}/build/latex/gdal.pdf)
+    add_custom_command(
+            OUTPUT ${GDAL_DOC_PDF}
+            DEPENDS gdalapps doxygen_xml ${SPHINX_SOURCE_FILES}
+            COMMAND ${CMAKE_COMMAND} -E env ${BUILD_RUN_ENV} BUILDDIR=${SPHINX_BUILD_DIR}
+                    ${SPHINX_BUILD} -M latexpdf
+                                    ${CMAKE_CURRENT_SOURCE_DIR}/source
+                                    ${CMAKE_CURRENT_BINARY_DIR}/build
+    )
+
+    add_custom_target(latexpdf DEPENDS ${GDAL_DOC_PDF})
+
+    # Sphinx manpage documentation
+    add_custom_command(
+            OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/man.stamp"
+            DEPENDS gdalapps doxygen_xml ${SPHINX_SOURCE_FILES}
+            COMMAND ${CMAKE_COMMAND} -E env ${BUILD_RUN_ENV} BUILDDIR=${SPHINX_BUILD_DIR}
+                    ${SPHINX_BUILD} -M man
+                                    ${CMAKE_CURRENT_SOURCE_DIR}/source
+                                    ${CMAKE_CURRENT_BINARY_DIR}/build
+                                    ${SPHINX_BUILD_OPTS}
+            COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_CURRENT_BINARY_DIR}/man.stamp"
+    )
+
+    add_custom_target(man DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/man.stamp)
+
+    ####################################################################################################
+    # Packaged documentation (e.g. "gdal3100doc.zip")
+    ####################################################################################################
+
+    string(REPLACE "." "" _GDAL_VERSION_NO_DOTS ${GDAL_VERSION_NO_DEV_SUFFIX})
+    set(DOC_ZIP "gdal${_GDAL_VERSION_NO_DOTS}doc.zip")
+
+    # The Javadoc path is copied from swig/java/CMakeLists.txt, which hasn't been read
+    # at the time this is executed.
+    set(JAVADOC_ZIP ${CMAKE_CURRENT_BINARY_DIR}/../swig/java/javadoc.zip)
+
+    add_custom_command(
+            OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${DOC_ZIP}
+            DEPENDS ${GDAL_DOC_PDF}
+                    ${CMAKE_CURRENT_BINARY_DIR}/html.stamp
+                    java_binding ${JAVADOC_ZIP}
+            COMMAND ${CMAKE_COMMAND} -E make_directory gdaldoc
+            COMMAND ${CMAKE_COMMAND} -E make_directory gdaldoc/java
+            COMMAND ${CMAKE_COMMAND} -E chdir gdaldoc/java ${CMAKE_COMMAND} -E tar x ${JAVADOC_ZIP} --format=zip
+            COMMAND ${CMAKE_COMMAND} -E copy ${GDAL_DOC_PDF} gdaldoc/gdal.pdf
+            COMMAND ${CMAKE_COMMAND} -E copy_directory ${SPHINX_BUILD_DIR}/html gdaldoc
+            COMMAND ${CMAKE_COMMAND} -E tar c ${DOC_ZIP} --format=zip gdaldoc)
+
+    add_custom_target(doczip DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${DOC_ZIP})
+
+    ####################################################################################################
+    # Documentation tests
+    ####################################################################################################
+
+    # Spell check
+    add_test(NAME doc-spelling
+             COMMAND ${CMAKE_COMMAND} -E env ${BUILD_RUN_ENV} BUILDDIR=${SPHINX_BUILD_DIR}
+                     ${SPHINX_BUILD} -b spelling
+                                     ${CMAKE_CURRENT_SOURCE_DIR}/source
+                                     ${CMAKE_CURRENT_BINARY_DIR}/build
+                                     ${SPHINX_BUILD_OPTS}
+                                     "--fail-on-warning"
+                                     -D html_extra_path=extra_path
+    )
+
 endif ()

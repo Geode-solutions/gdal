@@ -8,7 +8,7 @@ Introduction to Gridding
 ------------------------
 
 Gridding is a process of creating a regular grid (or call it a raster image)
-from the scattered data. Typically you have a set of arbitrary scattered over
+from the scattered data. Typically you have a set of arbitrary data scattered over
 the region of survey measurements and you would like to convert them into the
 regular grid for further processing and combining with other grids.
 
@@ -22,10 +22,10 @@ regular grid for further processing and combining with other grids.
     .. image:: ../../images/grid/gridding.png
         :alt:   Scattered data gridding
 
-This problem can be solved using data interpolation or approximation
+This problem can be solved using data :term:`interpolation` or approximation
 algorithms. But you are not limited by interpolation here. Sometimes you don't
 need to interpolate your data but rather compute some statistics or data
-metrics over the region. Statistics is valuable itself or could be used for
+metrics over the region. Statistics are valuable themselves or could be used for
 better choosing the interpolation algorithm and parameters.
 
 That is what GDAL Grid API is about. It helps you to interpolate your data
@@ -34,7 +34,8 @@ That is what GDAL Grid API is about. It helps you to interpolate your data
 
 There are two ways of using this interface. Programmatically it is available
 through the :cpp:func:`GDALGridCreate` C function; for end users there is a
-:ref:`gdal_grid` utility. The rest of this document discusses details on algorithms
+:ref:`gdal_grid` utility (which see for an up-to-date list of all current features).
+The rest of this document discusses details on algorithms
 and their parameters implemented in GDAL Grid API.
 
 Interpolation of the Scattered Data
@@ -46,11 +47,11 @@ Inverse Distance to a Power
 The Inverse Distance to a Power gridding method is a weighted average
 interpolator. You should supply the input arrays with the scattered data
 values including coordinates of every data point and output grid geometry. The
-function will compute interpolated value for the given position in output
+function will compute an interpolated value for the given position in the output
 grid.
 
 For every grid node the resulting value :math:`Z` will be calculated using
-formula:
+the formula:
 
 .. math::
 
@@ -63,7 +64,7 @@ where:
 - :math:`p` is a weighting power,
 - :math:`n` is a number of points in `Search Ellipse`_.
 
-The smoothing parameter :math:`s` is used as an additive term in the Euclidean distance calculation:
+The smoothing parameter :math:`s` is used as an additive term in the :term:`Euclidean distance` calculation:
 
 .. math::
 
@@ -89,8 +90,8 @@ The Moving Average is a simple data averaging algorithm. It uses a moving
 window of elliptic form to search values and averages all data points within
 the window. `Search Ellipse`_ can be rotated by
 specified angle, the center of ellipse located at the grid node. Also the
-minimum number of data points to average can be set, if there are not enough
-points in window, the grid node considered empty and will be filled with
+minimum number of data points to average can be set. If there are not enough
+points in window, the grid node is considered empty and will be filled with
 specified NODATA value.
 
 Mathematically it can be expressed with the formula:
@@ -112,7 +113,7 @@ Nearest Neighbor
 ++++++++++++++++
 
 The Nearest Neighbor method doesn't perform any interpolation or smoothing, it
-just takes the value of nearest point found in grid node search ellipse and
+just takes the value of nearest point found in the grid node search ellipse and
 returns it as a result. If there are no points found, the specified NODATA
 value will be returned.
 

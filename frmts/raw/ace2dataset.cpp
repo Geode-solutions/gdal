@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2011-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_frmts.h"
@@ -88,7 +72,7 @@ class ACE2Dataset final : public GDALPamDataset
     friend class ACE2RasterBand;
 
     OGRSpatialReference m_oSRS{};
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
 
   public:
     ACE2Dataset();
@@ -97,7 +81,8 @@ class ACE2Dataset final : public GDALPamDataset
     {
         return &m_oSRS;
     }
-    CPLErr GetGeoTransform(double *) override;
+
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -133,23 +118,16 @@ ACE2Dataset::ACE2Dataset()
 {
     m_oSRS.SetFromUserInput(SRS_WKT_WGS84_LAT_LONG);
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr ACE2Dataset::GetGeoTransform(double *padfTransform)
+CPLErr ACE2Dataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 
@@ -205,7 +183,7 @@ char **ACE2RasterBand::GetCategoryNames()
 int ACE2Dataset::Identify(GDALOpenInfo *poOpenInfo)
 
 {
-    if (!(EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "ACE2") ||
+    if (!(poOpenInfo->IsExtensionEqualToCI("ACE2") ||
           strstr(poOpenInfo->pszFilename, ".ACE2.gz") ||
           strstr(poOpenInfo->pszFilename, ".ace2.gz")))
         return FALSE;
@@ -223,7 +201,8 @@ GDALDataset *ACE2Dataset::Open(GDALOpenInfo *poOpenInfo)
     if (!Identify(poOpenInfo))
         return nullptr;
 
-    const char *pszBasename = CPLGetBasename(poOpenInfo->pszFilename);
+    const std::string osBasename = CPLGetBasenameSafe(poOpenInfo->pszFilename);
+    const char *pszBasename = osBasename.c_str();
 
     if (strlen(pszBasename) < 7)
         return nullptr;
@@ -261,7 +240,7 @@ GDALDataset *ACE2Dataset::Open(GDALOpenInfo *poOpenInfo)
         eDT = GDT_Int16;
     else
         eDT = GDT_Float32;
-    int nWordSize = GDALGetDataTypeSize(eDT) / 8;
+    const int nWordSize = GDALGetDataTypeSizeBytes(eDT);
 
     VSIStatBufL sStat;
     if (strstr(pszBasename, "_5M"))
@@ -330,22 +309,26 @@ GDALDataset *ACE2Dataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create the dataset.                                             */
     /* -------------------------------------------------------------------- */
-    ACE2Dataset *poDS = new ACE2Dataset();
+    auto poDS = std::make_unique<ACE2Dataset>();
 
     poDS->nRasterXSize = nXSize;
     poDS->nRasterYSize = nYSize;
 
-    poDS->adfGeoTransform[0] = southWestLon;
-    poDS->adfGeoTransform[1] = dfPixelSize;
-    poDS->adfGeoTransform[2] = 0.0;
-    poDS->adfGeoTransform[3] = southWestLat + nYSize * dfPixelSize;
-    poDS->adfGeoTransform[4] = 0.0;
-    poDS->adfGeoTransform[5] = -dfPixelSize;
+    poDS->m_gt[0] = southWestLon;
+    poDS->m_gt[1] = dfPixelSize;
+    poDS->m_gt[2] = 0.0;
+    poDS->m_gt[3] = southWestLat + nYSize * dfPixelSize;
+    poDS->m_gt[4] = 0.0;
+    poDS->m_gt[5] = -dfPixelSize;
 
     /* -------------------------------------------------------------------- */
     /*      Create band information objects                                 */
     /* -------------------------------------------------------------------- */
-    poDS->SetBand(1, new ACE2RasterBand(fpImage, eDT, nXSize, nYSize));
+    auto poBand =
+        std::make_unique<ACE2RasterBand>(fpImage, eDT, nXSize, nYSize);
+    if (!poBand->IsValid())
+        return nullptr;
+    poDS->SetBand(1, std::move(poBand));
 
     /* -------------------------------------------------------------------- */
     /*      Initialize any PAM information.                                 */
@@ -356,9 +339,9 @@ GDALDataset *ACE2Dataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/

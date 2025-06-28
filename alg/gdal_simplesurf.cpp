@@ -6,30 +6,12 @@
  ******************************************************************************
  * Copyright (c) 2012, Andrew Migal
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_simplesurf.h"
 
 #include <algorithm>
-
-CPL_CVSID("$Id$")
 
 /************************************************************************/
 /* ==================================================================== */
@@ -84,6 +66,7 @@ int GDALFeaturePoint::GetX() const
 {
     return nX;
 }
+
 void GDALFeaturePoint::SetX(int nXIn)
 {
     nX = nXIn;
@@ -93,6 +76,7 @@ int GDALFeaturePoint::GetY() const
 {
     return nY;
 }
+
 void GDALFeaturePoint::SetY(int nYIn)
 {
     nY = nYIn;
@@ -102,6 +86,7 @@ int GDALFeaturePoint::GetScale() const
 {
     return nScale;
 }
+
 void GDALFeaturePoint::SetScale(int nScaleIn)
 {
     nScale = nScaleIn;
@@ -111,6 +96,7 @@ int GDALFeaturePoint::GetRadius() const
 {
     return nRadius;
 }
+
 void GDALFeaturePoint::SetRadius(int nRadiusIn)
 {
     nRadius = nRadiusIn;
@@ -120,12 +106,24 @@ int GDALFeaturePoint::GetSign() const
 {
     return nSign;
 }
+
 void GDALFeaturePoint::SetSign(int nSignIn)
 {
     nSign = nSignIn;
 }
 
 double &GDALFeaturePoint::operator[](int nIndex)
+{
+    if (nIndex < 0 || nIndex >= DESC_SIZE)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Descriptor index is out of range");
+    }
+
+    return padfDescriptor[nIndex];
+}
+
+double GDALFeaturePoint::operator[](int nIndex) const
 {
     if (nIndex < 0 || nIndex >= DESC_SIZE)
     {
@@ -192,9 +190,16 @@ CPLErr GDALSimpleSURF::ConvertRGBToLuminosity(GDALRasterBand *red,
     const int dataGreenSize = GDALGetDataTypeSizeBytes(eGreenType);
     const int dataBlueSize = GDALGetDataTypeSizeBytes(eBlueType);
 
-    void *paRedLayer = CPLMalloc(dataRedSize * nWidth * nHeight);
-    void *paGreenLayer = CPLMalloc(dataGreenSize * nWidth * nHeight);
-    void *paBlueLayer = CPLMalloc(dataBlueSize * nWidth * nHeight);
+    void *paRedLayer = VSI_MALLOC3_VERBOSE(dataRedSize, nWidth, nHeight);
+    void *paGreenLayer = VSI_MALLOC3_VERBOSE(dataGreenSize, nWidth, nHeight);
+    void *paBlueLayer = VSI_MALLOC3_VERBOSE(dataBlueSize, nWidth, nHeight);
+    if (!paRedLayer || !paGreenLayer || !paBlueLayer)
+    {
+        CPLFree(paRedLayer);
+        CPLFree(paGreenLayer);
+        CPLFree(paBlueLayer);
+        return CE_Failure;
+    }
 
     CPLErr eErr = red->RasterIO(GF_Read, 0, 0, nXSize, nYSize, paRedLayer,
                                 nWidth, nHeight, eRedType, 0, 0, nullptr);
@@ -268,8 +273,8 @@ GDALSimpleSURF::ExtractFeaturePoints(GDALIntegralImage *poImg,
     return poCollection;
 }
 
-double GDALSimpleSURF::GetEuclideanDistance(GDALFeaturePoint &firstPoint,
-                                            GDALFeaturePoint &secondPoint)
+double GDALSimpleSURF::GetEuclideanDistance(const GDALFeaturePoint &firstPoint,
+                                            const GDALFeaturePoint &secondPoint)
 {
     double sum = 0.0;
 

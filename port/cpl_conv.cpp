@@ -8,31 +8,17 @@
  * Copyright (c) 1998, Frank Warmerdam
  * Copyright (c) 2007-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_config.h"
 
 #ifdef HAVE_USELOCALE
 // For uselocale, define _XOPEN_SOURCE = 700
-// but on Solaris, we don't have uselocale and we cannot have
-// std=c++11 with _XOPEN_SOURCE != 600
+// and OpenBSD with libcxx 19.1.7 requires 800 for vasprintf
+// (cf https://github.com/OSGeo/gdal/issues/12619)
+// (not sure if the following is still up to date...) but on Solaris, we don't
+// have uselocale and we cannot have std=c++11 with _XOPEN_SOURCE != 600
 #if defined(__sun__) && __cplusplus >= 201103L
 #if _XOPEN_SOURCE != 600
 #ifdef _XOPEN_SOURCE
@@ -44,12 +30,14 @@
 #ifdef _XOPEN_SOURCE
 #undef _XOPEN_SOURCE
 #endif
-#define _XOPEN_SOURCE 700
+#define _XOPEN_SOURCE 800
 #endif
 #endif
 
 // For atoll (at least for NetBSD)
+#ifndef _ISOC99_SOURCE
 #define _ISOC99_SOURCE
+#endif
 
 #ifdef MSVC_USE_VLD
 #include <vld.h>
@@ -58,6 +46,7 @@
 #include "cpl_conv.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <climits>
@@ -66,9 +55,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
+#include <mutex>
+#include <set>
+
 #if HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -76,16 +65,28 @@
 #include <xlocale.h>  // for LC_NUMERIC_MASK on MacOS
 #endif
 
-#ifdef DEBUG_CONFIG_OPTIONS
-#include <set>
+#include <sys/types.h>  // open
+#include <sys/stat.h>   // open
+#include <fcntl.h>      // open
+
+#ifdef _WIN32
+#include <io.h>  // _isatty, _wopen
+#else
+#include <unistd.h>  // isatty
 #endif
+
 #include <string>
+
+#if __cplusplus >= 202002L
+#include <bit>  // For std::endian
+#endif
 
 #include "cpl_config.h"
 #include "cpl_multiproc.h"
 #include "cpl_string.h"
 #include "cpl_vsi.h"
 #include "cpl_vsil_curl_priv.h"
+#include "cpl_known_config_options.h"
 
 #ifdef DEBUG
 #define OGRAPISPY_ENABLED
@@ -105,6 +106,9 @@ static bool gbIgnoreEnvVariables =
     false;  // if true, only take into account configuration options set through
             // configuration file or
             // CPLSetConfigOption()/CPLSetThreadLocalConfigOption()
+
+static std::vector<std::pair<CPLSetConfigOptionSubscriber, void *>>
+    gSetConfigOptionSubscribers{};
 
 // Used by CPLOpenShared() and friends.
 static CPLMutex *hSharedFileMutex = nullptr;
@@ -180,8 +184,6 @@ void *CPLMalloc(size_t nSize)
 {
     if (nSize == 0)
         return nullptr;
-
-    CPLVerifyConfiguration();
 
     if ((nSize >> (8 * sizeof(nSize) - 1)) != 0)
     {
@@ -320,7 +322,7 @@ char *CPLStrdup(const char *pszString)
  * Convert each characters of the string to lower case.
  *
  * For example, "ABcdE" will be converted to "abcde".
- * This function is locale dependent.
+ * Starting with GDAL 3.9, this function is no longer locale dependent.
  *
  * @param pszString input string to be converted.
  * @return pointer to the same string, pszString.
@@ -336,7 +338,8 @@ char *CPLStrlwr(char *pszString)
 
     while (*pszTemp)
     {
-        *pszTemp = static_cast<char>(tolower(*pszTemp));
+        *pszTemp =
+            static_cast<char>(CPLTolower(static_cast<unsigned char>(*pszTemp)));
         pszTemp++;
     }
 
@@ -1121,7 +1124,7 @@ void *CPLScanPointer(const char *pszString, int nMaxLength)
     {
         void *pResult = nullptr;
 
-#if defined(__MSVCRT__) || (defined(WIN32) && defined(_MSC_VER))
+#if defined(__MSVCRT__) || (defined(_WIN32) && defined(_MSC_VER))
         // cppcheck-suppress invalidscanf
         sscanf(szTemp + 2, "%p", &pResult);
 #else
@@ -1355,7 +1358,7 @@ int CPLPrintUIntBig(char *pszBuffer, GUIntBig iValue, int nMaxLen)
 
     char szTemp[64] = {};
 
-#if defined(__MSVCRT__) || (defined(WIN32) && defined(_MSC_VER))
+#if defined(__MSVCRT__) || (defined(_WIN32) && defined(_MSC_VER))
 /* x86_64-w64-mingw32-g++ (GCC) 4.8.2 annoyingly warns */
 #ifdef HAVE_GCC_DIAGNOSTIC_PUSH
 #pragma GCC diagnostic push
@@ -1558,40 +1561,43 @@ int CPLPrintTime(char *pszBuffer, int nMaxLen, const char *pszFormat,
 void CPLVerifyConfiguration()
 
 {
-    static bool verified = false;
-    if (verified)
-    {
-        return;
-    }
-    verified = true;
-
     /* -------------------------------------------------------------------- */
     /*      Verify data types.                                              */
     /* -------------------------------------------------------------------- */
-    CPL_STATIC_ASSERT(sizeof(GInt32) == 4);
-    CPL_STATIC_ASSERT(sizeof(GInt16) == 2);
-    CPL_STATIC_ASSERT(sizeof(GByte) == 1);
+    static_assert(sizeof(short) == 2);   // We unfortunately rely on this
+    static_assert(sizeof(int) == 4);     // We unfortunately rely on this
+    static_assert(sizeof(float) == 4);   // We unfortunately rely on this
+    static_assert(sizeof(double) == 8);  // We unfortunately rely on this
+    static_assert(sizeof(GInt64) == 8);
+    static_assert(sizeof(GInt32) == 4);
+    static_assert(sizeof(GInt16) == 2);
+    static_assert(sizeof(GByte) == 1);
 
     /* -------------------------------------------------------------------- */
     /*      Verify byte order                                               */
     /* -------------------------------------------------------------------- */
-    GInt32 nTest = 1;
-
 #ifdef CPL_LSB
-    if (reinterpret_cast<GByte *>(&nTest)[0] != 1)
+#if __cplusplus >= 202002L
+    static_assert(std::endian::native == std::endian::little);
+#elif defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__)
+    static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__);
 #endif
-#ifdef CPL_MSB
-        if (reinterpret_cast<GByte *>(&nTest)[3] != 1)
+#elif defined(CPL_MSB)
+#if __cplusplus >= 202002L
+    static_assert(std::endian::native == std::endian::big);
+#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__)
+    static_assert(__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__);
 #endif
-            CPLError(CE_Fatal, CPLE_AppDefined,
-                     "CPLVerifyConfiguration(): byte order set wrong.");
+#else
+#error "CPL_LSB or CPL_MSB must be defined"
+#endif
 }
 
 #ifdef DEBUG_CONFIG_OPTIONS
 
-static void *hRegisterConfigurationOptionMutex = 0;
-static std::set<CPLString> *paoGetKeys = NULL;
-static std::set<CPLString> *paoSetKeys = NULL;
+static CPLMutex *hRegisterConfigurationOptionMutex = nullptr;
+static std::set<CPLString> *paoGetKeys = nullptr;
+static std::set<CPLString> *paoSetKeys = nullptr;
 
 /************************************************************************/
 /*                      CPLShowAccessedOptions()                        */
@@ -1621,8 +1627,8 @@ static void CPLShowAccessedOptions()
 
     delete paoGetKeys;
     delete paoSetKeys;
-    paoGetKeys = NULL;
-    paoSetKeys = NULL;
+    paoGetKeys = nullptr;
+    paoSetKeys = nullptr;
 }
 
 /************************************************************************/
@@ -1632,7 +1638,7 @@ static void CPLShowAccessedOptions()
 static void CPLAccessConfigOption(const char *pszKey, bool bGet)
 {
     CPLMutexHolderD(&hRegisterConfigurationOptionMutex);
-    if (paoGetKeys == NULL)
+    if (paoGetKeys == nullptr)
     {
         paoGetKeys = new std::set<CPLString>;
         paoSetKeys = new std::set<CPLString>;
@@ -1663,7 +1669,7 @@ static void CPLAccessConfigOption(const char *pszKey, bool bGet)
  *
  * To override temporary a potentially existing option with a new value, you
  * can use the following snippet :
- * <pre>
+ * \code{.cpp}
  *     // backup old value
  *     const char* pszOldValTmp = CPLGetConfigOption(pszKey, NULL);
  *     char* pszOldVal = pszOldValTmp ? CPLStrdup(pszOldValTmp) : NULL;
@@ -1673,37 +1679,24 @@ static void CPLAccessConfigOption(const char *pszKey, bool bGet)
  *     // restore old value
  *     CPLSetConfigOption(pszKey, pszOldVal);
  *     CPLFree(pszOldVal);
- * </pre>
+ * \endcode
  *
  * @param pszKey the key of the option to retrieve
  * @param pszDefault a default value if the key does not match existing defined
  *     options (may be NULL)
  * @return the value associated to the key, or the default value if not found
  *
- * @see CPLSetConfigOption(), http://trac.osgeo.org/gdal/wiki/ConfigOptions
+ * @see CPLSetConfigOption(), https://gdal.org/user/configoptions.html
  */
 const char *CPL_STDCALL CPLGetConfigOption(const char *pszKey,
                                            const char *pszDefault)
 
 {
-#ifdef DEBUG_CONFIG_OPTIONS
-    CPLAccessConfigOption(pszKey, TRUE);
-#endif
-
-    const char *pszResult = nullptr;
-
-    int bMemoryError = FALSE;
-    char **papszTLConfigOptions = reinterpret_cast<char **>(
-        CPLGetTLSEx(CTLS_CONFIGOPTIONS, &bMemoryError));
-    if (papszTLConfigOptions != nullptr)
-        pszResult = CSLFetchNameValue(papszTLConfigOptions, pszKey);
+    const char *pszResult = CPLGetThreadLocalConfigOption(pszKey, nullptr);
 
     if (pszResult == nullptr)
     {
-        CPLMutexHolderD(&hConfigMutex);
-
-        pszResult = CSLFetchNameValue(const_cast<char **>(g_papszConfigOptions),
-                                      pszKey);
+        pszResult = CPLGetGlobalConfigOption(pszKey, nullptr);
     }
 
     if (gbIgnoreEnvVariables)
@@ -1806,15 +1799,236 @@ const char *CPL_STDCALL CPLGetThreadLocalConfigOption(const char *pszKey,
 }
 
 /************************************************************************/
+/*                   CPLGetGlobalConfigOption()                         */
+/************************************************************************/
+
+/** Same as CPLGetConfigOption() but excludes environment variables and
+ *  options set with CPLSetThreadLocalConfigOption().
+ *  This function should generally not be used by applications, which should
+ *  use CPLGetConfigOption() instead.
+ *  @since 3.8 */
+const char *CPL_STDCALL CPLGetGlobalConfigOption(const char *pszKey,
+                                                 const char *pszDefault)
+{
+#ifdef DEBUG_CONFIG_OPTIONS
+    CPLAccessConfigOption(pszKey, TRUE);
+#endif
+
+    CPLMutexHolderD(&hConfigMutex);
+
+    const char *pszResult =
+        CSLFetchNameValue(const_cast<char **>(g_papszConfigOptions), pszKey);
+
+    if (pszResult == nullptr)
+        return pszDefault;
+
+    return pszResult;
+}
+
+/************************************************************************/
+/*                    CPLSubscribeToSetConfigOption()                   */
+/************************************************************************/
+
+/**
+ * Install a callback that will be notified of calls to CPLSetConfigOption()/
+ * CPLSetThreadLocalConfigOption()
+ *
+ * @param pfnCallback Callback. Must not be NULL
+ * @param pUserData Callback user data. May be NULL.
+ * @return subscriber ID that can be used with CPLUnsubscribeToSetConfigOption()
+ * @since GDAL 3.7
+ */
+
+int CPLSubscribeToSetConfigOption(CPLSetConfigOptionSubscriber pfnCallback,
+                                  void *pUserData)
+{
+    CPLMutexHolderD(&hConfigMutex);
+    for (int nId = 0;
+         nId < static_cast<int>(gSetConfigOptionSubscribers.size()); ++nId)
+    {
+        if (!gSetConfigOptionSubscribers[nId].first)
+        {
+            gSetConfigOptionSubscribers[nId].first = pfnCallback;
+            gSetConfigOptionSubscribers[nId].second = pUserData;
+            return nId;
+        }
+    }
+    int nId = static_cast<int>(gSetConfigOptionSubscribers.size());
+    gSetConfigOptionSubscribers.push_back(
+        std::pair<CPLSetConfigOptionSubscriber, void *>(pfnCallback,
+                                                        pUserData));
+    return nId;
+}
+
+/************************************************************************/
+/*                  CPLUnsubscribeToSetConfigOption()                   */
+/************************************************************************/
+
+/**
+ * Remove a subscriber installed with CPLSubscribeToSetConfigOption()
+ *
+ * @param nId Subscriber id returned by CPLSubscribeToSetConfigOption()
+ * @since GDAL 3.7
+ */
+
+void CPLUnsubscribeToSetConfigOption(int nId)
+{
+    CPLMutexHolderD(&hConfigMutex);
+    if (nId == static_cast<int>(gSetConfigOptionSubscribers.size()) - 1)
+    {
+        gSetConfigOptionSubscribers.resize(gSetConfigOptionSubscribers.size() -
+                                           1);
+    }
+    else if (nId >= 0 &&
+             nId < static_cast<int>(gSetConfigOptionSubscribers.size()))
+    {
+        gSetConfigOptionSubscribers[nId].first = nullptr;
+    }
+}
+
+/************************************************************************/
 /*                  NotifyOtherComponentsConfigOptionChanged()          */
 /************************************************************************/
 
 static void NotifyOtherComponentsConfigOptionChanged(const char *pszKey,
-                                                     const char * /*pszValue*/)
+                                                     const char *pszValue,
+                                                     bool bThreadLocal)
 {
-    // Hack
-    if (STARTS_WITH_CI(pszKey, "AWS_"))
+    // When changing authentication parameters of virtual file systems,
+    // partially invalidate cached state about file availability.
+    if (STARTS_WITH_CI(pszKey, "AWS_") || STARTS_WITH_CI(pszKey, "GS_") ||
+        STARTS_WITH_CI(pszKey, "GOOGLE_") ||
+        STARTS_WITH_CI(pszKey, "GDAL_HTTP_HEADER_FILE") ||
+        STARTS_WITH_CI(pszKey, "AZURE_") ||
+        (STARTS_WITH_CI(pszKey, "SWIFT_") && !EQUAL(pszKey, "SWIFT_MAX_KEYS")))
+    {
         VSICurlAuthParametersChanged();
+    }
+
+    if (!gSetConfigOptionSubscribers.empty())
+    {
+        for (const auto &iter : gSetConfigOptionSubscribers)
+        {
+            if (iter.first)
+                iter.first(pszKey, pszValue, bThreadLocal, iter.second);
+        }
+    }
+}
+
+/************************************************************************/
+/*                       CPLIsDebugEnabled()                            */
+/************************************************************************/
+
+static int gnDebug = -1;
+
+/** Returns whether CPL_DEBUG is enabled.
+ *
+ * @since 3.11
+ */
+bool CPLIsDebugEnabled()
+{
+    if (gnDebug < 0)
+    {
+        // Check that apszKnownConfigOptions is correctly sorted with
+        // STRCASECMP() criterion.
+        for (size_t i = 1; i < CPL_ARRAYSIZE(apszKnownConfigOptions); ++i)
+        {
+            if (STRCASECMP(apszKnownConfigOptions[i - 1],
+                           apszKnownConfigOptions[i]) >= 0)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "ERROR: apszKnownConfigOptions[] isn't correctly "
+                         "sorted: %s >= %s",
+                         apszKnownConfigOptions[i - 1],
+                         apszKnownConfigOptions[i]);
+            }
+        }
+        gnDebug = CPLTestBool(CPLGetConfigOption("CPL_DEBUG", "OFF"));
+    }
+
+    return gnDebug != 0;
+}
+
+/************************************************************************/
+/*                       CPLDeclareKnownConfigOption()                  */
+/************************************************************************/
+
+static std::mutex goMutexDeclaredKnownConfigOptions;
+static std::set<CPLString> goSetKnownConfigOptions;
+
+/** Declare that the specified configuration option is known.
+ *
+ * This is useful to avoid a warning to be emitted on unknown configuration
+ * options when CPL_DEBUG is enabled.
+ *
+ * @param pszKey Name of the configuration option to declare.
+ * @param pszDefinition Unused for now. Must be set to nullptr.
+ * @since 3.11
+ */
+void CPLDeclareKnownConfigOption(const char *pszKey,
+                                 [[maybe_unused]] const char *pszDefinition)
+{
+    std::lock_guard oLock(goMutexDeclaredKnownConfigOptions);
+    goSetKnownConfigOptions.insert(CPLString(pszKey).toupper());
+}
+
+/************************************************************************/
+/*                       CPLGetKnownConfigOptions()                     */
+/************************************************************************/
+
+/** Return the list of known configuration options.
+ *
+ * Must be freed with CSLDestroy().
+ * @since 3.11
+ */
+char **CPLGetKnownConfigOptions()
+{
+    std::lock_guard oLock(goMutexDeclaredKnownConfigOptions);
+    CPLStringList aosList;
+    for (const char *pszKey : apszKnownConfigOptions)
+        aosList.AddString(pszKey);
+    for (const auto &osKey : goSetKnownConfigOptions)
+        aosList.AddString(osKey);
+    return aosList.StealList();
+}
+
+/************************************************************************/
+/*           CPLSetConfigOptionDetectUnknownConfigOption()              */
+/************************************************************************/
+
+static void CPLSetConfigOptionDetectUnknownConfigOption(const char *pszKey,
+                                                        const char *pszValue)
+{
+    if (EQUAL(pszKey, "CPL_DEBUG"))
+    {
+        gnDebug = pszValue ? CPLTestBool(pszValue) : false;
+    }
+    else if (CPLIsDebugEnabled())
+    {
+        if (!std::binary_search(std::begin(apszKnownConfigOptions),
+                                std::end(apszKnownConfigOptions), pszKey,
+                                [](const char *a, const char *b)
+                                { return STRCASECMP(a, b) < 0; }))
+        {
+            bool bFound;
+            {
+                std::lock_guard oLock(goMutexDeclaredKnownConfigOptions);
+                bFound = cpl::contains(goSetKnownConfigOptions,
+                                       CPLString(pszKey).toupper());
+            }
+            if (!bFound)
+            {
+                const char *pszOldValue = CPLGetConfigOption(pszKey, nullptr);
+                if (!((!pszValue && !pszOldValue) ||
+                      (pszValue && pszOldValue &&
+                       EQUAL(pszValue, pszOldValue))))
+                {
+                    CPLError(CE_Warning, CPLE_AppDefined,
+                             "Unknown configuration option '%s'.", pszKey);
+                }
+            }
+        }
+    }
 }
 
 /************************************************************************/
@@ -1835,23 +2049,26 @@ static void NotifyOtherComponentsConfigOptionChanged(const char *pszKey,
  * value provided during the last call will be used.
  *
  * Options can also be passed on the command line of most GDAL utilities
- * with the with '--config KEY VALUE'. For example,
- * ogrinfo --config CPL_DEBUG ON ~/data/test/point.shp
+ * with '\--config KEY VALUE' (or '\--config KEY=VALUE' since GDAL 3.10).
+ * For example, ogrinfo \--config CPL_DEBUG ON ~/data/test/point.shp
  *
  * This function can also be used to clear a setting by passing NULL as the
  * value (note: passing NULL will not unset an existing environment variable;
  * it will just unset a value previously set by CPLSetConfigOption()).
  *
+ * Starting with GDAL 3.11, if CPL_DEBUG is enabled prior to this call, and
+ * CPLSetConfigOption() is called with a key that is neither a known
+ * configuration option of GDAL itself, or one that has been declared with
+ * CPLDeclareKnownConfigOption(), a warning will be emitted.
+ *
  * @param pszKey the key of the option
  * @param pszValue the value of the option, or NULL to clear a setting.
  *
- * @see http://trac.osgeo.org/gdal/wiki/ConfigOptions
+ * @see https://gdal.org/user/configoptions.html
  */
 void CPL_STDCALL CPLSetConfigOption(const char *pszKey, const char *pszValue)
 
 {
-    NotifyOtherComponentsConfigOptionChanged(pszKey, pszValue);
-
 #ifdef DEBUG_CONFIG_OPTIONS
     CPLAccessConfigOption(pszKey, FALSE);
 #endif
@@ -1861,8 +2078,13 @@ void CPL_STDCALL CPLSetConfigOption(const char *pszKey, const char *pszValue)
     OGRAPISPYCPLSetConfigOption(pszKey, pszValue);
 #endif
 
+    CPLSetConfigOptionDetectUnknownConfigOption(pszKey, pszValue);
+
     g_papszConfigOptions = const_cast<volatile char **>(CSLSetNameValue(
         const_cast<char **>(g_papszConfigOptions), pszKey, pszValue));
+
+    NotifyOtherComponentsConfigOptionChanged(pszKey, pszValue,
+                                             /*bTheadLocal=*/false);
 }
 
 /************************************************************************/
@@ -1904,8 +2126,6 @@ void CPL_STDCALL CPLSetThreadLocalConfigOption(const char *pszKey,
                                                const char *pszValue)
 
 {
-    NotifyOtherComponentsConfigOptionChanged(pszKey, pszValue);
-
 #ifdef DEBUG_CONFIG_OPTIONS
     CPLAccessConfigOption(pszKey, FALSE);
 #endif
@@ -1920,11 +2140,16 @@ void CPL_STDCALL CPLSetThreadLocalConfigOption(const char *pszKey,
     if (bMemoryError)
         return;
 
+    CPLSetConfigOptionDetectUnknownConfigOption(pszKey, pszValue);
+
     papszTLConfigOptions =
         CSLSetNameValue(papszTLConfigOptions, pszKey, pszValue);
 
     CPLSetTLSWithFreeFunc(CTLS_CONFIGOPTIONS, papszTLConfigOptions,
                           CPLSetThreadLocalTLSFreeFunc);
+
+    NotifyOtherComponentsConfigOptionChanged(pszKey, pszValue,
+                                             /*bTheadLocal=*/true);
 }
 
 /************************************************************************/
@@ -2084,7 +2309,7 @@ void CPLLoadConfigOptionsFromFile(const char *pszFilename, int bOverrideEnvVars)
     {
         for (; *pszStr; ++pszStr)
         {
-            if (!isspace(*pszStr))
+            if (!isspace(static_cast<unsigned char>(*pszStr)))
                 return false;
         }
         return true;
@@ -2240,12 +2465,12 @@ void CPLLoadConfigOptionsFromFile(const char *pszFilename, int bOverrideEnvVars)
  *
  * Otherwise, for Unix builds, CPLLoadConfigOptionsFromFile() will be called
  * with ${sysconfdir}/gdal/gdalrc first where ${sysconfdir} evaluates
- * to ${prefix}/etc, unless the --sysconfdir switch of configure has been
+ * to ${prefix}/etc, unless the \--sysconfdir switch of configure has been
  * invoked.
  *
- * Then CPLLoadConfigOptionsFromFile() will be called with $(HOME)/.gdal/gdalrc
+ * Then CPLLoadConfigOptionsFromFile() will be called with ${HOME}/.gdal/gdalrc
  * on Unix builds (potentially overriding what was loaded with the sysconfdir)
- * or $(USERPROFILE)/.gdal/gdalrc on Windows builds.
+ * or ${USERPROFILE}/.gdal/gdalrc on Windows builds.
  *
  * CPLLoadConfigOptionsFromFile() will be called with bOverrideEnvVars = false,
  * that is the value of environment variables previously set will be used
@@ -2267,21 +2492,27 @@ void CPLLoadConfigOptionsFromPredefinedFiles()
     else
     {
 #ifdef SYSCONFDIR
-        pszFile = CPLFormFilename(CPLFormFilename(SYSCONFDIR, "gdal", nullptr),
-                                  "gdalrc", nullptr);
-        CPLLoadConfigOptionsFromFile(pszFile, false);
+        CPLLoadConfigOptionsFromFile(
+            CPLFormFilenameSafe(
+                CPLFormFilenameSafe(SYSCONFDIR, "gdal", nullptr).c_str(),
+                "gdalrc", nullptr)
+                .c_str(),
+            false);
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
         const char *pszHome = CPLGetConfigOption("USERPROFILE", nullptr);
 #else
         const char *pszHome = CPLGetConfigOption("HOME", nullptr);
 #endif
         if (pszHome != nullptr)
         {
-            pszFile = CPLFormFilename(
-                CPLFormFilename(pszHome, ".gdal", nullptr), "gdalrc", nullptr);
-            CPLLoadConfigOptionsFromFile(pszFile, false);
+            CPLLoadConfigOptionsFromFile(
+                CPLFormFilenameSafe(
+                    CPLFormFilenameSafe(pszHome, ".gdal", nullptr).c_str(),
+                    "gdalrc", nullptr)
+                    .c_str(),
+                false);
         }
     }
 }
@@ -2369,7 +2600,7 @@ double CPLDMSToDec(const char *is)
     double v = 0.0;
     for (; nl < 3; nl = n + 1)
     {
-        if (!(isdigit(*s) || *s == '.'))
+        if (!(isdigit(static_cast<unsigned char>(*s)) || *s == '.'))
             break;
         const double tv = proj_strtod(s, &s);
         if (tv == HUGE_VAL)
@@ -2431,7 +2662,7 @@ const char *CPLDecToDMS(double dfAngle, const char *pszAxis, int nPrecision)
 {
     VALIDATE_POINTER1(pszAxis, "CPLDecToDMS", "");
 
-    if (CPLIsNan(dfAngle))
+    if (std::isnan(dfAngle))
         return "Invalid angle";
 
     const double dfEpsilon = (0.5 / 3600.0) * pow(0.1, nPrecision);
@@ -2567,35 +2798,76 @@ double CPLDecToPackedDMS(double dfDec)
 /************************************************************************/
 
 /** Fetch the real and imaginary part of a serialized complex number */
-void CPL_DLL CPLStringToComplex(const char *pszString, double *pdfReal,
-                                double *pdfImag)
+CPLErr CPL_DLL CPLStringToComplex(const char *pszString, double *pdfReal,
+                                  double *pdfImag)
 
 {
     while (*pszString == ' ')
         pszString++;
 
-    *pdfReal = CPLAtof(pszString);
-    *pdfImag = 0.0;
+    char *end;
+    *pdfReal = CPLStrtod(pszString, &end);
 
     int iPlus = -1;
     int iImagEnd = -1;
 
-    for (int i = 0; i < 100 && pszString[i] != '\0' && pszString[i] != ' '; i++)
+    if (pszString == end)
     {
-        if (pszString[i] == '+' && i > 0)
+        goto error;
+    }
+
+    *pdfImag = 0.0;
+
+    for (int i = static_cast<int>(end - pszString);
+         i < 100 && pszString[i] != '\0' && pszString[i] != ' '; i++)
+    {
+        if (pszString[i] == '+')
+        {
+            if (iPlus != -1)
+                goto error;
             iPlus = i;
-        if (pszString[i] == '-' && i > 0)
+        }
+        if (pszString[i] == '-')
+        {
+            if (iPlus != -1)
+                goto error;
             iPlus = i;
+        }
         if (pszString[i] == 'i')
+        {
+            if (iPlus == -1)
+                goto error;
             iImagEnd = i;
+        }
     }
 
-    if (iPlus > -1 && iImagEnd > -1 && iPlus < iImagEnd)
+    // If we have a "+" or "-" we must also have an "i"
+    if ((iPlus == -1) != (iImagEnd == -1))
     {
-        *pdfImag = CPLAtof(pszString + iPlus);
+        goto error;
     }
 
-    return;
+    // Parse imaginary component, if any
+    if (iPlus > -1)
+    {
+        *pdfImag = CPLStrtod(pszString + iPlus, &end);
+    }
+
+    // Check everything remaining is whitespace
+    for (; *end != '\0'; end++)
+    {
+        if (!isspace(*end) && end - pszString != iImagEnd)
+        {
+            goto error;
+        }
+    }
+
+    return CE_None;
+
+error:
+    CPLError(CE_Failure, CPLE_AppDefined, "Failed to parse number: %s",
+             pszString);
+    return CE_Failure;
 }
 
 /************************************************************************/
@@ -2892,7 +3164,7 @@ int CPLUnlinkTree(const char *pszPath)
                 continue;
 
             const std::string osSubPath =
-                CPLFormFilename(pszPath, papszItems[i], nullptr);
+                CPLFormFilenameSafe(pszPath, papszItems[i], nullptr);
 
             const int nErr = CPLUnlinkTree(osSubPath.c_str());
 
@@ -2932,7 +3204,8 @@ int CPLUnlinkTree(const char *pszPath)
 int CPLCopyFile(const char *pszNewPath, const char *pszOldPath)
 
 {
-    return VSICopyFile(pszOldPath, pszNewPath, nullptr, 0, nullptr, nullptr,
+    return VSICopyFile(pszOldPath, pszNewPath, nullptr,
+                       static_cast<vsi_l_offset>(-1), nullptr, nullptr,
                        nullptr);
 }
 
@@ -2982,9 +3255,9 @@ int CPLCopyTree(const char *pszNewPath, const char *pszOldPath)
                 continue;
 
             const std::string osNewSubPath =
-                CPLFormFilename(pszNewPath, papszItems[i], nullptr);
+                CPLFormFilenameSafe(pszNewPath, papszItems[i], nullptr);
             const std::string osOldSubPath =
-                CPLFormFilename(pszOldPath, papszItems[i], nullptr);
+                CPLFormFilenameSafe(pszOldPath, papszItems[i], nullptr);
 
             const int nErr =
                 CPLCopyTree(osNewSubPath.c_str(), osOldSubPath.c_str());
@@ -3034,7 +3307,7 @@ int CPLMoveFile(const char *pszNewPath, const char *pszOldPath)
 /************************************************************************/
 
 /** Create a symbolic link */
-#ifdef WIN32
+#ifdef _WIN32
 int CPLSymlink(const char *, const char *, CSLConstList)
 {
     return -1;
@@ -3200,6 +3473,7 @@ CPLThreadLocaleC::~CPLThreadLocaleC()
 {
     delete m_private;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -3407,4 +3681,280 @@ CPLConfigOptionSetter::~CPLConfigOptionSetter()
     }
     CPLFree(m_pszKey);
 }
+
 //! @endcond
+
+/************************************************************************/
+/*                          CPLIsInteractive()                          */
+/************************************************************************/
+
+/** Returns whether the provided file refers to a terminal.
+ *
+ * This function is a wrapper of the ``isatty()`` POSIX function.
+ *
+ * @param f File to test. Typically stdin, stdout or stderr
+ * @return true if it is an open file referring to a terminal.
+ * @since GDAL 3.11
+ */
+bool CPLIsInteractive(FILE *f)
+{
+#ifndef _WIN32
+    return isatty(static_cast<int>(fileno(f)));
+#else
+    return _isatty(_fileno(f));
+#endif
+}
+
+/************************************************************************/
+/*                          CPLLockFileStruct                          */
+/************************************************************************/
+
+//! @cond Doxygen_Suppress
+struct CPLLockFileStruct
+{
+    std::string osLockFilename{};
+    std::atomic<bool> bStop = false;
+    CPLJoinableThread *hThread = nullptr;
+};
+
+//! @endcond
+
+/************************************************************************/
+/*                          CPLLockFileEx()                             */
+/************************************************************************/
+
+/** Create and acquire a lock file.
+ *
+ * Only one caller can acquire the lock file at a time. The O_CREAT|O_EXCL
+ * flags of open() are used for that purpose (there might be limitations for
+ * network file systems).
+ *
+ * The lock file is continuously touched by a thread started by this function,
+ * to indicate it is still alive. If an existing lock file is found that has
+ * not been recently refreshed it will be considered stalled, and will be
+ * deleted before attempting to recreate it.
+ *
+ * This function must be paired with CPLUnlockFileEx().
+ *
+ * Available options are:
+ * <ul>
+ * <li>WAIT_TIME=value_in_sec/inf: Maximum amount of time in second that this
+ *     function can spend waiting for the lock. If not set, default to infinity.
+ * </li>
+ * <li>STALLED_DELAY=value_in_sec: Delay in second to consider that an existing
+ * lock file that has not been touched since STALLED_DELAY is stalled, and can
+ * be re-acquired. Defaults to 10 seconds.
+ * </li>
+ * <li>VERBOSE_WAIT_MESSAGE=YES/NO: Whether to emit a CE_Warning message while
+ * waiting for a busy lock. Default to NO.
+ * </li>
+ * </ul>
+
+ * @param pszLockFileName Lock file name. The directory must already exist.
+ *                        Must not be NULL.
+ * @param[out] phLockFileHandle Pointer to at location where to store the lock
+ *                              handle that must be passed to CPLUnlockFileEx().
+ *                              *phLockFileHandle will be null if the return
+ *                              code of that function is not CLFS_OK.
+ * @param papszOptions NULL terminated list of strings, or NULL.
+ *
+ * @return lock file status.
+ *
+ * @since 3.11
+ */
+CPLLockFileStatus CPLLockFileEx(const char *pszLockFileName,
+                                CPLLockFileHandle *phLockFileHandle,
+                                CSLConstList papszOptions)
+{
+    if (!pszLockFileName || !phLockFileHandle)
+        return CLFS_API_MISUSE;
+
+    *phLockFileHandle = nullptr;
+
+    const double dfWaitTime =
+        CPLAtof(CSLFetchNameValueDef(papszOptions, "WAIT_TIME", "inf"));
+    const double dfStalledDelay =
+        CPLAtof(CSLFetchNameValueDef(papszOptions, "STALLED_DELAY", "10"));
+    const bool bVerboseWait =
+        CPLFetchBool(papszOptions, "VERBOSE_WAIT_MESSAGE", false);
+
+    for (int i = 0; i < 2; ++i)
+    {
+#ifdef _WIN32
+        wchar_t *pwszFilename =
+            CPLRecodeToWChar(pszLockFileName, CPL_ENC_UTF8, CPL_ENC_UCS2);
+        int fd = _wopen(pwszFilename, _O_CREAT | _O_EXCL, _S_IREAD | _S_IWRITE);
+        CPLFree(pwszFilename);
+#else
+        int fd = open(pszLockFileName, O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+#endif
+        if (fd == -1)
+        {
+            if (errno != EEXIST || i == 1)
+            {
+                return CLFS_CANNOT_CREATE_LOCK;
+            }
+            else
+            {
+                // Wait for the .lock file to have been removed or
+                // not refreshed since dfStalledDelay seconds.
+                double dfCurWaitTime = dfWaitTime;
+                VSIStatBufL sStat;
+                while (VSIStatL(pszLockFileName, &sStat) == 0 &&
+                       static_cast<double>(sStat.st_mtime) + dfStalledDelay >
+                           static_cast<double>(time(nullptr)))
+                {
+                    if (dfCurWaitTime <= 1e-5)
+                        return CLFS_LOCK_BUSY;
+
+                    if (bVerboseWait)
+                    {
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "Waiting for %s to be freed...",
+                                 pszLockFileName);
+                    }
+                    else
+                    {
+                        CPLDebug("CPL", "Waiting for %s to be freed...",
+                                 pszLockFileName);
+                    }
+
+                    const double dfPauseDelay = std::min(0.5, dfWaitTime);
+                    CPLSleep(dfPauseDelay);
+                    dfCurWaitTime -= dfPauseDelay;
+                }
+
+                if (VSIUnlink(pszLockFileName) != 0)
+                {
+                    return CLFS_CANNOT_CREATE_LOCK;
+                }
+            }
+        }
+        else
+        {
+            close(fd);
+            break;
+        }
+    }
+
+    // Touch regularly the lock file to show it is still alive
+    struct KeepAliveLockFile
+    {
+        static void func(void *user_data)
+        {
+            CPLLockFileHandle hLockFileHandle =
+                static_cast<CPLLockFileHandle>(user_data);
+            while (!hLockFileHandle->bStop)
+            {
+                auto f = VSIVirtualHandleUniquePtr(
+                    VSIFOpenL(hLockFileHandle->osLockFilename.c_str(), "wb"));
+                if (f)
+                {
+                    f.reset();
+                }
+                constexpr double REFRESH_DELAY = 0.5;
+                CPLSleep(REFRESH_DELAY);
+            }
+        }
+    };
+
+    *phLockFileHandle = new CPLLockFileStruct();
+    (*phLockFileHandle)->osLockFilename = pszLockFileName;
+
+    (*phLockFileHandle)->hThread =
+        CPLCreateJoinableThread(KeepAliveLockFile::func, *phLockFileHandle);
+    if ((*phLockFileHandle)->hThread == nullptr)
+    {
+        VSIUnlink(pszLockFileName);
+        delete *phLockFileHandle;
+        *phLockFileHandle = nullptr;
+        return CLFS_THREAD_CREATION_FAILED;
+    }
+
+    return CLFS_OK;
+}
+
+/************************************************************************/
+/*                         CPLUnlockFileEx()                            */
+/************************************************************************/
+
+/** Release and delete a lock file.
+ *
+ * This function must be paired with CPLLockFileEx().
+ *
+ * @param hLockFileHandle Lock handle (value of *phLockFileHandle argument
+ *                        set by CPLLockFileEx()), or NULL.
+ *
+ * @since 3.11
+ */
+void CPLUnlockFileEx(CPLLockFileHandle hLockFileHandle)
+{
+    if (hLockFileHandle)
+    {
+        // Remove .lock file
+        hLockFileHandle->bStop = true;
+        CPLJoinThread(hLockFileHandle->hThread);
+        VSIUnlink(hLockFileHandle->osLockFilename.c_str());
+
+        delete hLockFileHandle;
+    }
+}
+
+/************************************************************************/
+/*                       CPLFormatReadableFileSize()                    */
+/************************************************************************/
+
+template <class T>
+static std::string CPLFormatReadableFileSizeInternal(T nSizeInBytes)
+{
+    constexpr T ONE_MEGA_BYTE = 1000 * 1000;
+    constexpr T ONE_GIGA_BYTE = 1000 * ONE_MEGA_BYTE;
+    constexpr T ONE_TERA_BYTE = 1000 * ONE_GIGA_BYTE;
+    constexpr T ONE_PETA_BYTE = 1000 * ONE_TERA_BYTE;
+    constexpr T ONE_HEXA_BYTE = 1000 * ONE_PETA_BYTE;
+
+    if (nSizeInBytes > ONE_HEXA_BYTE)
+        return CPLSPrintf("%.02f HB", static_cast<double>(nSizeInBytes) /
+                                          static_cast<double>(ONE_HEXA_BYTE));
+
+    if (nSizeInBytes > ONE_PETA_BYTE)
+        return CPLSPrintf("%.02f PB", static_cast<double>(nSizeInBytes) /
+                                          static_cast<double>(ONE_PETA_BYTE));
+
+    if (nSizeInBytes > ONE_TERA_BYTE)
+        return CPLSPrintf("%.02f TB", static_cast<double>(nSizeInBytes) /
+                                          static_cast<double>(ONE_TERA_BYTE));
+
+    if (nSizeInBytes > ONE_GIGA_BYTE)
+        return CPLSPrintf("%.02f GB", static_cast<double>(nSizeInBytes) /
+                                          static_cast<double>(ONE_GIGA_BYTE));
+
+    if (nSizeInBytes > ONE_MEGA_BYTE)
+        return CPLSPrintf("%.02f MB", static_cast<double>(nSizeInBytes) /
+                                          static_cast<double>(ONE_MEGA_BYTE));
+
+    return CPLSPrintf("%03d,%03d bytes", static_cast<int>(nSizeInBytes) / 1000,
+                      static_cast<int>(nSizeInBytes) % 1000);
+}
+
+/** Return a file size in a human readable way.
+ *
+ * e.g 1200000 -> "1.20 MB"
+ *
+ * @since 3.12
+ */
+std::string CPLFormatReadableFileSize(uint64_t nSizeInBytes)
+{
+    return CPLFormatReadableFileSizeInternal(nSizeInBytes);
+}
+
+/** Return a file size in a human readable way.
+ *
+ * e.g 1200000 -> "1.20 MB"
+ *
+ * @since 3.12
+ */
+std::string CPLFormatReadableFileSize(double dfSizeInBytes)
+{
+    return CPLFormatReadableFileSizeInternal(dfSizeInBytes);
+}

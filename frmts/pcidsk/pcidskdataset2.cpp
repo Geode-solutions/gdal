@@ -9,27 +9,12 @@
  * Copyright (c) 2009, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_frmts.h"
 #include "pcidskdataset2.h"
+#include "pcidskdrivercore.h"
 
 #include <algorithm>
 
@@ -868,7 +853,7 @@ char **PCIDSK2Dataset::GetFileList()
 
 {
     char **papszFileList = GDALPamDataset::GetFileList();
-    CPLString osBaseDir = CPLGetPath(GetDescription());
+    CPLString osBaseDir = CPLGetPathSafe(GetDescription());
 
     try
     {
@@ -886,7 +871,8 @@ char **PCIDSK2Dataset::GetFileList()
             {
                 papszFileList = CSLAddString(
                     papszFileList,
-                    CPLProjectRelativeFilename(osBaseDir, osChanFilename));
+                    CPLProjectRelativeFilenameSafe(osBaseDir, osChanFilename)
+                        .c_str());
             }
         }
 
@@ -1236,7 +1222,7 @@ char **PCIDSK2Dataset::GetMetadata(const char *pszDomain)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr PCIDSK2Dataset::SetGeoTransform(double *padfTransform)
+CPLErr PCIDSK2Dataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
     PCIDSKGeoref *poGeoref = nullptr;
     try
@@ -1250,7 +1236,7 @@ CPLErr PCIDSK2Dataset::SetGeoTransform(double *padfTransform)
     }
 
     if (poGeoref == nullptr)
-        return GDALPamDataset::SetGeoTransform(padfTransform);
+        return GDALPamDataset::SetGeoTransform(gt);
 
     if (GetAccess() == GA_ReadOnly)
     {
@@ -1261,10 +1247,8 @@ CPLErr PCIDSK2Dataset::SetGeoTransform(double *padfTransform)
 
     try
     {
-        poGeoref->WriteSimple(poGeoref->GetGeosys(), padfTransform[0],
-                              padfTransform[1], padfTransform[2],
-                              padfTransform[3], padfTransform[4],
-                              padfTransform[5]);
+        poGeoref->WriteSimple(poGeoref->GetGeosys(), gt[0], gt[1], gt[2], gt[3],
+                              gt[4], gt[5]);
     }
     catch (const PCIDSKException &ex)
     {
@@ -1279,7 +1263,7 @@ CPLErr PCIDSK2Dataset::SetGeoTransform(double *padfTransform)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr PCIDSK2Dataset::GetGeoTransform(double *padfTransform)
+CPLErr PCIDSK2Dataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
     PCIDSKGeoref *poGeoref = nullptr;
     try
@@ -1296,9 +1280,7 @@ CPLErr PCIDSK2Dataset::GetGeoTransform(double *padfTransform)
     {
         try
         {
-            poGeoref->GetTransform(padfTransform[0], padfTransform[1],
-                                   padfTransform[2], padfTransform[3],
-                                   padfTransform[4], padfTransform[5]);
+            poGeoref->GetTransform(gt[0], gt[1], gt[2], gt[3], gt[4], gt[5]);
         }
         catch (const PCIDSKException &ex)
         {
@@ -1307,19 +1289,17 @@ CPLErr PCIDSK2Dataset::GetGeoTransform(double *padfTransform)
         }
 
         // If we got anything non-default return it.
-        if (padfTransform[0] != 0.0 || padfTransform[1] != 1.0 ||
-            padfTransform[2] != 0.0 || padfTransform[3] != 0.0 ||
-            padfTransform[4] != 0.0 || padfTransform[5] != 1.0)
+        if (gt != GDALGeoTransform())
             return CE_None;
     }
 
     /* -------------------------------------------------------------------- */
     /*      Check for worldfile if we have no other georeferencing.         */
     /* -------------------------------------------------------------------- */
-    if (GDALReadWorldFile(GetDescription(), "pxw", padfTransform))
+    if (GDALReadWorldFile(GetDescription(), "pxw", gt.data()))
         return CE_None;
 
-    return GDALPamDataset::GetGeoTransform(padfTransform);
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -1692,25 +1672,12 @@ GDALDataType PCIDSK2Dataset::PCIDSKTypeToGDAL(eChanType eType)
 }
 
 /************************************************************************/
-/*                              Identify()                              */
-/************************************************************************/
-
-int PCIDSK2Dataset::Identify(GDALOpenInfo *poOpenInfo)
-{
-    if (poOpenInfo->nHeaderBytes < 512 ||
-        !STARTS_WITH_CI((const char *)poOpenInfo->pabyHeader, "PCIDSK  "))
-        return FALSE;
-
-    return TRUE;
-}
-
-/************************************************************************/
 /*                                Open()                                */
 /************************************************************************/
 
 GDALDataset *PCIDSK2Dataset::Open(GDALOpenInfo *poOpenInfo)
 {
-    if (!Identify(poOpenInfo))
+    if (!PCIDSKDriverIdentify(poOpenInfo))
         return nullptr;
 
     /* -------------------------------------------------------------------- */
@@ -1910,7 +1877,7 @@ GDALDataset *PCIDSK2Dataset::LLOpen(const char *pszFilename,
                 dynamic_cast<PCIDSK::PCIDSKVectorSegment *>(segobj);
             if (poVecSeg)
                 poDS->apoLayers.push_back(new OGRPCIDSKLayer(
-                    segobj, poVecSeg, eAccessIn == GA_Update));
+                    poDS, segobj, poVecSeg, eAccessIn == GA_Update));
         }
 
         /* --------------------------------------------------------------------
@@ -2106,9 +2073,8 @@ OGRLayer *PCIDSK2Dataset::GetLayer(int iLayer)
 /************************************************************************/
 
 OGRLayer *PCIDSK2Dataset::ICreateLayer(const char *pszLayerName,
-                                       OGRSpatialReference *poSRS,
-                                       OGRwkbGeometryType eType,
-                                       CPL_UNUSED char **papszOptions)
+                                       const OGRGeomFieldDefn *poGeomFieldDefn,
+                                       CSLConstList /*papszOptions*/)
 {
     /* -------------------------------------------------------------------- */
     /*      Verify we are in update mode.                                   */
@@ -2121,6 +2087,10 @@ OGRLayer *PCIDSK2Dataset::ICreateLayer(const char *pszLayerName,
                  GetDescription(), pszLayerName);
         return nullptr;
     }
+
+    const auto eType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSRS =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
 
     /* -------------------------------------------------------------------- */
     /*      Figure out what type of layer we need.                          */
@@ -2217,7 +2187,7 @@ OGRLayer *PCIDSK2Dataset::ICreateLayer(const char *pszLayerName,
     /*      Create the layer object.                                        */
     /* -------------------------------------------------------------------- */
 
-    apoLayers.push_back(new OGRPCIDSKLayer(poSeg, poVecSeg, TRUE));
+    apoLayers.push_back(new OGRPCIDSKLayer(this, poSeg, poVecSeg, TRUE));
 
     return apoLayers.back();
 }
@@ -2229,51 +2199,12 @@ OGRLayer *PCIDSK2Dataset::ICreateLayer(const char *pszLayerName,
 void GDALRegister_PCIDSK()
 
 {
-    if (GDALGetDriverByName("PCIDSK") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
+    PCIDSKDriverSetCommonMetadata(poDriver);
 
-    poDriver->SetDescription("PCIDSK");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_VECTOR, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_CREATE_LAYER, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_CREATE_FIELD, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "PCIDSK Database File");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/pcidsk.html");
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "pix");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES,
-                              "Byte UInt16 Int16 Float32 CInt16 CFloat32");
-    poDriver->SetMetadataItem(
-        GDAL_DMD_CREATIONOPTIONLIST,
-        "<CreationOptionList>"
-        "   <Option name='INTERLEAVING' type='string-select' default='BAND' "
-        "description='raster data organization'>"
-        "       <Value>PIXEL</Value>"
-        "       <Value>BAND</Value>"
-        "       <Value>FILE</Value>"
-        "       <Value>TILED</Value>"
-        "   </Option>"
-        "   <Option name='COMPRESSION' type='string-select' default='NONE' "
-        "description='compression - (INTERLEAVING=TILED only)'>"
-        "       <Value>NONE</Value>"
-        "       <Value>RLE</Value>"
-        "       <Value>JPEG</Value>"
-        "   </Option>"
-        "   <Option name='TILESIZE' type='int' default='127' description='Tile "
-        "Size (INTERLEAVING=TILED only)'/>"
-        "   <Option name='TILEVERSION' type='int' default='2' "
-        "description='Tile Version (INTERLEAVING=TILED only)'/>"
-        "</CreationOptionList>");
-    poDriver->SetMetadataItem(GDAL_DS_LAYER_CREATIONOPTIONLIST,
-                              "<LayerCreationOptionList/>");
-    poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATATYPES,
-                              "Integer Real String IntegerList");
-    poDriver->SetMetadataItem(GDAL_DCAP_Z_GEOMETRIES, "YES");
-
-    poDriver->pfnIdentify = PCIDSK2Dataset::Identify;
     poDriver->pfnOpen = PCIDSK2Dataset::Open;
     poDriver->pfnCreate = PCIDSK2Dataset::Create;
 

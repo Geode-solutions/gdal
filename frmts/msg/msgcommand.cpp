@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2004, ITC
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************/
 
 #include "cpl_port.h"  // Must be first.
@@ -31,6 +15,8 @@
 #include "msgcommand.h"
 #include <cstdlib>
 #include <cstdio>
+
+#include <algorithm>
 
 using namespace std;
 
@@ -44,18 +30,12 @@ using namespace std;
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
-#define min(a, b) (((a) < (b)) ? (a) : (b))
-
 MSGCommand::MSGCommand()
     : cDataConversion('N'), iNrCycles(1), sRootFolder(""), sTimeStamp(""),
       iStep(1), fUseTimestampFolder(true)
 {
     for (int i = 0; i < 12; ++i)
         channel[i] = 0;
-}
-
-MSGCommand::~MSGCommand()
-{
 }
 
 std::string MSGCommand::sTrimSpaces(std::string const &str)
@@ -79,7 +59,7 @@ std::string MSGCommand::sNextTerm(std::string const &str, int &iPos)
     iPos = static_cast<int>(str.find(',', iOldPos));
     // FIXME: the int vs size_t is messy !
     iPos = static_cast<int>(
-        min(static_cast<size_t>(iPos), str.find(')', iOldPos)));
+        std::min(static_cast<size_t>(iPos), str.find(')', iOldPos)));
     if (iPos >= 0 && static_cast<size_t>(iPos) > iOldPos)
     {
         std::string sRet = str.substr(iOldPos, iPos - iOldPos);
@@ -375,7 +355,7 @@ std::string MSGCommand::sChannel(int iChannel)
     }
 }
 
-std::string MSGCommand::sTimeStampToFolder(std::string &sTimeStamp)
+std::string MSGCommand::sTimeStampToFolder(const std::string &sTimeStamp)
 {
     std::string sYear(sTimeStamp.substr(0, 4));
     std::string sMonth(sTimeStamp.substr(4, 2));

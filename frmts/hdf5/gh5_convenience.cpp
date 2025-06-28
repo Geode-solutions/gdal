@@ -7,25 +7,10 @@
  ******************************************************************************
  * Copyright (c) 2009, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
+#include "cpl_float.h"
 #include "gh5_convenience.h"
 
 /************************************************************************/
@@ -149,7 +134,7 @@ bool GH5_FetchAttribute(hid_t loc_id, const char *pszAttrName, double &dfResult,
 
     for (i = 0; i < nAttrDims; i++)
     {
-        nAttrElements *= (int)anSize[i];
+        nAttrElements *= static_cast<int>(anSize[i]);
     }
 
     if (nAttrElements != 1)
@@ -171,14 +156,58 @@ bool GH5_FetchAttribute(hid_t loc_id, const char *pszAttrName, double &dfResult,
     H5Aread(hAttr, hAttrNativeType, buf);
 
     // Translate to double.
-    if (H5Tequal(H5T_NATIVE_SHORT, hAttrNativeType))
-        dfResult = *((short *)buf);
+    if (H5Tequal(H5T_NATIVE_CHAR, hAttrNativeType))
+        dfResult = *(static_cast<char *>(buf));
+    else if (H5Tequal(H5T_NATIVE_SCHAR, hAttrNativeType))
+        dfResult = *(static_cast<signed char *>(buf));
+    else if (H5Tequal(H5T_NATIVE_UCHAR, hAttrNativeType))
+        dfResult = *(static_cast<unsigned char *>(buf));
+    else if (H5Tequal(H5T_NATIVE_SHORT, hAttrNativeType))
+        dfResult = *(static_cast<short *>(buf));
+    else if (H5Tequal(H5T_NATIVE_USHORT, hAttrNativeType))
+        dfResult = *(static_cast<unsigned short *>(buf));
     else if (H5Tequal(H5T_NATIVE_INT, hAttrNativeType))
-        dfResult = *((int *)buf);
+        dfResult = *(static_cast<int *>(buf));
+    else if (H5Tequal(H5T_NATIVE_UINT, hAttrNativeType))
+        dfResult = *(static_cast<unsigned int *>(buf));
+    else if (H5Tequal(H5T_NATIVE_INT64, hAttrNativeType))
+    {
+        const auto nVal = *static_cast<int64_t *>(buf);
+        dfResult = static_cast<double>(nVal);
+        if (nVal != static_cast<int64_t>(dfResult))
+        {
+            CPLDebug("HDF5",
+                     "Loss of accuracy when reading attribute %s. "
+                     "Value " CPL_FRMT_GIB " will be read as %.17g",
+                     pszAttrName, static_cast<GIntBig>(nVal), dfResult);
+        }
+    }
+    else if (H5Tequal(H5T_NATIVE_UINT64, hAttrNativeType))
+    {
+        const auto nVal = *static_cast<uint64_t *>(buf);
+        dfResult = static_cast<double>(nVal);
+        if (nVal != static_cast<uint64_t>(dfResult))
+        {
+            CPLDebug("HDF5",
+                     "Loss of accuracy when reading attribute %s. "
+                     "Value " CPL_FRMT_GUIB " will be read as %.17g",
+                     pszAttrName, static_cast<GUIntBig>(nVal), dfResult);
+        }
+    }
+#ifdef HDF5_HAVE_FLOAT16
+    else if (H5Tequal(H5T_NATIVE_FLOAT16, hAttrNativeType))
+    {
+        const uint16_t nVal16 = *(static_cast<uint16_t *>(buf));
+        const uint32_t nVal32 = CPLHalfToFloat(nVal16);
+        float fVal;
+        memcpy(&fVal, &nVal32, sizeof(fVal));
+        dfResult = fVal;
+    }
+#endif
     else if (H5Tequal(H5T_NATIVE_FLOAT, hAttrNativeType))
-        dfResult = *((float *)buf);
+        dfResult = *(static_cast<float *>(buf));
     else if (H5Tequal(H5T_NATIVE_DOUBLE, hAttrNativeType))
-        dfResult = *((double *)buf);
+        dfResult = *(static_cast<double *>(buf));
     else
     {
         if (bReportError)

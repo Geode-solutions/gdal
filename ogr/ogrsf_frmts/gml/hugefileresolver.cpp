@@ -8,23 +8,7 @@
  * Copyright (c) 2011, Alessandro Furieri
  * Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *
  ******************************************************************************
  * Contributor: Alessandro Furieri, a.furieri@lqt.it
@@ -39,6 +23,7 @@
 #include "gmlreaderp.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "cpl_conv.h"
@@ -52,7 +37,7 @@
 #include <sqlite3.h>
 
 #undef SQLITE_STATIC
-#define SQLITE_STATIC ((sqlite3_destructor_type) nullptr)
+#define SQLITE_STATIC static_cast<sqlite3_destructor_type>(nullptr)
 
 #endif
 
@@ -123,6 +108,7 @@ class huge_helper
           pLastHref(nullptr), pFirstParent(nullptr), pLastParent(nullptr)
     {
     }
+
     sqlite3 *hDB;
     sqlite3_stmt *hNodes;
     sqlite3_stmt *hEdges;
@@ -163,8 +149,8 @@ static bool gmlHugeFileSQLiteInit(huge_helper *helper)
     {
         const char osCommand[] = "CREATE TABLE gml_edges ("
                                  "     gml_id VARCHAR PRIMARY KEY, "
-                                 "     gml_string BLOB, "
-                                 "     gml_resolved BLOB, "
+                                 "     gml_string TEXT, "
+                                 "     gml_resolved TEXT, "
                                  "     node_from_id TEXT, "
                                  "     node_from_x DOUBLE, "
                                  "     node_from_y DOUBLE, "
@@ -428,10 +414,10 @@ static bool gmlHugeFileResolveEdges(huge_helper *helper)
             bError = false;
             pszGmlId = reinterpret_cast<const char *>(
                 sqlite3_column_text(hQueryStmt, 0));
-            if (sqlite3_column_type(hQueryStmt, 1) != SQLITE_NULL)
+            if (sqlite3_column_type(hQueryStmt, 1) == SQLITE_TEXT)
             {
-                pszGmlString = static_cast<const char *>(
-                    sqlite3_column_blob(hQueryStmt, 1));
+                pszGmlString = reinterpret_cast<const char *>(
+                    sqlite3_column_text(hQueryStmt, 1));
             }
             if (sqlite3_column_type(hQueryStmt, 2) != SQLITE_NULL)
             {
@@ -629,7 +615,7 @@ static bool gmlHugeFileResolveEdges(huge_helper *helper)
                         char *gmlText = CPLSerializeXMLTree(psNode);
                         sqlite3_reset(hUpdateStmt);
                         sqlite3_clear_bindings(hUpdateStmt);
-                        sqlite3_bind_blob(hUpdateStmt, 1, gmlText,
+                        sqlite3_bind_text(hUpdateStmt, 1, gmlText,
                                           static_cast<int>(strlen(gmlText)),
                                           SQLITE_STATIC);
                         sqlite3_bind_text(hUpdateStmt, 2, pszGmlId, -1,
@@ -769,14 +755,14 @@ static bool gmlHugeFileSQLiteInsert(huge_helper *helper)
         if (pItem->bIsNodeFromHref == false && pItem->bIsNodeToHref == false)
         {
             sqlite3_bind_null(helper->hEdges, 2);
-            sqlite3_bind_blob(
+            sqlite3_bind_text(
                 helper->hEdges, 3, pItem->gmlTagValue->c_str(),
                 static_cast<int>(strlen(pItem->gmlTagValue->c_str())),
                 SQLITE_STATIC);
         }
         else
         {
-            sqlite3_bind_blob(
+            sqlite3_bind_text(
                 helper->hEdges, 2, pItem->gmlTagValue->c_str(),
                 static_cast<int>(strlen(pItem->gmlTagValue->c_str())),
                 SQLITE_STATIC);
@@ -1035,7 +1021,7 @@ static void gmlHugeFileNodeCoords(struct huge_tag *pItem,
         CPLCreateXMLNode(nullptr, CXT_Element, "TopoCurve");
     CPLXMLNode *psDirEdge =
         CPLCreateXMLNode(psTopoCurve, CXT_Element, "directedEdge");
-    CPLXMLNode *psEdge = CPLCloneXMLTree((CPLXMLNode *)psNode);
+    CPLXMLNode *psEdge = CPLCloneXMLTree(psNode);
     CPLAddXMLChild(psDirEdge, psEdge);
     OGRGeometry *poTopoCurve = GML2OGRGeometry_XMLNode(psTopoCurve, FALSE);
     CPLDestroyXMLNode(psTopoCurve);
@@ -1585,6 +1571,7 @@ static bool gmlHugeResolveEdges(CPL_UNUSED huge_helper *helper,
 static bool gmlHugeFileWriteResolved(huge_helper *helper,
                                      const char *pszOutputFilename,
                                      GMLReader *pReader,
+                                     GMLAppSchemaType eAppSchemaType,
                                      int *m_nHasSequentialLayers)
 {
     // Open the resolved GML file for writing.
@@ -1611,10 +1598,20 @@ static bool gmlHugeFileWriteResolved(huge_helper *helper,
         return false;
     }
 
+    const char *pszTopElement = "ResolvedTopoFeatureMembers";
+    // For some specific application schema, GMLHandler has specific behavior,
+    // so re-use the root XML element it recognizes.
+    if (eAppSchemaType == APPSCHEMA_AIXM)
+        pszTopElement = "AIXMBasicMessage";
+    else if (eAppSchemaType == APPSCHEMA_CITYGML)
+        pszTopElement = "CityModel";
+
     VSIFPrintfL(fp, "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
-    VSIFPrintfL(fp, "<ResolvedTopoFeatureCollection  "
-                    "xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
-                    "xmlns:gml=\"http://www.opengis.net/gml\">\n");
+    VSIFPrintfL(fp,
+                "<%s  "
+                "xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
+                "xmlns:gml=\"http://www.opengis.net/gml\">\n",
+                pszTopElement);
     VSIFPrintfL(fp, "  <ResolvedTopoFeatureMembers>\n");
 
     int iOutCount = 0;
@@ -1700,7 +1697,15 @@ static bool gmlHugeFileWriteResolved(huge_helper *helper,
         const int iPropCount = poClass->GetPropertyCount();
 
         bool b_has_geom = false;
-        VSIFPrintfL(fp, "    <%s>\n", poClass->GetElementName());
+        VSIFPrintfL(fp, "    <%s", poClass->GetElementName());
+        const char *pszGmlId = poFeature->GetFID();
+        if (pszGmlId)
+        {
+            char *gmlText = CPLEscapeString(pszGmlId, -1, CPLES_XML);
+            VSIFPrintfL(fp, " gml:id=\"%s\"", gmlText);
+            CPLFree(gmlText);
+        }
+        VSIFPrintfL(fp, ">\n");
 
         for (int iProp = 0; iProp < iPropCount; iProp++)
         {
@@ -1714,8 +1719,27 @@ static bool gmlHugeFileWriteResolved(huge_helper *helper,
                 {
                     char *gmlText = CPLEscapeString(
                         poProp->papszSubProperties[iSub], -1, CPLES_XML);
-                    VSIFPrintfL(fp, "      <%s>%s</%s>\n", pszPropName, gmlText,
-                                pszPropName);
+                    if (strchr(pszPropName, '|'))
+                    {
+                        const CPLStringList aosPropNameComps(
+                            CSLTokenizeString2(pszPropName, "|", 0));
+                        VSIFPrintfL(fp, "      ");
+                        for (int i = 0; i < aosPropNameComps.size(); ++i)
+                        {
+                            VSIFPrintfL(fp, "<%s>", aosPropNameComps[i]);
+                        }
+                        VSIFPrintfL(fp, "%s", gmlText);
+                        for (int i = aosPropNameComps.size() - 1; i >= 0; --i)
+                        {
+                            VSIFPrintfL(fp, "</%s>", aosPropNameComps[i]);
+                        }
+                        VSIFPrintfL(fp, "\n");
+                    }
+                    else
+                    {
+                        VSIFPrintfL(fp, "      <%s>%s</%s>\n", pszPropName,
+                                    gmlText, pszPropName);
+                    }
                     CPLFree(gmlText);
                 }
             }
@@ -1742,7 +1766,7 @@ static bool gmlHugeFileWriteResolved(huge_helper *helper,
                 if (bNotToBeResolved)
                 {
                     VSIFPrintfL(fp, "      <ResolvedGeometry> \n");
-                    pszResolved = CPLSerializeXMLTree((CPLXMLNode *)psNode);
+                    pszResolved = CPLSerializeXMLTree(psNode);
                     VSIFPrintfL(fp, "        %s\n", pszResolved);
                     CPLFree(pszResolved);
                     VSIFPrintfL(fp, "      </ResolvedGeometry>\n");
@@ -1790,7 +1814,7 @@ static bool gmlHugeFileWriteResolved(huge_helper *helper,
     }
 
     VSIFPrintfL(fp, "  </ResolvedTopoFeatureMembers>\n");
-    VSIFPrintfL(fp, "</ResolvedTopoFeatureCollection>\n");
+    VSIFPrintfL(fp, "</%s>\n", pszTopElement);
 
     VSIFCloseL(fp);
 
@@ -1818,8 +1842,8 @@ bool GMLReader::ParseXMLHugeFile(const char *pszOutputFilename,
     /* -------------------------------------------------------------------- */
     /*      Creating/Opening the SQLite DB file                             */
     /* -------------------------------------------------------------------- */
-    const CPLString osSQLiteFilename =
-        CPLResetExtension(m_pszFilename, "sqlite");
+    const std::string osSQLiteFilename =
+        CPLResetExtensionSafe(m_pszFilename, "sqlite");
     const char *pszSQLiteFilename = osSQLiteFilename.c_str();
 
     VSIStatBufL statBufL;
@@ -1838,6 +1862,7 @@ bool GMLReader::ParseXMLHugeFile(const char *pszOutputFilename,
         {
             CPLError(CE_Failure, CPLE_OpenFailed, "sqlite3_open(%s) failed: %s",
                      pszSQLiteFilename, sqlite3_errmsg(hDB));
+            sqlite3_close(hDB);
             return false;
         }
     }
@@ -1962,6 +1987,9 @@ bool GMLReader::ParseXMLHugeFile(const char *pszOutputFilename,
         return false;
     }
 
+    CPLAssert(m_poGMLHandler);
+    const GMLAppSchemaType eAppSchemaType = m_poGMLHandler->GetAppSchemaType();
+
     // Restarting the GML parser.
     if (!SetupParser())
     {
@@ -1971,6 +1999,7 @@ bool GMLReader::ParseXMLHugeFile(const char *pszOutputFilename,
 
     // Output: writing the revolved GML file.
     if (gmlHugeFileWriteResolved(&helper, pszOutputFilename, this,
+                                 eAppSchemaType,
                                  &m_nHasSequentialLayers) == false)
     {
         gmlHugeFileCleanUp(&helper);

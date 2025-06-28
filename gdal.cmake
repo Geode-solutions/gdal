@@ -6,18 +6,13 @@
 # a new member or virtual function in a public C++ class, etc.
 # This will typically happen for each GDAL feature release (change of X or Y in
 # a X.Y.Z numbering scheme), but should not happen for a bugfix release (change of Z)
-# Previous value: 32 for GDAL 3.6
-set(GDAL_SOVERSION 32)
+# Previous value: 37 for GDAL 3.11
+set(GDAL_SOVERSION 37)
 
 # Switches to control build targets(cached)
 option(ENABLE_GNM "Build GNM (Geography Network Model) component" ON)
 option(ENABLE_PAM "Set ON to enable Persistent Auxiliary Metadata (.aux.xml)" ON)
 option(BUILD_APPS "Build command line utilities" ON)
-if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/doc" AND NOT "${CMAKE_BINARY_DIR}" STREQUAL "${CMAKE_SOURCE_DIR}")
-  # In-tree builds do not support Doc building because Sphinx requires (at least
-  # at first sight) a Makefile file which conflicts with the CMake generated one
-  option(BUILD_DOCS "Build documentation" ON)
-endif()
 
 # This option is to build drivers as plugins, for drivers that have external dependencies, that are not parf of GDAL
 # core dependencies Examples are netCDF, HDF4, Oracle, PDF, etc. This global setting can be overridden at the driver
@@ -36,6 +31,56 @@ endif ()
 option(GDAL_BUILD_OPTIONAL_DRIVERS "Whether to build GDAL optional drivers by default" ON)
 option(OGR_BUILD_OPTIONAL_DRIVERS "Whether to build OGR optional drivers by default" ON)
 
+# If the GDAL/OGR_BUILD_OPTIONAL_DRIVERS value has been turned OFF, unset
+# GDAL/OGR_ENABLE_DRIVER_xxxx variables
+if( GDAL_BUILD_OPTIONAL_DRIVERS_OLD_VAL AND NOT GDAL_BUILD_OPTIONAL_DRIVERS )
+    get_cmake_property(_variableNames VARIABLES)
+    foreach (_variableName ${_variableNames})
+        if ("${_variableName}" MATCHES "GDAL_ENABLE_DRIVER_" AND (NOT "${_variableName}" MATCHES "_PLUGIN"))
+            message(STATUS "Unsetting ${_variableName}")
+            unset(${_variableName})
+            unset(${_variableName} CACHE)
+            if ("${_variableName}" STREQUAL "GDAL_ENABLE_DRIVER_IDRISI")
+                set(_variableName "OGR_ENABLE_DRIVER_IDRISI")
+                message(STATUS "Unsetting ${_variableName}")
+                unset(${_variableName})
+                unset(${_variableName} CACHE)
+            elseif ("${_variableName}" STREQUAL "GDAL_ENABLE_DRIVER_PDS")
+                set(_variableName "OGR_ENABLE_DRIVER_PDS")
+                message(STATUS "Unsetting ${_variableName}")
+                unset(${_variableName})
+                unset(${_variableName} CACHE)
+            endif()
+        endif()
+    endforeach()
+endif()
+if( OGR_BUILD_OPTIONAL_DRIVERS_OLD_VAL AND NOT OGR_BUILD_OPTIONAL_DRIVERS )
+    get_cmake_property(_variableNames VARIABLES)
+    foreach (_variableName ${_variableNames})
+        if ("${_variableName}" MATCHES "OGR_ENABLE_DRIVER_" AND (NOT "${_variableName}" MATCHES "_PLUGIN"))
+            message(STATUS "Unsetting ${_variableName}")
+            unset(${_variableName})
+            unset(${_variableName} CACHE)
+            if ("${_variableName}" STREQUAL "OGR_ENABLE_DRIVER_AVC")
+                set(_variableName "GDAL_ENABLE_DRIVER_AIGRID")
+                message(STATUS "Unsetting ${_variableName}")
+                unset(${_variableName})
+                unset(${_variableName} CACHE)
+            elseif ("${_variableName}" STREQUAL "OGR_ENABLE_DRIVER_GPKG")
+                set(_variableName "GDAL_ENABLE_DRIVER_MBTILES")
+                message(STATUS "Unsetting ${_variableName}")
+                unset(${_variableName})
+                unset(${_variableName} CACHE)
+            endif()
+        endif()
+    endforeach()
+endif()
+# Save new value of GDAL/OGR_BUILD_OPTIONAL_DRIVERS
+set(GDAL_BUILD_OPTIONAL_DRIVERS_OLD_VAL ${GDAL_BUILD_OPTIONAL_DRIVERS} CACHE INTERNAL
+    "Old value of option GDAL_BUILD_OPTIONAL_DRIVERS_OLD_VAL")
+set(OGR_BUILD_OPTIONAL_DRIVERS_OLD_VAL ${OGR_BUILD_OPTIONAL_DRIVERS} CACHE INTERNAL
+    "Old value of option OGR_BUILD_OPTIONAL_DRIVERS_OLD_VAL")
+
 # libgdal shared/satic library generation
 option(BUILD_SHARED_LIBS "Set ON to build shared library" ON)
 
@@ -44,6 +89,13 @@ option(GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE "Set ON to produce -fPIC 
 
 # Option to set preferred C# compiler
 option(CSHARP_MONO "Whether to force the C# compiler to be Mono" OFF)
+
+if (SSE2NEON_COMPILES)
+  option(GDAL_ENABLE_ARM_NEON_OPTIMIZATIONS "Set ON to use ARM Neon FPU optimizations" ON)
+  if (GDAL_ENABLE_ARM_NEON_OPTIMIZATIONS)
+      message(STATUS "Using ARM Neon optimizations")
+  endif()
+endif()
 
 # This line must be kept early in the CMake instructions. At time of writing,
 # this file is populated only be scripts/install_bash_completions.cmake.in
@@ -58,198 +110,7 @@ set(CMAKE_MACOSX_RPATH ON)
 set(CMAKE_INSTALL_RPATH "${OS_RPATH}")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
 
-# ######################################################################################################################
-# Detect available warning flags
-
-# Do that check now, since we need the result of HAVE_GCC_WARNING_ZERO_AS_NULL_POINTER_CONSTANT for cpl_config.h
-
-set(GDAL_C_WARNING_FLAGS)
-set(GDAL_CXX_WARNING_FLAGS)
-
-if (MSVC)
-  # 1. conditional expression is constant
-  # 2. 'identifier' : class 'type' needs to have dll-interface to be used by clients of class 'type2'
-  # 3. non DLL-interface classkey 'identifier' used as base for DLL-interface classkey 'identifier'
-  # 4. ??????????
-  # 5. 'identifier' : unreferenced formal parameter
-  # 6. 'conversion' : conversion from 'type1' to 'type2', signed/unsigned mismatch
-  # 7. nonstandard extension used : translation unit is empty (only applies to C source code)
-  # 8. new behavior: elements of array 'array' will be default initialized (needed for
-  #    https://trac.osgeo.org/gdal/changeset/35593)
-  # 9. interaction between '_setjmp' and C++ object destruction is non-portable
-  #
-  set(GDAL_C_WARNING_FLAGS
-      /W4
-      /wd4127
-      /wd4251
-      /wd4275
-      /wd4786
-      /wd4100
-      /wd4245
-      /wd4206
-      /wd4351
-      /wd4611)
-  set(GDAL_CXX_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS})
-  add_compile_options(/EHsc)
-
-  # The following are extra disables that can be applied to external source not under our control that we wish to use
-  # less stringent warnings with.
-  set(GDAL_SOFTWARNFLAGS
-      /wd4244
-      /wd4702
-      /wd4701
-      /wd4013
-      /wd4706
-      /wd4057
-      /wd4210
-      /wd4305)
-
-else ()
-
-  set(GDAL_SOFTWARNFLAGS "")
-
-  macro (detect_and_set_c_warning_flag flag_name)
-    string(TOUPPER ${flag_name} flag_name_upper)
-    string(REPLACE "-" "_" flag_name_upper "${flag_name_upper}")
-    string(REPLACE "=" "_" flag_name_upper "${flag_name_upper}")
-    check_c_compiler_flag(-W${flag_name} "HAVE_WFLAG_${flag_name_upper}")
-    if (HAVE_WFLAG_${flag_name_upper})
-      set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -W${flag_name})
-    endif ()
-  endmacro ()
-
-  macro (detect_and_set_cxx_warning_flag flag_name)
-    string(TOUPPER ${flag_name} flag_name_upper)
-    string(REPLACE "-" "_" flag_name_upper "${flag_name_upper}")
-    string(REPLACE "=" "_" flag_name_upper "${flag_name_upper}")
-    check_cxx_compiler_flag(-W${flag_name} "HAVE_WFLAG_${flag_name_upper}")
-    if (HAVE_WFLAG_${flag_name_upper})
-      set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -W${flag_name})
-    endif ()
-  endmacro ()
-
-  macro (detect_and_set_c_and_cxx_warning_flag flag_name)
-    string(TOUPPER ${flag_name} flag_name_upper)
-    string(REPLACE "-" "_" flag_name_upper "${flag_name_upper}")
-    string(REPLACE "=" "_" flag_name_upper "${flag_name_upper}")
-    check_c_compiler_flag(-W${flag_name} "HAVE_WFLAG_${flag_name_upper}")
-    if (HAVE_WFLAG_${flag_name_upper})
-      set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -W${flag_name})
-      set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -W${flag_name})
-    endif ()
-  endmacro ()
-
-  detect_and_set_c_and_cxx_warning_flag(all)
-  detect_and_set_c_and_cxx_warning_flag(extra)
-  detect_and_set_c_and_cxx_warning_flag(init-self)
-  detect_and_set_c_and_cxx_warning_flag(unused-parameter)
-  detect_and_set_c_warning_flag(missing-prototypes)
-  detect_and_set_c_and_cxx_warning_flag(missing-declarations)
-  detect_and_set_c_and_cxx_warning_flag(shorten-64-to-32)
-  detect_and_set_c_and_cxx_warning_flag(logical-op)
-  detect_and_set_c_and_cxx_warning_flag(shadow)
-  detect_and_set_cxx_warning_flag(shadow-field) # CLang only for now
-  detect_and_set_c_and_cxx_warning_flag(missing-include-dirs)
-  check_c_compiler_flag("-Wformat -Werror=format-security -Wno-format-nonliteral" HAVE_WFLAG_FORMAT_SECURITY)
-  if (HAVE_WFLAG_FORMAT_SECURITY)
-    set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -Wformat -Werror=format-security -Wno-format-nonliteral)
-    set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -Wformat -Werror=format-security -Wno-format-nonliteral)
-  else ()
-    detect_and_set_c_and_cxx_warning_flag(format)
-  endif ()
-  detect_and_set_c_and_cxx_warning_flag(error=vla)
-  detect_and_set_c_and_cxx_warning_flag(no-clobbered)
-  detect_and_set_c_and_cxx_warning_flag(date-time)
-  detect_and_set_c_and_cxx_warning_flag(null-dereference)
-  detect_and_set_c_and_cxx_warning_flag(duplicate-cond)
-  detect_and_set_cxx_warning_flag(extra-semi)
-  detect_and_set_c_and_cxx_warning_flag(comma)
-  detect_and_set_c_and_cxx_warning_flag(float-conversion)
-  check_c_compiler_flag("-Wdocumentation -Wno-documentation-deprecated-sync" HAVE_WFLAG_DOCUMENTATION_AND_NO_DEPRECATED)
-  if (HAVE_WFLAG_DOCUMENTATION_AND_NO_DEPRECATED)
-    set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -Wdocumentation -Wno-documentation-deprecated-sync)
-    set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -Wdocumentation -Wno-documentation-deprecated-sync)
-  endif ()
-  detect_and_set_cxx_warning_flag(unused-private-field)
-  detect_and_set_cxx_warning_flag(non-virtual-dtor)
-  detect_and_set_cxx_warning_flag(overloaded-virtual)
-  detect_and_set_cxx_warning_flag(suggest-override)
-
-  check_cxx_compiler_flag(-fno-operator-names HAVE_FLAG_NO_OPERATOR_NAMES)
-  if (HAVE_FLAG_NO_OPERATOR_NAMES)
-    set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -fno-operator-names)
-  endif ()
-
-  check_cxx_compiler_flag(-Wzero-as-null-pointer-constant HAVE_GCC_WARNING_ZERO_AS_NULL_POINTER_CONSTANT)
-  if (HAVE_GCC_WARNING_ZERO_AS_NULL_POINTER_CONSTANT)
-    set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -Wzero-as-null-pointer-constant)
-  endif ()
-
-  # Detect -Wold-style-cast but do not add it by default, as not all targets support it
-  check_cxx_compiler_flag(-Wold-style-cast HAVE_WFLAG_OLD_STYLE_CAST)
-  if (HAVE_WFLAG_OLD_STYLE_CAST)
-    set(WFLAG_OLD_STYLE_CAST -Wold-style-cast)
-  endif ()
-
-  # Detect Weffc++ but do not add it by default, as not all targets support it
-  check_cxx_compiler_flag(-Weffc++ HAVE_WFLAG_EFFCXX)
-  if (HAVE_WFLAG_EFFCXX)
-    set(WFLAG_EFFCXX -Weffc++)
-  endif ()
-
-  if (CMAKE_BUILD_TYPE MATCHES Debug)
-    add_definitions(-DDEBUG)
-    check_c_compiler_flag(-ftrapv HAVE_FTRAPV)
-    if (HAVE_FTRAPV)
-      set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -ftrapv)
-      set(GDAL_CXX_WARNING_FLAGS ${GDAL_CXX_WARNING_FLAGS} -ftrapv)
-    endif ()
-  endif ()
-
-endif ()
-
-# message(STATUS "GDAL_C_WARNING_FLAGS: ${GDAL_C_WARNING_FLAGS}") message(STATUS "GDAL_CXX_WARNING_FLAGS: ${GDAL_CXX_WARNING_FLAGS}")
-
-if (CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  check_cxx_compiler_flag(-fno-finite-math-only HAVE_FLAG_NO_FINITE_MATH_ONLY)
-  if (HAVE_FLAG_NO_FINITE_MATH_ONLY)
-    # Intel CXX compiler based on clang defaults to -ffinite-math-only, which breaks std::isinf(), std::isnan(), etc.
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-finite-math-only")
-  endif ()
-
-  set(TEST_LINK_STDCPP_SOURCE_CODE
-      "#include <string>
-    int main(){
-      std::string s;
-      s += \"x\";
-      return 0;
-    }")
-  check_cxx_source_compiles("${TEST_LINK_STDCPP_SOURCE_CODE}" _TEST_LINK_STDCPP)
-  if( NOT _TEST_LINK_STDCPP )
-      message(WARNING "Cannot link code using standard C++ library. Automatically adding -lstdc++ to CMAKE_EXE_LINKER_FLAGS, CMAKE_SHARED_LINKER_FLAGS and CMAKE_MODULE_LINKER_FLAGS")
-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lstdc++")
-      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -lstdc++")
-      set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -lstdc++")
-
-      check_cxx_source_compiles("${TEST_LINK_STDCPP_SOURCE_CODE}" _TEST_LINK_STDCPP_AGAIN)
-      if( NOT _TEST_LINK_STDCPP_AGAIN )
-          message(FATAL_ERROR "Cannot link C++ program")
-      endif()
-  endif()
-
-  check_c_compiler_flag(-wd188 HAVE_WD188) # enumerated type mixed with another type
-  if( HAVE_WD188 )
-    set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -wd188)
-  endif()
-  check_c_compiler_flag(-wd2259 HAVE_WD2259) # non-pointer conversion from ... may lose significant bits
-  if( HAVE_WD2259 )
-    set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -wd2259)
-  endif()
-  check_c_compiler_flag(-wd2312 HAVE_WD2312) # pointer cast involving 64-bit pointed-to type
-  if( HAVE_WD2259 )
-    set(GDAL_C_WARNING_FLAGS ${GDAL_C_WARNING_FLAGS} -wd2312)
-  endif()
-endif ()
+include(GdalCompilationFlags)
 
 # ######################################################################################################################
 # generate ${CMAKE_CURRENT_BINARY_DIR}/port/cpl_config.h
@@ -328,8 +189,7 @@ macro(set_alternate_linker linker)
   endif()
 endmacro()
 
-# CMake >= 3.13 needed for add_link_options()
-if( (CMAKE_VERSION VERSION_GREATER_EQUAL 3.13) AND ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU") )
+if( "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" )
   set(USE_ALTERNATE_LINKER "" CACHE STRING "Use alternate linker. Leave empty for system default; potential alternatives are 'gold', 'lld', 'bfd', 'mold'")
   if(NOT "${USE_ALTERNATE_LINKER}" STREQUAL "")
     set_alternate_linker(${USE_ALTERNATE_LINKER})
@@ -339,17 +199,12 @@ if( (CMAKE_VERSION VERSION_GREATER_EQUAL 3.13) AND ("${CMAKE_CXX_COMPILER_ID}" S
       CACHE INTERNAL "Previous value of USE_ALTERNATE_LINKER")
 endif()
 
-# Default definitions during build
-add_definitions(-DGDAL_COMPILATION)
-
 if (ENABLE_IPO)
-  if (POLICY CMP0069)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT result)
     if (result)
       set(CMAKE_INTERPROCEDURAL_OPTIMIZATION True)
     endif ()
-  endif ()
 endif ()
 
 # ######################################################################################################################
@@ -398,19 +253,9 @@ if (MINGW AND BUILD_SHARED_LIBS)
     set_target_properties(${GDAL_LIB_TARGET_NAME} PROPERTIES SUFFIX "-${GDAL_SOVERSION}${CMAKE_SHARED_LIBRARY_SUFFIX}")
 endif ()
 
-if (MINGW)
-  if (TARGET_CPU MATCHES "x86_64")
-    add_definitions(-m64)
-  endif ()
-  # Workaround for export too large error - force problematic large file to be optimized to prevent string table
-  # overflow error Used -Os instead of -O2 as previous issues had mentioned, since -Os is roughly speaking -O2,
-  # excluding any optimizations that take up extra space. Given that the issue is a string table overflowing, -Os seemed
-  # appropriate. Solves issue of https://github.com/OSGeo/gdal/issues/4706 with for example x86_64-w64-mingw32-gcc-posix
-  # (GCC) 9.3-posix 20200320
-  if (CMAKE_BUILD_TYPE MATCHES Debug OR CMAKE_BUILD_TYPE STREQUAL "")
-    add_compile_options(-Os)
-  endif ()
-endif ()
+# Some of the types in our public headers are dependent on whether GDAL_DEBUG
+# is defined or not
+target_compile_definitions(${GDAL_LIB_TARGET_NAME} PUBLIC $<$<CONFIG:DEBUG>:GDAL_DEBUG>)
 
 # Install properties
 if (GDAL_ENABLE_MACOSX_FRAMEWORK)
@@ -476,6 +321,46 @@ endif ()
 
 set(INSTALL_PLUGIN_FULL_DIR "${CMAKE_INSTALL_PREFIX}/${INSTALL_PLUGIN_DIR}")
 
+function (is_sharp_embed_available res)
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.21 AND
+        ((CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 15.0) OR
+         (CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 19.0)))
+        # CMAKE_C_STANDARD=23 only supported since CMake 3.21
+        set(TEST_SHARP_EMBED
+          "static const unsigned char embedded[] = {\n#embed __FILE__\n};\nint main() { (void)embedded; return 0;}"
+        )
+        set(CMAKE_C_STANDARD_BACKUP "${CMAKE_C_STANDARD}")
+        set(CMAKE_C_STANDARD "23")
+        check_c_source_compiles("${TEST_SHARP_EMBED}" _TEST_SHARP_EMBED)
+        set(CMAKE_C_STANDARD "${CMAKE_C_STANDARD_BACKUP}")
+        if (_TEST_SHARP_EMBED)
+            set(${res} ON PARENT_SCOPE)
+        else()
+            set(${res} OFF PARENT_SCOPE)
+        endif()
+    else()
+        set(${res} OFF PARENT_SCOPE)
+    endif()
+endfunction()
+
+is_sharp_embed_available(IS_SHARP_EMBED_AVAILABLE_RES)
+if (NOT BUILD_SHARED_LIBS AND IS_SHARP_EMBED_AVAILABLE_RES)
+    set(DEFAULT_EMBED_RESOURCE_FILES ON)
+else()
+    set(DEFAULT_EMBED_RESOURCE_FILES OFF)
+endif()
+option(EMBED_RESOURCE_FILES "Whether resource files should be embedded into the GDAL library (only available with a C23 compatible compiler)" ${DEFAULT_EMBED_RESOURCE_FILES})
+
+if (EMBED_RESOURCE_FILES AND NOT IS_SHARP_EMBED_AVAILABLE_RES)
+  message(FATAL_ERROR "C23 #embed not available with this compiler")
+endif()
+
+option(USE_ONLY_EMBEDDED_RESOURCE_FILES "Whether embedded resource files should be used (should nominally be used together with EMBED_RESOURCE_FILES=ON, otherwise this will result in non-functional builds)" OFF)
+
+if (USE_ONLY_EMBEDDED_RESOURCE_FILES AND NOT EMBED_RESOURCE_FILES)
+  message(WARNING "USE_ONLY_EMBEDDED_RESOURCE_FILES=ON set but EMBED_RESOURCE_FILES=OFF: some drivers will lack required resource files")
+endif()
+
 # Configure internal libraries
 if (GDAL_USE_ZLIB_INTERNAL)
   option(RENAME_INTERNAL_ZLIB_SYMBOLS "Rename internal zlib symbols" ON)
@@ -527,11 +412,6 @@ if (GDAL_USE_GEOTIFF_INTERNAL)
   mark_as_advanced(RENAME_INTERNAL_GEOTIFF_SYMBOLS)
   add_subdirectory(frmts/gtiff/libgeotiff)
 endif ()
-if (GDAL_USE_GIF_INTERNAL)
-  option(RENAME_INTERNAL_GIF_SYMBOLS "Rename internal giflib symbols" ON)
-  mark_as_advanced(RENAME_INTERNAL_GIF_SYMBOLS)
-  add_subdirectory(frmts/gif/giflib)
-endif ()
 if (GDAL_USE_PNG_INTERNAL)
   option(RENAME_INTERNAL_PNG_SYMBOLS "Rename internal libpng symbols" ON)
   mark_as_advanced(RENAME_INTERNAL_PNG_SYMBOLS)
@@ -541,6 +421,34 @@ if (GDAL_USE_SHAPELIB_INTERNAL)
   option(RENAME_INTERNAL_SHAPELIB_SYMBOLS "Rename internal Shapelib symbols" ON)
   mark_as_advanced(RENAME_INTERNAL_SHAPELIB_SYMBOLS)
 endif ()
+
+# Must be set before including ogr
+option(OGR_ENABLE_DRIVER_TAB
+       "Set ON to build MapInfo TAB and MIF/MID driver (required by Northwoord driver, and Shapefile attribute indexing)"
+       ${OGR_BUILD_OPTIONAL_DRIVERS})
+if(OGR_ENABLE_DRIVER_TAB AND
+   NOT DEFINED OGR_ENABLE_DRIVER_TAB_PLUGIN AND
+   GDAL_ENABLE_PLUGINS_NO_DEPS)
+    option(OGR_ENABLE_DRIVER_TAB_PLUGIN "Set ON to build OGR MapInfo TAB and MIF/MID driver as plugin" ON)
+endif()
+
+# Precompiled header
+if (USE_PRECOMPILED_HEADERS)
+  include(GdalStandardIncludes)
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gcore/empty_c.c" "")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gcore/empty.cpp" "")
+  add_library(gdal_priv_header OBJECT "${CMAKE_CURRENT_BINARY_DIR}/gcore/empty_c.c" "${CMAKE_CURRENT_BINARY_DIR}/gcore/empty.cpp")
+  gdal_standard_includes(gdal_priv_header)
+  add_dependencies(gdal_priv_header generate_gdal_version_h)
+  target_compile_options(gdal_priv_header PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX}> $<$<COMPILE_LANGUAGE:C>:${GDAL_C_WARNING_FLAGS}>)
+  target_compile_definitions(gdal_priv_header PUBLIC $<$<CONFIG:DEBUG>:GDAL_DEBUG>)
+  set_property(TARGET gdal_priv_header PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
+  target_precompile_headers(gdal_priv_header PUBLIC
+    $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/port/cpl_float.h>
+    $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/gcore/gdal_priv.h>
+    $<$<COMPILE_LANGUAGE:C>:${CMAKE_CURRENT_SOURCE_DIR}/port/cpl_port.h>
+  )
+endif()
 
 # Core components
 add_subdirectory(alg)
@@ -553,12 +461,23 @@ endif ()
 set(GDAL_RASTER_FORMAT_SOURCE_DIR "${PROJECT_SOURCE_DIR}/frmts")
 set(GDAL_VECTOR_FORMAT_SOURCE_DIR "${PROJECT_SOURCE_DIR}/ogr/ogrsf_frmts")
 
+if(OGR_ENABLE_DRIVER_GPKG AND
+   NOT DEFINED OGR_ENABLE_DRIVER_SQLITE AND
+   DEFINED OGR_BUILD_OPTIONAL_DRIVERS AND
+   NOT OGR_BUILD_OPTIONAL_DRIVERS)
+   message(STATUS "Automatically enabling SQLite driver")
+   set(OGR_ENABLE_DRIVER_SQLITE ON CACHE BOOL "Set ON to build OGR SQLite driver")
+endif()
+
 # We need to forward declare a few OGR drivers because raster formats need them
 option(OGR_ENABLE_DRIVER_AVC "Set ON to build OGR AVC driver" ${OGR_BUILD_OPTIONAL_DRIVERS})
+option(OGR_ENABLE_DRIVER_GML "Set ON to build OGR GML driver" ${OGR_BUILD_OPTIONAL_DRIVERS})
 cmake_dependent_option(OGR_ENABLE_DRIVER_SQLITE "Set ON to build OGR SQLite driver" ${OGR_BUILD_OPTIONAL_DRIVERS}
                        "GDAL_USE_SQLITE3" OFF)
 cmake_dependent_option(OGR_ENABLE_DRIVER_GPKG "Set ON to build OGR GPKG driver" ${OGR_BUILD_OPTIONAL_DRIVERS}
                        "GDAL_USE_SQLITE3;OGR_ENABLE_DRIVER_SQLITE" OFF)
+cmake_dependent_option(OGR_ENABLE_DRIVER_MVT "Set ON to build OGR MVT driver" ${OGR_BUILD_OPTIONAL_DRIVERS}
+                       "GDAL_USE_SQLITE3" OFF)
 
 # Build frmts/iso8211 conditionally to drivers requiring it
 if ((GDAL_BUILD_OPTIONAL_DRIVERS AND NOT DEFINED GDAL_ENABLE_DRIVER_ADRG AND NOT DEFINED GDAL_ENABLE_DRIVER_SDTS) OR
@@ -593,7 +512,7 @@ get_property(GDAL_PRIVATE_LINK_LIBRARIES GLOBAL PROPERTY gdal_private_link_libra
 target_link_libraries(${GDAL_LIB_TARGET_NAME} PRIVATE ${GDAL_PRIVATE_LINK_LIBRARIES} ${GDAL_EXTRA_LINK_LIBRARIES})
 
 # Document/Manuals
-if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/doc" AND BUILD_DOCS)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/doc")
   add_subdirectory(doc)
 endif ()
 add_subdirectory(man)
@@ -615,9 +534,6 @@ target_include_directories(
 if (MSVC)
   target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE gcore/Version.rc)
   source_group("Resource Files" FILES gcore/Version.rc)
-  if (CMAKE_CL_64)
-    set_target_properties(${GDAL_LIB_TARGET_NAME} PROPERTIES STATIC_LIBRARY_FLAGS "/machine:x64")
-  endif ()
 endif ()
 
 get_property(_plugins GLOBAL PROPERTY PLUGIN_MODULES)
@@ -640,11 +556,6 @@ endif ()
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/frmts/drivers.ini DESTINATION ${INSTALL_PLUGIN_DIR})
 
 # ######################################################################################################################
-
-# Note: this file is generated but not used.
-configure_file(${GDAL_CMAKE_TEMPLATE_PATH}/gdal_def.h.in ${CMAKE_CURRENT_BINARY_DIR}/gcore/gdal_def.h @ONLY)
-
-# ######################################################################################################################
 set_property(
   TARGET ${GDAL_LIB_TARGET_NAME}
   APPEND
@@ -655,156 +566,24 @@ set(GDAL_DATA_FILES
     data/GDALLogoBW.svg
     data/GDALLogoColor.svg
     data/GDALLogoGS.svg
-    data/bag_template.xml
-    data/cubewerx_extra.wkt
-    data/default.rsc
-    data/ecw_cs.wkt
-    data/eedaconf.json
-    data/epsg.wkt
-    data/esri_StatePlane_extra.wkt
     data/gdalicon.png
-    data/gdalinfo_output.schema.json
-    data/gdalmdiminfo_output.schema.json
-    data/gdalvrt.xsd
-    data/gml_registry.xml
-    data/gmlasconf.xml
-    data/gmlasconf.xsd
-    data/grib2_table_versions.csv
-    data/grib2_center.csv
-    data/grib2_process.csv
-    data/grib2_subcenter.csv
-    data/grib2_table_4_2_0_0.csv
-    data/grib2_table_4_2_0_13.csv
-    data/grib2_table_4_2_0_14.csv
-    data/grib2_table_4_2_0_15.csv
-    data/grib2_table_4_2_0_16.csv
-    data/grib2_table_4_2_0_17.csv
-    data/grib2_table_4_2_0_18.csv
-    data/grib2_table_4_2_0_190.csv
-    data/grib2_table_4_2_0_191.csv
-    data/grib2_table_4_2_0_19.csv
-    data/grib2_table_4_2_0_1.csv
-    data/grib2_table_4_2_0_20.csv
-    data/grib2_table_4_2_0_21.csv
-    data/grib2_table_4_2_0_2.csv
-    data/grib2_table_4_2_0_3.csv
-    data/grib2_table_4_2_0_4.csv
-    data/grib2_table_4_2_0_5.csv
-    data/grib2_table_4_2_0_6.csv
-    data/grib2_table_4_2_0_7.csv
-    data/grib2_table_4_2_10_0.csv
-    data/grib2_table_4_2_10_191.csv
-    data/grib2_table_4_2_10_1.csv
-    data/grib2_table_4_2_10_2.csv
-    data/grib2_table_4_2_10_3.csv
-    data/grib2_table_4_2_10_4.csv
-    data/grib2_table_4_2_1_0.csv
-    data/grib2_table_4_2_1_1.csv
-    data/grib2_table_4_2_1_2.csv
-    data/grib2_table_4_2_20_0.csv
-    data/grib2_table_4_2_20_1.csv
-    data/grib2_table_4_2_20_2.csv
-    data/grib2_table_4_2_2_0.csv
-    data/grib2_table_4_2_2_3.csv
-    data/grib2_table_4_2_2_4.csv
-    data/grib2_table_4_2_2_5.csv
-    data/grib2_table_4_2_2_6.csv
-    data/grib2_table_4_2_3_0.csv
-    data/grib2_table_4_2_3_1.csv
-    data/grib2_table_4_2_3_2.csv
-    data/grib2_table_4_2_3_3.csv
-    data/grib2_table_4_2_3_4.csv
-    data/grib2_table_4_2_3_5.csv
-    data/grib2_table_4_2_3_6.csv
-    data/grib2_table_4_2_4_0.csv
-    data/grib2_table_4_2_4_10.csv
-    data/grib2_table_4_2_4_1.csv
-    data/grib2_table_4_2_4_2.csv
-    data/grib2_table_4_2_4_3.csv
-    data/grib2_table_4_2_4_4.csv
-    data/grib2_table_4_2_4_5.csv
-    data/grib2_table_4_2_4_6.csv
-    data/grib2_table_4_2_4_7.csv
-    data/grib2_table_4_2_4_8.csv
-    data/grib2_table_4_2_4_9.csv
-    data/grib2_table_4_2_local_Canada.csv
-    data/grib2_table_4_2_local_HPC.csv
-    data/grib2_table_4_2_local_index.csv
-    data/grib2_table_4_2_local_MRMS.csv
-    data/grib2_table_4_2_local_NCEP.csv
-    data/grib2_table_4_2_local_NDFD.csv
-    data/grib2_table_4_5.csv
-    data/gt_datum.csv
-    data/gt_ellips.csv
-    data/header.dxf
-    data/inspire_cp_BasicPropertyUnit.gfs
-    data/inspire_cp_CadastralBoundary.gfs
-    data/inspire_cp_CadastralParcel.gfs
-    data/inspire_cp_CadastralZoning.gfs
-    data/jpfgdgml_AdmArea.gfs
-    data/jpfgdgml_AdmBdry.gfs
-    data/jpfgdgml_AdmPt.gfs
-    data/jpfgdgml_BldA.gfs
-    data/jpfgdgml_BldL.gfs
-    data/jpfgdgml_Cntr.gfs
-    data/jpfgdgml_CommBdry.gfs
-    data/jpfgdgml_CommPt.gfs
-    data/jpfgdgml_Cstline.gfs
-    data/jpfgdgml_ElevPt.gfs
-    data/jpfgdgml_GCP.gfs
-    data/jpfgdgml_LeveeEdge.gfs
-    data/jpfgdgml_RailCL.gfs
-    data/jpfgdgml_RdASL.gfs
-    data/jpfgdgml_RdArea.gfs
-    data/jpfgdgml_RdCompt.gfs
-    data/jpfgdgml_RdEdg.gfs
-    data/jpfgdgml_RdMgtBdry.gfs
-    data/jpfgdgml_RdSgmtA.gfs
-    data/jpfgdgml_RvrMgtBdry.gfs
-    data/jpfgdgml_SBAPt.gfs
-    data/jpfgdgml_SBArea.gfs
-    data/jpfgdgml_SBBdry.gfs
-    data/jpfgdgml_WA.gfs
-    data/jpfgdgml_WL.gfs
-    data/jpfgdgml_WStrA.gfs
-    data/jpfgdgml_WStrL.gfs
-    data/netcdf_config.xsd
-    data/nitf_spec.xml
-    data/nitf_spec.xsd
-    data/ogrvrt.xsd
-    data/osmconf.ini
-    data/ogrinfo_output.schema.json
-    data/ozi_datum.csv
-    data/ozi_ellips.csv
-    data/pci_datum.txt
-    data/pci_ellips.txt
-    data/pdfcomposition.xsd
-    data/pds4_template.xml
-    data/plscenesconf.json
-    data/ruian_vf_ob_v1.gfs
-    data/ruian_vf_st_uvoh_v1.gfs
-    data/ruian_vf_st_v1.gfs
-    data/ruian_vf_v1.gfs
-    data/s57agencies.csv
-    data/s57attributes.csv
-    data/s57expectedinput.csv
-    data/s57objectclasses.csv
-    data/seed_2d.dgn
-    data/seed_3d.dgn
-    data/stateplane.csv
-    data/template_tiles.mapml
-    data/tms_LINZAntarticaMapTileGrid.json
-    data/tms_MapML_APSTILE.json
-    data/tms_MapML_CBMTILE.json
-    data/tms_NZTM2000.json
-    data/trailer.dxf
-    data/vdv452.xml
-    data/vdv452.xsd
-    data/vicar.json)
+)
 set_property(
   TARGET ${GDAL_LIB_TARGET_NAME}
   APPEND
   PROPERTY RESOURCE "${GDAL_DATA_FILES}")
+
+# Copy all resource files from their source location to ${CMAKE_CURRENT_BINARY_DIR}/data
+# Note that this is not only the small list of files set a few lines above,
+# but also resource files attached to ${GDAL_LIB_TARGET_NAME} in other directories (drivers, etc.)
+get_property(
+  _data_files
+  TARGET ${GDAL_LIB_TARGET_NAME}
+  PROPERTY RESOURCE)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/data")
+foreach(_file IN LISTS _data_files)
+    configure_file("${_file}" "${CMAKE_CURRENT_BINARY_DIR}/data" COPYONLY)
+endforeach()
 
 if (GDAL_ENABLE_MACOSX_FRAMEWORK)
   # We need to add data files and public headers as sources of the library os they get installed through the framework
@@ -826,6 +605,11 @@ install(
   RESOURCE DESTINATION ${GDAL_RESOURCE_PATH}
   PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FRAMEWORK DESTINATION "${FRAMEWORK_DESTINATION}")
+
+# Generate targets file for importing directly from GDAL build tree
+export(TARGETS ${GDAL_LIB_TARGET_NAME}
+        NAMESPACE GDAL::
+        FILE "GDAL-targets.cmake")
 
 if (NOT GDAL_ENABLE_MACOSX_FRAMEWORK)
   # Generate GdalConfig.cmake and GdalConfigVersion.cmake
@@ -850,17 +634,11 @@ if (NOT GDAL_ENABLE_MACOSX_FRAMEWORK)
   endif ()
 
   include(CMakePackageConfigHelpers)
-  if(CMAKE_VERSION VERSION_LESS 3.11)
-      set(comptatibility_check ExactVersion)
-  else()
-      # SameMinorVersion compatibility are supported CMake >= 3.11
-      # Our C++ ABI remains stable only among major.minor.XXX patch releases
-      set(comptatibility_check SameMinorVersion)
-  endif()
+  # SameMajorVersion as the C++ ABI stability is not relevant for new linking and there are only a few breaking API changes.
   write_basic_package_version_file(
     GDALConfigVersion.cmake
     VERSION ${GDAL_VERSION}
-    COMPATIBILITY ${comptatibility_check})
+    COMPATIBILITY SameMajorVersion)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/GDALConfigVersion.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gdal/)
   configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/template/GDALConfig.cmake.in
                  ${CMAKE_CURRENT_BINARY_DIR}/GDALConfig.cmake @ONLY)

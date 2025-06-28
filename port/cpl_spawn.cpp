@@ -7,23 +7,7 @@
  **********************************************************************
  * Copyright (c) 2012-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -37,7 +21,7 @@
 #include "cpl_multiproc.h"
 #include "cpl_string.h"
 
-#if defined(WIN32)
+#if defined(_WIN32)
 #include <windows.h>
 #else
 #include <cassert>
@@ -161,7 +145,7 @@ int CPLSpawn(const char *const papszArgv[], VSILFILE *fin, VSILFILE *fout,
     return CPLSpawnAsyncFinish(sp, TRUE, FALSE);
 }
 
-#if defined(WIN32)
+#if defined(_WIN32)
 
 /************************************************************************/
 /*                          CPLPipeRead()                               */
@@ -468,13 +452,22 @@ void CPLSpawnAsyncCloseErrorFileHandle(CPLSpawnedProcess *p)
  */
 int CPLPipeRead(CPL_FILE_HANDLE fin, void *data, int length)
 {
+#ifdef __COVERITY__
+    (void)fin;
+    (void)data;
+    (void)length;
+    CPLError(CE_Failure, CPLE_AppDefined, "Not implemented");
+    return FALSE;
+#else
     GByte *pabyData = static_cast<GByte *>(data);
     int nRemain = length;
     while (nRemain > 0)
     {
         while (true)
         {
-            const int n = static_cast<int>(read(fin, pabyData, nRemain));
+            assert(nRemain > 0);
+            // coverity[overflow_sink]
+            const ssize_t n = read(fin, pabyData, nRemain);
             if (n < 0)
             {
                 if (errno == EINTR)
@@ -485,11 +478,13 @@ int CPLPipeRead(CPL_FILE_HANDLE fin, void *data, int length)
             else if (n == 0)
                 return FALSE;
             pabyData += n;
-            nRemain -= n;
+            assert(n <= nRemain);
+            nRemain -= static_cast<int>(n);
             break;
         }
     }
     return TRUE;
+#endif
 }
 
 /************************************************************************/
@@ -509,13 +504,22 @@ int CPLPipeRead(CPL_FILE_HANDLE fin, void *data, int length)
  */
 int CPLPipeWrite(CPL_FILE_HANDLE fout, const void *data, int length)
 {
+#ifdef __COVERITY__
+    (void)fout;
+    (void)data;
+    (void)length;
+    CPLError(CE_Failure, CPLE_AppDefined, "Not implemented");
+    return FALSE;
+#else
     const GByte *pabyData = static_cast<const GByte *>(data);
     int nRemain = length;
     while (nRemain > 0)
     {
         while (true)
         {
-            const int n = static_cast<int>(write(fout, pabyData, nRemain));
+            assert(nRemain > 0);
+            // coverity[overflow_sink]
+            const ssize_t n = write(fout, pabyData, nRemain);
             if (n < 0)
             {
                 if (errno == EINTR)
@@ -524,11 +528,13 @@ int CPLPipeWrite(CPL_FILE_HANDLE fout, const void *data, int length)
                     return FALSE;
             }
             pabyData += n;
-            nRemain -= n;
+            assert(n <= nRemain);
+            nRemain -= static_cast<int>(n);
             break;
         }
     }
     return TRUE;
+#endif
 }
 
 /************************************************************************/
@@ -887,6 +893,14 @@ int CPLSpawnAsyncFinish(CPLSpawnedProcess *p, int bWait, CPL_UNUSED int bKill)
             }
             else
             {
+                if (WIFEXITED(status))
+                {
+                    status = WEXITSTATUS(status);
+                }
+                else
+                {
+                    status = -1;
+                }
                 break;
             }
         }

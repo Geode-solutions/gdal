@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # *****************************************************************************
-# $Id$
 #
 # Project:  GDAL Utilities
 # Purpose:  Python port of Commandline application to list info about a file.
@@ -12,25 +11,10 @@
 # Copyright (c) 2010-2011, Even Rouault <even dot rouault at spatialys.com>
 # Copyright (c) 1998, Frank Warmerdam
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 # ***************************************************************************/
 
+import math
 import sys
 
 from osgeo import gdal, osr
@@ -43,7 +27,7 @@ from osgeo import gdal, osr
 def Usage():
     print(
         "Usage: gdalinfo [--help-general] [-mm] [-stats] [-hist] [-nogcp] [-nomd]\n"
-        + "                [-norat] [-noct] [-nofl] [-checksum] [-mdd domain]* datasetname"
+        + "                [-norat] [-noct] [-nofl] [-checksum] [-mdd domain]... datasetname"
     )
     return 2
 
@@ -181,12 +165,13 @@ def main(argv=None):
     if pszProjection is not None:
 
         hSRS = osr.SpatialReference()
-        if hSRS.ImportFromWkt(pszProjection) == gdal.CE_None:
-            pszPrettyWkt = hSRS.ExportToPrettyWkt(False)
+        with gdal.quiet_errors(), osr.ExceptionMgr(useExceptions=False):
+            if hSRS.ImportFromWkt(pszProjection) == gdal.CE_None:
+                pszPrettyWkt = hSRS.ExportToPrettyWkt(False)
 
-            print("Coordinate System is:\n%s" % pszPrettyWkt)
-        else:
-            print("Coordinate System is `%s'" % pszProjection)
+                print("Coordinate System is:\n%s" % pszPrettyWkt)
+            else:
+                print("Coordinate System is `%s'" % pszProjection)
 
     # --------------------------------------------------------------------
     #      Report Geotransform.
@@ -318,19 +303,17 @@ def main(argv=None):
             print("  %s" % metadata)
 
     # --------------------------------------------------------------------
-    #      Setup projected to lat/long transform if appropriate.
+    #      Setup projected to long/lat transform if appropriate.
     # --------------------------------------------------------------------
-    if pszProjection:
-        hProj = osr.SpatialReference(pszProjection)
-        if hProj is not None:
-            hLatLong = hProj.CloneGeogCS()
-
+    hProj = hDataset.GetSpatialRef()
+    if hProj:
+        hLatLong = hProj.CloneGeogCS()
         if hLatLong is not None:
+            # To make sure the geographic coordinates are in long, lat order
+            hLatLong.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
             gdal.PushErrorHandler("CPLQuietErrorHandler")
             hTransform = osr.CoordinateTransformation(hProj, hLatLong)
             gdal.PopErrorHandler()
-            if gdal.GetLastErrorMsg().find("Unable to load PROJ.4 library") != -1:
-                hTransform = None
 
     # --------------------------------------------------------------------
     #      Report corners.
@@ -402,9 +385,8 @@ def main(argv=None):
             print(line)
 
         stats = hBand.GetStatistics(bApproxStats, bStats)
-        # Dirty hack to recognize if stats are valid. If invalid, the returned
-        # stddev is negative
-        if stats[3] >= 0.0:
+        # Before GDAL 3.10, a negative value for stddev indicated an error
+        if stats is not None and stats[3] >= 0.0:
             print(
                 "  Minimum=%.3f, Maximum=%.3f, Mean=%.3f, StdDev=%.3f"
                 % (stats[0], stats[1], stats[2], stats[3])
@@ -433,7 +415,7 @@ def main(argv=None):
 
         dfNoData = hBand.GetNoDataValue()
         if dfNoData is not None:
-            if dfNoData != dfNoData:
+            if math.isnan(dfNoData):
                 print("  NoData Value=nan")
             else:
                 print("  NoData Value=%.18g" % dfNoData)

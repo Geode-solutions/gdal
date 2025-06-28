@@ -1,5 +1,4 @@
-/* $Id$
- *
+/*
  * Name:     avc_binwr.c
  * Project:  Arc/Info vector coverage (AVC)  E00->BIN conversion library
  * Language: ANSI C
@@ -9,23 +8,7 @@
  **********************************************************************
  * Copyright (c) 1999-2001, Daniel Morissette
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************
  *
  * $Log: avc_binwr.c,v $
@@ -907,7 +890,6 @@ int AVCBinWriteCnt(AVCBinFile *psFile, AVCCnt *psCnt)
  **********************************************************************/
 static int _AVCBinWriteLab(AVCRawBinFile *psFile, AVCLab *psLab, int nPrecision)
 {
-
     AVCRawBinWriteInt32(psFile, psLab->nValue);
     if (CPLGetLastErrorNo() != 0)
         return -1;
@@ -981,7 +963,6 @@ int AVCBinWriteLab(AVCBinFile *psFile, AVCLab *psLab)
  **********************************************************************/
 static int _AVCBinWriteTol(AVCRawBinFile *psFile, AVCTol *psTol, int nPrecision)
 {
-
     AVCRawBinWriteInt32(psFile, psTol->nIndex);
     if (CPLGetLastErrorNo() != 0)
         return -1;
@@ -1322,7 +1303,6 @@ int AVCBinWriteTxt(AVCBinFile *psFile, AVCTxt *psTxt)
 static int _AVCBinWriteRxp(AVCRawBinFile *psFile, AVCRxp *psRxp,
                            CPL_UNUSED int nPrecision)
 {
-
     AVCRawBinWriteInt32(psFile, psRxp->n1);
     if (CPLGetLastErrorNo() != 0)
         return -1;
@@ -1511,7 +1491,7 @@ static int _AVCBinWriteCreateArcDirEntry(const char *pszArcDirFile,
     if ((fp = VSIFOpenL(pszArcDirFile, "r")) != nullptr)
     {
         char buf[380];
-        while (!VSIFEofL(fp))
+        while (!VSIFEofL(fp) && !VSIFErrorL(fp))
         {
             if (VSIFReadL(buf, 380, 1, fp) == 1)
                 numDirEntries++;
@@ -1793,7 +1773,8 @@ AVCBinFile *AVCBinWriteCreateTable(const char *pszInfoPath,
         for (i = 0; *pszPtr != '\0' && *pszPtr != '.' && *pszPtr != ' ';
              i++, pszPtr++)
         {
-            szCoverName[i] = (char)tolower(*pszPtr);
+            szCoverName[i] =
+                (char)CPLTolower(static_cast<unsigned char>(*pszPtr));
         }
         szCoverName[i] = '\0';
 
@@ -1802,13 +1783,14 @@ AVCBinFile *AVCBinWriteCreateTable(const char *pszInfoPath,
 
         for (i = 0; i < 3 && *pszPtr != '\0' && *pszPtr != ' '; i++, pszPtr++)
         {
-            szExt[i] = (char)tolower(*pszPtr);
+            szExt[i] = (char)CPLTolower(static_cast<unsigned char>(*pszPtr));
         }
         szExt[i] = '\0';
 
         for (i = 0; *pszPtr != '\0' && *pszPtr != ' '; i++, pszPtr++)
         {
-            szSubclass[i] = (char)tolower(*pszPtr);
+            szSubclass[i] =
+                (char)CPLTolower(static_cast<unsigned char>(*pszPtr));
         }
         szSubclass[i] = '\0';
 
@@ -1865,7 +1847,7 @@ AVCBinFile *AVCBinWriteCreateTable(const char *pszInfoPath,
                  psTableDef->szDataFile);
         psFile->pszFilename = CPLStrdup(pszFname);
 
-#ifdef WIN32
+#ifdef _WIN32
         /*-------------------------------------------------------------
          * On a Windows system, we have to change the '/' to '\\' in the
          * data file path.
@@ -1979,7 +1961,8 @@ AVCBinFile *_AVCBinWriteCreateDBFTable(const char *pszPath,
     for (i = (int)strlen(psFile->pszFilename); *pszDBFBasename;
          i++, pszDBFBasename++)
     {
-        psFile->pszFilename[i] = (char)tolower(*pszDBFBasename);
+        psFile->pszFilename[i] =
+            (char)CPLTolower(static_cast<unsigned char>(*pszDBFBasename));
     }
 
     strcat(psFile->pszFilename, ".dbf");

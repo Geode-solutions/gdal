@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  ENVI .hdr Driver
  * Purpose:  Implementation of ENVI .hdr labelled raw raster support.
@@ -10,23 +9,7 @@
  * Copyright (c) 2002, Frank Warmerdam
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDAL_FRMTS_RAW_ENVIDATASET_H_INCLUDED
@@ -72,7 +55,7 @@ class ENVIDataset final : public RawDataset
     bool bHeaderDirty;
     bool bFillFile;
 
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
 
     OGRSpatialReference m_oSRS{};
 
@@ -81,6 +64,8 @@ class ENVIDataset final : public RawDataset
     CPLString osStaFilename{};
 
     std::vector<GDAL_GCP> m_asGCPs{};
+
+    Interleave eInterleave = Interleave::BSQ;
 
     bool ReadHeader(VSILFILE *);
     bool ProcessMapinfo(const char *);
@@ -105,12 +90,6 @@ class ENVIDataset final : public RawDataset
 
     static char **SplitList(const char *);
 
-    enum Interleave
-    {
-        BSQ,
-        BIL,
-        BIP
-    } interleave;
     static int GetEnviType(GDALDataType eType);
 
     CPL_DISALLOW_COPY_ASSIGN(ENVIDataset)
@@ -122,8 +101,8 @@ class ENVIDataset final : public RawDataset
     ~ENVIDataset() override;
 
     CPLErr FlushCache(bool bAtClosing) override;
-    CPLErr GetGeoTransform(double *padfTransform) override;
-    CPLErr SetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
@@ -164,10 +143,7 @@ class ENVIRasterBand final : public RawRasterBand
     ENVIRasterBand(GDALDataset *poDSIn, int nBandIn, VSILFILE *fpRawIn,
                    vsi_l_offset nImgOffsetIn, int nPixelOffsetIn,
                    int nLineOffsetIn, GDALDataType eDataTypeIn,
-                   int bNativeOrderIn);
-    ~ENVIRasterBand() override
-    {
-    }
+                   RawRasterBand::ByteOrder eByteOrderIn);
 
     void SetDescription(const char *) override;
     CPLErr SetNoDataValue(double) override;

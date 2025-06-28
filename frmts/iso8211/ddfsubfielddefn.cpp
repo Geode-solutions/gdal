@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -261,7 +245,7 @@ void DDFSubfieldDefn::Dump(FILE *fp)
  */
 
 int DDFSubfieldDefn::GetDataLength(const char *pachSourceData, int nMaxBytes,
-                                   int *pnConsumedBytes)
+                                   int *pnConsumedBytes) const
 
 {
     if (!bIsVariable)
@@ -379,6 +363,9 @@ int DDFSubfieldDefn::GetDataLength(const char *pachSourceData, int nMaxBytes,
  * types other than DDFString, including data past zero chars.  This is
  * the standard way of extracting DDFBinaryString subfields for instance.<p>
  *
+ * CAUTION: this method is not thread safe as it updates mutable member
+ * variables.
+ *
  * @param pachSourceData The pointer to the raw data for this field.  This
  * may have come from DDFRecord::GetData(), taking into account skip factors
  * over previous subfields data.
@@ -399,7 +386,7 @@ int DDFSubfieldDefn::GetDataLength(const char *pachSourceData, int nMaxBytes,
 
 const char *DDFSubfieldDefn::ExtractStringData(const char *pachSourceData,
                                                int nMaxBytes,
-                                               int *pnConsumedBytes)
+                                               int *pnConsumedBytes) const
 
 {
     int nLength = GetDataLength(pachSourceData, nMaxBytes, pnConsumedBytes);
@@ -453,7 +440,8 @@ const char *DDFSubfieldDefn::ExtractStringData(const char *pachSourceData,
  */
 
 double DDFSubfieldDefn::ExtractFloatData(const char *pachSourceData,
-                                         int nMaxBytes, int *pnConsumedBytes)
+                                         int nMaxBytes,
+                                         int *pnConsumedBytes) const
 
 {
     switch (pszFormatString[0])
@@ -594,7 +582,7 @@ double DDFSubfieldDefn::ExtractFloatData(const char *pachSourceData,
  */
 
 int DDFSubfieldDefn::ExtractIntData(const char *pachSourceData, int nMaxBytes,
-                                    int *pnConsumedBytes)
+                                    int *pnConsumedBytes) const
 
 {
     switch (pszFormatString[0])
@@ -719,7 +707,8 @@ int DDFSubfieldDefn::ExtractIntData(const char *pachSourceData, int nMaxBytes,
  * @param fp File to write report to.
  */
 
-void DDFSubfieldDefn::DumpData(const char *pachData, int nMaxBytes, FILE *fp)
+void DDFSubfieldDefn::DumpData(const char *pachData, int nMaxBytes,
+                               FILE *fp) const
 
 {
     if (nMaxBytes < 0)
@@ -936,10 +925,12 @@ int DDFSubfieldDefn::FormatIntValue(char *pachData, int nBytesAvailable,
         {
             case NotBinary:
             {
-                char chFillChar = '0'; /* ASCII zero intended */
-                memset(pachData, chFillChar, nSize);
-                memcpy(pachData + nSize - strlen(szWork), szWork,
-                       strlen(szWork));
+                constexpr char chFillChar = '0'; /* ASCII zero intended */
+                const int nZeroFillCount =
+                    nSize - static_cast<int>(strlen(szWork));
+                for (int i = 0; i < nZeroFillCount; ++i)
+                    pachData[i] = chFillChar;
+                memcpy(pachData + nZeroFillCount, szWork, strlen(szWork));
                 break;
             }
 
@@ -1023,10 +1014,11 @@ int DDFSubfieldDefn::FormatFloatValue(char *pachData, int nBytesAvailable,
     {
         if (GetBinaryFormat() == NotBinary)
         {
-            const char chFillZeroASCII = '0'; /* ASCII zero intended */
-            /* coverity[bad_memset] */
-            memset(pachData, chFillZeroASCII, nSize);
-            memcpy(pachData + nSize - strlen(szWork), szWork, strlen(szWork));
+            constexpr char chFillChar = '0'; /* ASCII zero intended */
+            const int nZeroFillCount = nSize - static_cast<int>(strlen(szWork));
+            for (int i = 0; i < nZeroFillCount; ++i)
+                pachData[i] = chFillChar;
+            memcpy(pachData + nZeroFillCount, szWork, strlen(szWork));
         }
         else
         {

@@ -10,23 +10,7 @@
  *  Copyright (c) 2016 Alexandr Borzykh
  *  Copyright (c) 2016-2019 NextGIS, <info@nextgis.com>
  *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in all
- *  copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
+  * SPDX-License-Identifier: MIT
  *******************************************************************************/
 #include "opencad_api.h"
 #include "cadfilestreamio.h"
@@ -55,18 +39,18 @@ static int CheckCADFile(CADFileIO * pCADFileIO)
     size_t nPathLen = strlen( pszFilePath );
 
     if( nPathLen > 3 &&
-        toupper( pszFilePath[nPathLen - 3] ) == 'D' &&
-        toupper( pszFilePath[nPathLen - 2] ) == 'X' &&
-        toupper( pszFilePath[nPathLen - 1] ) == 'F' )
+        toupper( static_cast<unsigned char>(pszFilePath[nPathLen - 3]) ) == 'D' &&
+        toupper( static_cast<unsigned char>(pszFilePath[nPathLen - 2]) ) == 'X' &&
+        toupper( static_cast<unsigned char>(pszFilePath[nPathLen - 1]) ) == 'F' )
     {
         //TODO: "AutoCAD Binary DXF"
         //std::cerr << "DXF ASCII and binary is not supported yet.";
         return 0;
     }
     if( ! ( nPathLen > 3 &&
-            toupper( pszFilePath[nPathLen - 3] ) == 'D' &&
-            toupper( pszFilePath[nPathLen - 2] ) == 'W' &&
-            toupper( pszFilePath[nPathLen - 1] ) == 'G' ) )
+            toupper( static_cast<unsigned char>(pszFilePath[nPathLen - 3]) ) == 'D' &&
+            toupper( static_cast<unsigned char>(pszFilePath[nPathLen - 2]) ) == 'W' &&
+            toupper( static_cast<unsigned char>(pszFilePath[nPathLen - 1]) ) == 'G' ) )
     {
         return 0;
     }

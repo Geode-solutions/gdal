@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read/write functionality for JP2KAK JPEG2000 driver.
@@ -11,29 +10,13 @@
 # Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
 import pytest
 
-from osgeo import gdal
+from osgeo import gdal, osr
 
 pytestmark = pytest.mark.require_driver("JP2KAK")
 
@@ -58,7 +41,7 @@ def startup_and_cleanup():
 def test_jp2kak_1():
 
     tst = gdaltest.GDALTest("JP2KAK", "jpeg2000/byte.jp2", 1, 50054)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -68,7 +51,7 @@ def test_jp2kak_1():
 def test_jp2kak_2():
 
     tst = gdaltest.GDALTest("JP2KAK", "jpeg2000/int16.jp2", 1, 4587)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -81,7 +64,7 @@ def test_jp2kak_3():
         "JP2KAK", "jpeg2000/byte.jp2", 1, 50054, options=["QUALITY=100"]
     )
 
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -92,7 +75,7 @@ def test_jp2kak_4():
 
     tst = gdaltest.GDALTest("JP2KAK", "rgbsmall.tif", 0, 0, options=["GMLJP2=OFF"])
 
-    return tst.testCreateCopy(check_srs=1, check_gt=1)
+    tst.testCreateCopy(check_srs=1, check_gt=1)
 
 
 ###############################################################################
@@ -103,7 +86,7 @@ def test_jp2kak_5():
 
     tst = gdaltest.GDALTest("JP2KAK", "rgbsmall.tif", 0, 0, options=["GEOJP2=OFF"])
 
-    return tst.testCreateCopy(check_srs=1, check_gt=1)
+    tst.testCreateCopy(check_srs=1, check_gt=1)
 
 
 ###############################################################################
@@ -117,7 +100,7 @@ def test_jp2kak_8():
         "JP2KAK", "jpeg2000/byte.jp2", 1, 50054, options=["QUALITY=100"]
     )
 
-    return tst.testCreateCopy(vsimem=1, new_filename="/vsimem/jp2kak_8.jpc")
+    tst.testCreateCopy(vsimem=1, new_filename="/vsimem/jp2kak_8.jpc")
 
 
 ###############################################################################
@@ -128,7 +111,7 @@ def test_jp2kak_8():
 def test_jp2kak_9():
 
     tst = gdaltest.GDALTest("JP2KAK", "jpeg2000/rgbwcmyk01_YeGeo_kakadu.jp2", 2, 32141)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -209,16 +192,8 @@ def test_jp2kak_13(use_stripe_compressor):
         ov_band.XSize == 250 and ov_band.YSize == 4
     ), "did not get expected overview size."
     #
-    # Note, due to oddities of rounding related to identifying discard
-    # levels the overview is actually generated with no discard levels
-    # and in the debug output we see 500x7 -> 500x7 -> 250x4.
     checksum = ov_band.Checksum()
-    assert checksum in (
-        11767,
-        11776,
-        11736,
-        11801,
-    ), "did not get expected overview checksum"
+    assert checksum == 12061, "did not get expected overview checksum"
 
 
 ###############################################################################
@@ -323,35 +298,34 @@ def test_jp2kak_16():
 
 def test_jp2kak_17():
 
-    gdal.SetConfigOption("GDAL_JP2K_ALT_OFFSETVECTOR_ORDER", "YES")
+    with gdal.config_option("GDAL_JP2K_ALT_OFFSETVECTOR_ORDER", "YES"):
 
-    ds = gdal.Open("data/jpeg2000/gmljp2_dtedsm_epsg_4326_axes_alt_offsetVector.jp2")
+        ds = gdal.Open(
+            "data/jpeg2000/gmljp2_dtedsm_epsg_4326_axes_alt_offsetVector.jp2"
+        )
 
-    gt = ds.GetGeoTransform()
-    gte = (
-        42.999583333333369,
-        0.008271349862259,
-        0,
-        34.000416666666631,
-        0,
-        -0.008271349862259,
-    )
+        gt = ds.GetGeoTransform()
+        gte = (
+            42.999583333333369,
+            0.008271349862259,
+            0,
+            34.000416666666631,
+            0,
+            -0.008271349862259,
+        )
 
-    if (
-        gt[0] != pytest.approx(gte[0], abs=0.0000001)
-        or gt[3] != pytest.approx(gte[3], abs=0.000001)
-        or gt[1] != pytest.approx(gte[1], abs=0.000000000005)
-        or gt[2] != pytest.approx(gte[2], abs=0.000000000005)
-        or gt[4] != pytest.approx(gte[4], abs=0.000000000005)
-        or gt[5] != pytest.approx(gte[5], abs=0.000000000005)
-    ):
-        print("got: ", gt)
-        gdal.SetConfigOption("GDAL_JP2K_ALT_OFFSETVECTOR_ORDER", "NO")
-        pytest.fail("did not get expected geotransform")
+        if (
+            gt[0] != pytest.approx(gte[0], abs=0.0000001)
+            or gt[3] != pytest.approx(gte[3], abs=0.000001)
+            or gt[1] != pytest.approx(gte[1], abs=0.000000000005)
+            or gt[2] != pytest.approx(gte[2], abs=0.000000000005)
+            or gt[4] != pytest.approx(gte[4], abs=0.000000000005)
+            or gt[5] != pytest.approx(gte[5], abs=0.000000000005)
+        ):
+            print("got: ", gt)
+            pytest.fail("did not get expected geotransform")
 
-    ds = None
-
-    gdal.SetConfigOption("GDAL_JP2K_ALT_OFFSETVECTOR_ORDER", "NO")
+        ds = None
 
 
 ###############################################################################
@@ -364,7 +338,7 @@ def test_jp2kak_lossless_int16(use_stripe_compressor):
     tst = gdaltest.GDALTest("JP2KAK", "int16.tif", 1, 4672, options=["QUALITY=100"])
 
     with gdaltest.config_option("JP2KAK_USE_STRIPE_COMPRESSOR", use_stripe_compressor):
-        return tst.testCreateCopy()
+        tst.testCreateCopy()
 
 
 ###############################################################################
@@ -384,7 +358,7 @@ def test_jp2kak_lossless_uint16(use_stripe_compressor):
     )
 
     with gdaltest.config_option("JP2KAK_USE_STRIPE_COMPRESSOR", use_stripe_compressor):
-        return tst.testCreateCopy(vsimem=1)
+        tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -404,7 +378,7 @@ def test_jp2kak_lossless_int32(use_stripe_compressor):
     )
 
     with gdaltest.config_option("JP2KAK_USE_STRIPE_COMPRESSOR", use_stripe_compressor):
-        return tst.testCreateCopy()
+        tst.testCreateCopy()
 
 
 ###############################################################################
@@ -424,7 +398,7 @@ def test_jp2kak_lossless_uint32(use_stripe_compressor):
     )
 
     with gdaltest.config_option("JP2KAK_USE_STRIPE_COMPRESSOR", use_stripe_compressor):
-        return tst.testCreateCopy(vsimem=1)
+        tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -463,6 +437,51 @@ def test_jp2kak_lossless_uint32_nbits_20():
     ds = gdal.Open(tmpfilename)
     assert ds.GetRasterBand(1).ReadRaster() == src_ds.GetRasterBand(1).ReadRaster()
     gdal.GetDriverByName("JP2KAK").Delete(tmpfilename)
+
+
+###############################################################################
+# Test lossless copying of multi band with tiling (to cause a stripe_height != 1)
+
+
+@pytest.mark.parametrize("use_stripe_compressor", ["YES", "NO"])
+def test_jp2kak_lossless_multiband(tmp_vsimem, use_stripe_compressor):
+
+    src_ds = gdal.Open("data/rgbsmall.tif")
+    out_filename = str(tmp_vsimem / "out.jp2")
+    with gdaltest.config_option("JP2KAK_USE_STRIPE_COMPRESSOR", use_stripe_compressor):
+        gdal.GetDriverByName("JP2KAK").CreateCopy(
+            out_filename,
+            src_ds,
+            options=["QUALITY=100", "BLOCKXSIZE=32", "BLOCKYSIZE=24"],
+        )
+    ds = gdal.Open(out_filename)
+    assert [ds.GetRasterBand(i + 1).Checksum() for i in range(3)] == [
+        src_ds.GetRasterBand(i + 1).Checksum() for i in range(3)
+    ]
+
+
+###############################################################################
+# Test lossless copying of multi band with tiling (to cause a stripe_height != 1)
+
+
+@pytest.mark.parametrize("use_stripe_compressor", ["YES", "NO"])
+def test_jp2kak_lossless_multiband_non_byte(tmp_vsimem, use_stripe_compressor):
+
+    src_ds = gdal.Open("data/rgbsmall.tif")
+    src_ds = gdal.Translate(
+        "", src_ds, options="-f MEM -ot UInt16 -scale 0 255 0 65535"
+    )
+    out_filename = str(tmp_vsimem / "out.jp2")
+    with gdaltest.config_option("JP2KAK_USE_STRIPE_COMPRESSOR", use_stripe_compressor):
+        gdal.GetDriverByName("JP2KAK").CreateCopy(
+            out_filename,
+            src_ds,
+            options=["QUALITY=100", "BLOCKXSIZE=32", "BLOCKYSIZE=24"],
+        )
+    ds = gdal.Open(out_filename)
+    assert [ds.GetRasterBand(i + 1).Checksum() for i in range(3)] == [
+        src_ds.GetRasterBand(i + 1).Checksum() for i in range(3)
+    ]
 
 
 ###############################################################################
@@ -581,12 +600,7 @@ def test_jp2kak_21():
         0, 0, 20, 20, 40, 40, resample_alg=gdal.GRIORA_Cubic
     )
 
-    mem_ds = gdal.GetDriverByName("MEM").Create("", 40, 40, 1, gdal.GDT_Int16)
-    mem_ds.GetRasterBand(1).WriteRaster(0, 0, 40, 40, ref_upsampled_data)
-    ref_cs = mem_ds.GetRasterBand(1).Checksum()
-    mem_ds.GetRasterBand(1).WriteRaster(0, 0, 40, 40, upsampled_data)
-    cs = mem_ds.GetRasterBand(1).Checksum()
-    assert cs == ref_cs
+    assert upsampled_data == ref_upsampled_data
 
 
 ###############################################################################
@@ -967,3 +981,73 @@ def find_xml_node(ar, element_name, only_attributes=False):
         if found is not None:
             return found
     return None
+
+
+###############################################################################
+# Test unsupported XML SRS
+
+
+def test_jp2kak_unsupported_srs_for_gmljp2(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "out.jp2")
+    # There is no EPSG code and Albers Equal Area is not supported by OGRSpatialReference::exportToXML()
+    wkt = """PROJCRS["Africa_Albers_Equal_Area_Conic",
+    BASEGEOGCRS["WGS 84",
+        DATUM["World Geodetic System 1984",
+            ELLIPSOID["WGS 84",6378137,298.257223563,
+                LENGTHUNIT["metre",1]]],
+        PRIMEM["Greenwich",0,
+            ANGLEUNIT["degree",0.0174532925199433]],
+        ID["EPSG",4326]],
+    CONVERSION["Albers Equal Area",
+        METHOD["Albers Equal Area",
+            ID["EPSG",9822]],
+        PARAMETER["Latitude of false origin",0,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8821]],
+        PARAMETER["Longitude of false origin",25,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8822]],
+        PARAMETER["Latitude of 1st standard parallel",20,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8823]],
+        PARAMETER["Latitude of 2nd standard parallel",-23,
+            ANGLEUNIT["degree",0.0174532925199433],
+            ID["EPSG",8824]],
+        PARAMETER["Easting at false origin",0,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8826]],
+        PARAMETER["Northing at false origin",0,
+            LENGTHUNIT["metre",1],
+            ID["EPSG",8827]]],
+    CS[Cartesian,2],
+        AXIS["easting",east,
+            ORDER[1],
+            LENGTHUNIT["metre",1,
+                ID["EPSG",9001]]],
+        AXIS["northing",north,
+            ORDER[2],
+            LENGTHUNIT["metre",1,
+                ID["EPSG",9001]]]]"""
+    gdal.ErrorReset()
+    assert gdal.Translate(filename, "data/byte.tif", outputSRS=wkt, format="JP2KAK")
+    assert gdal.GetLastErrorMsg() == ""
+    ds = gdal.Open(filename)
+    ref_srs = osr.SpatialReference()
+    ref_srs.ImportFromWkt(wkt)
+    assert ds.GetSpatialRef().IsSame(ref_srs)
+    # Check that we do *not* have a GMLJP2 box
+    assert "xml:gml.root-instance" not in ds.GetMetadataDomainList()
+
+
+###############################################################################
+# Test non-persistent read mode on overviews
+
+
+def test_jp2kak_non_persistent_read_overview():
+
+    with gdal.config_option("JP2KAK_PERSIST", "NO"):
+        ds = gdal.Open("data/jpeg2000/513x513.jp2")
+        cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
+
+    assert cs == 29642

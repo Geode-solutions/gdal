@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "aigrid.h"
@@ -71,7 +55,7 @@ class AIGDataset final : public GDALPamDataset
 
     static GDALDataset *Open(GDALOpenInfo *);
 
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
     char **GetFileList(void) override;
 };
@@ -140,7 +124,7 @@ AIGRasterBand::AIGRasterBand(AIGDataset *poDSIn, int nBandIn)
 CPLErr AIGRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 
 {
-    AIGDataset *poODS = (AIGDataset *)poDS;
+    AIGDataset *poODS = cpl::down_cast<AIGDataset *>(poDS);
     GInt32 *panGridRaster;
 
     if (poODS->psInfo->nCellType == AIG_CELLTYPE_INT)
@@ -198,7 +182,7 @@ CPLErr AIGRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 GDALRasterAttributeTable *AIGRasterBand::GetDefaultRAT()
 
 {
-    AIGDataset *poODS = (AIGDataset *)poDS;
+    AIGDataset *poODS = cpl::down_cast<AIGDataset *>(poDS);
 
     /* -------------------------------------------------------------------- */
     /*      Read info raster attribute table, if present.                   */
@@ -222,7 +206,7 @@ GDALRasterAttributeTable *AIGRasterBand::GetDefaultRAT()
 double AIGRasterBand::GetMinimum(int *pbSuccess)
 
 {
-    AIGDataset *poODS = (AIGDataset *)poDS;
+    AIGDataset *poODS = cpl::down_cast<AIGDataset *>(poDS);
 
     if (pbSuccess != nullptr)
         *pbSuccess = TRUE;
@@ -237,7 +221,7 @@ double AIGRasterBand::GetMinimum(int *pbSuccess)
 double AIGRasterBand::GetMaximum(int *pbSuccess)
 
 {
-    AIGDataset *poODS = (AIGDataset *)poDS;
+    AIGDataset *poODS = cpl::down_cast<AIGDataset *>(poDS);
 
     if (pbSuccess != nullptr)
         *pbSuccess = TRUE;
@@ -274,7 +258,7 @@ double AIGRasterBand::GetNoDataValue(int *pbSuccess)
 GDALColorInterp AIGRasterBand::GetColorInterpretation()
 
 {
-    AIGDataset *poODS = (AIGDataset *)poDS;
+    AIGDataset *poODS = cpl::down_cast<AIGDataset *>(poDS);
 
     if (poODS->poCT != nullptr)
         return GCI_PaletteIndex;
@@ -289,7 +273,7 @@ GDALColorInterp AIGRasterBand::GetColorInterpretation()
 GDALColorTable *AIGRasterBand::GetColorTable()
 
 {
-    AIGDataset *poODS = (AIGDataset *)poDS;
+    AIGDataset *poODS = cpl::down_cast<AIGDataset *>(poDS);
 
     if (poODS->poCT != nullptr)
         return poODS->poCT;
@@ -353,7 +337,8 @@ char **AIGDataset::GetFileList()
 
         papszFileList = CSLAddString(
             papszFileList,
-            CPLFormFilename(GetDescription(), papszCoverFiles[i], nullptr));
+            CPLFormFilenameSafe(GetDescription(), papszCoverFiles[i], nullptr)
+                .c_str());
     }
     CSLDestroy(papszCoverFiles);
 
@@ -369,7 +354,7 @@ class AIGErrorDescription
   public:
     CPLErr eErr;
     CPLErrorNum no;
-    CPLString osMsg;
+    std::string osMsg;
 };
 
 static void CPL_STDCALL AIGErrorHandlerVATOpen(CPLErr eErr, CPLErrorNum no,
@@ -386,7 +371,7 @@ static void CPL_STDCALL AIGErrorHandlerVATOpen(CPLErr eErr, CPLErrorNum no,
     oError.eErr = eErr;
     oError.no = no;
     oError.osMsg = msg;
-    paoErrors->push_back(oError);
+    paoErrors->push_back(std::move(oError));
 }
 
 /************************************************************************/
@@ -549,7 +534,7 @@ GDALDataset *AIGDataset::Open(GDALOpenInfo *poOpenInfo)
     if (osCoverName.size() > 4 &&
         EQUAL(osCoverName.c_str() + osCoverName.size() - 4, ".adf"))
     {
-        osCoverName = CPLGetDirname(poOpenInfo->pszFilename);
+        osCoverName = CPLGetDirnameSafe(poOpenInfo->pszFilename);
         if (osCoverName == "")
             osCoverName = ".";
     }
@@ -651,9 +636,7 @@ GDALDataset *AIGDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         AIGClose(psInfo);
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The AIG driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("AIG");
         return nullptr;
     }
     /* -------------------------------------------------------------------- */
@@ -669,18 +652,18 @@ GDALDataset *AIGDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     char **papszFiles = VSIReadDir(psInfo->pszCoverName);
     CPLString osClrFilename;
-    CPLString osCleanPath = CPLCleanTrailingSlash(psInfo->pszCoverName);
+    CPLString osCleanPath = CPLCleanTrailingSlashSafe(psInfo->pszCoverName);
 
     // first check for any .clr in coverage dir.
     for (int iFile = 0; papszFiles != nullptr && papszFiles[iFile] != nullptr;
          iFile++)
     {
-        if (!EQUAL(CPLGetExtension(papszFiles[iFile]), "clr") &&
-            !EQUAL(CPLGetExtension(papszFiles[iFile]), "CLR"))
+        const std::string osExt = CPLGetExtensionSafe(papszFiles[iFile]);
+        if (!EQUAL(osExt.c_str(), "clr") && !EQUAL(osExt.c_str(), "CLR"))
             continue;
 
-        osClrFilename =
-            CPLFormFilename(psInfo->pszCoverName, papszFiles[iFile], nullptr);
+        osClrFilename = CPLFormFilenameSafe(psInfo->pszCoverName,
+                                            papszFiles[iFile], nullptr);
         break;
     }
 
@@ -689,19 +672,20 @@ GDALDataset *AIGDataset::Open(GDALOpenInfo *poOpenInfo)
     // Look in parent if we don't find a .clr in the coverage dir.
     if (osClrFilename.empty())
     {
-        osTestName.Printf("%s/../%s.clr", psInfo->pszCoverName,
-                          CPLGetFilename(osCleanPath));
+        CPLString osTestClrFilename;
+        osTestClrFilename.Printf("%s/../%s.clr", psInfo->pszCoverName,
+                                 CPLGetFilename(osCleanPath));
 
-        if (VSIStatL(osTestName, &sStatBuf) != 0)
+        if (VSIStatL(osTestClrFilename, &sStatBuf) != 0)
         {
-            osTestName.Printf("%s/../%s.CLR", psInfo->pszCoverName,
-                              CPLGetFilename(osCleanPath));
+            osTestClrFilename.Printf("%s/../%s.CLR", psInfo->pszCoverName,
+                                     CPLGetFilename(osCleanPath));
 
-            if (!VSIStatL(osTestName, &sStatBuf))
-                osClrFilename = osTestName;
+            if (!VSIStatL(osTestClrFilename, &sStatBuf))
+                osClrFilename = std::move(osTestClrFilename);
         }
         else
-            osClrFilename = osTestName;
+            osClrFilename = std::move(osTestClrFilename);
     }
 
     if (!osClrFilename.empty())
@@ -722,14 +706,14 @@ GDALDataset *AIGDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Try to read projection file.                                    */
     /* -------------------------------------------------------------------- */
-    const char *pszPrjFilename =
-        CPLFormCIFilename(psInfo->pszCoverName, "prj", "adf");
-    if (VSIStatL(pszPrjFilename, &sStatBuf) == 0)
+    const std::string osPrjFilename =
+        CPLFormCIFilenameSafe(psInfo->pszCoverName, "prj", "adf");
+    if (VSIStatL(osPrjFilename.c_str(), &sStatBuf) == 0)
     {
         OGRSpatialReference oSRS;
         oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
 
-        poDS->papszPrj = CSLLoad(pszPrjFilename);
+        poDS->papszPrj = CSLLoad(osPrjFilename.c_str());
 
         if (oSRS.importFromESRI(poDS->papszPrj) == OGRERR_NONE)
         {
@@ -744,7 +728,7 @@ GDALDataset *AIGDataset::Open(GDALOpenInfo *poOpenInfo)
                 psInfo->dfCellSizeY /= 3600.0;
             }
 
-            poDS->m_oSRS = oSRS;
+            poDS->m_oSRS = std::move(oSRS);
         }
     }
 
@@ -766,16 +750,16 @@ GDALDataset *AIGDataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr AIGDataset::GetGeoTransform(double *padfTransform)
+CPLErr AIGDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    padfTransform[0] = psInfo->dfLLX;
-    padfTransform[1] = psInfo->dfCellSizeX;
-    padfTransform[2] = 0;
+    gt[0] = psInfo->dfLLX;
+    gt[1] = psInfo->dfCellSizeX;
+    gt[2] = 0;
 
-    padfTransform[3] = psInfo->dfURY;
-    padfTransform[4] = 0;
-    padfTransform[5] = -psInfo->dfCellSizeY;
+    gt[3] = psInfo->dfURY;
+    gt[4] = 0;
+    gt[5] = -psInfo->dfCellSizeY;
 
     return CE_None;
 }
@@ -889,13 +873,13 @@ static CPLErr AIGRename(const char *pszNewName, const char *pszOldName)
     /* -------------------------------------------------------------------- */
     CPLString osOldPath, osNewPath;
 
-    if (strlen(CPLGetExtension(pszNewName)) > 0)
-        osNewPath = CPLGetPath(pszNewName);
+    if (!CPLGetExtensionSafe(pszNewName).empty())
+        osNewPath = CPLGetPathSafe(pszNewName);
     else
         osNewPath = pszNewName;
 
-    if (strlen(CPLGetExtension(pszOldName)) > 0)
-        osOldPath = CPLGetPath(pszOldName);
+    if (!CPLGetExtensionSafe(pszOldName).empty())
+        osOldPath = CPLGetPathSafe(pszOldName);
     else
         osOldPath = pszOldName;
 

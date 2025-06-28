@@ -14,7 +14,8 @@ the documentation of the :ref:`gdal_grid` utility).
 
 Those datasets are ASCII files with (at least) 3 columns, each line
 containing the X and Y coordinates of the center of the cell and the
-value of the cell.
+value of the cell. (Note the XYZ driver only uses the first band of
+the dataset. I.e., columns beyond the third are ignored.)
 
 The spacing between each cell must be constant.
 
@@ -38,26 +39,59 @@ The driver tries to autodetect an header line and will look for 'x',
 'north' for the Y column and 'z', 'alt' or 'height' for the Z column. If
 no header is present or one of the column could not be identified in the
 header, the X, Y and Z columns (in that order) are assumed to be the
-first 3 columns of each line.
+first 3 columns of each line. The open option :oo:`COLUMN_ORDER` overrides
+these assumptions (except on 'AUTO').
 
 The opening of a big dataset can be slow as the driver must scan the
 whole file to determine the dataset size and spatial resolution. The
 driver will autodetect the data type among Byte, Int16, Int32 or
 Float32.
 
+Open options
+------------
+
+|about-open-options|
+This driver supports the following open options:
+
+-  .. oo:: COLUMN_ORDER
+     :choices: AUTO, XYZ, YXZ
+     :since: 3.10
+     :default: AUTO
+
+     Specifies the order of the columns. It overrides the header.
+
 Creation options
 ----------------
 
--  **COLUMN_SEPARATOR=**\ a_value : where a_value is a string used to
-   separate the values of the X,Y and Z columns. Defaults to one space
-   character
--  **ADD_HEADER_LINE=**\ YES/NO : whether an header line must be written
-   (content is X <col_sep> Y <col_sep> Z) . Defaults to NO
--  **SIGNIFICANT_DIGITS=**\ a_value : where a_value specifies the number
-   of significant digits to output (%g format; is defaults with 18)
--  **DECIMAL_PRECISION=**\ a_value : where a_value specifies the number
-   of decimal places to output when writing floating-point numbers (%f
-   format; alternative to SIGNIFICANT_DIGITS).
+|about-creation-options|
+This driver supports the following creation options:
+
+-  .. co:: COLUMN_SEPARATOR
+      :choices: <string>
+
+      String used to
+      separate the values of the X,Y and Z columns. Defaults to one space
+      character
+
+-  .. co:: ADD_HEADER_LINE
+      :choices: YES, NO
+      :default: NO
+
+      Whether an header line must be written
+      (content is X <col_sep> Y <col_sep> Z).
+
+-  .. co:: SIGNIFICANT_DIGITS
+      :choices: <integer>
+      :default: 18
+
+      Specifies the number of significant digits to output (%g format)
+
+-  .. co:: DECIMAL_PRECISION
+      :choices: <integer>
+
+      Specifies the number
+      of decimal places to output when writing floating-point numbers (%f
+      format; alternative to :co:`SIGNIFICANT_DIGITS`).
 
 Driver capabilities
 -------------------

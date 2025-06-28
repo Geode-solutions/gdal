@@ -420,7 +420,7 @@ static int ParseSect1 (sInt4 *is1, sInt4 ns1, grib_MetaData *meta)
  *   5/2003 AAT: Stopped messing around with the way buffer and data[i]
  *          were allocated.  It was confusing the free routine.
  *   5/2003 AAT: Added maxLen to Wx structure.
- *   6/2003 AAT: Revisited after Matt (matt@wunderground.com) informed me of
+ *   6/2003 AAT: Revisited after Matt (matt at wunderground.com) informed me of
  *          memory problems.
  *          1) I had a memory leak caused by a buffer+= buffLen
  *          2) buffLen could have increased out of bounds of buffer.
@@ -475,6 +475,10 @@ static int ParseSect2_Wx (float *rdat, sInt4 nrdat, sInt4 *idat,
 
    buffLen = 0;
    buffer = (char *) malloc ((nidat + 1) * sizeof (char));
+   if( !buffer ) {
+       errSprintf ("Out of memory\n");
+       return -1;
+   }
    while (groupLen > 0) {
       for (j = 0; j < groupLen; j++) {
          buffer[buffLen] = (char) idat[loc];
@@ -600,6 +604,10 @@ static int ParseSect2_Hazard (float *rdat, sInt4 nrdat, sInt4 *idat,
 
    buffLen = 0;
    buffer = (char *) malloc ((nidat + 1) * sizeof (char));
+   if (!buffer) {
+       errSprintf ("Out of memory\n");
+       return -1;
+   }
    while (groupLen > 0) {
       for (j = 0; j < groupLen; j++) {
          buffer[buffLen] = (char) idat[loc];
@@ -836,6 +844,7 @@ static int ParseSect3 (sInt4 *is3, sInt4 ns3, grib_MetaData *meta)
    sInt4 angle;         /* For Lat/Lon, 92.1.6 may not hold, in which case,
                          * angle != 0, and unit = angle/subdivision. */
    sInt4 subdivision;   /* see angle explanation. */
+   int ret = 0;
 
    if (ns3 < 14) {
       return -1;
@@ -895,23 +904,29 @@ static int ParseSect3 (sInt4 *is3, sInt4 ns3, grib_MetaData *meta)
           * on: Y * 10^D = R, where Y = original value, D = scale factor, ___
           * R = scale value. */
 
-         if ((is3[16] != GRIB2MISSING_s4) && (is3[15] != GRIB2MISSING_s1)) {
+         // File of https://github.com/OSGeo/gdal/issues/7811
+         // has is3[16] == -1 and is3[15] = 255
+         if (is3[16] > 0 && is3[15] != 255 &&
+             (is3[16] != GRIB2MISSING_s4) && (is3[15] != GRIB2MISSING_s1)) {
             /* Assumes data is given in m (not km). */
             double denom = pow (10.0, is3[15]) * 1000.;
             if( denom == 0 )
             {
                 errSprintf ("Invalid radius.\n");
-                return -2;
+                ret = -2;
             }
-            meta->gds.majEarth = is3[16] / denom;
-            meta->gds.minEarth = meta->gds.majEarth;
+            else
+            {
+                meta->gds.majEarth = is3[16] / denom;
+                meta->gds.minEarth = meta->gds.majEarth;
+            }
          } else {
             errSprintf ("Missing info on radius of Earth.\n");
-            return -2;
+            ret = -2;
          }
          /* Check if our m assumption was valid. If it was not, they give us
           * 6371 km, which we convert to 6.371 < 6.4 */
-         if (meta->gds.majEarth < 6.4) {
+         if (ret == 0 && meta->gds.majEarth < 6.4) {
             meta->gds.majEarth = meta->gds.majEarth * 1000.;
             meta->gds.minEarth = meta->gds.minEarth * 1000.;
          }
@@ -946,13 +961,16 @@ static int ParseSect3 (sInt4 *is3, sInt4 ns3, grib_MetaData *meta)
             if( denomMaj == 0.0 || denomMin == 0.0 )
             {
                 errSprintf ("Invalid major / minor axis.\n");
-                return -2;
+                ret = -2;
             }
-            meta->gds.majEarth = is3[21] / denomMaj;
-            meta->gds.minEarth = is3[26] / denomMin;
+            else
+            {
+                meta->gds.majEarth = is3[21] / denomMaj;
+                meta->gds.minEarth = is3[26] / denomMin;
+            }
          } else {
             errSprintf ("Missing info on major / minor axis of Earth.\n");
-            return -2;
+            ret = -2;
          }
          /* Check if our km assumption was valid. If it was not, they give us
           * 6371000 m, which is > 6400. */
@@ -978,13 +996,16 @@ static int ParseSect3 (sInt4 *is3, sInt4 ns3, grib_MetaData *meta)
             if( denomMaj == 0.0 || denomMin == 0.0 )
             {
                 errSprintf ("Invalid major / minor axis.\n");
-                return -2;
+                ret = -2;
             }
-            meta->gds.majEarth = is3[21] / denomMaj;
-            meta->gds.minEarth = is3[26] / denomMin;
+            else
+            {
+                meta->gds.majEarth = is3[21] / denomMaj;
+                meta->gds.minEarth = is3[26] / denomMin;
+            }
          } else {
             errSprintf ("Missing info on major / minor axis of Earth.\n");
-            return -2;
+            ret = -2;
          }
          /* Check if our m assumption was valid. If it was not, they give us
           * 6371 km, which we convert to 6.371 < 6.4 */
@@ -1010,7 +1031,9 @@ static int ParseSect3 (sInt4 *is3, sInt4 ns3, grib_MetaData *meta)
        (meta->gds.minEarth > 6400) || (meta->gds.minEarth < 6300)) {
       errSprintf ("Bad shape of earth? %f %f\n", meta->gds.majEarth,
                   meta->gds.minEarth);
-      return -2;
+      meta->gds.majEarth = -1;
+      meta->gds.minEarth = -1;
+      ret = -2;
    }
    meta->gds.Nx = is3[30];
    meta->gds.Ny = is3[34];
@@ -1270,7 +1293,7 @@ static int ParseSect3 (sInt4 *is3, sInt4 ns3, grib_MetaData *meta)
       return -2;
 */
    }
-   return 0;
+   return ret;
 }
 
 /*****************************************************************************
@@ -2595,7 +2618,7 @@ static void ParseGridNoMiss (gridAttribType *attrib, double *grib_Data,
          if (attrib->fieldType) {
             itemp = iain + (startY + y - 1) * Nx + (startX - 1);
          } else {
-            ftemp = ((float *) iain) + (startY + y - 1) * Nx + (startX - 1);
+            ftemp = reinterpret_cast<float *>(iain) + (startY + y - 1) * Nx + (startX - 1);
          }
          for (x = 0; x < subNx; x++) {
             if (((startX + x - 1) < 0) || ((startX + x - 1) >= Nx)) {
@@ -2720,7 +2743,7 @@ static void ParseGridPrimMiss (gridAttribType *attrib, double *grib_Data,
          if (attrib->fieldType) {
             itemp = iain + (startY + y - 1) * Nx + (startX - 1);
          } else {
-            ftemp = ((float *) iain) + (startY + y - 1) * Nx + (startX - 1);
+            ftemp = reinterpret_cast<float *>(iain) + (startY + y - 1) * Nx + (startX - 1);
          }
          for (x = 0; x < subNx; x++) {
             if (((startX + x - 1) < 0) || ((startX + x - 1) >= Nx)) {
@@ -2850,7 +2873,7 @@ static void ParseGridSecMiss (gridAttribType *attrib, double *grib_Data,
          if (attrib->fieldType) {
             itemp = iain + (startY + y - 1) * Nx + (startX - 1);
          } else {
-            ftemp = ((float *) iain) + (startY + y - 1) * Nx + (startX - 1);
+            ftemp = reinterpret_cast<float *>(iain) + (startY + y - 1) * Nx + (startX - 1);
          }
          for (x = 0; x < subNx; x++) {
             if (((startX + x - 1) < 0) || ((startX + x - 1) >= Nx)) {
@@ -2985,7 +3008,7 @@ void ParseGrid (VSILFILE *fp, gridAttribType *attrib, double **Grib_Data,
    double *grib_Data = nullptr;
    sInt4 missCnt = 0;   /* Number of detected missing values. */
    uInt4 index;         /* Current index into Wx table. */
-   float *ain = (float *) iain;
+   float *ain = reinterpret_cast<float *>(iain);
    uInt4 subNx;         /* The Nx dimension of the subgrid. */
    uInt4 subNy;         /* The Ny dimension of the subgrid. */
 

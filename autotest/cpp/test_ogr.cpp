@@ -7,23 +7,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (c) 2006, Mateusz Loskot <mateusz@loskot.net>
 /*
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_unit_test.h"
@@ -32,10 +16,13 @@
 #include "ogrsf_frmts.h"
 #include "../../ogr/ogrsf_frmts/osm/gpb.h"
 #include "ogr_recordbatch.h"
+#include "ogrlayerarrow.h"
 
 #include <string>
 #include <algorithm>
+#include <cmath>
 #include <fstream>
+#include <limits>
 
 #ifdef HAVE_SQLITE3
 #include <sqlite3.h>
@@ -49,7 +36,6 @@ namespace
 // Common fixture with test data
 struct test_ogr : public ::testing::Test
 {
-    std::string drv_shape_{"ESRI Shapefile"};
     std::string data_{tut::common::data_basedir};
     std::string data_tmp_{tut::common::tmp_basedir};
 };
@@ -58,14 +44,6 @@ struct test_ogr : public ::testing::Test
 TEST_F(test_ogr, GetGDALDriverManager)
 {
     ASSERT_TRUE(nullptr != GetGDALDriverManager());
-}
-
-// Test if Shapefile driver is registered
-TEST_F(test_ogr, Shapefile_driver)
-{
-    GDALDriver *drv =
-        GetGDALDriverManager()->GetDriverByName(drv_shape_.c_str());
-    ASSERT_TRUE(nullptr != drv);
 }
 
 template <class T>
@@ -93,6 +71,9 @@ void testSpatialReferenceLeakOnCopy(OGRSpatialReference *poSRS)
         nLastCount = nCurCount;
 
         value3 = value;
+        // avoid Coverity Scan warning about above assignment being better
+        // replaced with a move.
+        EXPECT_NE(value.getSpatialReference(), nullptr);
         ASSERT_EQ(nLastCount, poSRS->GetReferenceCount());
     }
     ASSERT_EQ(1, poSRS->GetReferenceCount());
@@ -285,7 +266,7 @@ template <> OGRPolyhedralSurface *make()
 
 template <class T> void testCopyEquals()
 {
-    T *poOrigin = make<T>();
+    auto poOrigin = std::unique_ptr<T>(make<T>());
     ASSERT_TRUE(nullptr != poOrigin);
 
     T value2(*poOrigin);
@@ -311,7 +292,8 @@ template <class T> void testCopyEquals()
         << poOrigin->getGeometryName()
         << ": assignment operator changed a value";
 
-    OGRGeometryFactory::destroyGeometry(poOrigin);
+    value3 = T();
+    ASSERT_TRUE(value3.IsEmpty());
 }
 
 // Test if copy constructor and assignment operators succeeds on copying the
@@ -334,6 +316,118 @@ TEST_F(test_ogr, SpatialReference_leak_copy_constructor)
     testCopyEquals<OGRTriangle>();
     testCopyEquals<OGRPolyhedralSurface>();
     testCopyEquals<OGRTriangulatedSurface>();
+}
+
+// Test crazy usage of OGRGeometryCollection copy constructor
+TEST_F(test_ogr, OGRGeometryCollection_copy_constructor_illegal_use)
+{
+    OGRGeometryCollection gc;
+    gc.addGeometryDirectly(new OGRPoint(1, 2));
+
+    OGRMultiPolygon mp;
+    mp.addGeometryDirectly(new OGRPolygon());
+
+    OGRGeometryCollection *mp_as_gc = &mp;
+    CPLErrorReset();
+    {
+        CPLErrorHandlerPusher oPusher(CPLQuietErrorHandler);
+        *mp_as_gc = gc;
+        // avoid Coverity Scan warning
+        EXPECT_EQ(gc.getSpatialReference(), nullptr);
+    }
+    EXPECT_STREQ(CPLGetLastErrorMsg(),
+                 "Illegal use of OGRGeometryCollection::operator=(): trying to "
+                 "assign an incompatible sub-geometry");
+    EXPECT_TRUE(mp.IsEmpty());
+}
+
+// Test crazy usage of OGRCurvePolygon copy constructor
+TEST_F(test_ogr, OGRCurvePolygon_copy_constructor_illegal_use)
+{
+    OGRCurvePolygon cp;
+    auto poCC = new OGRCircularString();
+    poCC->addPoint(0, 0);
+    poCC->addPoint(1, 1);
+    poCC->addPoint(2, 0);
+    poCC->addPoint(1, -1);
+    poCC->addPoint(0, 0);
+    cp.addRingDirectly(poCC);
+
+    OGRPolygon poly;
+    auto poLR = new OGRLinearRing();
+    poLR->addPoint(0, 0);
+    poLR->addPoint(1, 1);
+    poLR->addPoint(2, 0);
+    poLR->addPoint(1, -1);
+    poLR->addPoint(0, 0);
+    poly.addRingDirectly(poLR);
+
+    OGRCurvePolygon *poly_as_cp = &poly;
+    CPLErrorReset();
+    {
+        CPLErrorHandlerPusher oPusher(CPLQuietErrorHandler);
+        *poly_as_cp = cp;
+        // avoid Coverity Scan warning
+        EXPECT_EQ(cp.getSpatialReference(), nullptr);
+    }
+    EXPECT_STREQ(CPLGetLastErrorMsg(),
+                 "Illegal use of OGRCurvePolygon::operator=(): trying to "
+                 "assign an incompatible sub-geometry");
+    EXPECT_TRUE(poly.IsEmpty());
+}
+
+template <class T> void testMove()
+{
+    auto poSRS = new OGRSpatialReference();
+    {
+        auto poOrigin = std::unique_ptr<T>(make<T>());
+        ASSERT_TRUE(nullptr != poOrigin);
+        poOrigin->assignSpatialReference(poSRS);
+
+        T valueCopy(*poOrigin);
+        const int refCountBefore = poSRS->GetReferenceCount();
+        T fromMoved(std::move(*poOrigin));
+        EXPECT_EQ(poSRS->GetReferenceCount(), refCountBefore);
+
+        ASSERT_TRUE(CPL_TO_BOOL(fromMoved.Equals(&valueCopy)))
+            << valueCopy.getGeometryName()
+            << ": move constructor changed a value";
+        EXPECT_EQ(fromMoved.getSpatialReference(), poSRS);
+
+        T valueCopy2(valueCopy);
+        EXPECT_EQ(valueCopy.getSpatialReference(), poSRS);
+        T value3;
+        const int refCountBefore2 = poSRS->GetReferenceCount();
+        value3 = std::move(valueCopy);
+        EXPECT_EQ(poSRS->GetReferenceCount(), refCountBefore2);
+
+        ASSERT_TRUE(CPL_TO_BOOL(value3.Equals(&valueCopy2)))
+            << valueCopy2.getGeometryName()
+            << ": move assignment operator changed a value";
+        EXPECT_EQ(value3.getSpatialReference(), poSRS);
+    }
+    EXPECT_EQ(poSRS->GetReferenceCount(), 1);
+    poSRS->Release();
+}
+
+TEST_F(test_ogr, geometry_move)
+{
+    testMove<OGRPoint>();
+    testMove<OGRLineString>();
+    testMove<OGRLinearRing>();
+    testMove<OGRCircularString>();
+    testMove<OGRCompoundCurve>();
+    testMove<OGRCurvePolygon>();
+    testMove<OGRPolygon>();
+    testMove<OGRGeometryCollection>();
+    testMove<OGRMultiSurface>();
+    testMove<OGRMultiPolygon>();
+    testMove<OGRMultiPoint>();
+    testMove<OGRMultiCurve>();
+    testMove<OGRMultiLineString>();
+    testMove<OGRTriangle>();
+    testMove<OGRPolyhedralSurface>();
+    testMove<OGRTriangulatedSurface>();
 }
 
 TEST_F(test_ogr, geometry_get_point)
@@ -425,6 +519,11 @@ TEST_F(test_ogr, geometry_get_point)
     }
 }
 
+TEST_F(test_ogr, OGR_G_CreateGeometry_unknown)
+{
+    EXPECT_EQ(OGR_G_CreateGeometry(wkbUnknown), nullptr);
+}
+
 TEST_F(test_ogr, style_manager)
 {
     OGRStyleMgrH hSM = OGR_SM_Create(nullptr);
@@ -452,103 +551,199 @@ TEST_F(test_ogr, style_manager)
 TEST_F(test_ogr, OGRParseDate)
 {
     OGRField sField;
-    ASSERT_EQ(OGRParseDate("2017/11/31 12:34:56", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Year, 2017);
-    ASSERT_EQ(sField.Date.Month, 11);
-    ASSERT_EQ(sField.Date.Day, 31);
-    ASSERT_EQ(sField.Date.Hour, 12);
-    ASSERT_EQ(sField.Date.Minute, 34);
-    ASSERT_EQ(sField.Date.Second, 56.0f);
-    ASSERT_EQ(sField.Date.TZFlag, 0);
+    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(sField.Date.Month, 11);
+    EXPECT_EQ(sField.Date.Day, 31);
+    EXPECT_EQ(sField.Date.Hour, 12);
+    EXPECT_EQ(sField.Date.Minute, 34);
+    EXPECT_EQ(sField.Date.Second, 56.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    ASSERT_EQ(OGRParseDate("2017/11/31 12:34:56+00", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.TZFlag, 100);
+    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56+00", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.TZFlag, 100);
 
-    ASSERT_EQ(OGRParseDate("2017/11/31 12:34:56+12:00", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.TZFlag, 100 + 12 * 4);
+    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56+12:00", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.TZFlag, 100 + 12 * 4);
 
-    ASSERT_EQ(OGRParseDate("2017/11/31 12:34:56+1200", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.TZFlag, 100 + 12 * 4);
+    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56+1200", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.TZFlag, 100 + 12 * 4);
 
-    ASSERT_EQ(OGRParseDate("2017/11/31 12:34:56+815", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.TZFlag, 100 + 8 * 4 + 1);
+    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56+815", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.TZFlag, 100 + 8 * 4 + 1);
 
-    ASSERT_EQ(OGRParseDate("2017/11/31 12:34:56-12:00", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.TZFlag, 100 - 12 * 4);
+    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56-12:00", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.TZFlag, 100 - 12 * 4);
 
-    ASSERT_EQ(OGRParseDate(" 2017/11/31 12:34:56", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(OGRParseDate(" 2017/11/31 12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
 
-    ASSERT_EQ(OGRParseDate("2017/11/31 12:34:56.789", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Second, 56.789f);
+    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56.789", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Second, 56.789f);
 
     // Leap second
-    ASSERT_EQ(OGRParseDate("2017/11/31 12:34:60", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Second, 60.0f);
+    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:60", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Second, 60.0f);
 
-    ASSERT_EQ(OGRParseDate("2017-11-31T12:34:56", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Year, 2017);
-    ASSERT_EQ(sField.Date.Month, 11);
-    ASSERT_EQ(sField.Date.Day, 31);
-    ASSERT_EQ(sField.Date.Hour, 12);
-    ASSERT_EQ(sField.Date.Minute, 34);
-    ASSERT_EQ(sField.Date.Second, 56.0f);
-    ASSERT_EQ(sField.Date.TZFlag, 0);
+    EXPECT_EQ(OGRParseDate("2017-11-31T12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(sField.Date.Month, 11);
+    EXPECT_EQ(sField.Date.Day, 31);
+    EXPECT_EQ(sField.Date.Hour, 12);
+    EXPECT_EQ(sField.Date.Minute, 34);
+    EXPECT_EQ(sField.Date.Second, 56.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    ASSERT_EQ(OGRParseDate("2017-11-31T12:34:56Z", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Second, 56.0f);
-    ASSERT_EQ(sField.Date.TZFlag, 100);
+    EXPECT_EQ(OGRParseDate("2017-11-31T12:34:56Z", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Second, 56.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 100);
 
-    ASSERT_EQ(OGRParseDate("2017-11-31T12:34:56.789Z", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Second, 56.789f);
-    ASSERT_EQ(sField.Date.TZFlag, 100);
+    EXPECT_EQ(OGRParseDate("2017-11-31T12:34:56.789Z", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Second, 56.789f);
+    EXPECT_EQ(sField.Date.TZFlag, 100);
 
-    ASSERT_EQ(OGRParseDate("2017-11-31", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Year, 2017);
-    ASSERT_EQ(sField.Date.Month, 11);
-    ASSERT_EQ(sField.Date.Day, 31);
-    ASSERT_EQ(sField.Date.Hour, 0);
-    ASSERT_EQ(sField.Date.Minute, 0);
-    ASSERT_EQ(sField.Date.Second, 0.0f);
-    ASSERT_EQ(sField.Date.TZFlag, 0);
+    EXPECT_EQ(OGRParseDate("2017-11-31", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(sField.Date.Month, 11);
+    EXPECT_EQ(sField.Date.Day, 31);
+    EXPECT_EQ(sField.Date.Hour, 0);
+    EXPECT_EQ(sField.Date.Minute, 0);
+    EXPECT_EQ(sField.Date.Second, 0.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    ASSERT_EQ(OGRParseDate("2017-11-31Z", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Year, 2017);
-    ASSERT_EQ(sField.Date.Month, 11);
-    ASSERT_EQ(sField.Date.Day, 31);
-    ASSERT_EQ(sField.Date.Hour, 0);
-    ASSERT_EQ(sField.Date.Minute, 0);
-    ASSERT_EQ(sField.Date.Second, 0.0f);
-    ASSERT_EQ(sField.Date.TZFlag, 0);
+    EXPECT_EQ(OGRParseDate("2017-11-31Z", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(sField.Date.Month, 11);
+    EXPECT_EQ(sField.Date.Day, 31);
+    EXPECT_EQ(sField.Date.Hour, 0);
+    EXPECT_EQ(sField.Date.Minute, 0);
+    EXPECT_EQ(sField.Date.Second, 0.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    ASSERT_EQ(OGRParseDate("12:34", &sField, 0), TRUE);
-    ASSERT_EQ(sField.Date.Year, 0);
-    ASSERT_EQ(sField.Date.Month, 0);
-    ASSERT_EQ(sField.Date.Day, 0);
-    ASSERT_EQ(sField.Date.Hour, 12);
-    ASSERT_EQ(sField.Date.Minute, 34);
-    ASSERT_EQ(sField.Date.Second, 0.0f);
-    ASSERT_EQ(sField.Date.TZFlag, 0);
+    EXPECT_EQ(OGRParseDate("12:34", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 0);
+    EXPECT_EQ(sField.Date.Month, 0);
+    EXPECT_EQ(sField.Date.Day, 0);
+    EXPECT_EQ(sField.Date.Hour, 12);
+    EXPECT_EQ(sField.Date.Minute, 34);
+    EXPECT_EQ(sField.Date.Second, 0.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    ASSERT_EQ(OGRParseDate("12:34:56", &sField, 0), TRUE);
-    ASSERT_EQ(OGRParseDate("12:34:56.789", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDate("12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDate("12:34:56.789", &sField, 0), TRUE);
 
-    ASSERT_TRUE(!OGRParseDate("2017", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("12:", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-a-31T12:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-00-31T12:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-13-31T12:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-00T12:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-aT12:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-32T12:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("a:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-01Ta:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-01T25:34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-01T00:a:00", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-01T00: 34:56", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-01T00:61:00", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-01T00:00:61", &sField, 0));
-    ASSERT_TRUE(!OGRParseDate("2017-01-01T00:00:a", &sField, 0));
+    EXPECT_EQ(OGRParseDate("T12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 0);
+    EXPECT_EQ(sField.Date.Month, 0);
+    EXPECT_EQ(sField.Date.Day, 0);
+    EXPECT_EQ(sField.Date.Hour, 12);
+    EXPECT_EQ(sField.Date.Minute, 34);
+    EXPECT_EQ(sField.Date.Second, 56.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
+
+    EXPECT_EQ(OGRParseDate("T123456", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 0);
+    EXPECT_EQ(sField.Date.Month, 0);
+    EXPECT_EQ(sField.Date.Day, 0);
+    EXPECT_EQ(sField.Date.Hour, 12);
+    EXPECT_EQ(sField.Date.Minute, 34);
+    EXPECT_EQ(sField.Date.Second, 56.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
+
+    EXPECT_EQ(OGRParseDate("T123456.789", &sField, 0), TRUE);
+    EXPECT_EQ(sField.Date.Year, 0);
+    EXPECT_EQ(sField.Date.Month, 0);
+    EXPECT_EQ(sField.Date.Day, 0);
+    EXPECT_EQ(sField.Date.Hour, 12);
+    EXPECT_EQ(sField.Date.Minute, 34);
+    EXPECT_EQ(sField.Date.Second, 56.789f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
+
+    CPLPushErrorHandler(CPLQuietErrorHandler);
+    EXPECT_TRUE(!OGRParseDate("123456-01-01", &sField, 0));
+    CPLPopErrorHandler();
+    EXPECT_TRUE(!OGRParseDate("2017", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017x-01-01", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-1-01", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-1", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-01x", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("12:", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("12:3", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("1:23", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("12:34:5", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("1a:34", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-a-31T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-00-31T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-13-31T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-00T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-aT12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-32T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("a:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-01Ta:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-01T25:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-01T00:a:00", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-01T00: 34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-01T00:61:00", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-01T00:00:61", &sField, 0));
+    EXPECT_TRUE(!OGRParseDate("2017-01-01T00:00:a", &sField, 0));
+
+    // Test OGRPARSEDATE_OPTION_LAX
+    EXPECT_EQ(OGRParseDate("2017-1-9", &sField, OGRPARSEDATE_OPTION_LAX), TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(sField.Date.Month, 1);
+    EXPECT_EQ(sField.Date.Day, 9);
+
+    EXPECT_EQ(OGRParseDate("2017-1-31", &sField, OGRPARSEDATE_OPTION_LAX),
+              TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(sField.Date.Month, 1);
+    EXPECT_EQ(sField.Date.Day, 31);
+
+    EXPECT_EQ(OGRParseDate("2017-1-31T1:2:3", &sField, OGRPARSEDATE_OPTION_LAX),
+              TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(sField.Date.Month, 1);
+    EXPECT_EQ(sField.Date.Day, 31);
+    EXPECT_EQ(sField.Date.Hour, 1);
+    EXPECT_EQ(sField.Date.Minute, 2);
+    EXPECT_EQ(sField.Date.Second, 3.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
+
+    EXPECT_EQ(OGRParseDate("2017-1-31T1:3", &sField, OGRPARSEDATE_OPTION_LAX),
+              TRUE);
+    EXPECT_EQ(sField.Date.Year, 2017);
+    EXPECT_EQ(sField.Date.Month, 1);
+    EXPECT_EQ(sField.Date.Day, 31);
+    EXPECT_EQ(sField.Date.Hour, 1);
+    EXPECT_EQ(sField.Date.Minute, 3);
+    EXPECT_EQ(sField.Date.Second, 0.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
+
+    EXPECT_EQ(OGRParseDate("1:3", &sField, OGRPARSEDATE_OPTION_LAX), TRUE);
+    EXPECT_EQ(sField.Date.Year, 0);
+    EXPECT_EQ(sField.Date.Month, 0);
+    EXPECT_EQ(sField.Date.Day, 0);
+    EXPECT_EQ(sField.Date.Hour, 1);
+    EXPECT_EQ(sField.Date.Minute, 3);
+    EXPECT_EQ(sField.Date.Second, 0.0f);
+    EXPECT_EQ(sField.Date.TZFlag, 0);
+
+    EXPECT_TRUE(!OGRParseDate("2017-a-01", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("2017-0-01", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("2017-1", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("2017-1-", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("2017-1-a", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("2017-1-0", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("2017-1-32", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDate("2017-1-1Ta:00:00", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("2017-1-1T1", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDate("2017-1-1T00:a:00", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("2017-1-1T1:", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDate("2017-1-1T00:00:a", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDate("1a:3", &sField, OGRPARSEDATE_OPTION_LAX));
 }
 
 // Test OGRPolygon::IsPointOnSurface()
@@ -1098,6 +1293,25 @@ TEST_F(test_ogr, OGRGeometry_visitor)
         delete poGeom;
     }
 
+    {
+        OGRLineString ls;
+        ls.setNumPoints(2);
+        auto oIter1 = ls.begin();
+        EXPECT_TRUE(oIter1 != ls.end());
+        EXPECT_TRUE(!(oIter1 != ls.begin()));
+        auto oIter2 = ls.begin();
+        EXPECT_TRUE(!(oIter1 != oIter2));
+        ++oIter2;
+        EXPECT_TRUE(oIter1 != oIter2);
+        ++oIter2;
+        EXPECT_TRUE(oIter1 != oIter2);
+    }
+
+    {
+        OGRLineString ls;
+        EXPECT_TRUE(!(ls.begin() != ls.end()));
+    }
+
     TestIterator<OGRLineString>();
     TestIterator<OGRLineString>("LINESTRING(0 0)", 1);
     TestIterator<OGRLineString, OGRCurve>("LINESTRING(0 0)", 1);
@@ -1211,6 +1425,12 @@ TEST_F(test_ogr, OGRToOGCGeomType)
 // Test layer, dataset-feature and layer-feature iterators
 TEST_F(test_ogr, DatasetFeature_and_LayerFeature_iterators)
 {
+    if (!GDALGetDriverByName("ESRI Shapefile"))
+    {
+        GTEST_SKIP() << "ESRI Shapefile driver missing";
+        return;
+    }
+
     std::string file(data_ + SEP + "poly.shp");
     GDALDatasetUniquePtr poDS(GDALDataset::Open(file.c_str(), GDAL_OF_VECTOR));
     ASSERT_TRUE(poDS != nullptr);
@@ -1275,7 +1495,7 @@ TEST_F(test_ogr, DatasetFeature_and_LayerFeature_iterators)
         ASSERT_TRUE(oIter != poLayer->end());
     }
 
-    poDS.reset(GetGDALDriverManager()->GetDriverByName("Memory")->Create(
+    poDS.reset(GetGDALDriverManager()->GetDriverByName("MEM")->Create(
         "", 0, 0, 0, GDT_Unknown, nullptr));
     int nCountLayers = 0;
     for (auto poLayer : poDS->GetLayers())
@@ -1286,7 +1506,7 @@ TEST_F(test_ogr, DatasetFeature_and_LayerFeature_iterators)
     ASSERT_EQ(nCountLayers, 0);
 
     poDS->CreateLayer("foo");
-    poDS->CreateLayer("bar");
+    poDS->CreateLayer("bar", nullptr);
     for (auto poLayer : poDS->GetLayers())
     {
         if (nCountLayers == 0)
@@ -1328,6 +1548,7 @@ TEST_F(test_ogr, DatasetFeature_and_LayerFeature_iterators)
         GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
         ++srcIter;
         GDALDataset::Layers::Iterator newIter(srcIter);
+        srcIter = layers.begin();  // avoid Coverity Scan warning
         ASSERT_EQ(*newIter, layers[1]);
     }
 
@@ -1337,6 +1558,7 @@ TEST_F(test_ogr, DatasetFeature_and_LayerFeature_iterators)
         ++srcIter;
         GDALDataset::Layers::Iterator newIter;
         newIter = srcIter;
+        srcIter = layers.begin();  // avoid Coverity Scan warning
         ASSERT_EQ(*newIter, layers[1]);
     }
 
@@ -1433,7 +1655,7 @@ TEST_F(test_ogr, field_iterator)
         oFeatureTmp["str_field"] = std::string("foo");
         oFeatureTmp["int_field"] = 123;
         oFeatureTmp["int64_field"] = oFeatureTmp["int_field"];
-        ASSERT_EQ(oFeatureTmp["int64_field"].GetInteger(), 123);
+        ASSERT_EQ(oFeatureTmp["int64_field"].GetInteger64(), 123);
         oFeatureTmp["int64_field"] = static_cast<GIntBig>(1234567890123);
         oFeatureTmp["double_field"] = 123.45;
         oFeatureTmp["null_field"].SetNull();
@@ -1845,6 +2067,36 @@ TEST_F(test_ogr, OGREnvelope)
     }
 }
 
+// Test OGREnvelope3D
+TEST_F(test_ogr, OGREnvelope3D)
+{
+    OGREnvelope3D s1;
+    EXPECT_TRUE(!s1.IsInit());
+    {
+        OGREnvelope3D s2(s1);
+        EXPECT_TRUE(s1 == s2);
+        EXPECT_TRUE(!(s1 != s2));
+    }
+
+    s1.MinX = 0;
+    s1.MinY = 1;
+    s1.MaxX = 2;
+    s1.MaxY = 3;
+    EXPECT_TRUE(s1.IsInit());
+    EXPECT_FALSE(s1.Is3D());
+    s1.MinZ = 4;
+    s1.MaxZ = 5;
+    EXPECT_TRUE(s1.Is3D());
+    {
+        OGREnvelope3D s2(s1);
+        EXPECT_TRUE(s1 == s2);
+        EXPECT_TRUE(!(s1 != s2));
+        s2.MinX += 1;
+        EXPECT_TRUE(s1 != s2);
+        EXPECT_TRUE(!(s1 == s2));
+    }
+}
+
 // Test OGRStyleMgr::InitStyleString() with a style name
 // (https://github.com/OSGeo/gdal/issues/5555)
 TEST_F(test_ogr, InitStyleString_with_style_name)
@@ -1864,7 +2116,7 @@ TEST_F(test_ogr, InitStyleString_with_style_name)
 TEST_F(test_ogr, OGR_L_GetArrowStream)
 {
     auto poDS = std::unique_ptr<GDALDataset>(
-        GetGDALDriverManager()->GetDriverByName("Memory")->Create(
+        GetGDALDriverManager()->GetDriverByName("MEM")->Create(
             "", 0, 0, 0, GDT_Unknown, nullptr));
     auto poLayer = poDS->CreateLayer("test");
     {
@@ -2173,6 +2425,22 @@ TEST_F(test_ogr, field_domain_cloning)
     ASSERT_EQ(poClonedCoded->GetMergePolicy(), oCoded.GetMergePolicy());
 }
 
+// Test field comments
+TEST_F(test_ogr, field_comments)
+{
+    OGRFieldDefn oFieldDefn("field1", OFTString);
+    ASSERT_EQ(oFieldDefn.GetComment(), "");
+    oFieldDefn.SetComment("my comment");
+    ASSERT_EQ(oFieldDefn.GetComment(), "my comment");
+
+    OGRFieldDefn oFieldDefn2(&oFieldDefn);
+    ASSERT_EQ(oFieldDefn2.GetComment(), "my comment");
+    ASSERT_TRUE(oFieldDefn.IsSame(&oFieldDefn2));
+
+    oFieldDefn2.SetComment("my comment 2");
+    ASSERT_FALSE(oFieldDefn.IsSame(&oFieldDefn2));
+}
+
 // Test OGRFeatureDefn C++ GetFields() iterator
 TEST_F(test_ogr, feature_defn_fields_iterator)
 {
@@ -2219,12 +2487,39 @@ TEST_F(test_ogr, feature_defn_geomfields_iterator)
     EXPECT_EQ(i, oFDefn.GetGeomFieldCount());
 }
 
+// Test OGRGeomFieldDefn copy constructor
+TEST_F(test_ogr, geom_field_defn_copy_constructor)
+{
+    {
+        OGRGeomFieldDefn oGeomFieldDefn("field1", wkbPoint);
+        oGeomFieldDefn.SetNullable(false);
+        OGRGeomFieldDefn oGeomFieldDefn2("field2", wkbLineString);
+        oGeomFieldDefn2 = oGeomFieldDefn;
+        EXPECT_TRUE(oGeomFieldDefn2.IsSame(&oGeomFieldDefn));
+    }
+
+    {
+        OGRSpatialReference oSRS;
+        oSRS.SetFromUserInput("WGS84");
+        EXPECT_EQ(oSRS.GetReferenceCount(), 1);
+        OGRGeomFieldDefn oGeomFieldDefn("field1", wkbPoint);
+        oGeomFieldDefn.SetSpatialRef(&oSRS);
+        EXPECT_EQ(oSRS.GetReferenceCount(), 2);
+        OGRGeomFieldDefn oGeomFieldDefn2("field2", wkbLineString);
+        oGeomFieldDefn2 = oGeomFieldDefn;
+        EXPECT_EQ(oSRS.GetReferenceCount(), 3);
+        EXPECT_TRUE(oGeomFieldDefn2.IsSame(&oGeomFieldDefn));
+
+        // oGeomFieldDefn2 already points to oSRS
+        oGeomFieldDefn2 = oGeomFieldDefn;
+        EXPECT_EQ(oSRS.GetReferenceCount(), 3);
+        EXPECT_TRUE(oGeomFieldDefn2.IsSame(&oGeomFieldDefn));
+    }
+}
+
 // Test GDALDataset QueryLoggerFunc callback
 TEST_F(test_ogr, GDALDatasetSetQueryLoggerFunc)
 {
-#if SQLITE_VERSION_NUMBER < 3014000
-    GTEST_SKIP() << "SQLite version must be >= 3014000";
-#else
     if (GDALGetDriverByName("GPKG") == nullptr)
     {
         GTEST_SKIP() << "GPKG driver missing";
@@ -2276,7 +2571,7 @@ TEST_F(test_ogr, GDALDatasetSetQueryLoggerFunc)
             {
                 entryLocal.error = pszError;
             }
-            queryLogLocal->push_back(entryLocal);
+            queryLogLocal->push_back(std::move(entryLocal));
         },
         &queryLog);
 
@@ -2311,14 +2606,8 @@ TEST_F(test_ogr, GDALDatasetSetQueryLoggerFunc)
     // Test prepared arg substitution
     hFeature = OGR_F_Create(OGR_L_GetLayerDefn(hLayer));
     poFeature.reset(OGRFeature::FromHandle(hFeature));
-    const char *wkt = "POLYGON ((479819 4765180,479690 4765259,479647 4765369, "
-                      "479819 4765180))";
-    OGRGeometryH testGeom = nullptr;
-    OGRErr err = OGR_G_CreateFromWkt((char **)&wkt, nullptr, &testGeom);
-    ASSERT_EQ(OGRERR_NONE, err);
-    err = OGR_F_SetGeometryDirectly(hFeature, testGeom);
-    ASSERT_EQ(OGRERR_NONE, err);
-    err = OGR_L_CreateFeature(hLayer, hFeature);
+    OGR_F_SetFieldInteger(hFeature, 1, 123);
+    OGRErr err = OGR_L_CreateFeature(hLayer, hFeature);
     ASSERT_EQ(OGRERR_NONE, err);
 
     auto insertEntry = std::find_if(
@@ -2329,10 +2618,2000 @@ TEST_F(test_ogr, GDALDatasetSetQueryLoggerFunc)
     ASSERT_TRUE(insertEntry != queryLog.end());
     ASSERT_EQ(
         insertEntry->sql.find(
-            R"sql(INSERT INTO "poly" ( "geom", "AREA", "EAS_ID", "PRFEDEA") VALUES (x'47500003346c0000000000007c461d41)sql",
+            R"sql(INSERT INTO "poly" ( "geom", "AREA", "EAS_ID", "PRFEDEA") VALUES (NULL, NULL, 123, NULL))sql",
             0),
         0);
+}
+
+TEST_F(test_ogr, OGRParseDateTimeYYYYMMDDTHHMMZ)
+{
+    {
+        char szInput[] = "2023-07-11T17:27Z";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMZ(szInput, &sField), true);
+        EXPECT_EQ(sField.Date.Year, 2023);
+        EXPECT_EQ(sField.Date.Month, 7);
+        EXPECT_EQ(sField.Date.Day, 11);
+        EXPECT_EQ(sField.Date.Hour, 17);
+        EXPECT_EQ(sField.Date.Minute, 27);
+        EXPECT_EQ(sField.Date.Second, 0.0f);
+        EXPECT_EQ(sField.Date.TZFlag, 100);
+    }
+    {
+        char szInput[] = "2023-07-11T17:27";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMZ(szInput, &sField), true);
+        EXPECT_EQ(sField.Date.Year, 2023);
+        EXPECT_EQ(sField.Date.Month, 7);
+        EXPECT_EQ(sField.Date.Day, 11);
+        EXPECT_EQ(sField.Date.Hour, 17);
+        EXPECT_EQ(sField.Date.Minute, 27);
+        EXPECT_EQ(sField.Date.Second, 0.0f);
+        EXPECT_EQ(sField.Date.TZFlag, 0);
+    }
+    {
+        // Invalid
+        char szInput[] = "2023-07-11T17:2";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMZ(szInput, &sField), false);
+    }
+    {
+        // Invalid
+        char szInput[] = "2023-07-11T17:99";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMZ(szInput, &sField), false);
+    }
+}
+
+TEST_F(test_ogr, OGRParseDateTimeYYYYMMDDTHHMMSSZ)
+{
+    {
+        char szInput[] = "2023-07-11T17:27:34Z";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMSSZ(szInput, &sField), true);
+        EXPECT_EQ(sField.Date.Year, 2023);
+        EXPECT_EQ(sField.Date.Month, 7);
+        EXPECT_EQ(sField.Date.Day, 11);
+        EXPECT_EQ(sField.Date.Hour, 17);
+        EXPECT_EQ(sField.Date.Minute, 27);
+        EXPECT_EQ(sField.Date.Second, 34.0f);
+        EXPECT_EQ(sField.Date.TZFlag, 100);
+    }
+    {
+        char szInput[] = "2023-07-11T17:27:34";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMSSZ(szInput, &sField), true);
+        EXPECT_EQ(sField.Date.Year, 2023);
+        EXPECT_EQ(sField.Date.Month, 7);
+        EXPECT_EQ(sField.Date.Day, 11);
+        EXPECT_EQ(sField.Date.Hour, 17);
+        EXPECT_EQ(sField.Date.Minute, 27);
+        EXPECT_EQ(sField.Date.Second, 34.0f);
+        EXPECT_EQ(sField.Date.TZFlag, 0);
+    }
+    {
+        // Invalid
+        char szInput[] = "2023-07-11T17:27:3";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMSSZ(szInput, &sField), false);
+    }
+    {
+        // Invalid
+        char szInput[] = "2023-07-11T17:27:99";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMSSZ(szInput, &sField), false);
+    }
+}
+
+TEST_F(test_ogr, OGRParseDateTimeYYYYMMDDTHHMMSSsssZ)
+{
+    {
+        char szInput[] = "2023-07-11T17:27:34.123Z";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(szInput, &sField), true);
+        EXPECT_EQ(sField.Date.Year, 2023);
+        EXPECT_EQ(sField.Date.Month, 7);
+        EXPECT_EQ(sField.Date.Day, 11);
+        EXPECT_EQ(sField.Date.Hour, 17);
+        EXPECT_EQ(sField.Date.Minute, 27);
+        EXPECT_EQ(sField.Date.Second, 34.123f);
+        EXPECT_EQ(sField.Date.TZFlag, 100);
+    }
+    {
+        char szInput[] = "2023-07-11T17:27:34.123";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(szInput, &sField), true);
+        EXPECT_EQ(sField.Date.Year, 2023);
+        EXPECT_EQ(sField.Date.Month, 7);
+        EXPECT_EQ(sField.Date.Day, 11);
+        EXPECT_EQ(sField.Date.Hour, 17);
+        EXPECT_EQ(sField.Date.Minute, 27);
+        EXPECT_EQ(sField.Date.Second, 34.123f);
+        EXPECT_EQ(sField.Date.TZFlag, 0);
+    }
+    {
+        // Invalid
+        char szInput[] = "2023-07-11T17:27:34.12";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(szInput, &sField), false);
+    }
+    {
+        // Invalid
+        char szInput[] = "2023-07-11T17:27:99.123";
+        OGRField sField;
+        EXPECT_EQ(OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(szInput, &sField), false);
+    }
+}
+
+TEST_F(test_ogr, OGRGetISO8601DateTime)
+{
+    OGRField sField;
+    sField.Date.Year = 2023;
+    sField.Date.Month = 7;
+    sField.Date.Day = 11;
+    sField.Date.Hour = 17;
+    sField.Date.Minute = 27;
+    sField.Date.Second = 34.567f;
+    sField.Date.TZFlag = 100;
+    {
+        char szResult[OGR_SIZEOF_ISO8601_DATETIME_BUFFER];
+        OGRISO8601Format sFormat;
+        sFormat.ePrecision = OGRISO8601Precision::AUTO;
+        OGRGetISO8601DateTime(&sField, sFormat, szResult);
+        EXPECT_STREQ(szResult, "2023-07-11T17:27:34.567Z");
+    }
+    {
+        char szResult[OGR_SIZEOF_ISO8601_DATETIME_BUFFER];
+        OGRISO8601Format sFormat;
+        sFormat.ePrecision = OGRISO8601Precision::MILLISECOND;
+        OGRGetISO8601DateTime(&sField, sFormat, szResult);
+        EXPECT_STREQ(szResult, "2023-07-11T17:27:34.567Z");
+    }
+    {
+        char szResult[OGR_SIZEOF_ISO8601_DATETIME_BUFFER];
+        OGRISO8601Format sFormat;
+        sFormat.ePrecision = OGRISO8601Precision::SECOND;
+        OGRGetISO8601DateTime(&sField, sFormat, szResult);
+        EXPECT_STREQ(szResult, "2023-07-11T17:27:35Z");
+    }
+    {
+        char szResult[OGR_SIZEOF_ISO8601_DATETIME_BUFFER];
+        OGRISO8601Format sFormat;
+        sFormat.ePrecision = OGRISO8601Precision::MINUTE;
+        OGRGetISO8601DateTime(&sField, sFormat, szResult);
+        EXPECT_STREQ(szResult, "2023-07-11T17:27Z");
+    }
+    sField.Date.Second = 34.0f;
+    {
+        char szResult[OGR_SIZEOF_ISO8601_DATETIME_BUFFER];
+        OGRISO8601Format sFormat;
+        sFormat.ePrecision = OGRISO8601Precision::AUTO;
+        OGRGetISO8601DateTime(&sField, sFormat, szResult);
+        EXPECT_STREQ(szResult, "2023-07-11T17:27:34Z");
+    }
+}
+
+// Test calling importFromWkb() multiple times on the same geometry object
+TEST_F(test_ogr, importFromWkbReuse)
+{
+    {
+        OGRPoint oPoint;
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oPoint.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x01\x00\x00\x00"                // Point
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"    // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"),  // 2.0
+                          21, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 21);
+            EXPECT_EQ(oPoint.getX(), 1.0);
+            EXPECT_EQ(oPoint.getY(), 2.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oPoint.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x01\x00\x00\x00"              // Point
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"  // 2.0
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"  // 1.0
+                              ),
+                          21, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 21);
+            EXPECT_EQ(oPoint.getX(), 2.0);
+            EXPECT_EQ(oPoint.getY(), 1.0);
+        }
+    }
+
+    {
+        OGRLineString oLS;
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oLS.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x02\x00\x00\x00"              // LineString
+                              "\x01\x00\x00\x00"                  // 1 point
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"  // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"),  // 2.0
+                          25, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 25);
+            ASSERT_EQ(oLS.getNumPoints(), 1);
+            EXPECT_EQ(oLS.getX(0), 1.0);
+            EXPECT_EQ(oLS.getY(0), 2.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oLS.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x02\x00\x00\x00"              // LineString
+                              "\x02\x00\x00\x00"                  // 2 points
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"  // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"  // 2.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"  // 2.0
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"),  // 1.0
+                          41, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 41);
+            ASSERT_EQ(oLS.getNumPoints(), 2);
+            EXPECT_EQ(oLS.getX(0), 1.0);
+            EXPECT_EQ(oLS.getY(0), 2.0);
+            EXPECT_EQ(oLS.getX(1), 2.0);
+            EXPECT_EQ(oLS.getY(1), 1.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oLS.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x02\x00\x00\x00"              // LineString
+                              "\x01\x00\x00\x00"                  // 1 point
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"  // 2.0
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"),  // 1.0
+                          25, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 25);
+            ASSERT_EQ(oLS.getNumPoints(), 1);
+            EXPECT_EQ(oLS.getX(0), 2.0);
+            EXPECT_EQ(oLS.getY(0), 1.0);
+        }
+    }
+
+    {
+        OGRPolygon oPoly;
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oPoly.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x03\x00\x00\x00"                // Polygon
+                              "\x01\x00\x00\x00"                    // 1 ring
+                              "\x01\x00\x00\x00"                    // 1 point
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"    // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"),  // 2.0
+                          29, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 29);
+            ASSERT_TRUE(oPoly.getExteriorRing() != nullptr);
+            ASSERT_EQ(oPoly.getNumInteriorRings(), 0);
+            auto poLS = oPoly.getExteriorRing();
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 1.0);
+            EXPECT_EQ(poLS->getY(0), 2.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oPoly.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x03\x00\x00\x00"                // Polygon
+                              "\x01\x00\x00\x00"                    // 1 ring
+                              "\x01\x00\x00\x00"                    // 1 point
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"    // 2.0
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"),  // 1.0
+                          29, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 29);
+            ASSERT_TRUE(oPoly.getExteriorRing() != nullptr);
+            ASSERT_EQ(oPoly.getNumInteriorRings(), 0);
+            auto poLS = oPoly.getExteriorRing();
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 2.0);
+            EXPECT_EQ(poLS->getY(0), 1.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oPoly.importFromWkb(reinterpret_cast<const GByte *>(
+                                              "\x01\x03\x00\x00\x00"  // Polygon
+                                              "\x00\x00\x00\x00"),    // 0 ring
+                                          9, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 9);
+            ASSERT_TRUE(oPoly.getExteriorRing() == nullptr);
+            ASSERT_EQ(oPoly.getNumInteriorRings(), 0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oPoly.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x03\x00\x00\x00"                // Polygon
+                              "\x01\x00\x00\x00"                    // 1 ring
+                              "\x01\x00\x00\x00"                    // 1 point
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"    // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"),  // 2.0
+                          29, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 29);
+            ASSERT_TRUE(oPoly.getExteriorRing() != nullptr);
+            ASSERT_EQ(oPoly.getNumInteriorRings(), 0);
+            auto poLS = oPoly.getExteriorRing();
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 1.0);
+            EXPECT_EQ(poLS->getY(0), 2.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oPoly.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x03\x00\x00\x00"                // Polygon
+                              "\x01\x00\x00\x00"                    // 1 ring
+                              "\x01\x00\x00\x00"                    // 1 point
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"    // 2.0
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"),  // 1.0
+                          static_cast<size_t>(-1), wkbVariantIso,
+                          nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 29);
+            ASSERT_TRUE(oPoly.getExteriorRing() != nullptr);
+            ASSERT_EQ(oPoly.getNumInteriorRings(), 0);
+            auto poLS = oPoly.getExteriorRing();
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 2.0);
+            EXPECT_EQ(poLS->getY(0), 1.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            // Truncated WKB
+            EXPECT_NE(oPoly.importFromWkb(reinterpret_cast<const GByte *>(
+                                              "\x01\x03\x00\x00\x00"  // Polygon
+                                              "\x01\x00\x00\x00"      // 1 ring
+                                              "\x01\x00\x00\x00"),    // 1 point
+                                          13, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            ASSERT_TRUE(oPoly.getExteriorRing() == nullptr);
+            ASSERT_EQ(oPoly.getNumInteriorRings(), 0);
+        }
+    }
+
+    {
+        OGRMultiLineString oMLS;
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oMLS.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x05\x00\x00\x00"  // MultiLineString
+                              "\x01\x00\x00\x00"      // 1-part
+                              "\x01\x02\x00\x00\x00"  // LineString
+                              "\x01\x00\x00\x00"      // 1 point
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"    // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"),  // 2.0
+                          34, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 34);
+            ASSERT_EQ(oMLS.getNumGeometries(), 1);
+            auto poLS = oMLS.getGeometryRef(0);
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 1.0);
+            EXPECT_EQ(poLS->getY(0), 2.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oMLS.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x05\x00\x00\x00"  // MultiLineString
+                              "\x01\x00\x00\x00"      // 1-part
+                              "\x01\x02\x00\x00\x00"  // LineString
+                              "\x01\x00\x00\x00"      // 1 point
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"    // 2.0
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"),  // 1.0
+                          34, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 34);
+            ASSERT_EQ(oMLS.getNumGeometries(), 1);
+            auto poLS = oMLS.getGeometryRef(0);
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 2.0);
+            EXPECT_EQ(poLS->getY(0), 1.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oMLS.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x05\x00\x00\x00"  // MultiLineString
+                              "\x01\x00\x00\x00"      // 1-part
+                              "\x01\x02\x00\x00\x00"  // LineString
+                              "\x01\x00\x00\x00"      // 1 point
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"    // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"),  // 2.0
+                          static_cast<size_t>(-1), wkbVariantIso,
+                          nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 34);
+            ASSERT_EQ(oMLS.getNumGeometries(), 1);
+            auto poLS = oMLS.getGeometryRef(0);
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 1.0);
+            EXPECT_EQ(poLS->getY(0), 2.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            // Truncated WKB
+            EXPECT_NE(oMLS.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x05\x00\x00\x00"  // MultiLineString
+                              "\x01\x00\x00\x00"      // 1-part
+                              "\x01\x02\x00\x00\x00"  // LineString
+                              "\x01\x00\x00\x00"      // 1 point
+                              ),
+                          18, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            ASSERT_EQ(oMLS.getNumGeometries(), 0);
+        }
+    }
+
+    {
+        OGRMultiPolygon oMP;
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oMP.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x06\x00\x00\x00"  // MultiPolygon
+                              "\x01\x00\x00\x00"      // 1-part
+                              "\x01\x03\x00\x00\x00"  // Polygon
+                              "\x01\x00\x00\x00"      // 1 ring
+                              "\x01\x00\x00\x00"      // 1 point
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"    // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"),  // 2.0
+                          38, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 38);
+            ASSERT_EQ(oMP.getNumGeometries(), 1);
+            auto poPoly = oMP.getGeometryRef(0);
+            ASSERT_TRUE(poPoly->getExteriorRing() != nullptr);
+            ASSERT_EQ(poPoly->getNumInteriorRings(), 0);
+            auto poLS = poPoly->getExteriorRing();
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 1.0);
+            EXPECT_EQ(poLS->getY(0), 2.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oMP.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x06\x00\x00\x00"  // MultiPolygon
+                              "\x01\x00\x00\x00"      // 1-part
+                              "\x01\x03\x00\x00\x00"  // Polygon
+                              "\x01\x00\x00\x00"      // 1 ring
+                              "\x01\x00\x00\x00"      // 1 point
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"    // 2.0
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"),  // 1.0
+                          38, wkbVariantIso, nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 38);
+            ASSERT_EQ(oMP.getNumGeometries(), 1);
+            auto poPoly = oMP.getGeometryRef(0);
+            ASSERT_TRUE(poPoly->getExteriorRing() != nullptr);
+            ASSERT_EQ(poPoly->getNumInteriorRings(), 0);
+            auto poLS = poPoly->getExteriorRing();
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 2.0);
+            EXPECT_EQ(poLS->getY(0), 1.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            EXPECT_EQ(oMP.importFromWkb(
+                          reinterpret_cast<const GByte *>(
+                              "\x01\x06\x00\x00\x00"  // MultiPolygon
+                              "\x01\x00\x00\x00"      // 1-part
+                              "\x01\x03\x00\x00\x00"  // Polygon
+                              "\x01\x00\x00\x00"      // 1 ring
+                              "\x01\x00\x00\x00"      // 1 point
+                              "\x00\x00\x00\x00\x00\x00\xf0\x3f"    // 1.0
+                              "\x00\x00\x00\x00\x00\x00\x00\x40"),  // 2.0
+                          static_cast<size_t>(-1), wkbVariantIso,
+                          nBytesConsumed),
+                      OGRERR_NONE);
+            EXPECT_EQ(nBytesConsumed, 38);
+            ASSERT_EQ(oMP.getNumGeometries(), 1);
+            auto poPoly = oMP.getGeometryRef(0);
+            ASSERT_TRUE(poPoly->getExteriorRing() != nullptr);
+            ASSERT_EQ(poPoly->getNumInteriorRings(), 0);
+            auto poLS = poPoly->getExteriorRing();
+            ASSERT_EQ(poLS->getNumPoints(), 1);
+            EXPECT_EQ(poLS->getX(0), 1.0);
+            EXPECT_EQ(poLS->getY(0), 2.0);
+        }
+        {
+            size_t nBytesConsumed = 0;
+            // Truncated WKB
+            EXPECT_NE(
+                oMP.importFromWkb(reinterpret_cast<const GByte *>(
+                                      "\x01\x06\x00\x00\x00"  // MultiPolygon
+                                      "\x01\x00\x00\x00"      // 1-part
+                                      "\x01\x03\x00\x00\x00"  // Polygon
+                                      "\x01\x00\x00\x00"      // 1 ring
+                                      "\x01\x00\x00\x00"      // 1 point
+                                      ),
+                                  22, wkbVariantIso, nBytesConsumed),
+                OGRERR_NONE);
+            ASSERT_EQ(oMP.getNumGeometries(), 0);
+        }
+    }
+}
+
+// Test sealing functionality on OGRFieldDefn
+TEST_F(test_ogr, OGRFieldDefn_sealing)
+{
+    OGRFieldDefn oFieldDefn("test", OFTString);
+    oFieldDefn.Seal();
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetType(OFTInteger);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetSubType(OFSTJSON);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetWidth(1);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetPrecision(1);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetDefault("");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetUnique(true);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetNullable(false);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetComment("");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetAlternativeName("");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetDomainName("");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetTZFlag(0);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        auto oTemporaryUnsealer(oFieldDefn.GetTemporaryUnsealer());
+        CPLErrorReset();
+        oFieldDefn.SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") == nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        whileUnsealing(&oFieldDefn)->SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+}
+
+// Test sealing functionality on OGRGeomFieldDefn
+TEST_F(test_ogr, OGRGeomFieldDefn_sealing)
+{
+    OGRGeomFieldDefn oFieldDefn("test", wkbUnknown);
+
+    oFieldDefn.Seal();
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetType(wkbPoint);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetSpatialRef(nullptr);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetNullable(false);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        auto oTemporaryUnsealer(oFieldDefn.GetTemporaryUnsealer());
+        CPLErrorReset();
+        oFieldDefn.SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFieldDefn.SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        whileUnsealing(&oFieldDefn)->SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+}
+
+// Test sealing functionality on OGRFeatureDefn
+TEST_F(test_ogr, OGRFeatureDefn_sealing)
+{
+    OGRFeatureDefn oFDefn;
+    CPLErrorReset();
+    {
+        oFDefn.SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+    {
+        OGRFieldDefn oFieldDefn("test", OFTString);
+        oFDefn.AddFieldDefn(&oFieldDefn);
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+    {
+        OGRGeomFieldDefn oFieldDefn("test", wkbUnknown);
+        oFDefn.AddGeomFieldDefn(&oFieldDefn);
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFDefn.Unseal(true);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "unsealed") != nullptr);
+
+        CPLErrorReset();
+        auto oTemporaryUnsealer1(oFDefn.GetTemporaryUnsealer(false));
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "unsealed") != nullptr);
+        CPLErrorReset();
+        auto oTemporaryUnsealer2(oFDefn.GetTemporaryUnsealer(false));
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+
+    oFDefn.Seal(true);
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFDefn.Seal(true);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFDefn.SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        OGRFieldDefn oFieldDefn("test2", OFTString);
+        oFDefn.AddFieldDefn(&oFieldDefn);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFDefn.DeleteFieldDefn(0);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        int map[] = {0};
+        oFDefn.ReorderFieldDefns(map);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        OGRGeomFieldDefn oFieldDefn("test2", wkbUnknown);
+        oFDefn.AddGeomFieldDefn(&oFieldDefn);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        oFDefn.DeleteGeomFieldDefn(0);
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        auto oTemporaryUnsealer(oFDefn.GetTemporaryUnsealer(false));
+        CPLErrorReset();
+        oFDefn.SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        CPLErrorReset();
+        oFDefn.GetFieldDefn(0)->SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+
+        CPLErrorReset();
+        oFDefn.GetGeomFieldDefn(0)->SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        CPLErrorReset();
+        oFDefn.GetFieldDefn(0)->SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+
+        CPLErrorReset();
+        oFDefn.GetGeomFieldDefn(0)->SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        auto oTemporaryUnsealer(oFDefn.GetTemporaryUnsealer(true));
+        CPLErrorReset();
+        oFDefn.SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+
+        oFDefn.GetFieldDefn(0)->SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+
+        auto oTemporaryUnsealer2(oFDefn.GetTemporaryUnsealer(true));
+
+        oFDefn.GetGeomFieldDefn(0)->SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+
+    {
+
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        CPLErrorReset();
+        oFDefn.GetFieldDefn(0)->SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+
+        CPLErrorReset();
+        oFDefn.GetGeomFieldDefn(0)->SetName("new_name");
+        EXPECT_TRUE(strstr(CPLGetLastErrorMsg(), "sealed") != nullptr);
+    }
+
+    {
+        CPLErrorReset();
+        whileUnsealing(&oFDefn)->SetName("new_name");
+        EXPECT_EQ(CPLGetLastErrorType(), CE_None);
+    }
+}
+
+// Test wkbExportOptions
+TEST_F(test_ogr, wkbExportOptions_default)
+{
+    OGRwkbExportOptions *psOptions = OGRwkbExportOptionsCreate();
+    ASSERT_TRUE(psOptions != nullptr);
+    OGRPoint p(1.23456789012345678, 2.23456789012345678, 3);
+    std::vector<GByte> abyWKB(p.WkbSize());
+    OGR_G_ExportToWkbEx(OGRGeometry::ToHandle(&p), &abyWKB[0], psOptions);
+    OGRwkbExportOptionsDestroy(psOptions);
+
+    std::vector<GByte> abyRegularWKB(p.WkbSize());
+    OGR_G_ExportToWkb(OGRGeometry::ToHandle(&p), wkbNDR, &abyRegularWKB[0]);
+
+    EXPECT_TRUE(abyWKB == abyRegularWKB);
+}
+
+// Test wkbExportOptions
+TEST_F(test_ogr, wkbExportOptions)
+{
+    OGRwkbExportOptions *psOptions = OGRwkbExportOptionsCreate();
+    ASSERT_TRUE(psOptions != nullptr);
+    OGRwkbExportOptionsSetByteOrder(psOptions, wkbXDR);
+    OGRwkbExportOptionsSetVariant(psOptions, wkbVariantIso);
+
+    auto hPrec = OGRGeomCoordinatePrecisionCreate();
+    OGRGeomCoordinatePrecisionSet(hPrec, 1e-1, 1e-2, 1e-4);
+    OGRwkbExportOptionsSetPrecision(psOptions, hPrec);
+    OGRGeomCoordinatePrecisionDestroy(hPrec);
+
+    OGRPoint p(1.23456789012345678, -1.23456789012345678, 1.23456789012345678,
+               1.23456789012345678);
+    std::vector<GByte> abyWKB(p.WkbSize());
+    OGR_G_ExportToWkbEx(OGRGeometry::ToHandle(&p), &abyWKB[0], psOptions);
+    OGRwkbExportOptionsDestroy(psOptions);
+
+    const std::vector<GByte> expectedWKB{
+        0x00, 0x00, 0x00, 0x0B, 0xB9, 0x3F, 0xF3, 0x80, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0xBF, 0xF3, 0x80, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x3F, 0xF3, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3F,
+        0xF3, 0xC0, 0xC0, 0x00, 0x00, 0x00, 0x00};
+    EXPECT_TRUE(abyWKB == expectedWKB);
+
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    ASSERT_NE(poGeom, nullptr);
+    EXPECT_NEAR(poGeom->toPoint()->getX(), 1.2, 1e-1);
+    EXPECT_NEAR(poGeom->toPoint()->getY(), -1.2, 1e-1);
+    EXPECT_NEAR(poGeom->toPoint()->getZ(), 1.23, 1e-2);
+    EXPECT_NEAR(poGeom->toPoint()->getM(), 1.2346, 1e-4);
+    delete poGeom;
+}
+
+// Test OGRGeometry::roundCoordinatesIEEE754()
+TEST_F(test_ogr, roundCoordinatesIEEE754)
+{
+    OGRLineString oLS;
+    oLS.addPoint(1.2345678901234, -1.2345678901234, -1.2345678901234, 0.012345);
+    oLS.addPoint(-1.2345678901234, 1.2345678901234, 1.2345678901234, -0.012345);
+    oLS.addPoint(std::numeric_limits<double>::infinity(),
+                 std::numeric_limits<double>::quiet_NaN());
+    OGRGeomCoordinateBinaryPrecision sBinaryPrecision;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.dfXYResolution = 1e-10;
+    sPrecision.dfZResolution = 1e-3;
+    sPrecision.dfMResolution = 1e-5;
+    sBinaryPrecision.SetFrom(sPrecision);
+    OGRLineString oLSOri(oLS);
+    oLS.roundCoordinatesIEEE754(sBinaryPrecision);
+    EXPECT_NE(oLS.getX(0), oLSOri.getX(0));
+    EXPECT_NE(oLS.getY(0), oLSOri.getY(0));
+    EXPECT_NE(oLS.getZ(0), oLSOri.getZ(0));
+    EXPECT_NE(oLS.getM(0), oLSOri.getM(0));
+    EXPECT_NEAR(oLS.getX(0), oLSOri.getX(0), sPrecision.dfXYResolution);
+    EXPECT_NEAR(oLS.getY(0), oLSOri.getY(0), sPrecision.dfXYResolution);
+    EXPECT_NEAR(oLS.getZ(0), oLSOri.getZ(0), sPrecision.dfZResolution);
+    EXPECT_NEAR(oLS.getM(0), oLSOri.getM(0), sPrecision.dfMResolution);
+    EXPECT_NEAR(oLS.getX(1), oLSOri.getX(1), sPrecision.dfXYResolution);
+    EXPECT_NEAR(oLS.getY(1), oLSOri.getY(1), sPrecision.dfXYResolution);
+    EXPECT_NEAR(oLS.getZ(1), oLSOri.getZ(1), sPrecision.dfZResolution);
+    EXPECT_NEAR(oLS.getM(1), oLSOri.getM(1), sPrecision.dfMResolution);
+    EXPECT_EQ(oLS.getX(2), std::numeric_limits<double>::infinity());
+    EXPECT_TRUE(std::isnan(oLS.getY(2)));
+}
+
+// Test discarding of bits in WKB export
+TEST_F(test_ogr, wkb_linestring_2d_xy_precision)
+{
+    OGRLineString oLS;
+    oLS.addPoint(1.2345678901234, -1.2345678901234);
+    oLS.addPoint(-1.2345678901234, 1.2345678901234);
+    OGRwkbExportOptions sOptions;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.dfXYResolution = 1e-10;
+    sOptions.sPrecision.SetFrom(sPrecision);
+    std::vector<GByte> abyWKB(oLS.WkbSize());
+    oLS.exportToWkb(&abyWKB[0], &sOptions);
+    for (int i = 0; i < oLS.getDimension() * oLS.getNumPoints(); ++i)
+    {
+        EXPECT_EQ(abyWKB[5 + 4 + 0 + 8 * i], 0);
+    }
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    EXPECT_NE(poGeom->toLineString()->getX(0), oLS.getX(0));
+    EXPECT_NE(poGeom->toLineString()->getY(0), oLS.getY(0));
+    EXPECT_NEAR(poGeom->toLineString()->getX(0), oLS.getX(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getY(0), oLS.getY(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getX(1), oLS.getX(1),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getY(1), oLS.getY(1),
+                sPrecision.dfXYResolution);
+    delete poGeom;
+}
+
+// Test discarding of bits in WKB export
+TEST_F(test_ogr, wkb_linestring_3d_discard_lsb_bits)
+{
+    OGRLineString oLS;
+    oLS.addPoint(1.2345678901234, -1.2345678901234, -1.2345678901234);
+    oLS.addPoint(-1.2345678901234, 1.2345678901234, 1.2345678901234);
+    OGRwkbExportOptions sOptions;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.dfXYResolution = 1e-10;
+    sPrecision.dfZResolution = 1e-3;
+    sOptions.sPrecision.SetFrom(sPrecision);
+    std::vector<GByte> abyWKB(oLS.WkbSize());
+    oLS.exportToWkb(&abyWKB[0], &sOptions);
+    for (int i = 0; i < oLS.getDimension() * oLS.getNumPoints(); ++i)
+    {
+        EXPECT_EQ(abyWKB[5 + 4 + 0 + 8 * i], 0);
+    }
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    EXPECT_NE(poGeom->toLineString()->getX(0), oLS.getX(0));
+    EXPECT_NE(poGeom->toLineString()->getY(0), oLS.getY(0));
+    EXPECT_NE(poGeom->toLineString()->getZ(0), oLS.getZ(0));
+    EXPECT_NEAR(poGeom->toLineString()->getX(0), oLS.getX(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getY(0), oLS.getY(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getZ(0), oLS.getZ(0),
+                sPrecision.dfZResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getX(1), oLS.getX(1),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getY(1), oLS.getY(1),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getZ(1), oLS.getZ(1),
+                sPrecision.dfZResolution);
+    delete poGeom;
+}
+
+// Test discarding of bits in WKB export
+TEST_F(test_ogr, wkb_linestring_xym_discard_lsb_bits)
+{
+    OGRLineString oLS;
+    oLS.addPointM(1.2345678901234, -1.2345678901234, -1.2345678901234);
+    oLS.addPointM(-1.2345678901234, 1.2345678901234, 1.2345678901234);
+    OGRwkbExportOptions sOptions;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.dfXYResolution = 1e-10;
+    sPrecision.dfMResolution = 1e-3;
+    sOptions.sPrecision.SetFrom(sPrecision);
+    std::vector<GByte> abyWKB(oLS.WkbSize());
+    oLS.exportToWkb(&abyWKB[0], &sOptions);
+    for (int i = 0; i < oLS.getDimension() * oLS.getNumPoints(); ++i)
+    {
+        EXPECT_EQ(abyWKB[5 + 4 + 0 + 8 * i], 0);
+    }
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    EXPECT_NE(poGeom->toLineString()->getX(0), oLS.getX(0));
+    EXPECT_NE(poGeom->toLineString()->getY(0), oLS.getY(0));
+    EXPECT_NE(poGeom->toLineString()->getM(0), oLS.getM(0));
+    EXPECT_NEAR(poGeom->toLineString()->getX(0), oLS.getX(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getY(0), oLS.getY(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getM(0), oLS.getM(0),
+                sPrecision.dfMResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getX(1), oLS.getX(1),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getY(1), oLS.getY(1),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getM(1), oLS.getM(1),
+                sPrecision.dfMResolution);
+    delete poGeom;
+}
+
+// Test discarding of bits in WKB export
+TEST_F(test_ogr, wkb_linestring_xyzm_discard_lsb_bits)
+{
+    OGRLineString oLS;
+    oLS.addPoint(1.2345678901234, -1.2345678901234, -1.2345678901234, 0.012345);
+    oLS.addPoint(-1.2345678901234, 1.2345678901234, 1.2345678901234, 0.012345);
+    OGRwkbExportOptions sOptions;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.dfXYResolution = 1e-10;
+    sPrecision.dfZResolution = 1e-3;
+    sPrecision.dfMResolution = 1e-5;
+    sOptions.sPrecision.SetFrom(sPrecision);
+    std::vector<GByte> abyWKB(oLS.WkbSize());
+    oLS.exportToWkb(&abyWKB[0], &sOptions);
+    for (int i = 0; i < oLS.getDimension() * oLS.getNumPoints(); ++i)
+    {
+        EXPECT_EQ(abyWKB[5 + 4 + 0 + 8 * i], 0);
+    }
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    EXPECT_NE(poGeom->toLineString()->getX(0), oLS.getX(0));
+    EXPECT_NE(poGeom->toLineString()->getY(0), oLS.getY(0));
+    EXPECT_NE(poGeom->toLineString()->getZ(0), oLS.getZ(0));
+    EXPECT_NE(poGeom->toLineString()->getM(0), oLS.getM(0));
+    EXPECT_NEAR(poGeom->toLineString()->getX(0), oLS.getX(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getY(0), oLS.getY(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getZ(0), oLS.getZ(0),
+                sPrecision.dfZResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getM(0), oLS.getM(0),
+                sPrecision.dfMResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getX(1), oLS.getX(1),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getY(1), oLS.getY(1),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getZ(1), oLS.getZ(1),
+                sPrecision.dfZResolution);
+    EXPECT_NEAR(poGeom->toLineString()->getM(1), oLS.getM(1),
+                sPrecision.dfMResolution);
+    delete poGeom;
+}
+
+// Test discarding of bits in WKB export
+TEST_F(test_ogr, wkb_polygon_2d_xy_precision)
+{
+    OGRLinearRing oLS;
+    oLS.addPoint(1.2345678901234, -1.2345678901234);
+    oLS.addPoint(-1.2345678901234, -1.2345678901234);
+    oLS.addPoint(-2.2345678901234, 1.2345678901234);
+    oLS.addPoint(1.2345678901234, -1.2345678901234);
+    OGRPolygon oPoly;
+    oPoly.addRing(&oLS);
+    OGRwkbExportOptions sOptions;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.dfXYResolution = 1e-10;
+    sOptions.sPrecision.SetFrom(sPrecision);
+    std::vector<GByte> abyWKB(oPoly.WkbSize());
+    oPoly.exportToWkb(&abyWKB[0], &sOptions);
+    for (int i = 0; i < oLS.getDimension() * oLS.getNumPoints(); ++i)
+    {
+        EXPECT_EQ(abyWKB[5 + 4 + 4 + 0 + 8 * i], 0);
+    }
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getX(0), oLS.getX(0));
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getY(0), oLS.getY(0));
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getX(0), oLS.getX(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getY(0), oLS.getY(0),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getX(1), oLS.getX(1),
+                sPrecision.dfXYResolution);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getY(1), oLS.getY(1),
+                sPrecision.dfXYResolution);
+    delete poGeom;
+}
+
+// Test discarding of bits in WKB export
+TEST_F(test_ogr, wkb_polygon_3d_discard_lsb_bits)
+{
+    OGRLinearRing oLS;
+    oLS.addPoint(1.2345678901234, -1.2345678901234, 1.2345678901234);
+    oLS.addPoint(-1.2345678901234, -1.2345678901234, -1.2345678901234);
+    oLS.addPoint(-2.2345678901234, 1.2345678901234, -1.2345678901234);
+    oLS.addPoint(1.2345678901234, -1.2345678901234, 1.2345678901234);
+    OGRPolygon oPoly;
+    oPoly.addRing(&oLS);
+    OGRSpatialReference oSRS;
+    oSRS.importFromEPSG(4326);
+    OGRwkbExportOptions sOptions;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.SetFromMeter(&oSRS, 1e-3, 1e-3, 0);
+    sOptions.sPrecision.SetFrom(sPrecision);
+    std::vector<GByte> abyWKB(oPoly.WkbSize());
+    oPoly.exportToWkb(&abyWKB[0], &sOptions);
+    for (int i = 0; i < oLS.getDimension() * oLS.getNumPoints(); ++i)
+    {
+        EXPECT_EQ(abyWKB[5 + 4 + 4 + 0 + 8 * i], 0);
+    }
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getX(0), oLS.getX(0));
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getY(0), oLS.getY(0));
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getZ(0), oLS.getZ(0));
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getX(0), oLS.getX(0),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getY(0), oLS.getY(0),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getZ(0), oLS.getZ(0),
+                1e-3);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getX(1), oLS.getX(1),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getY(1), oLS.getY(1),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getZ(1), oLS.getZ(1),
+                1e-3);
+    delete poGeom;
+}
+
+// Test discarding of bits in WKB export
+TEST_F(test_ogr, wkb_polygon_xym_discard_lsb_bits)
+{
+    OGRLinearRing oLS;
+    oLS.addPointM(1.2345678901234, -1.2345678901234, 1.2345678901234);
+    oLS.addPointM(-1.2345678901234, -1.2345678901234, -1.2345678901234);
+    oLS.addPointM(-2.2345678901234, 1.2345678901234, -1.2345678901234);
+    oLS.addPointM(1.2345678901234, -1.2345678901234, 1.2345678901234);
+    OGRPolygon oPoly;
+    oPoly.addRing(&oLS);
+    OGRSpatialReference oSRS;
+    oSRS.importFromEPSG(4326);
+    OGRwkbExportOptions sOptions;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.SetFromMeter(&oSRS, 1e-3, 0, 1e-3);
+    sOptions.sPrecision.SetFrom(sPrecision);
+    std::vector<GByte> abyWKB(oPoly.WkbSize());
+    oPoly.exportToWkb(&abyWKB[0], &sOptions);
+    for (int i = 0; i < oLS.getDimension() * oLS.getNumPoints(); ++i)
+    {
+        EXPECT_EQ(abyWKB[5 + 4 + 4 + 0 + 8 * i], 0);
+    }
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getX(0), oLS.getX(0));
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getY(0), oLS.getY(0));
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getM(0), oLS.getM(0));
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getX(0), oLS.getX(0),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getY(0), oLS.getY(0),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getM(0), oLS.getM(0),
+                1e-3);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getX(1), oLS.getX(1),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getY(1), oLS.getY(1),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getM(1), oLS.getM(1),
+                1e-3);
+    delete poGeom;
+}
+
+// Test discarding of bits in WKB export
+TEST_F(test_ogr, wkb_polygon_xyzm_discard_lsb_bits)
+{
+    OGRLinearRing oLS;
+    oLS.addPoint(1.2345678901234, -1.2345678901234, 1.2345678901234, 0.012345);
+    oLS.addPoint(-1.2345678901234, -1.2345678901234, -1.2345678901234, 12345);
+    oLS.addPoint(-2.2345678901234, 1.2345678901234, -1.2345678901234, 0.012345);
+    oLS.addPoint(1.2345678901234, -1.2345678901234, 1.2345678901234, 0.012345);
+    OGRPolygon oPoly;
+    oPoly.addRing(&oLS);
+    OGRSpatialReference oSRS;
+    oSRS.importFromEPSG(4326);
+    OGRwkbExportOptions sOptions;
+    OGRGeomCoordinatePrecision sPrecision;
+    sPrecision.SetFromMeter(&oSRS, 1e-3, 1e-3, 1e-4);
+    sOptions.sPrecision.SetFrom(sPrecision);
+    std::vector<GByte> abyWKB(oPoly.WkbSize());
+    oPoly.exportToWkb(&abyWKB[0], &sOptions);
+    for (int i = 0; i < oLS.getDimension() * oLS.getNumPoints(); ++i)
+    {
+        EXPECT_EQ(abyWKB[5 + 4 + 4 + 0 + 8 * i], 0);
+    }
+    OGRGeometry *poGeom = nullptr;
+    OGRGeometryFactory::createFromWkb(abyWKB.data(), nullptr, &poGeom);
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getX(0), oLS.getX(0));
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getY(0), oLS.getY(0));
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getZ(0), oLS.getZ(0));
+    EXPECT_NE(poGeom->toPolygon()->getExteriorRing()->getM(0), oLS.getM(0));
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getX(0), oLS.getX(0),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getY(0), oLS.getY(0),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getZ(0), oLS.getZ(0),
+                1e-3);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getM(0), oLS.getM(0),
+                1e-4);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getX(1), oLS.getX(1),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getY(1), oLS.getY(1),
+                8.9e-9);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getZ(1), oLS.getZ(1),
+                1e-3);
+    EXPECT_NEAR(poGeom->toPolygon()->getExteriorRing()->getM(1), oLS.getM(1),
+                1e-4);
+    delete poGeom;
+}
+
+// Test OGRFeature::SerializeToBinary() and DeserializeFromBinary();
+TEST_F(test_ogr, OGRFeature_SerializeToBinary)
+{
+    {
+        OGRFeatureDefn oFDefn;
+        oFDefn.SetGeomType(wkbNone);
+        oFDefn.Reference();
+
+        {
+            OGRFeature oFeatSrc(&oFDefn);
+            oFeatSrc.SetFID(1);
+            std::vector<GByte> abyBuffer;
+
+            EXPECT_TRUE(oFeatSrc.SerializeToBinary(abyBuffer));
+            EXPECT_EQ(abyBuffer.size(), 1);
+            EXPECT_EQ(abyBuffer[0], 1);
+
+            OGRFeature oFeatDst(&oFDefn);
+            EXPECT_FALSE(oFeatDst.DeserializeFromBinary(abyBuffer.data(), 0));
+            EXPECT_TRUE(oFeatDst.DeserializeFromBinary(abyBuffer.data(),
+                                                       abyBuffer.size()));
+            EXPECT_EQ(oFeatDst.GetFID(), 1);
+        }
+
+        {
+            OGRFeature oFeatSrc(&oFDefn);
+            oFeatSrc.SetFID(static_cast<GIntBig>(-12345678901234));
+            std::vector<GByte> abyBuffer;
+
+            EXPECT_TRUE(oFeatSrc.SerializeToBinary(abyBuffer));
+
+            OGRFeature oFeatDst(&oFDefn);
+            // Try truncated buffers
+            for (size_t i = 0; i < abyBuffer.size(); ++i)
+            {
+                EXPECT_FALSE(
+                    oFeatDst.DeserializeFromBinary(abyBuffer.data(), i));
+            }
+            EXPECT_TRUE(oFeatDst.DeserializeFromBinary(abyBuffer.data(),
+                                                       abyBuffer.size()));
+            EXPECT_EQ(oFeatDst.GetFID(), static_cast<GIntBig>(-12345678901234));
+        }
+    }
+
+    {
+        OGRFeatureDefn oFDefn;
+        oFDefn.Reference();
+        {
+            OGRFieldDefn oFieldDefn("int", OFTInteger);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("int64", OFTInteger64);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("real", OFTReal);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("str", OFTString);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("binary", OFTBinary);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("intlist", OFTIntegerList);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("int64list", OFTInteger64List);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("reallist", OFTRealList);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("strlist", OFTStringList);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("date", OFTDate);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("time", OFTTime);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+        {
+            OGRFieldDefn oFieldDefn("datetime", OFTDateTime);
+            oFDefn.AddFieldDefn(&oFieldDefn);
+        }
+
+        {
+            OGRFeature oFeatSrc(&oFDefn);
+            std::vector<GByte> abyBuffer;
+
+            EXPECT_TRUE(oFeatSrc.SerializeToBinary(abyBuffer));
+            EXPECT_EQ(abyBuffer.size(), 5);
+
+            OGRFeature oFeatDst(&oFDefn);
+            for (size_t i = 0; i < abyBuffer.size(); ++i)
+            {
+                EXPECT_FALSE(
+                    oFeatDst.DeserializeFromBinary(abyBuffer.data(), i));
+            }
+            EXPECT_TRUE(oFeatDst.DeserializeFromBinary(abyBuffer.data(),
+                                                       abyBuffer.size()));
+            EXPECT_TRUE(oFeatDst.Equal(&oFeatSrc));
+        }
+
+        {
+            OGRFeature oFeatSrc(&oFDefn);
+            std::vector<GByte> abyBuffer;
+
+            const int iFieldInt = oFDefn.GetFieldIndex("int");
+            ASSERT_TRUE(iFieldInt >= 0);
+            oFeatSrc.SetFieldNull(iFieldInt);
+            EXPECT_TRUE(oFeatSrc.SerializeToBinary(abyBuffer));
+            EXPECT_EQ(abyBuffer.size(), 5);
+
+            OGRFeature oFeatDst(&oFDefn);
+
+            // Try truncated buffers
+            for (size_t i = 0; i < abyBuffer.size(); ++i)
+            {
+                EXPECT_FALSE(
+                    oFeatDst.DeserializeFromBinary(abyBuffer.data(), i));
+            }
+
+            EXPECT_TRUE(oFeatDst.DeserializeFromBinary(abyBuffer.data(),
+                                                       abyBuffer.size()));
+            EXPECT_TRUE(oFeatDst.Equal(&oFeatSrc));
+        }
+
+        {
+            OGRFeature oFeatSrc(&oFDefn);
+            oFeatSrc.SetFID(1);
+            oFeatSrc.SetField("int", -123);
+            oFeatSrc.SetField("int64", static_cast<GIntBig>(-12345678901234));
+            oFeatSrc.SetField("real", 1.25);
+            oFeatSrc.SetField("str", "foo");
+            const int iFieldBinary = oFDefn.GetFieldIndex("binary");
+            ASSERT_TRUE(iFieldBinary >= 0);
+            oFeatSrc.SetField(iFieldBinary, 3,
+                              static_cast<const void *>("abc"));
+            oFeatSrc.SetField("intlist", 2,
+                              std::vector<int>{1, -123456}.data());
+            oFeatSrc.SetField("int64list", 2,
+                              std::vector<GIntBig>{1, -12345678901234}.data());
+            oFeatSrc.SetField("reallist", 2,
+                              std::vector<double>{1.5, -2.5}.data());
+            CPLStringList aosList;
+            aosList.AddString("foo");
+            aosList.AddString("barbaz");
+            oFeatSrc.SetField("strlist", aosList.List());
+            oFeatSrc.SetField("date", 2023, 1, 3);
+            oFeatSrc.SetField("time", 0, 0, 0, 12, 34, 56.789f);
+            oFeatSrc.SetField("datetime", 2023, 1, 3, 12, 34, 56.789f);
+            OGRPoint p(1, 2);
+            oFeatSrc.SetGeometry(&p);
+            std::vector<GByte> abyBuffer;
+
+            EXPECT_TRUE(oFeatSrc.SerializeToBinary(abyBuffer));
+
+            OGRFeature oFeatDst(&oFDefn);
+
+            // Try truncated buffers
+            for (size_t i = 0; i < abyBuffer.size(); ++i)
+            {
+                EXPECT_FALSE(
+                    oFeatDst.DeserializeFromBinary(abyBuffer.data(), i));
+            }
+
+            // Try corrupted buffers
+            {
+                CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+                for (size_t i = 0; i < abyBuffer.size(); ++i)
+                {
+                    // Might succeed or fail, but shouldn't crash..
+                    const GByte backup = abyBuffer[i];
+                    abyBuffer[i] = static_cast<GByte>(~abyBuffer[i]);
+                    (void)oFeatDst.DeserializeFromBinary(abyBuffer.data(),
+                                                         abyBuffer.size());
+                    abyBuffer[i] = backup;
+                }
+            }
+
+            EXPECT_TRUE(oFeatDst.DeserializeFromBinary(abyBuffer.data(),
+                                                       abyBuffer.size()));
+            // oFeatSrc.DumpReadable(stdout);
+            // oFeatDst.DumpReadable(stdout);
+            EXPECT_TRUE(oFeatDst.Equal(&oFeatSrc));
+        }
+    }
+}
+
+// Test OGRGeometry::IsRectangle()
+TEST_F(test_ogr, OGRGeometry_IsRectangle)
+{
+    // Not a polygon
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POINT EMPTY", nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+    // Polygon empty
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POLYGON EMPTY", nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+    // Polygon with inner ring
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt(
+            "POLYGON ((0 0,0 1,1 1,1 0,0 0),(0.2 0.2,0.2 0.8,0.8 0.8,0.8 "
+            "0.2,0.2 0.2))",
+            nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+    // Polygon with 3 points
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POLYGON ((0 0,0 1,1 1))", nullptr,
+                                          &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+    // Polygon with 6 points
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt(
+            "POLYGON ((0 0,0.1 0,0.2 0,0.3 0,1 1,0 0))", nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+    // Polygon with 5 points, but last one not matching first (invalid)
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt(
+            "POLYGON ((0 0,0 1,1 1,1 0,-999 -999))", nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+    // Polygon with 5 points, but not rectangle
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POLYGON ((0 0,0 1.1,1 1,1 0,0 0))",
+                                          nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+    // Rectangle (type 1)
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POLYGON ((0 0,0 1,1 1,1 0,0 0))",
+                                          nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_TRUE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+    // Rectangle2(type 1)
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POLYGON ((0 0,1 0,1 1,0 1,0 0))",
+                                          nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_TRUE(poGeom->IsRectangle());
+        delete poGeom;
+    }
+}
+
+// Test OGRGeometry::removeEmptyParts()
+TEST_F(test_ogr, OGRGeometry_removeEmptyParts)
+{
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POINT EMPTY", nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_TRUE(poGeom->IsEmpty());
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POLYGON ((0 0,0 1,1 0,0 0))",
+                                          nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_NE(poGeom->toPolygon()->getExteriorRing(), nullptr);
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("POLYGON ((0 0,0 1,1 0,0 0))",
+                                          nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        poGeom->toPolygon()->addRingDirectly(new OGRLinearRing());
+        EXPECT_EQ(poGeom->toPolygon()->getNumInteriorRings(), 1);
+        EXPECT_TRUE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_NE(poGeom->toPolygon()->getExteriorRing(), nullptr);
+        EXPECT_EQ(poGeom->toPolygon()->getNumInteriorRings(), 0);
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("COMPOUNDCURVE ((0 0,1 1))", nullptr,
+                                          &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_EQ(poGeom->toCompoundCurve()->getNumCurves(), 1);
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("COMPOUNDCURVE ((0 0,1 1),(1 1,2 2))",
+                                          nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        poGeom->toCompoundCurve()->getCurve(1)->empty();
+        EXPECT_EQ(poGeom->toCompoundCurve()->getNumCurves(), 2);
+        EXPECT_TRUE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        EXPECT_EQ(poGeom->toCompoundCurve()->getNumCurves(), 1);
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("GEOMETRYCOLLECTION (POINT(0 0))",
+                                          nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_EQ(poGeom->toGeometryCollection()->getNumGeometries(), 1);
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt(
+            "GEOMETRYCOLLECTION (POINT EMPTY,POINT(0 0),POINT EMPTY)", nullptr,
+            &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_EQ(poGeom->toGeometryCollection()->getNumGeometries(), 3);
+        EXPECT_TRUE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        EXPECT_EQ(poGeom->toGeometryCollection()->getNumGeometries(), 1);
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt("GEOMETRYCOLLECTION EMPTY", nullptr,
+                                          &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        OGRGeometry *poPoly = nullptr;
+        OGRGeometryFactory::createFromWkt("POLYGON ((0 0,0 1,1 0,0 0))",
+                                          nullptr, &poPoly);
+        EXPECT_NE(poPoly, nullptr);
+        if (poPoly)
+        {
+            poPoly->toPolygon()->addRingDirectly(new OGRLinearRing());
+            poGeom->toGeometryCollection()->addGeometryDirectly(poPoly);
+            EXPECT_EQ(poGeom->toGeometryCollection()->getNumGeometries(), 1);
+            EXPECT_TRUE(poGeom->hasEmptyParts());
+            poGeom->removeEmptyParts();
+            EXPECT_FALSE(poGeom->hasEmptyParts());
+            EXPECT_EQ(poGeom->toGeometryCollection()->getNumGeometries(), 1);
+        }
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt(
+            "POLYHEDRALSURFACE (((0 0,0 1,1 1,0 0)))", nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_EQ(poGeom->toPolyhedralSurface()->getNumGeometries(), 1);
+        delete poGeom;
+    }
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt(
+            "POLYHEDRALSURFACE (((0 0,0 1,1 1,0 0)))", nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        poGeom->toPolyhedralSurface()->addGeometryDirectly(new OGRPolygon());
+        EXPECT_EQ(poGeom->toPolyhedralSurface()->getNumGeometries(), 2);
+        EXPECT_TRUE(poGeom->hasEmptyParts());
+        poGeom->removeEmptyParts();
+        EXPECT_FALSE(poGeom->hasEmptyParts());
+        EXPECT_EQ(poGeom->toPolyhedralSurface()->getNumGeometries(), 1);
+        delete poGeom;
+    }
+}
+
+// Test OGRCurve::reversePoints()
+TEST_F(test_ogr, OGRCurve_reversePoints)
+{
+    {
+        OGRGeometry *poGeom = nullptr;
+        OGRGeometryFactory::createFromWkt(
+            "COMPOUNDCURVE ZM (CIRCULARSTRING ZM (0 0 10 20,1 1 11 21,2 0 12 "
+            "22),(2 0 12 22,3 0 13 2))",
+            nullptr, &poGeom);
+        ASSERT_NE(poGeom, nullptr);
+        poGeom->toCurve()->reversePoints();
+        char *pszWKT = nullptr;
+        poGeom->exportToWkt(&pszWKT, wkbVariantIso);
+        EXPECT_TRUE(pszWKT != nullptr);
+        if (pszWKT)
+        {
+            EXPECT_STREQ(
+                pszWKT, "COMPOUNDCURVE ZM ((3 0 13 2,2 0 12 22),CIRCULARSTRING "
+                        "ZM (2 0 12 22,1 1 11 21,0 0 10 20))");
+        }
+        CPLFree(pszWKT);
+        delete poGeom;
+    }
+}
+
+// Test OGRGeometryFactory::transformWithOptions()
+TEST_F(test_ogr, transformWithOptions)
+{
+    // Projected CRS to national geographic CRS (not including poles or antimeridian)
+    auto [poGeom, err] = OGRGeometryFactory::createFromWkt(
+        "LINESTRING(700000 6600000, 700001 6600001)");
+    ASSERT_NE(poGeom, nullptr);
+
+    OGRSpatialReference oEPSG_2154;
+    oEPSG_2154.importFromEPSG(2154);  // "RGF93 v1 / Lambert-93"
+    OGRSpatialReference oEPSG_4171;
+    oEPSG_4171.importFromEPSG(4171);  // "RGF93 v1"
+    oEPSG_4171.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    auto poCT = std::unique_ptr<OGRCoordinateTransformation>(
+        OGRCreateCoordinateTransformation(&oEPSG_2154, &oEPSG_4171));
+    OGRGeometryFactory::TransformWithOptionsCache oCache;
+    auto poNewGeom =
+        std::unique_ptr<OGRGeometry>(OGRGeometryFactory::transformWithOptions(
+            poGeom.get(), poCT.get(), nullptr, oCache));
+    ASSERT_NE(poNewGeom, nullptr);
+    EXPECT_NEAR(poNewGeom->toLineString()->getX(0), 3, 1e-8);
+    EXPECT_NEAR(poNewGeom->toLineString()->getY(0), 46.5, 1e-8);
+}
+
+#ifdef HAVE_GEOS
+
+// Test OGRGeometryFactory::transformWithOptions()
+TEST_F(test_ogr, transformWithOptions_GEOS)
+{
+    // Projected CRS to national geographic CRS including antimeridian
+    auto [poGeom, err] = OGRGeometryFactory::createFromWkt(
+        "LINESTRING(657630.64 4984896.17,815261.43 4990738.26)");
+    ASSERT_NE(poGeom, nullptr);
+
+    OGRSpatialReference oEPSG_6329;
+    oEPSG_6329.importFromEPSG(6329);  // "NAD83(2011) / UTM zone 60N"
+    OGRSpatialReference oEPSG_6318;
+    oEPSG_6318.importFromEPSG(6318);  // "NAD83(2011)"
+    oEPSG_6318.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+    auto poCT = std::unique_ptr<OGRCoordinateTransformation>(
+        OGRCreateCoordinateTransformation(&oEPSG_6329, &oEPSG_6318));
+    OGRGeometryFactory::TransformWithOptionsCache oCache;
+    auto poNewGeom =
+        std::unique_ptr<OGRGeometry>(OGRGeometryFactory::transformWithOptions(
+            poGeom.get(), poCT.get(), nullptr, oCache));
+    ASSERT_NE(poNewGeom, nullptr);
+    EXPECT_EQ(poNewGeom->getGeometryType(), wkbMultiLineString);
+    if (poNewGeom->getGeometryType() == wkbMultiLineString)
+    {
+        const auto poMLS = poNewGeom->toMultiLineString();
+        EXPECT_EQ(poMLS->getNumGeometries(), 2);
+        if (poMLS->getNumGeometries() == 2)
+        {
+            const auto poLS = poMLS->getGeometryRef(0);
+            EXPECT_EQ(poLS->getNumPoints(), 2);
+            if (poLS->getNumPoints() == 2)
+            {
+                EXPECT_NEAR(poLS->getX(0), 179, 1e-6);
+                EXPECT_NEAR(poLS->getY(0), 45, 1e-6);
+                EXPECT_NEAR(poLS->getX(1), 180, 1e-6);
+                EXPECT_NEAR(poLS->getY(1), 45.004384301691303, 1e-6);
+            }
+        }
+    }
+}
 #endif
+
+// Test OGRCurvePolygon::addRingDirectly
+TEST_F(test_ogr, OGRCurvePolygon_addRingDirectly)
+{
+    OGRCurvePolygon cp;
+    OGRGeometry *ring;
+
+    // closed CircularString
+    OGRGeometryFactory::createFromWkt(
+        "CIRCULARSTRING (0 0, 1 1, 2 0, 1 -1, 0 0)", nullptr, &ring);
+    ASSERT_TRUE(ring);
+    EXPECT_EQ(cp.addRingDirectly(ring->toCurve()), OGRERR_NONE);
+
+    // open CircularString
+    OGRGeometryFactory::createFromWkt("CIRCULARSTRING (0 0, 1 1, 2 0)", nullptr,
+                                      &ring);
+    ASSERT_TRUE(ring);
+    {
+        CPLConfigOptionSetter oSetter("OGR_GEOMETRY_ACCEPT_UNCLOSED_RING", "NO",
+                                      false);
+        ASSERT_EQ(cp.addRingDirectly(ring->toCurve()),
+                  OGRERR_UNSUPPORTED_GEOMETRY_TYPE);
+    }
+    EXPECT_EQ(cp.addRingDirectly(ring->toCurve()), OGRERR_NONE);
+
+    // closed CompoundCurve
+    OGRGeometryFactory::createFromWkt(
+        "COMPOUNDCURVE( CIRCULARSTRING (0 0, 1 1, 2 0), (2 0, 0 0))", nullptr,
+        &ring);
+    ASSERT_TRUE(ring);
+    EXPECT_EQ(cp.addRingDirectly(ring->toCurve()), OGRERR_NONE);
+
+    // closed LineString
+    OGRGeometryFactory::createFromWkt("LINESTRING (0 0, 1 0, 1 1, 0 1, 0 0)",
+                                      nullptr, &ring);
+    ASSERT_TRUE(ring);
+    EXPECT_EQ(cp.addRingDirectly(ring->toCurve()), OGRERR_NONE);
+
+    // LinearRing
+    auto lr = std::make_unique<OGRLinearRing>();
+    lr->addPoint(0, 0);
+    lr->addPoint(1, 0);
+    lr->addPoint(1, 1);
+    lr->addPoint(0, 1);
+    lr->addPoint(0, 0);
+    ASSERT_TRUE(ring);
+    ASSERT_EQ(cp.addRingDirectly(lr.get()), OGRERR_UNSUPPORTED_GEOMETRY_TYPE);
+}
+
+// Test OGRPolygon::addRingDirectly
+TEST_F(test_ogr, OGRPolygon_addRingDirectly)
+{
+    OGRPolygon p;
+    OGRGeometry *ring;
+
+    // closed CircularString
+    OGRGeometryFactory::createFromWkt(
+        "CIRCULARSTRING (0 0, 1 1, 2 0, 1 -1, 0 0)", nullptr, &ring);
+    ASSERT_TRUE(ring);
+    EXPECT_EQ(p.addRingDirectly(ring->toCurve()),
+              OGRERR_UNSUPPORTED_GEOMETRY_TYPE);
+    delete ring;
+
+    // closed LineString
+    OGRGeometryFactory::createFromWkt("LINESTRING (0 0, 1 0, 1 1, 0 1, 0 0)",
+                                      nullptr, &ring);
+    ASSERT_TRUE(ring);
+    EXPECT_EQ(p.addRingDirectly(ring->toCurve()),
+              OGRERR_UNSUPPORTED_GEOMETRY_TYPE);
+    delete ring;
+
+    // open LineString
+    OGRGeometryFactory::createFromWkt("LINESTRING (0 0, 1 0)", nullptr, &ring);
+    ASSERT_TRUE(ring);
+    EXPECT_EQ(p.addRingDirectly(ring->toCurve()),
+              OGRERR_UNSUPPORTED_GEOMETRY_TYPE);
+    delete ring;
+
+    // LinearRing
+    auto lr = std::make_unique<OGRLinearRing>();
+    lr->addPoint(0, 0);
+    lr->addPoint(1, 0);
+    lr->addPoint(1, 1);
+    lr->addPoint(0, 1);
+    lr->addPoint(0, 0);
+    ASSERT_EQ(p.addRingDirectly(lr.release()), OGRERR_NONE);
+}
+
+TEST_F(test_ogr, OGRFeature_SetGeometry)
+{
+    OGRFeatureDefn *poFeatureDefn = new OGRFeatureDefn();
+    poFeatureDefn->Reference();
+
+    OGRFeature oFeat(poFeatureDefn);
+    auto [poGeom, err] = OGRGeometryFactory::createFromWkt("POINT (3 7)");
+    ASSERT_EQ(err, OGRERR_NONE);
+
+    ASSERT_EQ(oFeat.SetGeometry(std::move(poGeom)), OGRERR_NONE);
+    EXPECT_EQ(oFeat.GetGeometryRef()->toPoint()->getX(), 3);
+    EXPECT_EQ(oFeat.GetGeometryRef()->toPoint()->getY(), 7);
+
+    // set it again to make sure previous feature geometry is freed
+    std::tie(poGeom, err) = OGRGeometryFactory::createFromWkt("POINT (2 8)");
+    ASSERT_EQ(err, OGRERR_NONE);
+    ASSERT_EQ(oFeat.SetGeometry(std::move(poGeom)), OGRERR_NONE);
+    EXPECT_EQ(oFeat.GetGeometryRef()->toPoint()->getX(), 2);
+    EXPECT_EQ(oFeat.GetGeometryRef()->toPoint()->getY(), 8);
+
+    poFeatureDefn->Release();
+}
+
+TEST_F(test_ogr, OGRFeature_SetGeomField)
+{
+    OGRFeatureDefn *poFeatureDefn = new OGRFeatureDefn();
+    poFeatureDefn->Reference();
+
+    OGRGeomFieldDefn oGeomField("second", wkbPoint);
+    poFeatureDefn->AddGeomFieldDefn(&oGeomField);
+
+    OGRFeature oFeat(poFeatureDefn);
+
+    // failure
+    {
+        auto [poGeom, err] = OGRGeometryFactory::createFromWkt("POINT (3 7)");
+        ASSERT_EQ(err, OGRERR_NONE);
+        EXPECT_EQ(oFeat.SetGeomField(13, std::move(poGeom)), OGRERR_FAILURE);
+    }
+
+    // success
+    {
+        auto [poGeom, err] = OGRGeometryFactory::createFromWkt("POINT (3 7)");
+        ASSERT_EQ(err, OGRERR_NONE);
+        EXPECT_EQ(oFeat.SetGeomField(1, std::move(poGeom)), OGRERR_NONE);
+    }
+
+    poFeatureDefn->Release();
+}
+
+TEST_F(test_ogr, GetArrowStream_DateTime_As_String)
+{
+    auto poDS = std::unique_ptr<GDALDataset>(
+        GetGDALDriverManager()->GetDriverByName("MEM")->Create(
+            "", 0, 0, 0, GDT_Unknown, nullptr));
+    auto poLayer = poDS->CreateLayer("test", nullptr, wkbNone);
+    OGRFieldDefn oFieldDefn("dt", OFTDateTime);
+    poLayer->CreateField(&oFieldDefn);
+    struct ArrowArrayStream stream;
+    CPLStringList aosOptions;
+    aosOptions.SetNameValue("INCLUDE_FID", "NO");
+    aosOptions.SetNameValue("DATETIME_AS_STRING", "YES");
+    ASSERT_TRUE(poLayer->GetArrowStream(&stream, aosOptions.List()));
+    struct ArrowSchema schema;
+    memset(&schema, 0, sizeof(schema));
+    EXPECT_EQ(stream.get_schema(&stream, &schema), 0);
+    EXPECT_TRUE(schema.n_children == 1 &&
+                strcmp(schema.children[0]->format, "u") == 0)
+        << schema.n_children;
+    if (schema.n_children == 1 && strcmp(schema.children[0]->format, "u") == 0)
+    {
+        EXPECT_TRUE(schema.children[0]->metadata != nullptr);
+        if (schema.children[0]->metadata)
+        {
+            auto oMapKeyValue =
+                OGRParseArrowMetadata(schema.children[0]->metadata);
+            EXPECT_EQ(oMapKeyValue.size(), 1);
+            if (oMapKeyValue.size() == 1)
+            {
+                EXPECT_STREQ(oMapKeyValue.begin()->first.c_str(),
+                             "GDAL:OGR:type");
+                EXPECT_STREQ(oMapKeyValue.begin()->second.c_str(), "DateTime");
+            }
+        }
+    }
+    schema.release(&schema);
+    stream.release(&stream);
+}
+
+// Test OGRFeatureDefn::GetFieldSubTypeByName()
+TEST_F(test_ogr, OGRFieldDefnGetFieldSubTypeByName)
+{
+    for (int i = 0; i < OFSTMaxSubType; i++)
+    {
+        const char *pszName =
+            OGRFieldDefn::GetFieldSubTypeName(static_cast<OGRFieldSubType>(i));
+        if (pszName != nullptr)
+        {
+            EXPECT_EQ(OGRFieldDefn::GetFieldSubTypeByName(pszName), i);
+        }
+    }
+}
+
+// Test OGRFeatureDefn::GetFieldTypeByName()
+TEST_F(test_ogr, OGRFieldDefnGetFieldTypeByName)
+{
+    for (int i = 0; i < OFTMaxType; i++)
+    {
+        // deprecated types
+        if (i == OFTWideString || i == OFTWideStringList)
+        {
+            continue;
+        }
+        const char *pszName =
+            OGRFieldDefn::GetFieldTypeName(static_cast<OGRFieldType>(i));
+        if (pszName != nullptr)
+        {
+            EXPECT_EQ(OGRFieldDefn::GetFieldTypeByName(pszName), i);
+        }
+    }
+}
+
+// Test OGRGeometryFactory::GetDefaultArcStepSize()
+TEST_F(test_ogr, GetDefaultArcStepSize)
+{
+    if (CPLGetConfigOption("OGR_ARC_STEPSIZE", nullptr) == nullptr)
+    {
+        EXPECT_EQ(OGRGeometryFactory::GetDefaultArcStepSize(), 4.0);
+    }
+    {
+        CPLConfigOptionSetter oSetter("OGR_ARC_STEPSIZE", "0.00001",
+                                      /* bSetOnlyIfUndefined = */ false);
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        EXPECT_EQ(OGRGeometryFactory::GetDefaultArcStepSize(), 1e-2);
+        EXPECT_TRUE(
+            strstr(CPLGetLastErrorMsg(),
+                   "Too small value for OGR_ARC_STEPSIZE. Clamping it to"));
+    }
+    {
+        CPLConfigOptionSetter oSetter("OGR_ARC_STEPSIZE", "190",
+                                      /* bSetOnlyIfUndefined = */ false);
+        CPLErrorHandlerPusher oErrorHandler(CPLQuietErrorHandler);
+        EXPECT_EQ(OGRGeometryFactory::GetDefaultArcStepSize(), 180);
+        EXPECT_TRUE(
+            strstr(CPLGetLastErrorMsg(),
+                   "Too large value for OGR_ARC_STEPSIZE. Clamping it to"));
+    }
+}
+
+TEST_F(test_ogr, OGRPolygon_two_vertex_constructor)
+{
+    OGRPolygon p(1, 2, 3, 4);
+    char *outWKT = nullptr;
+    p.exportToWkt(&outWKT, wkbVariantIso);
+    EXPECT_STREQ(outWKT, "POLYGON ((1 2,1 4,3 4,3 2,1 2))");
+    CPLFree(outWKT);
 }
 
 }  // namespace

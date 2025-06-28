@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test /vsiaz
@@ -9,25 +8,11 @@
 ###############################################################################
 # Copyright (c) 2017 Even Rouault <even dot rouault at spatialys dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import copy
+import os
 import sys
 
 import gdaltest
@@ -36,7 +21,15 @@ import webserver
 
 from osgeo import gdal
 
+from .vsis3 import general_s3_options
+
 pytestmark = pytest.mark.require_curl()
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 def open_for_read(uri):
@@ -59,6 +52,7 @@ def startup_and_cleanup():
         ("AZURE_NO_SIGN_REQUEST", None),
         ("AZURE_CONFIG_DIR", ""),
         ("AZURE_STORAGE_ACCESS_TOKEN", ""),
+        ("AZURE_FEDERATED_TOKEN_FILE", ""),
     ):
         options[var] = reset_val
 
@@ -106,7 +100,7 @@ def test_vsiaz_fake_basic():
         "/vsiaz/az_fake_bucket/resource", ["START_DATE=20180213T123456"]
     )
     assert (
-        "azure/blob/myaccount/az_fake_bucket/resource?se=2018-02-13T13%3A34%3A56Z&sig=9Jc4yBFlSRZSSxf059OohN6pYRrjuHWJWSEuryczN%2FM%3D&sp=r&sr=c&st=2018-02-13T12%3A34%3A56Z&sv=2012-02-12"
+        "azure/blob/myaccount/az_fake_bucket/resource?se=2018-02-13T13%3A34%3A56Z&sig=j0cUaaHtf2SW2usSsiN79DYx%2Fo1vWwq4lLYZSC5%2Bv7I%3D&sp=r&spr=https&sr=b&st=2018-02-13T12%3A34%3A56Z&sv=2020-12-06"
         in signed_url
     )
 
@@ -383,6 +377,117 @@ def test_vsiaz_fake_readdir():
         dir_contents = gdal.ReadDir("/vsiaz/")
     assert dir_contents == ["mycontainer1", "mycontainer2"]
 
+    stat = gdal.VSIStatL("/vsiaz/mycontainer1", gdal.VSI_STAT_CACHE_ONLY)
+    assert stat is not None
+    assert stat.mode == 16384
+
+    stat = gdal.VSIStatL("/vsiaz/")
+    assert stat is not None
+    assert stat.mode == 16384
+
+
+###############################################################################
+# Test ReadDir() when first response has no blobs but a non-empty NextMarker
+
+
+def test_vsiaz_fake_readdir_no_blobs_in_first_request():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/az_fake_bucket2?comp=list&delimiter=%2F&prefix=a_dir%20with_space%2F&restype=container",
+        200,
+        {"Content-type": "application/xml"},
+        """<?xml version="1.0" encoding="UTF-8"?>
+                    <EnumerationResults>
+                        <Prefix>a_dir with_space/</Prefix>
+                        <Blobs/>
+                        <NextMarker>bla</NextMarker>
+                    </EnumerationResults>
+                """,
+    )
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/az_fake_bucket2?comp=list&delimiter=%2F&marker=bla&prefix=a_dir%20with_space%2F&restype=container",
+        200,
+        {"Content-type": "application/xml"},
+        """<?xml version="1.0" encoding="UTF-8"?>
+                    <EnumerationResults>
+                        <Prefix>a_dir with_space/</Prefix>
+                        <Blobs>
+                          <Blob>
+                            <Name>a_dir with_space/resource4.bin</Name>
+                            <Properties>
+                              <Last-Modified>16 Oct 2016 12:34:56</Last-Modified>
+                              <Content-Length>456789</Content-Length>
+                            </Properties>
+                          </Blob>
+                          <BlobPrefix>
+                            <Name>a_dir with_space/subdir/</Name>
+                          </BlobPrefix>
+                        </Blobs>
+                    </EnumerationResults>
+                """,
+    )
+
+    with webserver.install_http_handler(handler):
+        dir_contents = gdal.ReadDir("/vsiaz/az_fake_bucket2/a_dir with_space")
+    assert dir_contents == ["resource4.bin", "subdir"]
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+def test_vsiaz_fake_readdir_protection_again_infinite_looping():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/az_fake_bucket2?comp=list&delimiter=%2F&prefix=a_dir%20with_space%2F&restype=container",
+        200,
+        {"Content-type": "application/xml"},
+        """<?xml version="1.0" encoding="UTF-8"?>
+                    <EnumerationResults>
+                        <Prefix>a_dir with_space/</Prefix>
+                        <Blobs/>
+                        <NextMarker>bla0</NextMarker>
+                    </EnumerationResults>
+                """,
+    )
+    for i in range(10):
+        handler.add(
+            "GET",
+            f"/azure/blob/myaccount/az_fake_bucket2?comp=list&delimiter=%2F&marker=bla{i}&prefix=a_dir%20with_space%2F&restype=container",
+            200,
+            {"Content-type": "application/xml"},
+            f"""<?xml version="1.0" encoding="UTF-8"?>
+                        <EnumerationResults>
+                            <Prefix>a_dir with_space/</Prefix>
+                            <Blobs/>
+                            <NextMarker>bla{i + 1}</NextMarker>
+                        </EnumerationResults>
+                    """,
+        )
+
+    with webserver.install_http_handler(handler):
+        with pytest.raises(
+            Exception,
+            match="More than 10 consecutive List Blob requests returning no blobs",
+        ):
+            gdal.ReadDir("/vsiaz/az_fake_bucket2/a_dir with_space")
+
 
 ###############################################################################
 # Test AZURE_STORAGE_SAS_TOKEN option with fake server
@@ -440,6 +545,10 @@ def test_vsiaz_sas_fake():
 # Test write
 
 
+@pytest.mark.skipif(
+    "CI" in os.environ,
+    reason="Flaky",
+)
 def test_vsiaz_fake_write():
 
     if gdaltest.webserver_port == 0:
@@ -508,7 +617,7 @@ def test_vsiaz_fake_write():
     # Simulate illegal read
     f = gdal.VSIFOpenL("/vsiaz/test_copy/file.tif", "wb")
     assert f is not None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret = gdal.VSIFReadL(1, 1, f)
     assert not ret
     gdal.VSIFCloseL(f)
@@ -516,7 +625,7 @@ def test_vsiaz_fake_write():
     # Simulate illegal seek
     f = gdal.VSIFOpenL("/vsiaz/test_copy/file.tif", "wb")
     assert f is not None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret = gdal.VSIFSeekL(f, 1, 0)
     assert ret != 0
     gdal.VSIFCloseL(f)
@@ -561,7 +670,7 @@ def test_vsiaz_fake_write():
         pytest.fail()
 
     with webserver.install_http_handler(handler):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ret = gdal.VSIFCloseL(f)
         if ret == 0:
             gdal.VSIFCloseL(f)
@@ -704,7 +813,7 @@ def test_vsiaz_fake_write():
     handler.add("PUT", "/azure/blob/myaccount/test_copy/file.tif", custom_method=method)
 
     with webserver.install_http_handler(handler):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ret = gdal.VSIFWriteL("0123456789abcdef", 1, 16, f)
         if ret != 0:
             gdal.VSIFCloseL(f)
@@ -720,7 +829,7 @@ def test_vsiaz_fake_write():
     handler.add("PUT", "/azure/blob/myaccount/test_copy/file.tif", 201)
     handler.add("PUT", "/azure/blob/myaccount/test_copy/file.tif?comp=appendblock", 403)
     with webserver.install_http_handler(handler):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ret = gdal.VSIFWriteL("0123456789abcdef", 1, 16, f)
         if ret != 0:
             gdal.VSIFCloseL(f)
@@ -739,14 +848,14 @@ def test_vsiaz_write_blockblob_retry():
 
     gdal.VSICurlClearCache()
 
-    # Test creation of BlockBob
-    f = gdal.VSIFOpenL("/vsiaz/test_copy/file.bin", "wb")
-    assert f is not None
-
     with gdaltest.config_options(
         {"GDAL_HTTP_MAX_RETRY": "2", "GDAL_HTTP_RETRY_DELAY": "0.01"},
         thread_local=False,
     ):
+
+        # Test creation of BlockBob
+        f = gdal.VSIFOpenL("/vsiaz/test_copy/file.bin", "wb")
+        assert f is not None
 
         handler = webserver.SequentialHandler()
 
@@ -768,7 +877,7 @@ def test_vsiaz_write_blockblob_retry():
         handler.add(
             "PUT", "/azure/blob/myaccount/test_copy/file.bin", custom_method=method
         )
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             with webserver.install_http_handler(handler):
                 assert gdal.VSIFWriteL("foo", 1, 3, f) == 3
                 gdal.VSIFCloseL(f)
@@ -813,10 +922,140 @@ def test_vsiaz_write_appendblob_retry():
             "PUT", "/azure/blob/myaccount/test_copy/file.bin?comp=appendblock", 201
         )
 
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             with webserver.install_http_handler(handler):
                 assert gdal.VSIFWriteL("0123456789abcdef", 1, 16, f) == 16
                 gdal.VSIFCloseL(f)
+
+
+###############################################################################
+# Test writing a block blob
+
+
+# Often fails at the gdal.VSIFWriteL(b"x" * (1024 * 1024 - 1), 1024 * 1024 - 1, 1, f)
+# which returns 0
+@pytest.mark.skipif(
+    "CI" in os.environ,
+    reason="Flaky",
+)
+def test_vsiaz_write_blockblob_chunk_size_1():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    f = gdal.VSIFOpenExL(
+        "/vsiaz/test_create/file.bin", "wb", False, ["BLOB_TYPE=BLOCK", "CHUNK_SIZE=1"]
+    )
+    assert f is not None
+
+    assert gdal.VSIFWriteL(b"x", 1, 1, f) == 1
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_create/file.bin?blockid=000000000001&comp=block",
+        201,
+        expected_headers={"Content-Length": str(1024 * 1024)},
+    )
+
+    with webserver.install_http_handler(handler):
+        assert gdal.VSIFWriteL(b"x" * (1024 * 1024 - 1), 1024 * 1024 - 1, 1, f) == 1
+
+    assert gdal.VSIFWriteL(b"x", 1, 1, f) == 1
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_create/file.bin?blockid=000000000002&comp=block",
+        201,
+        expected_headers={"Content-Length": "1"},
+    )
+
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_create/file.bin?comp=blocklist",
+        201,
+        expected_body=b'<?xml version="1.0" encoding="utf-8"?>\n<BlockList>\n<Latest>000000000001</Latest>\n<Latest>000000000002</Latest>\n</BlockList>\n',
+    )
+
+    with webserver.install_http_handler(handler):
+        gdal.VSIFCloseL(f)
+
+
+###############################################################################
+# Test writing a block blob default chunk size
+
+
+def test_vsiaz_write_blockblob_default_chunk_size():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    f = gdal.VSIFOpenExL(
+        "/vsiaz/test_create/file.bin", "wb", False, ["BLOB_TYPE=BLOCK"]
+    )
+    assert f is not None
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_create/file.bin?blockid=000000000001&comp=block",
+        201,
+        expected_headers={"Content-Length": str(50 * 1024 * 1024)},
+    )
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_create/file.bin?blockid=000000000002&comp=block",
+        201,
+        expected_headers={"Content-Length": "1"},
+    )
+
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_create/file.bin?comp=blocklist",
+        201,
+        expected_body=b'<?xml version="1.0" encoding="utf-8"?>\n<BlockList>\n<Latest>000000000001</Latest>\n<Latest>000000000002</Latest>\n</BlockList>\n',
+    )
+
+    with webserver.install_http_handler(handler):
+        assert (
+            gdal.VSIFWriteL(b"x" * (50 * 1024 * 1024 + 1), 50 * 1024 * 1024 + 1, 1, f)
+            == 1
+        )
+        gdal.VSIFCloseL(f)
+
+
+###############################################################################
+# Test writing a block blob single PUT
+
+
+def test_vsiaz_write_blockblob_single_put():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    f = gdal.VSIFOpenExL(
+        "/vsiaz/test_create/file.bin", "wb", False, ["BLOB_TYPE=BLOCK"]
+    )
+    assert f is not None
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_create/file.bin",
+        201,
+        expected_headers={"Content-Length": "1"},
+    )
+
+    with webserver.install_http_handler(handler):
+        assert gdal.VSIFWriteL(b"x", 1, 1, f) == 1
+        gdal.VSIFCloseL(f)
 
 
 ###############################################################################
@@ -861,9 +1100,168 @@ def test_vsiaz_fake_unlink():
         {"Connection": "close"},
     )
     with webserver.install_http_handler(handler):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ret = gdal.Unlink("/vsiaz/az_bucket_test_unlink/myfile")
     assert ret == -1
+
+
+###############################################################################
+# Test UnlinkBatch()
+
+
+def test_vsiaz_fake_unlink_batch():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "POST",
+        "/azure/blob/myaccount/?comp=batch",
+        202,
+        {"content-type": "multipart/mixed; boundary=my_boundary"},
+        """--my_boundary
+Content-Type: application/http
+Content-ID: <0>
+
+HTTP/1.1 202 Accepted
+
+--my_boundary
+Content-Type: application/http
+Content-ID: <1>
+
+HTTP/1.1 202 Accepted
+
+--my_boundary--
+""",
+        expected_body=b"--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589\r\nContent-Type: application/http\r\nContent-ID: <0>\r\nContent-Transfer-Encoding: binary\r\n\r\nDELETE /az_bucket_test_unlink/myfile HTTP/1.1\r\nx-ms-date: my_timestamp\r\nAuthorization: SharedKey myaccount:Dnfp0tNObKAYSOkqSNuMyzxeHo75tKnFv0SP74SLlGg=\r\nContent-Length: 0\r\n\r\n\r\n--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589\r\nContent-Type: application/http\r\nContent-ID: <1>\r\nContent-Transfer-Encoding: binary\r\n\r\nDELETE /az_bucket_test_unlink/myfile2 HTTP/1.1\r\nx-ms-date: my_timestamp\r\nAuthorization: SharedKey myaccount:j9rNG0PKzqhgOF45zZi2V6Gvkq12Zql3cXO8TVjizTc=\r\nContent-Length: 0\r\n\r\n\r\n--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589--\r\n",
+    )
+
+    with webserver.install_http_handler(handler):
+        ret = gdal.UnlinkBatch(
+            [
+                "/vsiaz/az_bucket_test_unlink/myfile",
+                "/vsiaz/az_bucket_test_unlink/myfile2",
+            ]
+        )
+    assert ret
+
+
+###############################################################################
+# Test UnlinkBatch()
+
+
+def test_vsiaz_fake_unlink_batch_max_batch_size_1():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "POST",
+        "/azure/blob/myaccount/?comp=batch",
+        202,
+        {"content-type": "multipart/mixed; boundary=my_boundary"},
+        """--my_boundary
+Content-Type: application/http
+Content-ID: <0>
+
+HTTP/1.1 202 Accepted
+
+--my_boundary--
+""",
+        expected_body=b"--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589\r\nContent-Type: application/http\r\nContent-ID: <0>\r\nContent-Transfer-Encoding: binary\r\n\r\nDELETE /az_bucket_test_unlink/myfile HTTP/1.1\r\nx-ms-date: my_timestamp\r\nAuthorization: SharedKey myaccount:Dnfp0tNObKAYSOkqSNuMyzxeHo75tKnFv0SP74SLlGg=\r\nContent-Length: 0\r\n\r\n\r\n--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589--\r\n",
+    )
+    handler.add(
+        "POST",
+        "/azure/blob/myaccount/?comp=batch",
+        202,
+        {"content-type": "multipart/mixed; boundary=my_boundary"},
+        """--my_boundary
+Content-Type: application/http
+Content-ID: <1>
+
+HTTP/1.1 202 Accepted
+
+--my_boundary--
+""",
+        expected_body=b"--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589\r\nContent-Type: application/http\r\nContent-ID: <1>\r\nContent-Transfer-Encoding: binary\r\n\r\nDELETE /az_bucket_test_unlink/myfile2 HTTP/1.1\r\nx-ms-date: my_timestamp\r\nAuthorization: SharedKey myaccount:j9rNG0PKzqhgOF45zZi2V6Gvkq12Zql3cXO8TVjizTc=\r\nContent-Length: 0\r\n\r\n\r\n--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589--\r\n",
+    )
+
+    with gdaltest.config_option("CPL_VSIAZ_UNLINK_BATCH_SIZE", "1"):
+        with webserver.install_http_handler(handler):
+            ret = gdal.UnlinkBatch(
+                [
+                    "/vsiaz/az_bucket_test_unlink/myfile",
+                    "/vsiaz/az_bucket_test_unlink/myfile2",
+                ]
+            )
+    assert ret
+
+
+###############################################################################
+# Test UnlinkBatch()
+
+
+def test_vsiaz_fake_unlink_batch_max_payload_4MB():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    longfilename1 = "/az_bucket_test_unlink/myfile" + ("X" * (3000 * 1000))
+    longfilename2 = "/az_bucket_test_unlink/myfile2" + ("X" * (3000 * 1000))
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "POST",
+        "/azure/blob/myaccount/?comp=batch",
+        202,
+        {"content-type": "multipart/mixed; boundary=my_boundary"},
+        """--my_boundary
+Content-Type: application/http
+Content-ID: <0>
+
+HTTP/1.1 202 Accepted
+
+--my_boundary--
+""",
+        expected_body=b"--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589\r\nContent-Type: application/http\r\nContent-ID: <0>\r\nContent-Transfer-Encoding: binary\r\n\r\nDELETE "
+        + longfilename1.encode("UTF-8")
+        + b" HTTP/1.1\r\nx-ms-date: my_timestamp\r\nAuthorization: SharedKey myaccount:/yczq3N49gssy5a0exoyTyS6FIWXXwOBLPMxgaflJBI=\r\nContent-Length: 0\r\n\r\n\r\n--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589--\r\n",
+    )
+    handler.add(
+        "POST",
+        "/azure/blob/myaccount/?comp=batch",
+        202,
+        {"content-type": "multipart/mixed; boundary=my_boundary"},
+        """--my_boundary
+Content-Type: application/http
+Content-ID: <1>
+
+HTTP/1.1 202 Accepted
+
+--my_boundary
+Content-Type: application/http
+Content-ID: <2>
+
+HTTP/1.1 202 Accepted
+
+--my_boundary--
+""",
+        expected_body=b"--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589\r\nContent-Type: application/http\r\nContent-ID: <1>\r\nContent-Transfer-Encoding: binary\r\n\r\nDELETE "
+        + longfilename2.encode("UTF-8")
+        + b" HTTP/1.1\r\nx-ms-date: my_timestamp\r\nAuthorization: SharedKey myaccount:MSulMcLyy+3xYWT7RGIfS0pd6zjc9Gq3OV9jIR2Rh5w=\r\nContent-Length: 0\r\n\r\n\r\n--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589\r\nContent-Type: application/http\r\nContent-ID: <2>\r\nContent-Transfer-Encoding: binary\r\n\r\nDELETE /az_bucket_test_unlink/myfile HTTP/1.1\r\nx-ms-date: my_timestamp\r\nAuthorization: SharedKey myaccount:Dnfp0tNObKAYSOkqSNuMyzxeHo75tKnFv0SP74SLlGg=\r\nContent-Length: 0\r\n\r\n\r\n--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589--\r\n",
+    )
+
+    with webserver.install_http_handler(handler):
+        ret = gdal.UnlinkBatch(
+            [
+                "/vsiaz" + longfilename1,
+                "/vsiaz" + longfilename2,
+                "/vsiaz/az_bucket_test_unlink/myfile",
+            ]
+        )
+    assert ret
 
 
 ###############################################################################
@@ -1106,9 +1504,10 @@ def test_vsiaz_fake_test_BlobEndpointInConnectionString():
     if gdaltest.webserver_port == 0:
         pytest.skip()
 
+    # Add a trailing slash to BlobEndpoint to test bugfix for https://github.com/OSGeo/gdal/issues/9519
     with gdaltest.config_option(
         "AZURE_STORAGE_CONNECTION_STRING",
-        "DefaultEndpointsProtocol=http;AccountName=myaccount;AccountKey=MY_ACCOUNT_KEY;BlobEndpoint=http://127.0.0.1:%d/myaccount"
+        "DefaultEndpointsProtocol=http;AccountName=myaccount;AccountKey=MY_ACCOUNT_KEY;BlobEndpoint=http://127.0.0.1:%d/myaccount/"
         % gdaltest.webserver_port,
         thread_local=False,
     ):
@@ -1274,7 +1673,7 @@ def test_vsiaz_opendir():
     assert entry.mtime == 1
 
     entry = gdal.GetNextDirEntry(d)
-    assert entry.name == "subdir/"
+    assert entry.name == "subdir"
     assert entry.mode == 16384
 
     entry = gdal.GetNextDirEntry(d)
@@ -1431,6 +1830,36 @@ def test_vsiaz_rmdirrecursive():
         "GET",
         "/azure/blob/myaccount/rmdirrec?comp=list&delimiter=%2F&maxresults=1&prefix=subdir%2Fsubdir2%2F&restype=container",
         200,
+        {"Content-type": "application/xml"},
+        """<?xml version="1.0" encoding="UTF-8"?>
+                    <EnumerationResults>
+                        <Prefix>subdir/subdir2/</Prefix>
+                        <Blobs>
+                          <Blob>
+                            <Name>subdir/subdir2/.gdal_marker_for_dir</Name>
+                          </Blob>
+                        </Blobs>
+                    </EnumerationResults>""",
+    )
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/rmdirrec?comp=list&delimiter=%2F&maxresults=1&prefix=subdir%2Fsubdir2%2F&restype=container",
+        200,
+        {"Content-type": "application/xml"},
+        """<?xml version="1.0" encoding="UTF-8"?>
+                    <EnumerationResults>
+                        <Prefix>subdir/subdir2/</Prefix>
+                        <Blobs>
+                          <Blob>
+                            <Name>subdir/subdir2/.gdal_marker_for_dir</Name>
+                          </Blob>
+                        </Blobs>
+                    </EnumerationResults>""",
+    )
+    handler.add(
+        "DELETE",
+        "/azure/blob/myaccount/rmdirrec/subdir/subdir2/.gdal_marker_for_dir",
+        202,
     )
     handler.add("HEAD", "/azure/blob/myaccount/rmdirrec/subdir/", 404)
     handler.add(
@@ -1443,23 +1872,84 @@ def test_vsiaz_rmdirrecursive():
 
 
 ###############################################################################
+# Test RmdirRecursive() with a fake server
+
+
+def test_vsiaz_rmdirrecursive_empty_dir():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/rmdirrec?comp=list&prefix=empty_dir%2F&restype=container",
+        200,
+        {"Content-type": "application/xml"},
+        """<?xml version="1.0" encoding="UTF-8"?>
+                    <EnumerationResults>
+                        <Prefix>empty_dir/</Prefix>
+                        <Blobs>
+                          <Blob>
+                            <Name>empty_dir/.gdal_marker_for_dir</Name>
+                          </Blob>
+                        </Blobs>
+                    </EnumerationResults>""",
+    )
+    handler.add("HEAD", "/azure/blob/myaccount/rmdirrec/empty_dir/", 404)
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/rmdirrec?comp=list&delimiter=%2F&maxresults=1&prefix=empty_dir%2F&restype=container",
+        200,
+        {"Content-type": "application/xml"},
+        """<?xml version="1.0" encoding="UTF-8"?>
+                    <EnumerationResults>
+                        <Prefix>empty_dir/</Prefix>
+                        <Blobs>
+                          <Blob>
+                            <Name>empty_dir/.gdal_marker_for_dir</Name>
+                          </Blob>
+                        </Blobs>
+                    </EnumerationResults>""",
+    )
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/rmdirrec?comp=list&delimiter=%2F&maxresults=1&prefix=empty_dir%2F&restype=container",
+        200,
+        {"Content-type": "application/xml"},
+        """<?xml version="1.0" encoding="UTF-8"?>
+                    <EnumerationResults>
+                        <Prefix>empty_dir/</Prefix>
+                        <Blobs>
+                          <Blob>
+                            <Name>empty_dir/.gdal_marker_for_dir</Name>
+                          </Blob>
+                        </Blobs>
+                    </EnumerationResults>""",
+    )
+    handler.add(
+        "DELETE", "/azure/blob/myaccount/rmdirrec/empty_dir/.gdal_marker_for_dir", 202
+    )
+    with webserver.install_http_handler(handler):
+        assert gdal.RmdirRecursive("/vsiaz/rmdirrec/empty_dir") == 0
+
+
+###############################################################################
 # Test Sync() and multithreaded download and CHUNK_SIZE
 
 
-def test_vsiaz_fake_sync_multithreaded_upload_chunk_size():
-
-    if gdaltest.is_travis_branch("MacOS build"):
-        pytest.xfail(
-            "Failure. See https://github.com/rouault/gdal/runs/1329425333?check_suite_focus=true"
-        )
+@pytest.mark.skipif(
+    gdaltest.is_travis_branch("macos_build"), reason="randomly fails on macos"
+)
+def test_vsiaz_fake_sync_multithreaded_upload_chunk_size(tmp_vsimem):
 
     if gdaltest.webserver_port == 0:
         pytest.skip()
 
     gdal.VSICurlClearCache()
 
-    gdal.Mkdir("/vsimem/test", 0)
-    gdal.FileFromMemBuffer("/vsimem/test/foo", "foo\n")
+    gdal.Mkdir(tmp_vsimem / "test", 0)
+    gdal.FileFromMemBuffer(tmp_vsimem / "test/foo", "foo\n")
 
     tab = [-1]
     handler = webserver.SequentialHandler()
@@ -1600,7 +2090,7 @@ def test_vsiaz_fake_sync_multithreaded_upload_chunk_size():
     with gdaltest.config_option("VSIS3_SIMULATE_THREADING", "YES", thread_local=False):
         with webserver.install_http_handler(handler):
             assert gdal.Sync(
-                "/vsimem/test",
+                tmp_vsimem / "test",
                 "/vsiaz/test_bucket",
                 options=["NUM_THREADS=1", "CHUNK_SIZE=3"],
                 callback=cbk,
@@ -1608,22 +2098,20 @@ def test_vsiaz_fake_sync_multithreaded_upload_chunk_size():
             )
     assert tab[0] == 1.0
 
-    gdal.RmdirRecursive("/vsimem/test")
-
 
 ###############################################################################
 # Test Sync() and multithreaded download of a single file
 
 
-def test_vsiaz_fake_sync_multithreaded_upload_single_file():
+def test_vsiaz_fake_sync_multithreaded_upload_single_file(tmp_vsimem):
 
     if gdaltest.webserver_port == 0:
         pytest.skip()
 
     gdal.VSICurlClearCache()
 
-    gdal.Mkdir("/vsimem/test", 0)
-    gdal.FileFromMemBuffer("/vsimem/test/foo", "foo\n")
+    gdal.Mkdir(tmp_vsimem / "test", 0)
+    gdal.FileFromMemBuffer(tmp_vsimem / "test/foo", "foo\n")
 
     handler = webserver.SequentialHandler()
     handler.add(
@@ -1700,19 +2188,17 @@ def test_vsiaz_fake_sync_multithreaded_upload_single_file():
     with gdaltest.config_option("VSIS3_SIMULATE_THREADING", "YES", thread_local=False):
         with webserver.install_http_handler(handler):
             assert gdal.Sync(
-                "/vsimem/test/foo",
+                tmp_vsimem / "test/foo",
                 "/vsiaz/test_bucket",
                 options=["NUM_THREADS=1", "CHUNK_SIZE=3"],
             )
-
-    gdal.RmdirRecursive("/vsimem/test")
 
 
 ###############################################################################
 # Read credentials from simulated Azure VM
 
 
-def test_vsiaz_read_credentials_simulated_azure_vm():
+def test_vsiaz_imds_authentication():
 
     if gdaltest.webserver_port == 0:
         pytest.skip()
@@ -1802,7 +2288,7 @@ def test_vsiaz_read_credentials_simulated_azure_vm():
 # Read credentials from simulated Azure VM with expiration
 
 
-def test_vsiaz_read_credentials_simulated_azure_vm_expiration():
+def test_vsiaz_imds_authentication_expiration():
 
     if gdaltest.webserver_port == 0:
         pytest.skip()
@@ -1864,6 +2350,348 @@ def test_vsiaz_read_credentials_simulated_azure_vm_expiration():
             gdal.VSIFCloseL(f)
 
         assert data == "foo"
+
+
+###############################################################################
+# Test support for object_id/client_id/msi_res_id parameters of IMDS
+
+
+def test_vsiaz_imds_authentication_object_id_client_is_msi_res_id():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    try:
+        with gdaltest.config_options(
+            {
+                "AZURE_STORAGE_CONNECTION_STRING": "",
+                "AZURE_STORAGE_ACCOUNT": "myaccount",
+                "CPL_AZURE_ENDPOINT": "http://127.0.0.1:%d/azure/blob/myaccount"
+                % gdaltest.webserver_port,
+                "CPL_AZURE_USE_HTTPS": "NO",
+                "CPL_AZURE_VM_API_ROOT_URL": "http://localhost:%d"
+                % gdaltest.webserver_port,
+            },
+            thread_local=False,
+        ):
+
+            handler = webserver.SequentialHandler()
+            handler.add(
+                "GET",
+                "/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fstorage.azure.com%2F&object_id=my_object_id&client_id=my_client_id&msi_res_id=my_msi_res_id",
+                200,
+                {},
+                """{
+                        "access_token": "my_bearer",
+                        "expires_on": "99999999999",
+                        }""",
+                expected_headers={"Metadata": "true"},
+            )
+            handler.add(
+                "GET",
+                "/azure/blob/myaccount/az_fake_bucket/resource",
+                200,
+                {"Content-Length": 3},
+                "foo",
+                expected_headers={
+                    "Authorization": "Bearer my_bearer",
+                    "x-ms-version": "2019-12-12",
+                },
+            )
+
+            gdal.SetPathSpecificOption(
+                "/vsiaz/az_fake_bucket/", "AZURE_IMDS_OBJECT_ID", "my_object_id"
+            )
+            gdal.SetPathSpecificOption(
+                "/vsiaz/az_fake_bucket/", "AZURE_IMDS_CLIENT_ID", "my_client_id"
+            )
+            gdal.SetPathSpecificOption(
+                "/vsiaz/az_fake_bucket/", "AZURE_IMDS_MSI_RES_ID", "my_msi_res_id"
+            )
+            with webserver.install_http_handler(handler):
+                f = open_for_read("/vsiaz/az_fake_bucket/resource")
+                assert f is not None
+                data = gdal.VSIFReadL(1, 4, f).decode("ascii")
+                gdal.VSIFCloseL(f)
+            assert data == "foo"
+
+            # Query another bucket with different object_id/client_id/msi_res_id
+            handler = webserver.SequentialHandler()
+            handler.add(
+                "GET",
+                "/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fstorage.azure.com%2F&object_id=my_object_id2&client_id=my_client_id2&msi_res_id=my_msi_res_id2",
+                200,
+                {},
+                """{
+                        "access_token": "my_bearer2",
+                        "expires_on": "99999999999",
+                        }""",
+                expected_headers={"Metadata": "true"},
+            )
+
+            handler.add(
+                "POST",
+                "/azure/blob/myaccount/?comp=batch",
+                202,
+                {"content-type": "multipart/mixed; boundary=my_boundary"},
+                """--my_boundary
+    Content-Type: application/http
+    Content-ID: <0>
+
+    HTTP/1.1 202 Accepted
+
+    --my_boundary--
+        """,
+                expected_body=b"--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589\r\nContent-Type: application/http\r\nContent-ID: <0>\r\nContent-Transfer-Encoding: binary\r\n\r\nDELETE /az_fake_bucket2/myfile HTTP/1.1\r\n\r\nAuthorization: Bearer my_bearer2\r\nContent-Length: 0\r\n\r\n\r\n--batch_ec2ce0a7-deaf-11ed-9ad8-3fabe5ecd589--\r\n",
+            )
+
+            gdal.SetPathSpecificOption(
+                "/vsiaz/az_fake_bucket2/", "AZURE_IMDS_OBJECT_ID", "my_object_id2"
+            )
+            gdal.SetPathSpecificOption(
+                "/vsiaz/az_fake_bucket2/", "AZURE_IMDS_CLIENT_ID", "my_client_id2"
+            )
+            gdal.SetPathSpecificOption(
+                "/vsiaz/az_fake_bucket2/", "AZURE_IMDS_MSI_RES_ID", "my_msi_res_id2"
+            )
+
+            with webserver.install_http_handler(handler):
+                ret = gdal.UnlinkBatch(
+                    [
+                        "/vsiaz/az_fake_bucket2/myfile",
+                    ]
+                )
+            assert ret
+
+            # Check that querying again under /vsiaz/az_fake_bucket/ reuses
+            # the cached token
+            handler.add(
+                "GET",
+                "/azure/blob/myaccount/az_fake_bucket/resource2",
+                200,
+                {"Content-Length": 4},
+                "foo2",
+                expected_headers={
+                    "Authorization": "Bearer my_bearer",
+                    "x-ms-version": "2019-12-12",
+                },
+            )
+            with webserver.install_http_handler(handler):
+                f = open_for_read("/vsiaz/az_fake_bucket/resource2")
+                assert f is not None
+                data = gdal.VSIFReadL(1, 5, f).decode("ascii")
+                gdal.VSIFCloseL(f)
+            assert data == "foo2"
+
+    finally:
+        gdal.ClearPathSpecificOptions("/vsiaz/az_fake_bucket/")
+        gdal.ClearPathSpecificOptions("/vsiaz/az_fake_bucket2/")
+
+
+###############################################################################
+# Get authentication for Workload Identity from simulated Azure VM
+
+
+def test_vsiaz_workload_identity_managed_authentication():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    with gdaltest.config_options(
+        {
+            "AZURE_STORAGE_CONNECTION_STRING": "",
+            "AZURE_STORAGE_ACCOUNT": "myaccount",
+            "CPL_AZURE_ENDPOINT": "http://127.0.0.1:%d/azure/blob/myaccount"
+            % gdaltest.webserver_port,
+            "CPL_AZURE_USE_HTTPS": "NO",
+            "AZURE_AUTHORITY_HOST": "http://localhost:%d/" % gdaltest.webserver_port,
+            "AZURE_TENANT_ID": "tenant_id",
+            "AZURE_CLIENT_ID": "client_id_value",
+            "AZURE_FEDERATED_TOKEN_FILE": "/vsimem/AZURE_FEDERATED_TOKEN_FILE",
+        },
+        thread_local=False,
+    ), gdaltest.tempfile(
+        "/vsimem/AZURE_FEDERATED_TOKEN_FILE", "content_of_AZURE_FEDERATED_TOKEN_FILE"
+    ):
+
+        handler = webserver.SequentialHandler()
+        handler.add(
+            "POST",
+            "/tenant_id/oauth2/v2.0/token",
+            200,
+            {},
+            """{"access_token": "my_bearer", "expires_in": "100"}""",
+            expected_headers={"Content-Type": "application/x-www-form-urlencoded"},
+            expected_body=b"client_assertion=content_of_AZURE_FEDERATED_TOKEN_FILE&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer&client_id=client_id_value&grant_type=client_credentials&scope=https://storage.azure.com/.default",
+        )
+
+        handler.add(
+            "GET",
+            "/azure/blob/myaccount/az_fake_bucket/resource",
+            200,
+            {"Content-Length": 3},
+            "foo",
+            expected_headers={
+                "Authorization": "Bearer my_bearer",
+                "x-ms-version": "2019-12-12",
+            },
+        )
+        with webserver.install_http_handler(handler):
+            f = open_for_read("/vsiaz/az_fake_bucket/resource")
+            assert f is not None
+            data = gdal.VSIFReadL(1, 4, f).decode("ascii")
+            gdal.VSIFCloseL(f)
+
+        assert data == "foo"
+
+    # Set a fake AZURE_FEDERATED_TOKEN_FILE to check that credentials re-use works
+    with gdaltest.config_options(
+        {
+            "AZURE_STORAGE_CONNECTION_STRING": "",
+            "AZURE_STORAGE_ACCOUNT": "myaccount",
+            "CPL_AZURE_ENDPOINT": "http://127.0.0.1:%d/azure/blob/myaccount"
+            % gdaltest.webserver_port,
+            "CPL_AZURE_USE_HTTPS": "NO",
+            "AZURE_AUTHORITY_HOST": "http://localhost:%d/" % gdaltest.webserver_port,
+            "AZURE_TENANT_ID": "tenant_id",
+            "AZURE_CLIENT_ID": "client_id_value",
+            "AZURE_FEDERATED_TOKEN_FILE": "****invalid******",
+        },
+        thread_local=False,
+    ):
+
+        handler = webserver.SequentialHandler()
+        handler.add(
+            "GET",
+            "/azure/blob/myaccount/az_fake_bucket/bar",
+            200,
+            {"Content-Length": 3},
+            "bar",
+            expected_headers={
+                "Authorization": "Bearer my_bearer",
+                "x-ms-version": "2019-12-12",
+            },
+        )
+        with webserver.install_http_handler(handler):
+            f = open_for_read("/vsiaz/az_fake_bucket/bar")
+            assert f is not None
+            data = gdal.VSIFReadL(1, 4, f).decode("ascii")
+            gdal.VSIFCloseL(f)
+
+        assert data == "bar"
+
+
+###############################################################################
+# Get authentication for Workload Identity from simulated Azure VM
+
+
+def test_vsiaz_workload_identity_managed_authentication_expiration():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    with gdaltest.config_options(
+        {
+            "AZURE_STORAGE_CONNECTION_STRING": "",
+            "AZURE_STORAGE_ACCOUNT": "myaccount",
+            "CPL_AZURE_ENDPOINT": "http://127.0.0.1:%d/azure/blob/myaccount"
+            % gdaltest.webserver_port,
+            "CPL_AZURE_USE_HTTPS": "NO",
+            "AZURE_AUTHORITY_HOST": "http://localhost:%d/" % gdaltest.webserver_port,
+            "AZURE_TENANT_ID": "tenant_id",
+            "AZURE_CLIENT_ID": "client_id_value",
+            "AZURE_FEDERATED_TOKEN_FILE": "/vsimem/AZURE_FEDERATED_TOKEN_FILE",
+        },
+        thread_local=False,
+    ):
+
+        handler = webserver.SequentialHandler()
+
+        # Done once because of VSICurlClearCache()
+        handler.add(
+            "POST",
+            "/tenant_id/oauth2/v2.0/token",
+            200,
+            {},
+            """{"access_token": "my_bearer", "expires_in": "10"}""",
+            expected_headers={"Content-Type": "application/x-www-form-urlencoded"},
+            expected_body=b"client_assertion=content_of_AZURE_FEDERATED_TOKEN_FILE&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer&client_id=client_id_value&grant_type=client_credentials&scope=https://storage.azure.com/.default",
+        )
+
+        # We have a security margin of 60 seconds over the expires_in delay
+        # so we will need to fetch the token again
+        handler.add(
+            "POST",
+            "/tenant_id/oauth2/v2.0/token",
+            200,
+            {},
+            """{"access_token": "my_bearer2", "expires_in": "10"}""",
+            expected_headers={"Content-Type": "application/x-www-form-urlencoded"},
+            expected_body=b"client_assertion=content_of_AZURE_FEDERATED_TOKEN_FILE&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer&client_id=client_id_value&grant_type=client_credentials&scope=https://storage.azure.com/.default",
+        )
+
+        handler.add(
+            "GET",
+            "/azure/blob/myaccount/az_fake_bucket/resource",
+            200,
+            {"Content-Length": 3},
+            "foo",
+            expected_headers={
+                "Authorization": "Bearer my_bearer2",
+                "x-ms-version": "2019-12-12",
+            },
+        )
+        with webserver.install_http_handler(handler), gdaltest.tempfile(
+            "/vsimem/AZURE_FEDERATED_TOKEN_FILE",
+            "content_of_AZURE_FEDERATED_TOKEN_FILE",
+        ):
+            f = open_for_read("/vsiaz/az_fake_bucket/resource")
+            assert f is not None
+            data = gdal.VSIFReadL(1, 4, f).decode("ascii")
+            gdal.VSIFCloseL(f)
+
+        assert data == "foo"
+
+        # Check that AZURE_FEDERATED_TOKEN_FILE isn't actually read
+
+        handler = webserver.SequentialHandler()
+        handler.add(
+            "POST",
+            "/tenant_id/oauth2/v2.0/token",
+            200,
+            {},
+            """{"access_token": "my_bearer3", "expires_in": "100"}""",
+            expected_headers={"Content-Type": "application/x-www-form-urlencoded"},
+            expected_body=b"client_assertion=content_of_AZURE_FEDERATED_TOKEN_FILE&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer&client_id=client_id_value&grant_type=client_credentials&scope=https://storage.azure.com/.default",
+        )
+
+        handler.add(
+            "GET",
+            "/azure/blob/myaccount/az_fake_bucket2/resource",
+            200,
+            {"Content-Length": 3},
+            "bar",
+            expected_headers={
+                "Authorization": "Bearer my_bearer3",
+                "x-ms-version": "2019-12-12",
+            },
+        )
+        with webserver.install_http_handler(handler), gdaltest.tempfile(
+            "/vsimem/AZURE_FEDERATED_TOKEN_FILE",
+            "another_content_of_AZURE_FEDERATED_TOKEN_FILE",
+        ):
+            f = open_for_read("/vsiaz/az_fake_bucket2/resource")
+            assert f is not None
+            data = gdal.VSIFReadL(1, 4, f).decode("ascii")
+            gdal.VSIFCloseL(f)
+
+        assert data == "bar"
 
 
 ###############################################################################
@@ -2183,3 +3011,181 @@ def test_vsiaz_access_token():
             gdal.VSIFCloseL(f)
 
         assert data == "foo"
+
+
+###############################################################################
+# Test server-side copy from S3 to Azure
+
+
+def test_vsiaz_copy_from_vsis3():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    options = copy.copy(general_s3_options)
+    options["AWS_S3_ENDPOINT"] = f"127.0.0.1:{gdaltest.webserver_port}"
+
+    with gdaltest.config_options(options, thread_local=False):
+        handler = webserver.SequentialHandler()
+        handler.add(
+            "GET",
+            "/s3_bucket/test.bin",
+            200,
+            {"Content-Length": "3"},
+            "foo",
+        )
+
+        if gdaltest.webserver_port == 8080:
+            expected_headers = {
+                "x-ms-copy-source": "http://127.0.0.1:%d/s3_bucket/test.bin?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AWS_ACCESS_KEY_ID%%2F20150101%%2Fus-east-1%%2Fs3%%2Faws4_request&X-Amz-Date=20150101T000000Z&X-Amz-Expires=3600&X-Amz-Signature=49294bd260338188b336ff2ed2c202e95d503439aca8fd9b2982c91992fa584d&X-Amz-SignedHeaders=host"
+                % gdaltest.webserver_port
+            }
+        elif gdaltest.webserver_port == 8081:
+            expected_headers = {
+                "x-ms-copy-source": "http://127.0.0.1:%d/s3_bucket/test.bin?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AWS_ACCESS_KEY_ID%%2F20150101%%2Fus-east-1%%2Fs3%%2Faws4_request&X-Amz-Date=20150101T000000Z&X-Amz-Expires=3600&X-Amz-Signature=20dfcb6bdd7a4e55fc58a171b7a25dcce55244f990e4d1e0361eed1bbb729a07&X-Amz-SignedHeaders=host"
+                % gdaltest.webserver_port
+            }
+        else:
+            expected_headers = {}
+
+        handler.add(
+            "PUT",
+            "/azure/blob/myaccount/az_container/test.bin",
+            202,
+            expected_headers=expected_headers,
+        )
+
+        with webserver.install_http_handler(handler):
+            assert (
+                gdal.CopyFile(
+                    "/vsis3/s3_bucket/test.bin", "/vsiaz/az_container/test.bin"
+                )
+                == 0
+            )
+
+
+###############################################################################
+# Test server-side copy from Azure to Azure, but with source and target being
+# in same bucket
+
+
+def test_vsiaz_copy_from_vsiaz_same_bucket():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+
+    def method(request):
+
+        request.protocol_version = "HTTP/1.1"
+        h = request.headers
+        if (
+            "x-ms-copy-source" not in h
+            or h["x-ms-copy-source"]
+            != f"http://127.0.0.1:{gdaltest.webserver_port}/azure/blob/myaccount/az_container/test.bin"
+        ):
+            sys.stderr.write("Bad headers: %s\n" % str(h))
+            request.send_response(403)
+            return
+        request.send_response(202)
+        request.send_header("Connection", "close")
+        request.end_headers()
+
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/az_container/test2.bin",
+        custom_method=method,
+    )
+
+    with webserver.install_http_handler(handler):
+        assert (
+            gdal.CopyFile(
+                "/vsiaz/az_container/test.bin",
+                "/vsiaz/az_container/test2.bin",
+            )
+            == 0
+        )
+
+
+###############################################################################
+# Test server-side copy from Azure to Azure, but with source and target being
+# in different buckets
+
+
+def test_vsiaz_copy_from_vsiaz_different_storage_bucket():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "HEAD",
+        "/azure/blob/myaccount/az_source_container/test.bin",
+        200,
+        {"Content-Length": "3"},
+    )
+
+    def method(request):
+
+        request.protocol_version = "HTTP/1.1"
+        h = request.headers
+        if "x-ms-copy-source" not in h or (
+            not h["x-ms-copy-source"].startswith(
+                f"http://127.0.0.1:{gdaltest.webserver_port}/azure/blob/myaccount/az_source_container/test.bin?se="
+            )
+        ):
+            sys.stderr.write("Bad headers: %s\n" % str(h))
+            request.send_response(403)
+            return
+        request.send_response(202)
+        request.send_header("Connection", "close")
+        request.end_headers()
+
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/az_target_container/test.bin",
+        custom_method=method,
+    )
+
+    with webserver.install_http_handler(handler):
+        assert (
+            gdal.CopyFile(
+                "/vsiaz/az_source_container/test.bin",
+                "/vsiaz/az_target_container/test.bin",
+            )
+            == 0
+        )
+
+
+###############################################################################
+# Test VSIMultipartUploadXXXX()
+
+
+def test_vsiaz_MultipartUpload():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    # Test MultipartUploadGetCapabilities()
+    info = gdal.MultipartUploadGetCapabilities("/vsiaz/")
+    assert info.non_sequential_upload_supported
+    assert info.parallel_upload_supported
+    assert not info.abort_supported
+    assert info.min_part_size == 0
+    assert info.max_part_size >= 1024
+    assert info.max_part_count == 50000
+
+    # Test unsupported MultipartUploadAbort()
+    with gdal.ExceptionMgr(useExceptions=True):
+        with pytest.raises(
+            Exception,
+            match=r"MultipartUploadAbort\(\) not supported by this file system",
+        ):
+            gdal.MultipartUploadAbort("/vsiaz/foo/bar", "upload_id")

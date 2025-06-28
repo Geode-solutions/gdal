@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test SAGA GIS Binary driver
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2009, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -45,7 +28,7 @@ pytestmark = pytest.mark.require_driver("SAGA")
 def test_saga_1():
 
     tst = gdaltest.GDALTest("SAGA", "saga/4byteFloat.sdat", 1, 108)
-    return tst.testOpen(
+    tst.testOpen(
         check_prj="""PROJCS["NAD_1927_UTM_Zone_11N",
     GEOGCS["GCS_North_American_1927",
         DATUM["North_American_Datum_1927",
@@ -69,7 +52,7 @@ def test_saga_1():
 def test_saga_2():
 
     tst = gdaltest.GDALTest("SAGA", "saga/4byteFloat.sdat", 1, 108)
-    return tst.testCreateCopy(new_filename="tmp/createcopy.sdat", check_srs=True)
+    tst.testCreateCopy(new_filename="tmp/createcopy.sdat", check_srs=True)
 
 
 ###############################################################################
@@ -79,7 +62,7 @@ def test_saga_2():
 def test_saga_3():
 
     tst = gdaltest.GDALTest("SAGA", "saga/4byteFloat.sdat", 1, 108)
-    return tst.testCreate(new_filename="tmp/copy.sdat", out_bands=1)
+    tst.testCreate(new_filename="tmp/copy.sdat", out_bands=1)
 
 
 ###############################################################################
@@ -186,7 +169,7 @@ def test_saga_6():
 def test_saga_7():
 
     tst = gdaltest.GDALTest("SAGA", "saga/4byteFloat.sdat", 1, 108)
-    return tst.testCreateCopy(new_filename="/vsimem/createcopy.sdat")
+    tst.testCreateCopy(new_filename="/vsimem/createcopy.sdat")
 
 
 ###############################################################################
@@ -195,7 +178,7 @@ def test_saga_7():
 
 def test_saga_8():
     tst = gdaltest.GDALTest("SAGA", "saga/4byteFloat.sg-grd-z", 1, 108)
-    return tst.testOpen(
+    tst.testOpen(
         check_prj="""PROJCS["NAD_1927_UTM_Zone_11N",
     GEOGCS["GCS_North_American_1927",
         DATUM["North_American_Datum_1927",
@@ -222,9 +205,8 @@ def test_saga_9():
     ds = None
 
     ds = gdal.Open("tmp/test9.sdat")
-    with gdaltest.error_handler():
-        ret = ds.GetRasterBand(1).SetNoDataValue(56)
-    assert ret == gdalconst.CE_Failure
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1).SetNoDataValue(56)
     # make sure nodata value is not changed
     assert ds.GetRasterBand(1).GetNoDataValue() == -99999
 

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test OGR AVCE00 and AVCBin drivers
@@ -9,30 +8,14 @@
 ###############################################################################
 # Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
 import ogrtest
 import pytest
 
-from osgeo import gdal, ogr
+from osgeo import ogr
 
 pytestmark = [
     pytest.mark.require_driver("AVCE00"),
@@ -48,19 +31,16 @@ def check_content(ds):
     lyr = ds.GetLayerByName("ARC")
     expect = ["1", "2", "3", "4", "5", "6", "7"]
 
-    tr = ogrtest.check_features_against_list(lyr, "UserID", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "UserID", expect)
 
     lyr.ResetReading()
 
     feat = lyr.GetNextFeature()
-    assert (
-        ogrtest.check_feature_geometry(
-            feat,
-            "LINESTRING (340099.875 4100200.0,340400.0625 4100399.5,340900.125 4100200.0,340700.03125 4100199.5)",
-            max_error=0.01,
-        )
-        == 0
+
+    ogrtest.check_feature_geometry(
+        feat,
+        "LINESTRING (340099.875 4100200.0,340400.0625 4100399.5,340900.125 4100200.0,340700.03125 4100199.5)",
+        max_error=0.01,
     )
 
 
@@ -99,14 +79,8 @@ def test_ogr_avc_2():
 
 def test_ogr_avc_3():
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    avc_ds = ogr.Open("data/avc/compressed.e00")
-    gdal.PopErrorHandler()
-    last_error_msg = gdal.GetLastErrorMsg()
-
-    assert avc_ds is None, "expected failure"
-
-    assert last_error_msg != "", "expected error message"
+    with pytest.raises(Exception):
+        ogr.Open("data/avc/compressed.e00")
 
 
 ###############################################################################

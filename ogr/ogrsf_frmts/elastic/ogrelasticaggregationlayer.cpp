@@ -7,27 +7,11 @@
  ******************************************************************************
  * Copyright (c) 2021, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_elastic.h"
-#include "ogrgeojsonreader.h"
+#include "ogrlibjsonutils.h"
 #include "cpl_json.h"
 
 #include <algorithm>
@@ -80,7 +64,7 @@ OGRElasticAggregationLayer::Build(OGRElasticDataSource *poDS,
     if (!oDoc.LoadMemory(pszAggregation))
         return nullptr;
     const auto oRoot = oDoc.GetRoot();
-    const auto osIndex = oRoot.GetString("index");
+    std::string osIndex = oRoot.GetString("index");
     if (osIndex.empty())
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -135,10 +119,9 @@ OGRElasticAggregationLayer::Build(OGRElasticDataSource *poDS,
         }
     }
 
-    auto poLayer = std::unique_ptr<OGRElasticAggregationLayer>(
-        new OGRElasticAggregationLayer(poDS));
-    poLayer->m_osIndexName = osIndex;
-    poLayer->m_osGeometryField = osGeometryField;
+    auto poLayer = std::make_unique<OGRElasticAggregationLayer>(poDS);
+    poLayer->m_osIndexName = std::move(osIndex);
+    poLayer->m_osGeometryField = std::move(osGeometryField);
 
     // Parse geohash_grid options
     auto oGeohashGrid = oRoot["geohash_grid"];
@@ -242,15 +225,20 @@ void OGRElasticAggregationLayer::ResetReading()
 }
 
 /************************************************************************/
-/*                          SetSpatialFilter()                          */
+/*                          ISetSpatialFilter()                         */
 /************************************************************************/
 
-void OGRElasticAggregationLayer::SetSpatialFilter(OGRGeometry *poGeom)
+OGRErr OGRElasticAggregationLayer::ISetSpatialFilter(int iGeomField,
+                                                     const OGRGeometry *poGeom)
 
 {
-    OGRLayer::SetSpatialFilter(poGeom);
-    m_bFeaturesRequested = false;
-    m_apoCachedFeatures.clear();
+    const OGRErr eErr = OGRLayer::ISetSpatialFilter(iGeomField, poGeom);
+    if (eErr == OGRERR_NONE)
+    {
+        m_bFeaturesRequested = false;
+        m_apoCachedFeatures.clear();
+    }
+    return eErr;
 }
 
 /************************************************************************/
@@ -363,7 +351,7 @@ std::string OGRElasticAggregationLayer::BuildRequest()
     geo_centroid.Set("field", m_osGeometryField);
 
     // Add extra fields
-    for (auto &oChild : m_oAggregatedFieldsRequest.GetChildren())
+    for (const auto &oChild : m_oAggregatedFieldsRequest.GetChildren())
     {
         subaggs.Add(oChild.GetName(), oChild);
     }
@@ -593,4 +581,13 @@ GIntBig OGRElasticAggregationLayer::GetFeatureCount(int bForce)
 int OGRElasticAggregationLayer::TestCapability(const char *pszCap)
 {
     return EQUAL(pszCap, OLCStringsAsUTF8);
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRElasticAggregationLayer::GetDataset()
+{
+    return m_poDS;
 }

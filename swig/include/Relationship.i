@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     Relationship.i
  * Project:  GDAL Python Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Nyall Dawson <nyall dot dawson at gmail dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 //************************************************************************
@@ -36,22 +19,6 @@
 #ifndef SWIGCSHARP
 typedef int GDALRelationshipCardinality;
 typedef int GDALRelationshipType;
-#else
-%rename (RelationshipCardinality) GDALRelationshipCardinality;
-typedef enum {
-    /*! One-to-one */ GRC_ONE_TO_ONE,
-    /*! One-to-many */ GRC_ONE_TO_MANY,
-    /*! Many-to-one */ GRC_MANY_TO_ONE,
-    /*! Many-to-many */ GRC_MANY_TO_MANY,
-} GDALRelationshipCardinality;
-
-%rename (RelationshipType) GDALRelationshipType;
-typedef enum {
-    /*! Composite relationship */ GRT_COMPOSITE,
-    /*! Association relationship */ GRT_ASSOCIATION,
-    /*! Aggregation relationship */ GRT_AGGREGATION
-} GDALRelationshipType;
-
 #endif /* CSHARP */
 
 %rename (Relationship) GDALRelationshipShadow;
@@ -152,9 +119,15 @@ public:
       }
     %clear char**pList;
 
+    #ifdef SWIGCSHARP
+    GDALRelationshipType GetRelationshipType() {
+        return GDALRelationshipGetType( self );
+    }
+    #else
     GDALRelationshipType GetType() {
         return GDALRelationshipGetType( self );
     }
+    #endif
 
     void SetType( GDALRelationshipType type ) {
       return GDALRelationshipSetType( self, type );

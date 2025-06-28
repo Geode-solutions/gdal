@@ -8,28 +8,13 @@
  * Copyright (c) 2007, Frank Warmerdam
  * Copyright (c) 2009, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "nitflib.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "gdal.h"
@@ -415,8 +400,8 @@ int NITFUncompressARIDPCM(NITFImage *psImage, GByte *pabyInputData,
     /*      bit larger than the output buffer if the width or height is     */
     /*      not divisible by 8.                                             */
     /* -------------------------------------------------------------------- */
-    GByte *full_image =
-        reinterpret_cast<GByte *>(CPLMalloc(blocks_x * blocks_y * 8 * 8));
+    GByte *full_image = reinterpret_cast<GByte *>(
+        CPLMalloc(static_cast<size_t>(blocks_x) * blocks_y * 8 * 8));
 
     /* -------------------------------------------------------------------- */
     /*      Scan through all the neighbourhoods determining the busyness    */
@@ -443,7 +428,8 @@ int NITFUncompressARIDPCM(NITFImage *psImage, GByte *pabyInputData,
             CPLFree(full_image);
             return FALSE;
         }
-        L00[i] = (unsigned char)get_bits(pabyInputData, block_offset[i], 8);
+        L00[i] = static_cast<unsigned char>(
+            get_bits(pabyInputData, block_offset[i], 8));
 
         total += block_size[i];
     }
@@ -508,14 +494,9 @@ int NITFUncompressARIDPCM(NITFImage *psImage, GByte *pabyInputData,
             {
                 for (int j = 0; j < 8; j++)
                 {
-                    int value = L[i][j];
-                    if (value < 0)
-                        value = 0;
-                    if (value > 255)
-                        value = 255;
-
-                    full_tl[8 - j - 1 + (8 - i - 1) * rowlen] =
-                        (unsigned char)value;
+                    const unsigned char value =
+                        static_cast<unsigned char>(std::clamp(L[i][j], 0, 255));
+                    full_tl[8 - j - 1 + (8 - i - 1) * rowlen] = value;
                 }
             }
         }

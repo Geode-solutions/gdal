@@ -15,17 +15,7 @@ gdalmdimtranslate
 Synopsis
 --------
 
-.. code-block::
-
-    gdalmdimtranslate [--help-general] [-co "NAME=VALUE"]*
-                      [-if format]* [-of format]
-                      [-array <array_spec>]*
-                      [-group <group_spec>]*
-                      [-subset <subset_spec>]*
-                      [-scaleaxes <scaleaxes_spec>]*
-                      [-oo NAME=VALUE]*
-                      <src_filename> <dst_filename>
-
+.. program-output:: gdalmdimtranslate --help-doc
 
 Description
 -----------
@@ -38,6 +28,8 @@ The following command line parameters can appear in any order.
 
 .. program:: gdalmdimtranslate
 
+.. include:: options/help_and_help_general.rst
+
 .. include:: options/if.rst
 
 .. option:: -of <format>
@@ -48,7 +40,7 @@ The following command line parameters can appear in any order.
     not specified, the format is guessed when possible from the extension of the
     destination filename.
 
-.. option:: -co <NAME=VALUE>
+.. option:: -co <NAME>=<VALUE>
 
     Many formats have one or more optional creation options that can be
     used to control particulars about the file created.
@@ -56,7 +48,7 @@ The following command line parameters can appear in any order.
     The creation options available vary by format driver, and some
     simple formats have no creation options at all. A list of options
     supported for a format can be listed with the
-    :ref:`--formats <raster_common_options_formats>`
+    :ref:`--format <raster_common_options_format>`
     command line option but the documentation for the format is the
     definitive source of information on driver creation options.
     See :ref:`raster_drivers` format
@@ -74,15 +66,29 @@ The following command line parameters can appear in any order.
     <array_spec> may be just an array name, potentially using a fully qualified
     syntax (/group/subgroup/array_name). Or it can be a combination of options
     with the syntax:
-    name={src_array_name}[,dstname={dst_array_name}][,transpose=[{axis1},{axis2},...][,view={view_expr}]
+    name={src_array_name}[,dstname={dst_array_name}][,resample=yes][,transpose=[{axis1},{axis2},...][,view={view_expr}]
 
-    [{axis1},{axis2},...] is the argument of  :cpp:func:`GDALMDArray::Transpose`.
-    For example, transpose=[1,0] switches the axis order of a 2D array.
+    The following options are processed in that order:
 
-    {view_expr} is the value of the *viewExpr* argument of :cpp:func:`GDALMDArray::GetView`
+    - ``resample=yes`` asks for the array to run through :cpp:func:`GDALMDArray::GetResampled`.
+
+    - [{axis1},{axis2},...] is the argument of  :cpp:func:`GDALMDArray::Transpose`.
+       For example, transpose=[1,0] switches the axis order of a 2D array.
+       See :example:`transpose`.
+
+    - {view_expr} is the value of the *viewExpr* argument of :cpp:func:`GDALMDArray::GetView`.
+      See :example:`reorder`.
 
     When specifying a view_expr that performs a slicing or subsetting on a dimension, the
     equivalent operation will be applied to the corresponding indexing variable.
+
+.. option:: -arrayoption <NAME>=<VALUE>
+
+    .. versionadded:: 3.9
+
+    Option passed to :cpp:func:`GDALGroup::GetMDArrayNames` to filter reported
+    arrays. Such option is format specific. Consult driver documentation.
+    This option may be used several times.
 
 .. option:: -group <group_spec>
 
@@ -101,7 +107,7 @@ The following command line parameters can appear in any order.
 
     Performs a subsetting (trimming or slicing) operation along a dimension,
     provided that it is indexed by a 1D variable of numeric or string data type,
-    and whose values are monotically sorted.
+    and whose values are monotonically sorted.
     <subset_spec> follows exactly the `OGC WCS 2.0 KVP encoding <https://portal.opengeospatial.org/files/09-147r3>`__
     for subsetting.
 
@@ -111,7 +117,9 @@ The following command line parameters can appear in any order.
     to value sliced_val (and this dimension will be removed from the arrays
     that reference to it)
 
-    Using -subset is incompatible of specifying a *view* option in -array.
+    Using -subset is incompatible with specifying a *view* option in -array.
+
+    See :example:`subset-1`.
 
 .. option:: -scaleaxes <scaleaxes_spec>
 
@@ -123,11 +131,19 @@ The following command line parameters can appear in any order.
     `OGC WCS 2.0 Scaling Extension <https://portal.opengeospatial.org/files/12-039>`__,
     but limited to integer scale factors.
 
-    That is dim1_name(scale_factor)[,dim2_name(scale_factor)]*
+    That is <dim1_name>(<scale_factor>)[,<dim2_name>(<scale_factor>)]...
 
-    Using -scaleaxes is incompatible of specifying a *view* option in -array.
+    Using -scaleaxes is incompatible with specifying a *view* option in -array.
 
-.. option:: -oo <NAME=VALUE>
+    See :example:`subsample-1`.
+
+.. option:: -strict
+
+    By default, some failures during the translation are tolerated, such as not
+    being able to write group attributes. When setting this option, such
+    failures will cause the process to fail.
+
+.. option:: -oo <NAME>=<VALUE>
 
     .. versionadded:: 3.4
 
@@ -149,33 +165,45 @@ This utility is also callable from C with :cpp:func:`GDALMultiDimTranslate`.
 Examples
 --------
 
-- Convert a netCDF file to a multidimensional VRT file
+.. example::
+   :title: Convert a netCDF file to a multidimensional VRT file
 
-.. code-block::
+   .. code-block:: bash
 
-    $ gdalmdimtranslate in.nc out.vrt
+      gdalmdimtranslate in.nc out.vrt
 
-- Extract a 2D slice of a time,Y,X array
+.. example::
+   :title: Extract a 2D slice of a time,Y,X array
+   :id: subset-1
 
-.. code-block::
+   .. code-block:: bash
 
-    $ gdalmdimtranslate in.nc out.tif -subset 'time("2010-01-01")' -array temperature
+       gdalmdimtranslate in.nc out.tif -subset 'time("2010-01-01")' -array temperature
 
-- Subsample along X and Y axis
+.. example::
+   :title: Subsample along X and Y axis
+   :id: subsample-1
 
-.. code-block::
+   .. code-block:: bash
 
-    $ gdalmdimtranslate in.nc out.nc -scaleaxes "X(2),Y(2)"
+       gdalmdimtranslate in.nc out.nc -scaleaxes "X(2),Y(2)"
 
-- Reorder the values of a time,Y,X array along the Y axis from top-to-bottom
-  to bottom-to-top (or the reverse)
+.. example::
+   :title: Reorder the values of an array
+   :id: reorder
 
-.. code-block::
+   Reorder the values of the time,Y,X array along the Y axis from top-to-bottom
+   to bottom-to-top (or the reverse)
 
-    $ gdalmdimtranslate in.nc out.nc -array "name=temperature,view=[:,::-1,:]"
+   .. code-block:: bash
 
-- Transpose an array that has X,Y,time dimension order to time,Y,X
+      gdalmdimtranslate in.nc out.nc -array "name=temperature,view=[:,::-1,:]"
 
-.. code-block::
+.. example::
+   :title: Transpose an array that has X,Y,time dimension order to time,Y,X
+   :id: transpose
 
-    $ gdalmdimtranslate in.nc out.nc -array "name=temperature,transpose=[2,1,0]"
+
+   .. code-block:: bash
+
+       gdalmdimtranslate in.nc out.nc -array "name=temperature,transpose=[2,1,0]"

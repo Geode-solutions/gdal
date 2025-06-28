@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for RPFTOC driver.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2008-2010, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -59,7 +42,7 @@ def test_rpftoc_1():
         0.0,
         -0.0013461816406249993,
     )
-    return tst.testOpen(check_gt=gt)
+    tst.testOpen(check_gt=gt)
 
 
 ###############################################################################
@@ -67,17 +50,15 @@ def test_rpftoc_1():
 
 
 def test_rpftoc_2():
-    gdal.SetConfigOption("RPFTOC_FORCE_RGBA", "YES")
-    tst = gdaltest.GDALTest(
-        "RPFTOC",
-        "NITF_TOC_ENTRY:CADRG_ONC_1,000,000_2_0:data/nitf/A.TOC",
-        1,
-        0,
-        filename_absolute=1,
-    )
-    res = tst.testOpen()
-    gdal.SetConfigOption("RPFTOC_FORCE_RGBA", "NO")
-    return res
+    with gdal.config_option("RPFTOC_FORCE_RGBA", "YES"):
+        tst = gdaltest.GDALTest(
+            "RPFTOC",
+            "NITF_TOC_ENTRY:CADRG_ONC_1,000,000_2_0:data/nitf/A.TOC",
+            1,
+            0,
+            filename_absolute=1,
+        )
+        tst.testOpen()
 
 
 ###############################################################################
@@ -106,29 +87,27 @@ def test_rpftoc_3():
 
 
 def test_rpftoc_4():
-    gdal.SetConfigOption("RPFTOC_FORCE_RGBA", "YES")
 
     shutil.copyfile("data/nitf/A.TOC", "tmp/A.TOC")
     shutil.copyfile("data/nitf/RPFTOC01.ON2", "tmp/RPFTOC01.ON2")
 
-    ds = gdal.Open("NITF_TOC_ENTRY:CADRG_ONC_1,000,000_2_0:tmp/A.TOC")
-    err = ds.BuildOverviews(overviewlist=[2, 4])
+    with gdal.config_option("RPFTOC_FORCE_RGBA", "YES"):
+        ds = gdal.Open("NITF_TOC_ENTRY:CADRG_ONC_1,000,000_2_0:tmp/A.TOC")
+        err = ds.BuildOverviews(overviewlist=[2, 4])
 
-    assert err == 0, "BuildOverviews reports an error"
+        assert err == 0, "BuildOverviews reports an error"
 
-    assert (
-        ds.GetRasterBand(1).GetOverviewCount() == 2
-    ), "Overview missing on target file."
+        assert (
+            ds.GetRasterBand(1).GetOverviewCount() == 2
+        ), "Overview missing on target file."
 
-    ds = None
-    ds = gdal.Open("NITF_TOC_ENTRY:CADRG_ONC_1,000,000_2_0:tmp/A.TOC")
-    assert (
-        ds.GetRasterBand(1).GetOverviewCount() == 2
-    ), "Overview missing on target file after re-open."
+        ds = None
+        ds = gdal.Open("NITF_TOC_ENTRY:CADRG_ONC_1,000,000_2_0:tmp/A.TOC")
+        assert (
+            ds.GetRasterBand(1).GetOverviewCount() == 2
+        ), "Overview missing on target file after re-open."
 
-    ds = None
-
-    gdal.SetConfigOption("RPFTOC_FORCE_RGBA", "NO")
+        ds = None
 
     os.unlink("tmp/A.TOC")
     os.unlink("tmp/A.TOC.1.ovr")

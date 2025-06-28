@@ -10,23 +10,7 @@
  *  Copyright (c) 2016 Alexandr Borzykh
  *  Copyright (c) 2016-2018 NextGIS, <info@nextgis.com>
  *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in all
- *  copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
+  * SPDX-License-Identifier: MIT
  *******************************************************************************/
 #include "cadtables.h"
 #include "opencad_api.h"
@@ -118,7 +102,7 @@ int CADTables::ReadLayersTable( CADFile * const pCADFile, long dLayerControlHand
                 oCADLayer.setId( aLayers.size() + 1 );
                 oCADLayer.setHandle( oCADLayerObj->hObjectHandle.getAsLong() );
 
-                aLayers.push_back( oCADLayer );
+                aLayers.push_back( std::move(oCADLayer) );
             }
             else
             {
@@ -164,7 +148,7 @@ int CADTables::ReadLayersTable( CADFile * const pCADFile, long dLayerControlHand
             delete pCADEntityObject;
             DebugMsg( "Entity object is null\n" );
             break;
-        } 
+        }
         else if ( dCurrentEntHandle == dLastEntHandle )
         {
             FillLayer( spEntityObj.get() );

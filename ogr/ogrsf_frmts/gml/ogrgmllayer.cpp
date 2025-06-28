@@ -8,23 +8,7 @@
  * Copyright (c) 2002, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_gml.h"
@@ -44,7 +28,7 @@ OGRGMLLayer::OGRGMLLayer(const char *pszName, bool bWriterIn,
     : poFeatureDefn(new OGRFeatureDefn(
           pszName + (STARTS_WITH_CI(pszName, "ogr:") ? 4 : 0))),
       iNextGMLId(0), bInvalidFIDFound(false), pszFIDPrefix(nullptr),
-      bWriter(bWriterIn), bSameSRS(false), poDS(poDSIn),
+      bWriter(bWriterIn), poDS(poDSIn),
       poFClass(!bWriter ? poDS->GetReader()->GetClass(pszName) : nullptr),
       // Reader's should get the corresponding GMLFeatureClass and cache it.
       hCacheSRS(GML_BuildOGRGeometryFromList_CreateCache()),
@@ -568,7 +552,7 @@ OGRFeature *OGRGMLLayer::GetNextFeature()
             poGeom = poOGRFeature->GetGeomFieldRef(i);
             if (poGeom != nullptr)
             {
-                OGRSpatialReference *poSRS =
+                const OGRSpatialReference *poSRS =
                     poFeatureDefn->GetGeomFieldDefn(i)->GetSpatialRef();
                 if (poSRS != nullptr)
                     poGeom->assignSpatialReference(poSRS);
@@ -619,10 +603,11 @@ GIntBig OGRGMLLayer::GetFeatureCount(int bForce)
 }
 
 /************************************************************************/
-/*                             GetExtent()                              */
+/*                            IGetExtent()                              */
 /************************************************************************/
 
-OGRErr OGRGMLLayer::GetExtent(OGREnvelope *psExtent, int bForce)
+OGRErr OGRGMLLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                               bool bForce)
 
 {
     if (GetGeomType() == wkbNone)
@@ -643,7 +628,7 @@ OGRErr OGRGMLLayer::GetExtent(OGREnvelope *psExtent, int bForce)
         return OGRERR_NONE;
     }
 
-    return OGRLayer::GetExtent(psExtent, bForce);
+    return OGRLayer::IGetExtent(iGeomField, psExtent, bForce);
 }
 
 /************************************************************************/
@@ -685,7 +670,7 @@ OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
     const bool bRemoveAppPrefix = poDS->RemoveAppPrefix();
     const bool bGMLFeatureCollection = poDS->GMLFeatureCollection();
 
-    if (!bWriter)
+    if (!bWriter || poDS->HasWriteError())
         return OGRERR_FAILURE;
 
     poFeature->FillUnsetWithDefault(TRUE, nullptr);
@@ -706,33 +691,6 @@ OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
     else
     {
         poDS->PrintLine(fp, "<gml:featureMember>");
-    }
-
-    if (iNextGMLId == 0)
-    {
-        bSameSRS = true;
-        for (int iGeomField = 1;
-             iGeomField < poFeatureDefn->GetGeomFieldCount(); iGeomField++)
-        {
-            OGRGeomFieldDefn *poFieldDefn0 = poFeatureDefn->GetGeomFieldDefn(0);
-            OGRGeomFieldDefn *poFieldDefn =
-                poFeatureDefn->GetGeomFieldDefn(iGeomField);
-            OGRSpatialReference *poSRS0 = poFieldDefn0->GetSpatialRef();
-            OGRSpatialReference *poSRS = poFieldDefn->GetSpatialRef();
-            if (poSRS0 != nullptr && poSRS == nullptr)
-            {
-                bSameSRS = false;
-            }
-            else if (poSRS0 == nullptr && poSRS != nullptr)
-            {
-                bSameSRS = false;
-            }
-            else if (poSRS0 != nullptr && poSRS != nullptr && poSRS0 != poSRS &&
-                     !poSRS0->IsSame(poSRS))
-            {
-                bSameSRS = false;
-            }
-        }
     }
 
     if (poFeature->GetFID() == OGRNullFID)
@@ -781,7 +739,7 @@ OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
     for (int iGeomField = 0; iGeomField < poFeatureDefn->GetGeomFieldCount();
          iGeomField++)
     {
-        OGRGeomFieldDefn *poFieldDefn =
+        const OGRGeomFieldDefn *poFieldDefn =
             poFeatureDefn->GetGeomFieldDefn(iGeomField);
 
         // Write out Geometry - for now it isn't indented properly.
@@ -794,12 +752,14 @@ OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
             const int nCoordDimension = poGeom->getCoordinateDimension();
 
             poGeom->getEnvelope(&sGeomBounds);
-            if (bSameSRS)
+            if (poDS->HasWriteGlobalSRS())
                 poDS->GrowExtents(&sGeomBounds, nCoordDimension);
 
             if (poGeom->getSpatialReference() == nullptr &&
                 poFieldDefn->GetSpatialRef() != nullptr)
                 poGeom->assignSpatialReference(poFieldDefn->GetSpatialRef());
+
+            const auto &oCoordPrec = poFieldDefn->GetCoordinatePrecision();
 
             if (bIsGML3Output && poDS->WriteFeatureBoundedBy())
             {
@@ -810,23 +770,50 @@ OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
                                    poDS->GetSRSNameFormat(), &bCoordSwap);
                 char szLowerCorner[75] = {};
                 char szUpperCorner[75] = {};
+
+                OGRWktOptions coordOpts;
+
+                if (oCoordPrec.dfXYResolution !=
+                    OGRGeomCoordinatePrecision::UNKNOWN)
+                {
+                    coordOpts.format = OGRWktFormat::F;
+                    coordOpts.xyPrecision =
+                        OGRGeomCoordinatePrecision::ResolutionToPrecision(
+                            oCoordPrec.dfXYResolution);
+                }
+                if (oCoordPrec.dfZResolution !=
+                    OGRGeomCoordinatePrecision::UNKNOWN)
+                {
+                    coordOpts.format = OGRWktFormat::F;
+                    coordOpts.zPrecision =
+                        OGRGeomCoordinatePrecision::ResolutionToPrecision(
+                            oCoordPrec.dfZResolution);
+                }
+
+                std::string wkt;
                 if (bCoordSwap)
                 {
-                    OGRMakeWktCoordinate(szLowerCorner, sGeomBounds.MinY,
-                                         sGeomBounds.MinX, sGeomBounds.MinZ,
-                                         nCoordDimension);
-                    OGRMakeWktCoordinate(szUpperCorner, sGeomBounds.MaxY,
-                                         sGeomBounds.MaxX, sGeomBounds.MaxZ,
-                                         nCoordDimension);
+                    wkt = OGRMakeWktCoordinate(
+                        sGeomBounds.MinY, sGeomBounds.MinX, sGeomBounds.MinZ,
+                        nCoordDimension, coordOpts);
+                    memcpy(szLowerCorner, wkt.data(), wkt.size() + 1);
+
+                    wkt = OGRMakeWktCoordinate(
+                        sGeomBounds.MaxY, sGeomBounds.MaxX, sGeomBounds.MaxZ,
+                        nCoordDimension, coordOpts);
+                    memcpy(szUpperCorner, wkt.data(), wkt.size() + 1);
                 }
                 else
                 {
-                    OGRMakeWktCoordinate(szLowerCorner, sGeomBounds.MinX,
-                                         sGeomBounds.MinY, sGeomBounds.MinZ,
-                                         nCoordDimension);
-                    OGRMakeWktCoordinate(szUpperCorner, sGeomBounds.MaxX,
-                                         sGeomBounds.MaxY, sGeomBounds.MaxZ,
-                                         nCoordDimension);
+                    wkt = OGRMakeWktCoordinate(
+                        sGeomBounds.MinX, sGeomBounds.MinY, sGeomBounds.MinZ,
+                        nCoordDimension, coordOpts);
+                    memcpy(szLowerCorner, wkt.data(), wkt.size() + 1);
+
+                    wkt = OGRMakeWktCoordinate(
+                        sGeomBounds.MaxX, sGeomBounds.MaxY, sGeomBounds.MaxZ,
+                        nCoordDimension, coordOpts);
+                    memcpy(szUpperCorner, wkt.data(), wkt.size() + 1);
                 }
                 if (bWriteSpaceIndentation)
                     VSIFPrintfL(fp, "      ");
@@ -871,6 +858,20 @@ OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
                         papszOptions, CPLSPrintf("GMLID=%s.geom." CPL_FRMT_GIB,
                                                  poFeatureDefn->GetName(),
                                                  poFeature->GetFID()));
+            }
+
+            if (oCoordPrec.dfXYResolution !=
+                OGRGeomCoordinatePrecision::UNKNOWN)
+            {
+                papszOptions = CSLAddString(
+                    papszOptions, CPLSPrintf("XY_COORD_RESOLUTION=%g",
+                                             oCoordPrec.dfXYResolution));
+            }
+            if (oCoordPrec.dfZResolution != OGRGeomCoordinatePrecision::UNKNOWN)
+            {
+                papszOptions = CSLAddString(
+                    papszOptions, CPLSPrintf("Z_COORD_RESOLUTION=%g",
+                                             oCoordPrec.dfZResolution));
             }
 
             char *pszGeometry = nullptr;
@@ -1091,7 +1092,7 @@ OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
         poDS->PrintLine(fp, "</gml:featureMember>");
     }
 
-    return OGRERR_NONE;
+    return !poDS->HasWriteError() ? OGRERR_NONE : OGRERR_FAILURE;
 }
 
 /************************************************************************/
@@ -1149,7 +1150,7 @@ int OGRGMLLayer::TestCapability(const char *pszCap)
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRGMLLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRGMLLayer::CreateField(const OGRFieldDefn *poField, int bApproxOK)
 
 {
     if (!bWriter || iNextGMLId != 0)
@@ -1192,7 +1193,8 @@ OGRErr OGRGMLLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
 /*                          CreateGeomField()                           */
 /************************************************************************/
 
-OGRErr OGRGMLLayer::CreateGeomField(OGRGeomFieldDefn *poField, int bApproxOK)
+OGRErr OGRGMLLayer::CreateGeomField(const OGRGeomFieldDefn *poField,
+                                    int bApproxOK)
 
 {
     if (!bWriter || iNextGMLId != 0)
@@ -1202,10 +1204,14 @@ OGRErr OGRGMLLayer::CreateGeomField(OGRGeomFieldDefn *poField, int bApproxOK)
     /*      Enforce XML naming semantics on element name.                   */
     /* -------------------------------------------------------------------- */
     OGRGeomFieldDefn oCleanCopy(poField);
-    if (oCleanCopy.GetSpatialRef())
+    const auto poSRSOri = poField->GetSpatialRef();
+    poDS->DeclareNewWriteSRS(poSRSOri);
+    if (poSRSOri)
     {
-        oCleanCopy.GetSpatialRef()->SetAxisMappingStrategy(
-            OAMS_TRADITIONAL_GIS_ORDER);
+        auto poSRS = poSRSOri->Clone();
+        poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        oCleanCopy.SetSpatialRef(poSRS);
+        poSRS->Release();
     }
     char *pszName = CPLStrdup(poField->GetNameRef());
     CPLCleanXMLElementName(pszName);
@@ -1234,4 +1240,13 @@ OGRErr OGRGMLLayer::CreateGeomField(OGRGeomFieldDefn *poField, int bApproxOK)
     poFeatureDefn->AddGeomFieldDefn(&oCleanCopy);
 
     return OGRERR_NONE;
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRGMLLayer::GetDataset()
+{
+    return poDS;
 }

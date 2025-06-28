@@ -8,23 +8,7 @@
  * Copyright (c) 2004, Pirmin Kalberer, Sourcepole AG
  * Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ili2readerp.h"
@@ -58,19 +42,26 @@ static const char *const ILI2_BOUNDARY = "BOUNDARY";
 static const char *const ILI2_AREA = "AREA";
 static const char *const ILI2_SURFACE = "SURFACE";
 
+namespace gdal
+{
+namespace ili2
+{
 //
 // helper functions
 //
-int cmpStr(string s1, string s2)
+int cmpStr(const string &s1, const string &s2)
 {
-
     string::const_iterator p1 = s1.begin();
     string::const_iterator p2 = s2.begin();
 
     while (p1 != s1.end() && p2 != s2.end())
     {
-        if (toupper(*p1) != toupper(*p2))
-            return (toupper(*p1) < toupper(*p2)) ? -1 : 1;
+        if (CPLToupper(static_cast<unsigned char>(*p1)) !=
+            CPLToupper(static_cast<unsigned char>(*p2)))
+            return (CPLToupper(static_cast<unsigned char>(*p1)) <
+                    CPLToupper(static_cast<unsigned char>(*p2)))
+                       ? -1
+                       : 1;
         ++p1;
         ++p2;
     }
@@ -78,32 +69,36 @@ int cmpStr(string s1, string s2)
     return (s2.size() == s1.size()) ? 0 : (s1.size() < s2.size()) ? -1 : 1;
 }
 
-string ltrim(string tmpstr)
+string ltrim(const string &tmpstr)
 {
-    unsigned int i = 0;
+    size_t i = 0;
     while (i < tmpstr.length() && (tmpstr[i] == ' ' || tmpstr[i] == '\t' ||
                                    tmpstr[i] == '\r' || tmpstr[i] == '\n'))
         ++i;
     return i > 0 ? tmpstr.substr(i, tmpstr.length() - i) : tmpstr;
 }
 
-string rtrim(string tmpstr)
+string rtrim(const string &tmpstr)
 {
-    if (tmpstr.length() == 0)
+    if (tmpstr.empty())
         return tmpstr;
-    unsigned int i = static_cast<unsigned int>(tmpstr.length()) - 1;
+    size_t i = tmpstr.length() - 1U;
     while (tmpstr[i] == ' ' || tmpstr[i] == '\t' || tmpstr[i] == '\r' ||
            tmpstr[i] == '\n')
         --i;
     return i < tmpstr.length() - 1 ? tmpstr.substr(0, i + 1) : tmpstr;
 }
 
-string trim(string tmpstr)
+string trim(const string &tmpstr)
 {
-    tmpstr = ltrim(tmpstr);
-    tmpstr = rtrim(tmpstr);
-    return tmpstr;
+    auto ret = ltrim(tmpstr);
+    ret = rtrim(ret);
+    return ret;
 }
+}  // namespace ili2
+}  // namespace gdal
+
+using namespace gdal::ili2;
 
 static int getGeometryTypeOfElem(DOMElement *elem)
 {
@@ -476,16 +471,16 @@ OGRGeometry *ILI2Reader::getGeometry(DOMElement *elem, int type)
     return gm;
 }
 
-int ILI2Reader::ReadModel(ImdReader *poImdReader, const char *modelFilename)
+int ILI2Reader::ReadModel(OGRILI2DataSource *poDS, ImdReader *poImdReader,
+                          const char *modelFilename)
 {
     poImdReader->ReadModel(modelFilename);
     for (FeatureDefnInfos::const_iterator it =
              poImdReader->featureDefnInfos.begin();
          it != poImdReader->featureDefnInfos.end(); ++it)
     {
-        OGRLayer *layer = new OGRILI2Layer(it->GetTableDefnRef(),
-                                           it->poGeomFieldInfos, nullptr);
-        m_listLayer.push_back(layer);
+        m_listLayer.push_back(std::make_unique<OGRILI2Layer>(
+            it->GetTableDefnRef(), it->poGeomFieldInfos, poDS));
     }
     return 0;
 }
@@ -642,14 +637,6 @@ ILI2Reader::~ILI2Reader()
 
     if (m_bXercesInitialized)
         OGRDeinitializeXerces();
-
-    list<OGRLayer *>::const_iterator layerIt = m_listLayer.begin();
-    while (layerIt != m_listLayer.end())
-    {
-        OGRILI2Layer *tmpLayer = (OGRILI2Layer *)*layerIt;
-        delete tmpLayer;
-        ++layerIt;
-    }
 }
 
 void ILI2Reader::SetSourceFile(const char *pszFilename)
@@ -682,6 +669,8 @@ int ILI2Reader::SetupParser()
     m_poSAXReader->setLexicalHandler(m_poILI2Handler);
     m_poSAXReader->setEntityResolver(m_poILI2Handler);
     m_poSAXReader->setDTDHandler(m_poILI2Handler);
+    m_poSAXReader->setFeature(XMLUni::fgXercesDisableDefaultEntityResolution,
+                              true);
 
     /* No Validation
     #if (OGR_ILI2_VALIDATION)
@@ -783,7 +772,7 @@ int ILI2Reader::SaveClasses(const char *pszFile = nullptr)
     return TRUE;
 }
 
-list<OGRLayer *> ILI2Reader::GetLayers()
+std::vector<std::unique_ptr<OGRLayer>> &ILI2Reader::GetLayers()
 {
     return m_listLayer;
 }
@@ -795,13 +784,12 @@ int ILI2Reader::GetLayerCount()
 
 OGRLayer *ILI2Reader::GetLayer(const char *pszName)
 {
-    for (list<OGRLayer *>::reverse_iterator layerIt = m_listLayer.rbegin();
-         layerIt != m_listLayer.rend(); ++layerIt)
+    for (auto it = m_listLayer.rbegin(); it != m_listLayer.rend(); ++it)
     {
-        OGRFeatureDefn *fDef = (*layerIt)->GetLayerDefn();
+        const OGRFeatureDefn *fDef = (*it)->GetLayerDefn();
         if (cmpStr(fDef->GetName(), pszName) == 0)
         {
-            return *layerIt;
+            return it->get();
         }
     }
     return nullptr;
@@ -813,23 +801,25 @@ int ILI2Reader::AddFeature(DOMElement *elem)
     // CPLDebug( "OGR_ILI", "Reading layer: %s", osName.c_str() );
 
     // test if this layer exist
-    OGRILI2Layer *curLayer = dynamic_cast<OGRILI2Layer *>(GetLayer(osName));
-    bool newLayer = (curLayer == nullptr);
+    OGRILI2Layer *curLayer = cpl::down_cast<OGRILI2Layer *>(GetLayer(osName));
+    const bool needsNewLayer = (curLayer == nullptr);
+    std::unique_ptr<OGRILI2Layer> newLayer;
 
     // add a layer
-    if (newLayer)
+    if (needsNewLayer)
     {
         CPLDebug("OGR_ILI", "Adding layer: %s", osName.c_str());
         OGRFeatureDefn *poFeatureDefn = new OGRFeatureDefn(osName);
         poFeatureDefn->SetGeomType(wkbUnknown);
         GeomFieldInfos oGeomFieldInfos;
-        curLayer = new OGRILI2Layer(poFeatureDefn, oGeomFieldInfos, nullptr);
-        m_listLayer.push_back(curLayer);
+        newLayer = std::make_unique<OGRILI2Layer>(poFeatureDefn,
+                                                  oGeomFieldInfos, nullptr);
+        curLayer = newLayer.get();
     }
 
     // the feature and field definition
     OGRFeatureDefn *featureDef = curLayer->GetLayerDefn();
-    if (newLayer)
+    if (needsNewLayer)
     {
         // add TID field
         OGRFieldDefn ofieldDefn(ILI2_TID, OFTString);
@@ -855,6 +845,9 @@ int ILI2Reader::AddFeature(DOMElement *elem)
 
     SetFieldValues(feature, elem);
     curLayer->AddFeature(feature);
+
+    if (needsNewLayer)
+        m_listLayer.push_back(std::move(newLayer));
 
     return 0;
 }

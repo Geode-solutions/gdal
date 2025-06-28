@@ -7,28 +7,13 @@
  ******************************************************************************
  * Copyright (c) 2013, Paul Ramsey <pramsey@boundlessgeo.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogrgeopackageutility.h"
 #include "ogr_p.h"
-
+#include "ogr_wkb.h"
+#include "sqlite/ogrsqlitebase.h"
 #include <limits>
 
 /* Requirement 20: A GeoPackage SHALL store feature table geometries */
@@ -70,8 +55,9 @@ OGRwkbGeometryType GPkgGeometryTypeToWKB(const char *pszGpkgType, bool bHasZ,
 /* declared using one of the data types specified in table GeoPackage */
 /* Data Types. */
 /* http://opengis.github.io/geopackage/#table_column_data_types */
-OGRFieldType GPkgFieldToOGR(const char *pszGpkgType, OGRFieldSubType &eSubType,
-                            int &nMaxWidth)
+// return a OGRFieldType value or OFTMaxType + 1
+int GPkgFieldToOGR(const char *pszGpkgType, OGRFieldSubType &eSubType,
+                   int &nMaxWidth)
 {
     eSubType = OFSTNone;
     nMaxWidth = 0;
@@ -160,7 +146,7 @@ OGRFieldType GPkgFieldToOGR(const char *pszGpkgType, OGRFieldSubType &eSubType,
             CPLError(CE_Warning, CPLE_AppDefined,
                      "Field format '%s' not supported", pszGpkgType);
         }
-        return static_cast<OGRFieldType>(OFTMaxType + 1);
+        return OFTMaxType + 1;
     }
 }
 
@@ -240,13 +226,17 @@ const char *GPkgFieldFromOGR(OGRFieldType eType, OGRFieldSubType eSubType,
  */
 
 GByte *GPkgGeometryFromOGR(const OGRGeometry *poGeometry, int iSrsId,
+                           const OGRGeomCoordinateBinaryPrecision *psPrecision,
                            size_t *pnWkbLen)
 {
     CPLAssert(poGeometry != nullptr);
 
     GByte byFlags = 0;
     GByte byEnv = 1;
-    OGRwkbByteOrder eByteOrder = static_cast<OGRwkbByteOrder>(CPL_IS_LSB);
+    OGRwkbExportOptions wkbExportOptions;
+    if (psPrecision)
+        wkbExportOptions.sPrecision = *psPrecision;
+    wkbExportOptions.eByteOrder = static_cast<OGRwkbByteOrder>(CPL_IS_LSB);
     OGRErr err;
     OGRBoolean bPoint = (wkbFlatten(poGeometry->getGeometryType()) == wkbPoint);
     OGRBoolean bEmpty = poGeometry->IsEmpty();
@@ -311,7 +301,7 @@ GByte *GPkgGeometryFromOGR(const OGRGeometry *poGeometry, int iSrsId,
 
     /* Byte order of header? */
     /* Use native endianness */
-    byFlags |= eByteOrder;
+    byFlags |= wkbExportOptions.eByteOrder;
 
     /* Write flags byte */
     pabyWkb[3] = byFlags;
@@ -348,7 +338,8 @@ GByte *GPkgGeometryFromOGR(const OGRGeometry *poGeometry, int iSrsId,
     GByte *pabyPtr = pabyWkb + nHeaderLen;
 
     /* Use the wkbVariantIso for ISO SQL/MM output (differs for 3d geometry) */
-    err = poGeometry->exportToWkb(eByteOrder, pabyPtr, wkbVariantIso);
+    wkbExportOptions.eWkbVariant = wkbVariantIso;
+    err = poGeometry->exportToWkb(pabyPtr, &wkbExportOptions);
     if (err != OGRERR_NONE)
     {
         CPLFree(pabyWkb);
@@ -368,6 +359,7 @@ OGRErr GPkgHeaderFromWKB(const GByte *pabyGpkg, size_t nGpkgLen,
     if (nGpkgLen < 8 || pabyGpkg[0] != 0x47 || pabyGpkg[1] != 0x50 ||
         pabyGpkg[2] != 0) /* Version (only 0 supported at this time)*/
     {
+        memset(poHeader, 0, sizeof(*poHeader));
         return OGRERR_FAILURE;
     }
 
@@ -479,6 +471,87 @@ OGRErr GPkgHeaderFromWKB(const GByte *pabyGpkg, size_t nGpkgLen,
     return OGRERR_NONE;
 }
 
+bool GPkgUpdateHeader(GByte *pabyGpkg, size_t nGpkgLen, int nSrsId, double MinX,
+                      double MaxX, double MinY, double MaxY, double MinZ,
+                      double MaxZ)
+{
+    CPLAssert(nGpkgLen >= 8);
+
+    /* Flags */
+    const GByte byFlags = pabyGpkg[3];
+    const auto eByteOrder = static_cast<OGRwkbByteOrder>(byFlags & 0x01);
+    const OGRBoolean bSwap = OGR_SWAP(eByteOrder);
+
+    /* SrsId */
+    if (bSwap)
+    {
+        nSrsId = CPL_SWAP32(nSrsId);
+    }
+    memcpy(pabyGpkg + 4, &nSrsId, 4);
+
+    /* Envelope */
+    const int iEnvelope = (byFlags & (0x07 << 1)) >> 1;
+    int nEnvelopeDim = 0;
+    if (iEnvelope)
+    {
+        if (iEnvelope == 1)
+        {
+            nEnvelopeDim = 2; /* 2D envelope */
+        }
+        else if (iEnvelope == 2)
+        {
+            nEnvelopeDim = 3; /* 2D+Z envelope */
+        }
+        else if (iEnvelope == 3)
+        {
+            nEnvelopeDim = 3; /* 2D+M envelope */
+        }
+        else if (iEnvelope == 4)
+        {
+            nEnvelopeDim = 4; /* 2D+ZM envelope */
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        return true;
+    }
+
+    if (nGpkgLen < static_cast<size_t>(8 + 8 * 2 * nEnvelopeDim))
+    {
+        // Not enough bytes
+        return false;
+    }
+
+    /* Envelope */
+    if (bSwap)
+    {
+        CPL_SWAPDOUBLE(&(MinX));
+        CPL_SWAPDOUBLE(&(MaxX));
+        CPL_SWAPDOUBLE(&(MinY));
+        CPL_SWAPDOUBLE(&(MaxY));
+        CPL_SWAPDOUBLE(&(MinZ));
+        CPL_SWAPDOUBLE(&(MaxZ));
+    }
+
+    double *padPtr = reinterpret_cast<double *>(pabyGpkg + 8);
+    memcpy(&padPtr[0], &MinX, sizeof(double));
+    memcpy(&padPtr[1], &MaxX, sizeof(double));
+    memcpy(&padPtr[2], &MinY, sizeof(double));
+    memcpy(&padPtr[3], &MaxY, sizeof(double));
+
+    if (iEnvelope == 2 || iEnvelope == 4)
+    {
+        memcpy(&padPtr[4], &MinZ, sizeof(double));
+        memcpy(&padPtr[5], &MaxZ, sizeof(double));
+    }
+
+    return true;
+}
+
 OGRGeometry *GPkgGeometryToOGR(const GByte *pabyGpkg, size_t nGpkgLen,
                                OGRSpatialReference *poSrs)
 {
@@ -503,4 +576,89 @@ OGRGeometry *GPkgGeometryToOGR(const GByte *pabyGpkg, size_t nGpkgLen,
         return nullptr;
 
     return poGeom;
+}
+
+/************************************************************************/
+/*                     OGRGeoPackageGetHeader()                         */
+/************************************************************************/
+
+bool OGRGeoPackageGetHeader(sqlite3_context * /*pContext*/, int /*argc*/,
+                            sqlite3_value **argv, GPkgHeader *psHeader,
+                            bool bNeedExtent, bool bNeedExtent3D, int iGeomIdx)
+{
+
+    // Extent3D implies extent
+    const bool bNeedAnyExtent{bNeedExtent || bNeedExtent3D};
+
+    if (sqlite3_value_type(argv[iGeomIdx]) != SQLITE_BLOB)
+    {
+        memset(psHeader, 0, sizeof(*psHeader));
+        return false;
+    }
+    const int nBLOBLen = sqlite3_value_bytes(argv[iGeomIdx]);
+    const GByte *pabyBLOB =
+        reinterpret_cast<const GByte *>(sqlite3_value_blob(argv[iGeomIdx]));
+
+    if (nBLOBLen < 8)
+    {
+        memset(psHeader, 0, sizeof(*psHeader));
+        return false;
+    }
+    else if (GPkgHeaderFromWKB(pabyBLOB, nBLOBLen, psHeader) != OGRERR_NONE)
+    {
+        bool bEmpty = false;
+        memset(psHeader, 0, sizeof(*psHeader));
+        if (OGRSQLiteGetSpatialiteGeometryHeader(
+                pabyBLOB, nBLOBLen, &(psHeader->iSrsId), nullptr, &bEmpty,
+                &(psHeader->MinX), &(psHeader->MinY), &(psHeader->MaxX),
+                &(psHeader->MaxY)) == OGRERR_NONE)
+        {
+            psHeader->bEmpty = bEmpty;
+            psHeader->bExtentHasXY = !bEmpty;
+            if (!bNeedExtent3D && !(bEmpty && bNeedAnyExtent))
+                return true;
+        }
+
+        return false;
+    }
+
+    if (psHeader->bEmpty && bNeedAnyExtent)
+    {
+        return false;
+    }
+    else if (!psHeader->bExtentHasXY && bNeedExtent && !bNeedExtent3D)
+    {
+        OGREnvelope sEnvelope;
+        if (OGRWKBGetBoundingBox(pabyBLOB + psHeader->nHeaderLen,
+                                 static_cast<size_t>(nBLOBLen) -
+                                     psHeader->nHeaderLen,
+                                 sEnvelope))
+        {
+            psHeader->MinX = sEnvelope.MinX;
+            psHeader->MaxX = sEnvelope.MaxX;
+            psHeader->MinY = sEnvelope.MinY;
+            psHeader->MaxY = sEnvelope.MaxY;
+            return true;
+        }
+        return false;
+    }
+    else if (!psHeader->bExtentHasZ && bNeedExtent3D)
+    {
+        OGREnvelope3D sEnvelope3D;
+        if (OGRWKBGetBoundingBox(pabyBLOB + psHeader->nHeaderLen,
+                                 static_cast<size_t>(nBLOBLen) -
+                                     psHeader->nHeaderLen,
+                                 sEnvelope3D))
+        {
+            psHeader->MinX = sEnvelope3D.MinX;
+            psHeader->MaxX = sEnvelope3D.MaxX;
+            psHeader->MinY = sEnvelope3D.MinY;
+            psHeader->MaxY = sEnvelope3D.MaxY;
+            psHeader->MinZ = sEnvelope3D.MinZ;
+            psHeader->MaxZ = sEnvelope3D.MaxZ;
+            return true;
+        }
+        return false;
+    }
+    return true;
 }

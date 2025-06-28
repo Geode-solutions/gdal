@@ -21,6 +21,9 @@ The driver does support creating new files, but the input data must be
 exactly formatted as a SRTM-3 or SRTM-1 cell. That is the size, and
 bounds must be appropriate for a cell.
 
+Starting with GDAL 3.10, the driver also supports reading and writing 0.5
+degree resolution SRTM HGT files.
+
 See Also:
 
 -  `SRTM
@@ -28,11 +31,13 @@ See Also:
 -  `SRTM FAQ <http://www2.jpl.nasa.gov/srtm/faq.html>`__
 -  `SRTM data <http://dds.cr.usgs.gov/srtm/version2_1/>`__
 
-NOTE: Implemented as ``gdal/frmts/srtmhgt/srtmhgtdataset.cpp``.
+NOTE: Implemented as :source_file:`frmts/srtmhgt/srtmhgtdataset.cpp`.
 
 Driver capabilities
 -------------------
 
 .. supports_georeferencing::
+
+.. supports_createcopy::
 
 .. supports_virtualio::

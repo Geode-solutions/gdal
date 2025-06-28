@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test basic read support for all datatypes from a TileDB array.
@@ -10,30 +9,31 @@
 ###############################################################################
 # Copyright (c) 2019, TileDB, Inc
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
 import pytest
 
+from osgeo import gdal
 
-@pytest.mark.require_driver("TileDB")
+pytestmark = pytest.mark.require_driver("TileDB")
+
+
 def test_tiledb_open():
     ut = gdaltest.GDALTest("TileDB", "tiledb_array", 1, 4857)
     ut.testOpen()
+
+
+def test_tiledb_open_does_not_exist():
+    with pytest.raises(Exception, match="Failed to open"):
+        gdal.OpenEx("tiledb_does_not_exist_array", gdal.OF_READONLY, ["TileDB"])
+
+
+###############################################################################
+
+
+def test_tiledb_force_identify():
+
+    drv = gdal.IdentifyDriverEx("data/tiledb_array", allowed_drivers=["TileDB"])
+    assert drv is not None

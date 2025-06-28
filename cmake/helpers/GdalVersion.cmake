@@ -16,8 +16,10 @@ GdalVersion
 
 #]=======================================================================]
 
+set(GDAL_ROOT_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../..")
+
 # parse the version number from gdal_version.h and include in GDAL_MAJOR_VERSION and GDAL_MINOR_VERSION
-file(READ ${PROJECT_SOURCE_DIR}/gcore/gdal_version.h.in GDAL_VERSION_H_CONTENTS)
+file(READ ${GDAL_ROOT_SOURCE_DIR}/gcore/gdal_version.h.in GDAL_VERSION_H_CONTENTS)
 string(REGEX MATCH "GDAL_VERSION_MAJOR[ \t]+([0-9]+)"
        GDAL_VERSION_MAJOR ${GDAL_VERSION_H_CONTENTS})
 string(REGEX MATCH "([0-9]+)"
@@ -35,13 +37,51 @@ string(REGEX MATCH "GDAL_VERSION_BUILD[ \t]+([0-9]+)"
 string(REGEX MATCH "([0-9]+)"
        GDAL_VERSION_BUILD ${GDAL_VERSION_BUILD})
 
-if ((EXISTS "${PROJECT_SOURCE_DIR}/gcore/gdal_version.h") AND NOT ("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}"))
+if (STANDALONE)
+    return()
+endif()
+
+if ((EXISTS "${GDAL_ROOT_SOURCE_DIR}/gcore/gdal_version.h") AND NOT ("${GDAL_ROOT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}"))
     # Try to detect issues when building with cmake out of source tree, but against a previous build done in source tree
-    message(FATAL_ERROR "${PROJECT_SOURCE_DIR}/gcore/gdal_version.h was found, and likely conflicts with ${PROJECT_BINARY_DIR}/gcore/gdal_version.h")
+    message(FATAL_ERROR "${GDAL_ROOT_SOURCE_DIR}/gcore/gdal_version.h was found, and likely conflicts with ${PROJECT_BINARY_DIR}/gcore/gdal_version.h")
 endif ()
 
-if (EXISTS ${PROJECT_SOURCE_DIR}/.git)
+if (EXISTS ${GDAL_ROOT_SOURCE_DIR}/.git)
     set(GDAL_DEV_SUFFIX "dev")
+
+    # Try look in the Git tags to see if it is a special version
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" "tag" "--points-at" "HEAD"
+            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+            RESULT_VARIABLE git_result
+            OUTPUT_VARIABLE git_tags
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+
+        if(git_result EQUAL 0)
+            # First replaces the line breaks by a ";", so we can iterate over it
+            string(REGEX REPLACE "\r?\n" ";" git_tags "${git_tags}")
+            foreach(git_tag ${git_tags})
+                # GDAL is currently not fully compatible with Semantic Versioning 2.0.0, as there would have to be a minus before the pre-release tag, so we allow it to be omitted.
+                if (git_tag MATCHES "^v${GDAL_VERSION_MAJOR}.${GDAL_VERSION_MINOR}.${GDAL_VERSION_REV}-?(.*)")
+                    # ${CMAKE_MATCH_1} contains the pre-release suffix
+                    if (NOT CMAKE_MATCH_1)
+                        # In case there is no pre-release suffix, it is a release version.
+                        set(GDAL_DEV_SUFFIX "")
+                        # Ignore further suffixes (e.g., a RC tag)
+                        break()
+                    else()
+                        # Take the pre-release suffix as dev suffix. Normally there should only be one pre-release tag,
+                        # so we don't need any logic here to compare the pre-release tags with each other. However,
+                        # as there may still be a release tag without a pre-release suffix, we do not break the loop.
+                        set(GDAL_DEV_SUFFIX "${CMAKE_MATCH_1}")
+                    endif()
+                endif()
+            endforeach()
+        endif()
+    endif()
 else()
     set(GDAL_DEV_SUFFIX "")
 endif()
@@ -52,11 +92,11 @@ set(GDAL_RELEASE_DATE "$ENV{GDAL_RELEASE_DATE}")
 
 add_custom_target(generate_gdal_version_h
                   COMMAND ${CMAKE_COMMAND}
-                    "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+                    "-DSOURCE_DIR=${GDAL_ROOT_SOURCE_DIR}"
                     "-DBINARY_DIR=${PROJECT_BINARY_DIR}"
                     "-DGDAL_SHA1SUM=${GDAL_SHA1SUM}"
                     "-DGDAL_RELEASE_DATE=${GDAL_RELEASE_DATE}"
-                    -P "${PROJECT_SOURCE_DIR}/cmake/helpers/generate_gdal_version_h.cmake"
+                    -P "${GDAL_ROOT_SOURCE_DIR}/cmake/helpers/generate_gdal_version_h.cmake"
                   VERBATIM)
 
 if (WIN32 AND NOT MINGW)

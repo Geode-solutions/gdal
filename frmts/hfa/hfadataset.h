@@ -9,23 +9,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef HFADATASET_H_INCLUDED
@@ -53,30 +37,31 @@ class HFADataset final : public GDALPamDataset
 {
     friend class HFARasterBand;
 
-    HFAHandle hHFA;
+    HFAHandle hHFA = nullptr;
 
-    bool bMetadataDirty;
+    bool bMetadataDirty = false;
 
-    bool bGeoDirty;
-    double adfGeoTransform[6];
+    bool bGeoDirty = false;
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
 
-    bool bIgnoreUTM;
+    bool bIgnoreUTM = false;
 
     CPLErr ReadProjection();
     CPLErr WriteProjection();
-    bool bForceToPEString;
+    bool bForceToPEString = false;
+    bool bDisablePEString = false;
 
-    int nGCPCount;
-    GDAL_GCP asGCPList[36];
+    std::vector<gdal::GCP> m_aoGCPs{};
 
     void UseXFormStack(int nStepCount, Efga_Polynomial *pasPolyListForward,
                        Efga_Polynomial *pasPolyListReverse);
 
   protected:
     virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, int, int *, GSpacing nPixelSpace,
-                             GSpacing nLineSpace, GSpacing nBandSpace,
+                             GDALDataType, int, BANDMAP_TYPE,
+                             GSpacing nPixelSpace, GSpacing nLineSpace,
+                             GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg) override;
 
   public:
@@ -102,8 +87,8 @@ class HFADataset final : public GDALPamDataset
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
-    virtual CPLErr GetGeoTransform(double *) override;
-    virtual CPLErr SetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    virtual CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
     virtual int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
@@ -239,7 +224,7 @@ class HFARasterAttributeTable final : public GDALRasterAttributeTable
         aField.bIsBinValues = bIsBinValues;
         aField.bConvertColors = bConvertColors;
 
-        aoFields.push_back(aField);
+        aoFields.push_back(std::move(aField));
     }
 
     void CreateDT()
@@ -269,9 +254,10 @@ class HFARasterAttributeTable final : public GDALRasterAttributeTable
     virtual int GetValueAsInt(int iRow, int iField) const override;
     virtual double GetValueAsDouble(int iRow, int iField) const override;
 
-    virtual void SetValue(int iRow, int iField, const char *pszValue) override;
-    virtual void SetValue(int iRow, int iField, double dfValue) override;
-    virtual void SetValue(int iRow, int iField, int nValue) override;
+    virtual CPLErr SetValue(int iRow, int iField,
+                            const char *pszValue) override;
+    virtual CPLErr SetValue(int iRow, int iField, double dfValue) override;
+    virtual CPLErr SetValue(int iRow, int iField, int nValue) override;
 
     virtual CPLErr ValuesIO(GDALRWFlag eRWFlag, int iField, int iStartRow,
                             int iLength, double *pdfData) override;

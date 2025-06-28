@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_xlsx.h"
@@ -55,7 +39,7 @@ static int OGRXLSXDriverIdentify(GDALOpenInfo *poOpenInfo)
     if (STARTS_WITH(poOpenInfo->pszFilename, "/vsizip/") ||
         STARTS_WITH(poOpenInfo->pszFilename, "/vsitar/"))
     {
-        const char *pszExt = CPLGetExtension(poOpenInfo->pszFilename);
+        const char *pszExt = poOpenInfo->osExtension.c_str();
         return EQUAL(pszExt, "XLSX") || EQUAL(pszExt, "XLSM") ||
                EQUAL(pszExt, "XLSX}") || EQUAL(pszExt, "XLSM}");
     }
@@ -78,7 +62,7 @@ static int OGRXLSXDriverIdentify(GDALOpenInfo *poOpenInfo)
         {
             return TRUE;
         }
-        const char *pszExt = CPLGetExtension(poOpenInfo->pszFilename);
+        const char *pszExt = poOpenInfo->osExtension.c_str();
         if (EQUAL(pszExt, "XLSX") || EQUAL(pszExt, "XLSM"))
         {
             CPLDebug(
@@ -164,7 +148,8 @@ static GDALDataset *OGRXLSXDriverOpen(GDALOpenInfo *poOpenInfo)
     osTmpFilename = CPLSPrintf("%s/xl/styles.xml", osPrefixedFilename.c_str());
     VSILFILE *fpStyles = VSIFOpenL(osTmpFilename, "rb");
 
-    OGRXLSXDataSource *poDS = new OGRXLSXDataSource();
+    OGRXLSXDataSource *poDS =
+        new OGRXLSXDataSource(poOpenInfo->papszOpenOptions);
 
     if (!poDS->Open(pszFilename, osPrefixedFilename.c_str(), fpWorkbook,
                     fpWorkbookRels, fpSharedStrings, fpStyles,
@@ -191,7 +176,7 @@ static GDALDataset *OGRXLSXDriverCreate(const char *pszName, int /* nXSize */,
                                         char **papszOptions)
 
 {
-    if (!EQUAL(CPLGetExtension(pszName), "XLSX"))
+    if (!EQUAL(CPLGetExtensionSafe(pszName).c_str(), "XLSX"))
     {
         CPLError(CE_Failure, CPLE_AppDefined, "File extension should be XLSX");
         return nullptr;
@@ -214,7 +199,7 @@ static GDALDataset *OGRXLSXDriverCreate(const char *pszName, int /* nXSize */,
     /* -------------------------------------------------------------------- */
     /*      Try to create datasource.                                       */
     /* -------------------------------------------------------------------- */
-    OGRXLSXDataSource *poDS = new OGRXLSXDataSource();
+    OGRXLSXDataSource *poDS = new OGRXLSXDataSource(nullptr);
 
     if (!poDS->Create(pszName, papszOptions))
     {
@@ -242,6 +227,9 @@ void RegisterOGRXLSX()
     poDriver->SetMetadataItem(GDAL_DCAP_CREATE_LAYER, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_DELETE_LAYER, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_CREATE_FIELD, "YES");
+    poDriver->SetMetadataItem(GDAL_DCAP_DELETE_FIELD, "YES");
+    poDriver->SetMetadataItem(GDAL_DCAP_REORDER_FIELDS, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_ALTER_FIELD_DEFN_FLAGS, "Name Type");
 
     poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
                               "MS Office Open XML spreadsheet");
@@ -258,6 +246,29 @@ void RegisterOGRXLSX()
     poDriver->SetMetadataItem(GDAL_DCAP_CURVE_GEOMETRIES, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_Z_GEOMETRIES, "YES");
     poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
+
+    poDriver->SetMetadataItem(GDAL_DCAP_UPDATE, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_UPDATE_ITEMS, "Features");
+
+    poDriver->SetMetadataItem(
+        GDAL_DMD_OPENOPTIONLIST,
+        "<OpenOptionList>"
+        "  <Option name='FIELD_TYPES' type='string-select' "
+        "description='If set to STRING, all fields will be of type String. "
+        "Otherwise the driver autodetects the field type from field content.' "
+        "default='AUTO'>"
+        "    <Value>AUTO</Value>"
+        "    <Value>STRING</Value>"
+        "  </Option>"
+        "  <Option name='HEADERS' type='string-select' "
+        "description='Defines if the first line should be considered as "
+        "containing the name of the fields.' "
+        "default='AUTO'>"
+        "    <Value>AUTO</Value>"
+        "    <Value>FORCE</Value>"
+        "    <Value>DISABLE</Value>"
+        "  </Option>"
+        "</OpenOptionList>");
 
     poDriver->pfnIdentify = OGRXLSXDriverIdentify;
     poDriver->pfnOpen = OGRXLSXDriverOpen;

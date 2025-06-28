@@ -8,6 +8,16 @@ add_gdal_driver(
           ogrhanaresultlayer.cpp
           ogrhanatablelayer.cpp
           ogrhanautils.cpp
-          PLUGIN_CAPABLE)
+  CORE_SOURCES
+          ogrhanadrivercore.cpp
+  PLUGIN_CAPABLE
+  NO_SHARED_SYMBOL_WITH_CORE
+  NO_CXX_WFLAGS_EFFCXX
+  NO_WFLAG_OLD_STYLE_CAST
+)
+if(NOT TARGET ogr_HANA)
+    return()
+endif()
+
 gdal_standard_includes(ogr_HANA)
 gdal_target_link_libraries(ogr_HANA PRIVATE ODBCCPP::ODBCCPP)

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR samples
 # Purpose:  Dispatch features into layers according to the value of some fields
@@ -11,23 +10,7 @@
 ###############################################################################
 # Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import sys
@@ -39,7 +22,7 @@ def Usage():
     print("Usage: ogr_dispatch.py [-f format] -src name -dst name [-field field]+")
     print("                [-25D_as_2D] [-multi_as_single]")
     print("                [-remove_dispatch_fields] [-prefix_with_layer_name]")
-    print("                [-dsco KEY=VALUE]* [-lco KEY=VALUE]* [-a_srs srs_def]")
+    print("                [-dsco KEY=VALUE]... [-lco KEY=VALUE]... [-a_srs srs_def]")
     print(
         "                [-style_as_field] [-where restricted_where] [-gt n] [-quiet]"
     )
@@ -99,7 +82,7 @@ def wkbFlatten(x):
 ###############################################################
 
 
-class Options(object):
+class Options:
     def __init__(self):
         self.lco = []
         self.dispatch_fields = []

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test JP2 metadata support.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -35,6 +18,19 @@ import pytest
 
 from osgeo import gdal
 
+
+def have_jpeg2000_capable_driver():
+    # JP2MrSID doesn't manage to open data/jpeg2000/IMG_md_ple_R1C1.jp2
+    for drv_name in ["JP2KAK", "JP2ECW", "JP2OpenJPEG"]:
+        if gdal.GetDriverByName(drv_name):
+            return True
+    return False
+
+
+pytestmark = pytest.mark.skipif(
+    not have_jpeg2000_capable_driver(), reason="No JPEG2000 capable driver"
+)
+
 ###############################################################################
 # Test bugfix for #5249 (Irrelevant ERDAS GeoTIFF JP2Box read)
 
@@ -42,12 +38,9 @@ from osgeo import gdal
 def test_jp2metadata_1():
 
     ds = gdal.Open("data/jpeg2000/erdas_foo.jp2")
-    if ds is None:
-        pytest.skip()
-
     wkt = ds.GetProjectionRef()
     gt = ds.GetGeoTransform()
-    assert wkt.startswith('PROJCS["ETRS89')
+    assert wkt.startswith('PROJCS["ETRS89') or wkt.startswith('PROJCS["EUREF-FIN')
     expected_gt = (356000.0, 0.5, 0.0, 7596000.0, 0.0, -0.5)
     for i in range(6):
         assert gt[i] == pytest.approx(expected_gt[i], abs=1e-5)
@@ -64,8 +57,6 @@ def _test_jp2metadata(file_path, rpc_values_to_check=None):
         pass
 
     ds = gdal.Open(file_path, gdal.GA_ReadOnly)
-    if ds is None:
-        pytest.skip()
 
     filelist = ds.GetFileList()
 
@@ -177,15 +168,11 @@ def test_jp2metadata_2b():
 
 def test_jp2metadata_3():
 
-    gdal.SetConfigOption("GDAL_IGNORE_AXIS_ORIENTATION", "YES")
-
     exp_wkt = 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","4326"]]'
 
-    ds = gdal.Open("data/jpeg2000/ll.jp2")
-    if ds is None:
-        gdal.SetConfigOption("GDAL_IGNORE_AXIS_ORIENTATION", "NO")
-        pytest.skip()
-    wkt = ds.GetProjection()
+    with gdal.config_option("GDAL_IGNORE_AXIS_ORIENTATION", "YES"):
+        ds = gdal.Open("data/jpeg2000/ll.jp2")
+        wkt = ds.GetProjection()
 
     if wkt != exp_wkt:
         print("got: ", wkt)
@@ -206,8 +193,6 @@ def test_jp2metadata_3():
 
     ds = None
 
-    gdal.SetConfigOption("GDAL_IGNORE_AXIS_ORIENTATION", "NO")
-
 
 ###############################################################################
 # Test reading a file with axis orientation set properly for an alternate
@@ -219,8 +204,6 @@ def test_jp2metadata_4():
     exp_wkt = 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","4326"]]'
 
     ds = gdal.Open("data/jpeg2000/gmljp2_dtedsm_epsg_4326_axes.jp2")
-    if ds is None:
-        pytest.skip()
     wkt = ds.GetProjection()
 
     if wkt != exp_wkt:
@@ -260,9 +243,6 @@ def test_jp2metadata_4():
 def test_jp2metadata_5():
 
     ds = gdal.Open("data/jpeg2000/gmljp2_epsg3035_easting_northing.jp2")
-    if ds is None:
-        pytest.skip()
-
     sr = ds.GetSpatialRef()
     assert sr.GetAuthorityCode(None) == "3035"
 
@@ -303,19 +283,9 @@ def test_jp2metadata_getjpeg2000structure():
     assert ret is not None
 
     with gdaltest.config_option("GDAL_JPEG2000_STRUCTURE_MAX_LINES", "15"):
-        gdal.ErrorReset()
-        with gdaltest.error_handler():
-            ret = gdal.GetJPEG2000StructureAsString(
-                "data/jpeg2000/byte.jp2", ["ALL=YES"]
-            )
-        assert ret is not None
-        assert gdal.GetLastErrorMsg() != ""
+        with pytest.raises(Exception):
+            gdal.GetJPEG2000StructureAsString("data/jpeg2000/byte.jp2", ["ALL=YES"])
 
     with gdaltest.config_option("GDAL_JPEG2000_STRUCTURE_MAX_LINES", "150"):
-        gdal.ErrorReset()
-        with gdaltest.error_handler():
-            ret = gdal.GetJPEG2000StructureAsString(
-                "data/jpeg2000/byte.jp2", ["ALL=YES"]
-            )
-        assert ret is not None
-        assert gdal.GetLastErrorMsg() != ""
+        with pytest.raises(Exception):
+            gdal.GetJPEG2000StructureAsString("data/jpeg2000/byte.jp2", ["ALL=YES"])

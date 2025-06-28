@@ -68,7 +68,7 @@ int LLVMFuzzerInitialize(int * /*argc*/, char ***argv)
     const char *exe_path = (*argv)[0];
     if (CPLGetConfigOption("GDAL_DATA", nullptr) == nullptr)
     {
-        CPLSetConfigOption("GDAL_DATA", CPLGetPath(exe_path));
+        CPLSetConfigOption("GDAL_DATA", CPLGetPathSafe(exe_path).c_str());
     }
     CPLSetConfigOption("CPL_TMPDIR", "/tmp");
     CPLSetConfigOption("DISABLE_OPEN_REAL_NETCDF_FILES", "YES");
@@ -121,7 +121,7 @@ static void ExploreArray(const std::shared_ptr<GDALMDArray> &poArray,
     constexpr size_t MAX_ALLOC = 1000 * 1000 * 1000U;
     if (pszDriverName && EQUAL(pszDriverName, "GRIB"))
     {
-        const auto poDims = poArray->GetDimensions();
+        const auto &poDims = poArray->GetDimensions();
         if (nDimCount >= 2 &&
             poDims[nDimCount - 2]->GetSize() >
                 MAX_ALLOC / sizeof(double) / poDims[nDimCount - 1]->GetSize())
@@ -213,7 +213,15 @@ int LLVMFuzzerTestOneInput(const uint8_t *buf, size_t len)
 #else
     const char *pszGDALFilename = GDAL_FILENAME;
 #endif
-    GDALDatasetH hDS = GDALOpen(pszGDALFilename, GA_ReadOnly);
+
+#ifdef DRIVER_NAME
+    const char *const apszAllowedDrivers[] = {DRIVER_NAME, nullptr};
+#else
+    const char *const *apszAllowedDrivers = nullptr;
+#endif
+
+    GDALDatasetH hDS = GDALOpenEx(pszGDALFilename, GDAL_OF_RASTER,
+                                  apszAllowedDrivers, nullptr, nullptr);
     if (hDS)
     {
         const int nTotalBands = GDALGetRasterCount(hDS);
@@ -241,6 +249,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *buf, size_t len)
                 if (hRawDS)
                 {
                     nSimultaneousBands = GDALGetRasterCount(hRawDS);
+                    // shouldn't happen, but will make Coverity Scan happy
+                    if (nSimultaneousBands == 0)
+                        nSimultaneousBands = 1;
                     GDALClose(hRawDS);
                 }
             }

@@ -10,23 +10,7 @@
  *  Copyright (c) 2016 Alexandr Borzykh
  *  Copyright (c) 2016 NextGIS, <info@nextgis.com>
  *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in all
- *  copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
+  * SPDX-License-Identifier: MIT
  *******************************************************************************/
 #ifndef CADGEOMETRIES_H
 #define CADGEOMETRIES_H
@@ -64,6 +48,11 @@ class OCAD_EXTERN CADGeometry
 public:
     CADGeometry();
     virtual ~CADGeometry();
+    CADGeometry(const CADGeometry&) = default;
+    CADGeometry& operator=(const CADGeometry&) = default;
+    CADGeometry(CADGeometry&&) = default;
+    CADGeometry& operator=(CADGeometry&&) = default;
+
     /**
      * @brief The CAD geometry types enum
      */
@@ -122,7 +111,6 @@ class CADUnknown : public CADGeometry
 {
 public:
     CADUnknown();
-    virtual ~CADUnknown(){}
 
     virtual void print() const override;
     void         transform( const Matrix& matrix ) override;
@@ -136,7 +124,7 @@ class OCAD_EXTERN CADPoint3D : public CADGeometry
 public:
     CADPoint3D();
     CADPoint3D( const CADVector& positionIn, double thicknessIn );
-    virtual ~CADPoint3D(){}
+
     CADVector getPosition() const;
     void      setPosition( const CADVector& value );
 
@@ -162,7 +150,7 @@ class OCAD_EXTERN CADLine : public CADGeometry
 public:
     CADLine();
     CADLine( const CADPoint3D& startIn, const CADPoint3D& endIn );
-    virtual ~CADLine(){}
+
     CADPoint3D getStart() const;
     void       setStart( const CADPoint3D& value );
 
@@ -183,7 +171,7 @@ class OCAD_EXTERN CADPolyline3D : public CADGeometry
 {
 public:
     CADPolyline3D();
-    virtual ~CADPolyline3D(){}
+
     void   addVertex( const CADVector& vertex );
     size_t getVertexCount() const;
     CADVector& getVertex( size_t index );
@@ -202,7 +190,6 @@ class OCAD_EXTERN CADLWPolyline : public CADPolyline3D
 {
 public:
     CADLWPolyline();
-    virtual ~CADLWPolyline(){}
 
     double getConstWidth() const;
     void   setConstWidth( double value );
@@ -239,7 +226,6 @@ class OCAD_EXTERN CADCircle : public CADPoint3D
 {
 public:
     CADCircle();
-    virtual ~CADCircle(){}
 
     double getRadius() const;
     void   setRadius( double value );
@@ -256,7 +242,6 @@ class OCAD_EXTERN CADText : public CADPoint3D
 {
 public:
     CADText();
-    virtual ~CADText(){}
 
     std::string getTextValue() const;
     void   setTextValue( const std::string& value );
@@ -285,7 +270,6 @@ class OCAD_EXTERN CADArc : public CADCircle
 {
 public:
     CADArc();
-    virtual ~CADArc(){}
 
     double getStartingAngle() const;
     void   setStartingAngle( double value );
@@ -306,7 +290,6 @@ class OCAD_EXTERN CADEllipse : public CADArc
 {
 public:
     CADEllipse();
-    virtual ~CADEllipse(){}
 
     double getAxisRatio() const;
     void   setAxisRatio( double value );
@@ -327,7 +310,6 @@ class OCAD_EXTERN CADSpline : public CADGeometry
 {
 public:
     CADSpline();
-    virtual ~CADSpline(){}
 
     long getScenario() const;
     void setScenario( long value );
@@ -377,7 +359,6 @@ class OCAD_EXTERN CADSolid : public CADPoint3D
 {
 public:
     CADSolid();
-    virtual ~CADSolid(){}
 
     double getElevation() const;
     void   setElevation( double value );
@@ -398,7 +379,6 @@ class OCAD_EXTERN CADRay : public CADPoint3D
 {
 public:
     CADRay();
-    virtual ~CADRay(){}
 
     CADVector getVectVector() const;
     void      setVectVector( const CADVector& value );
@@ -413,7 +393,7 @@ class OCAD_EXTERN CADHatch : public CADGeometry
 {
 public:
     CADHatch();
-    virtual ~CADHatch(){}
+    ~CADHatch() override;
 };
 
 /**
@@ -438,7 +418,6 @@ public:
     }
 
     CADImage();
-    virtual ~CADImage(){}
 
     CADVector getVertInsertionPoint() const;
     void      setVertInsertionPoint( const CADVector& value );
@@ -500,7 +479,6 @@ class OCAD_EXTERN CADMText : public CADText
 {
 public:
     CADMText();
-    virtual ~CADMText(){}
 
     double getRectWidth() const;
     void   setRectWidth( double value );
@@ -533,7 +511,6 @@ class OCAD_EXTERN CADFace3D : public CADGeometry
 {
 public:
     CADFace3D();
-    virtual ~CADFace3D(){}
 
     void      addCorner( const CADVector& corner );
     CADVector getCorner( size_t index );
@@ -555,7 +532,6 @@ class OCAD_EXTERN CADPolylinePFace : public CADGeometry
 {
 public:
     CADPolylinePFace();
-    virtual ~CADPolylinePFace(){}
 
     void addVertex( const CADVector& vertex );
 
@@ -572,7 +548,6 @@ class OCAD_EXTERN CADXLine : public CADRay
 {
 public:
     CADXLine();
-    virtual ~CADXLine(){}
 
     virtual void print() const override;
 };
@@ -584,7 +559,6 @@ class OCAD_EXTERN CADMLine : public CADPoint3D
 {
 public:
     CADMLine();
-    virtual ~CADMLine(){}
 
     double getScale() const;
     void   setScale( double value );
@@ -611,7 +585,6 @@ class OCAD_EXTERN CADAttrib : public CADText
 {
 public:
     CADAttrib();
-    virtual ~CADAttrib(){}
 
     double getElevation() const;
     void   setElevation( double );
@@ -641,7 +614,6 @@ class OCAD_EXTERN CADAttdef : public CADAttrib
 {
 public:
     CADAttdef();
-    virtual ~CADAttdef(){}
 
     std::string getPrompt() const;
     void   setPrompt( const std::string& );

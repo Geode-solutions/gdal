@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #ifndef INCLUDE_PRIV_CPCIDSKFILE_H
 #define INCLUDE_PRIV_CPCIDSKFILE_H
@@ -49,11 +33,11 @@ namespace PCIDSK
 /************************************************************************/
     class CPCIDSKFile final: public PCIDSKFile
     {
-        friend PCIDSKFile PCIDSK_DLL *Open( std::string filename,
-            std::string access, const PCIDSKInterfaces *interfaces, int max_channel_count_allowed );
+        friend PCIDSKFile PCIDSK_DLL *Open( const std::string& filename,
+            const std::string& access, const PCIDSKInterfaces *interfaces, int max_channel_count_allowed );
     public:
 
-        CPCIDSKFile( std::string filename );
+        CPCIDSKFile( const std::string& filename );
         virtual ~CPCIDSKFile();
 
         virtual PCIDSKInterfaces *GetInterfaces() override { return &interfaces; }
@@ -94,10 +78,10 @@ namespace PCIDSK
         std::string GetFilename() const { return base_filename; }
 
         void      GetIODetails( void ***io_handle_pp, Mutex ***io_mutex_pp,
-                                std::string filename="", bool writable=false ) override;
+                                const std::string& filename=std::string(), bool writable=false ) override;
 
         bool      GetEDBFileDetails( EDBFile** file_p, Mutex **io_mutex_p,
-                                     std::string filename );
+                                     const std::string& filename );
 
         std::string GetUniqueEDBFilename() override;
 

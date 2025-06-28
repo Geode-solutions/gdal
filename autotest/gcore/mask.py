@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test RFC 15 "mask band" default functionality (nodata/alpha/etc)
@@ -10,23 +9,7 @@
 # Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -36,6 +19,14 @@ import gdaltest
 import pytest
 
 from osgeo import gdal
+
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 ###############################################################################
 # Verify the checksum and flags for "all valid" case.
@@ -64,6 +55,10 @@ def test_mask_1():
 # Verify the checksum and flags for "nodata" case.
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_mask_2():
 
     ds = gdal.Open("data/byte.vrt")
@@ -132,16 +127,18 @@ def test_mask_3():
 
 @pytest.mark.require_driver("JPEG")
 @pytest.mark.require_driver("PNM")
-def test_mask_4():
+def test_mask_4(tmp_path):
 
     src_ds = gdal.Open("../gdrivers/data/jpeg/masked.jpg")
 
     assert src_ds is not None, "Failed to open test dataset."
 
+    output_ppm = str(tmp_path / "mask_4.ppm")
+
     # NOTE: for now we copy to PNM since it does everything (overviews too)
     # externally. Should eventually test with gtiff, hfa.
     drv = gdal.GetDriverByName("PNM")
-    ds = drv.CreateCopy("tmp/mask_4.ppm", src_ds)
+    ds = drv.CreateCopy(output_ppm, src_ds)
     src_ds = None
 
     # confirm we got the custom mask on the copied dataset.
@@ -166,10 +163,17 @@ def test_mask_4():
 # masks built for them.
 
 
+@pytest.mark.require_driver("JPEG")
 @pytest.mark.require_driver("PNM")
-def test_mask_5():
+def test_mask_5(tmp_path):
 
-    ds = gdal.Open("tmp/mask_4.ppm", gdal.GA_Update)
+    src_ds = gdal.Open("../gdrivers/data/jpeg/masked.jpg")
+
+    output_ppm = str(tmp_path / "mask_4.ppm")
+    drv = gdal.GetDriverByName("PNM")
+    ds = drv.CreateCopy(output_ppm, src_ds)
+
+    ds = gdal.Open(output_ppm, gdal.GA_Update)
 
     assert ds is not None, "Failed to open test dataset."
 
@@ -194,7 +198,7 @@ def test_mask_5():
     ds = None
 
     # Reopen and confirm we still get same results.
-    ds = gdal.Open("tmp/mask_4.ppm")
+    ds = gdal.Open(output_ppm)
 
     # confirm mask flags on overview.
     ovr = ds.GetRasterBand(1).GetOverview(1)
@@ -211,8 +215,6 @@ def test_mask_5():
     ovr = None
     msk = None
     ds = None
-
-    gdal.GetDriverByName("PNM").Delete("tmp/mask_4.ppm")
 
 
 ###############################################################################
@@ -415,7 +417,8 @@ def test_mask_13():
     ds = drv.CreateCopy("tmp/byte_with_mask.tif", src_ds)
     src_ds = None
 
-    ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+    with gdal.config_option("GDAL_TIFF_INTERNAL_MASK", "NO"):
+        ds.CreateMaskBand(gdal.GMF_PER_DATASET)
     assert ds.GetRasterBand(1).GetMaskBand().IsMaskBand()
 
     cs = ds.GetRasterBand(1).GetMaskBand().Checksum()
@@ -453,7 +456,7 @@ def test_mask_13():
 # Test creation of internal TIFF mask band
 
 
-@gdaltest.require_creation_option("GTiff", "JPEG")
+@pytest.mark.require_creation_option("GTiff", "JPEG")
 def test_mask_14():
 
     src_ds = gdal.Open("data/byte.tif")
@@ -461,18 +464,17 @@ def test_mask_14():
     assert src_ds is not None, "Failed to open test dataset."
 
     drv = gdal.GetDriverByName("GTiff")
-    with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK_TO_8BIT", "FALSE"):
-        ds = drv.CreateCopy("tmp/byte_with_mask.tif", src_ds)
+    with gdal.config_option("GDAL_TIFF_INTERNAL_MASK", "NO"):
+        with gdal.config_option("GDAL_TIFF_INTERNAL_MASK_TO_8BIT", "FALSE"):
+            ds = drv.CreateCopy("tmp/byte_with_mask.tif", src_ds)
     src_ds = None
 
     # The only flag value supported for internal mask is GMF_PER_DATASET
-    with gdaltest.error_handler():
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ret = ds.CreateMaskBand(0)
+    with gdal.quiet_errors():
+        ret = ds.CreateMaskBand(0)
     assert ret != 0, "Error expected"
 
-    with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-        ret = ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+    ret = ds.CreateMaskBand(gdal.GMF_PER_DATASET)
     assert ret == 0, "Creation failed"
     assert ds.GetRasterBand(1).GetMaskBand().IsMaskBand()
 
@@ -485,15 +487,13 @@ def test_mask_14():
     assert cs == 400, "Got wrong checksum for the mask (2)"
 
     # This TIFF dataset has already an internal mask band
-    with gdaltest.error_handler():
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ret = ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+    with gdal.quiet_errors():
+        ret = ds.CreateMaskBand(gdal.GMF_PER_DATASET)
     assert ret != 0, "Error expected"
 
     # This TIFF dataset has already an internal mask band
-    with gdaltest.error_handler():
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ret = ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
+    with gdal.quiet_errors():
+        ret = ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
     assert ret != 0, "Error expected"
 
     ds = None
@@ -512,10 +512,9 @@ def test_mask_14():
 
     # Test fix for #5884
     with gdaltest.SetCacheMax(0):
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            out_ds = drv.CreateCopy(
-                "/vsimem/byte_with_mask.tif", ds, options=["COMPRESS=JPEG"]
-            )
+        out_ds = drv.CreateCopy(
+            "/vsimem/byte_with_mask.tif", ds, options=["COMPRESS=JPEG"]
+        )
 
     assert out_ds.GetRasterBand(1).Checksum() != 0
     cs = ds.GetRasterBand(1).GetMaskBand().Checksum()
@@ -532,7 +531,9 @@ def test_mask_14():
 # Test creation of internal TIFF overview, mask band and mask band of overview
 
 
-def mask_and_ovr(order, method):
+@pytest.mark.parametrize("order", [1, 2, 3, 4])
+@pytest.mark.parametrize("method", ["NEAR", "AVERAGE"])
+def test_mask_and_ovr(order, method):
 
     src_ds = gdal.Open("data/byte.tif")
 
@@ -543,30 +544,32 @@ def mask_and_ovr(order, method):
     src_ds = None
 
     if order == 1:
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+        ds.CreateMaskBand(gdal.GMF_PER_DATASET)
         ds.BuildOverviews(method, overviewlist=[2, 4])
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ds.GetRasterBand(1).GetOverview(0).CreateMaskBand(gdal.GMF_PER_DATASET)
-            ds.GetRasterBand(1).GetOverview(1).CreateMaskBand(gdal.GMF_PER_DATASET)
+        with gdal.quiet_errors():
+            assert (
+                ds.GetRasterBand(1).GetOverview(0).CreateMaskBand(gdal.GMF_PER_DATASET)
+                == gdal.CE_Failure
+            )
+            assert (
+                ds.GetRasterBand(1).GetOverview(1).CreateMaskBand(gdal.GMF_PER_DATASET)
+                == gdal.CE_Failure
+            )
     elif order == 2:
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ds.BuildOverviews(method, overviewlist=[2, 4])
-            ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-            ds.GetRasterBand(1).GetOverview(0).CreateMaskBand(gdal.GMF_PER_DATASET)
-            ds.GetRasterBand(1).GetOverview(1).CreateMaskBand(gdal.GMF_PER_DATASET)
+        ds.BuildOverviews(method, overviewlist=[2, 4])
+        ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+        ds.GetRasterBand(1).GetOverview(0).CreateMaskBand(gdal.GMF_PER_DATASET)
+        ds.GetRasterBand(1).GetOverview(1).CreateMaskBand(gdal.GMF_PER_DATASET)
     elif order == 3:
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ds.BuildOverviews(method, overviewlist=[2, 4])
-            ds.GetRasterBand(1).GetOverview(0).CreateMaskBand(gdal.GMF_PER_DATASET)
-            ds.GetRasterBand(1).GetOverview(1).CreateMaskBand(gdal.GMF_PER_DATASET)
-            ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+        ds.BuildOverviews(method, overviewlist=[2, 4])
+        ds.GetRasterBand(1).GetOverview(0).CreateMaskBand(gdal.GMF_PER_DATASET)
+        ds.GetRasterBand(1).GetOverview(1).CreateMaskBand(gdal.GMF_PER_DATASET)
+        ds.CreateMaskBand(gdal.GMF_PER_DATASET)
     elif order == 4:
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-            ds.GetRasterBand(1).GetMaskBand().Fill(1)
-            # The overview for the mask will be implicitly created and computed.
-            ds.BuildOverviews(method, overviewlist=[2, 4])
+        ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+        ds.GetRasterBand(1).GetMaskBand().Fill(1)
+        # The overview for the mask will be implicitly created and computed.
+        ds.BuildOverviews(method, overviewlist=[2, 4])
 
     if order < 4:
         ds = None
@@ -598,38 +601,6 @@ def mask_and_ovr(order, method):
     ds = None
 
     drv.Delete("tmp/byte_with_ovr_and_mask.tif")
-
-
-def test_mask_15():
-    return mask_and_ovr(1, "NEAREST")
-
-
-def test_mask_16():
-    return mask_and_ovr(2, "NEAREST")
-
-
-def test_mask_17():
-    return mask_and_ovr(3, "NEAREST")
-
-
-def test_mask_18():
-    return mask_and_ovr(4, "NEAREST")
-
-
-def test_mask_15_avg():
-    return mask_and_ovr(1, "AVERAGE")
-
-
-def test_mask_16_avg():
-    return mask_and_ovr(2, "AVERAGE")
-
-
-def test_mask_17_avg():
-    return mask_and_ovr(3, "AVERAGE")
-
-
-def test_mask_18_avg():
-    return mask_and_ovr(4, "AVERAGE")
 
 
 ###############################################################################
@@ -754,7 +725,8 @@ def test_mask_22():
 
     drv = gdal.GetDriverByName("GTiff")
     ds = drv.Create("tmp/mask_22.tif", 20, 20)
-    ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+    with gdal.config_option("GDAL_TIFF_INTERNAL_MASK", "NO"):
+        ds.CreateMaskBand(gdal.GMF_PER_DATASET)
 
     cs = ds.GetRasterBand(1).GetMaskBand().Checksum()
     assert cs == 0, "Got wrong checksum for the mask"
@@ -792,7 +764,7 @@ def test_mask_22():
 # internal mask (#3800)
 
 
-@gdaltest.require_creation_option("GTiff", "JPEG")
+@pytest.mark.require_creation_option("GTiff", "JPEG")
 def test_mask_23():
 
     drv = gdal.GetDriverByName("GTiff")
@@ -800,14 +772,14 @@ def test_mask_23():
     src_ds = drv.Create(
         "tmp/mask_23_src.tif", 3000, 2000, 3, options=["TILED=YES", "SPARSE_OK=YES"]
     )
-    src_ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+    with gdal.config_option("GDAL_TIFF_INTERNAL_MASK", "NO"):
+        src_ds.CreateMaskBand(gdal.GMF_PER_DATASET)
 
     gdal.ErrorReset()
     with gdaltest.SetCacheMax(15000000):
-        with gdaltest.config_option("GDAL_TIFF_INTERNAL_MASK", "YES"):
-            ds = drv.CreateCopy(
-                "tmp/mask_23_dst.tif", src_ds, options=["TILED=YES", "COMPRESS=JPEG"]
-            )
+        ds = drv.CreateCopy(
+            "tmp/mask_23_dst.tif", src_ds, options=["TILED=YES", "COMPRESS=JPEG"]
+        )
 
     del ds
     error_msg = gdal.GetLastErrorMsg()
@@ -885,7 +857,8 @@ def test_mask_25():
 
     # Per-band mask
     ds = gdal.GetDriverByName("GTiff").Create("/vsimem/mask_25.tif", 1, 1)
-    ds.GetRasterBand(1).CreateMaskBand(0)
+    with gdal.config_option("GDAL_TIFF_INTERNAL_MASK", "NO"):
+        ds.GetRasterBand(1).CreateMaskBand(0)
     ds = None
     ds = gdal.Open("/vsimem/mask_25.tif")
     assert ds.GetRasterBand(1).GetMaskFlags() == 0
@@ -901,7 +874,7 @@ def test_mask_25():
     ds.SetMetadataItem("INTERNAL_MASK_FLAGS_2", "0")
     ds = None
     ds = gdal.Open("/vsimem/mask_25.tif")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.GetRasterBand(2).GetMaskFlags() == gdal.GMF_ALL_VALID
     ds = None
     gdal.Unlink("/vsimem/mask_25.tif")
@@ -909,15 +882,17 @@ def test_mask_25():
 
     # Invalid sequences of CreateMaskBand() calls
     ds = gdal.GetDriverByName("GTiff").Create("/vsimem/mask_25.tif", 1, 1, 2)
-    ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
-    with gdaltest.error_handler():
-        assert ds.GetRasterBand(2).CreateMaskBand(0) != 0
+    with gdal.config_option("GDAL_TIFF_INTERNAL_MASK", "NO"):
+        ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
+    with gdal.quiet_errors():
+        with gdal.config_option("GDAL_TIFF_INTERNAL_MASK", "NO"):
+            assert ds.GetRasterBand(2).CreateMaskBand(0) != 0
     ds = None
     gdal.Unlink("/vsimem/mask_25.tif")
     gdal.Unlink("/vsimem/mask_25.tif.msk")
 
     # CreateMaskBand not supported by this dataset
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
         ds.CreateMaskBand(0)
 
@@ -985,7 +960,10 @@ def test_mask_27():
 
 
 @pytest.mark.parametrize("dt", [gdal.GDT_Byte, gdal.GDT_Int64, gdal.GDT_UInt64])
-def test_mask_setting_nodata(dt):
+@pytest.mark.parametrize(
+    "GDAL_SIMUL_MEM_ALLOC_FAILURE_NODATA_MASK_BAND", [None, "YES", "ALWAYS"]
+)
+def test_mask_setting_nodata(dt, GDAL_SIMUL_MEM_ALLOC_FAILURE_NODATA_MASK_BAND):
     def set_nodata_value(ds, val):
         if dt == gdal.GDT_Byte:
             ds.GetRasterBand(1).SetNoDataValue(val)
@@ -994,15 +972,100 @@ def test_mask_setting_nodata(dt):
         else:
             ds.GetRasterBand(1).SetNoDataValueAsUInt64(val)
 
-    ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 1, dt)
-    assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 255)
-    assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 255)
-    set_nodata_value(ds, 0)
-    assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 0)
-    assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 0)
-    set_nodata_value(ds, 1)
-    assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 255)
-    set_nodata_value(ds, 0)
-    assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 0)
-    ds.GetRasterBand(1).DeleteNoDataValue()
-    assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 255)
+    def test():
+        ds = gdal.GetDriverByName("MEM").Create("__debug__", 1, 1, 1, dt)
+        assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 255)
+        assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 255)
+        set_nodata_value(ds, 0)
+        got = ds.GetRasterBand(1).GetMaskBand().ReadRaster()
+        if (
+            GDAL_SIMUL_MEM_ALLOC_FAILURE_NODATA_MASK_BAND == "ALWAYS"
+            and dt != gdal.GDT_Byte
+        ):
+            assert got is None
+            assert gdal.GetLastErrorType() == gdal.CE_Failure
+        else:
+            if (
+                GDAL_SIMUL_MEM_ALLOC_FAILURE_NODATA_MASK_BAND == "YES"
+                and dt != gdal.GDT_Byte
+            ):
+                assert gdal.GetLastErrorType() == gdal.CE_Warning
+            assert got == struct.pack("B", 0)
+            assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 0)
+            set_nodata_value(ds, 1)
+            assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack(
+                "B", 255
+            )
+            set_nodata_value(ds, 0)
+            assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 0)
+
+        ds.GetRasterBand(1).DeleteNoDataValue()
+        assert ds.GetRasterBand(1).GetMaskBand().ReadRaster() == struct.pack("B", 255)
+
+    if GDAL_SIMUL_MEM_ALLOC_FAILURE_NODATA_MASK_BAND:
+        with gdal.quiet_errors(), gdal.config_option(
+            "GDAL_SIMUL_MEM_ALLOC_FAILURE_NODATA_MASK_BAND",
+            GDAL_SIMUL_MEM_ALLOC_FAILURE_NODATA_MASK_BAND,
+        ):
+            test()
+    else:
+        test()
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_mask_write_to_all_valid_mask_band():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterBand::Fill\(\): attempt to write to an all-valid implicit mask band.",
+    ):
+        ds.GetRasterBand(1).GetMaskBand().Fill(0)
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterBand::RasterIO\(\): attempt to write to an all-valid implicit mask band.",
+    ):
+        ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 1, 1, b"\0")
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_mask_write_to_nodata_mask_band():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    ds.GetRasterBand(1).SetNoDataValue(0)
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterBand::Fill\(\): attempt to write to a nodata implicit mask band.",
+    ):
+        ds.GetRasterBand(1).GetMaskBand().Fill(0)
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterBand::RasterIO\(\): attempt to write to a nodata implicit mask band.",
+    ):
+        ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 1, 1, b"\0")
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_mask_write_to_nodata_values_mask_band():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 2)
+    ds.SetMetadataItem("NODATA_VALUES", "0 0")
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterBand::Fill\(\): attempt to write to a nodata implicit mask band.",
+    ):
+        ds.GetRasterBand(1).GetMaskBand().Fill(0)
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterBand::RasterIO\(\): attempt to write to a nodata implicit mask band.",
+    ):
+        ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 1, 1, b"\0")

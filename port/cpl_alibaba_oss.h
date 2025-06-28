@@ -1,5 +1,4 @@
 /**********************************************************************
- * $Id$
  *
  * Name:     cpl_alibaba_oss.h
  * Project:  CPL - Common Portability Library
@@ -9,23 +8,7 @@
  **********************************************************************
  * Copyright (c) 2017, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_ALIBABA_OSS_INCLUDED_H
@@ -47,12 +30,12 @@ class VSIOSSHandleHelper final : public IVSIS3LikeHandleHelper
 {
     CPL_DISALLOW_COPY_ASSIGN(VSIOSSHandleHelper)
 
-    CPLString m_osURL{};
-    CPLString m_osSecretAccessKey{};
-    CPLString m_osAccessKeyId{};
-    CPLString m_osEndpoint{};
-    CPLString m_osBucket{};
-    CPLString m_osObjectKey{};
+    std::string m_osURL{};
+    std::string m_osSecretAccessKey{};
+    std::string m_osAccessKeyId{};
+    std::string m_osEndpoint{};
+    std::string m_osBucket{};
+    std::string m_osObjectKey{};
     bool m_bUseHTTPS = false;
     bool m_bUseVirtualHosting = false;
 
@@ -60,73 +43,76 @@ class VSIOSSHandleHelper final : public IVSIS3LikeHandleHelper
 
     static bool GetConfiguration(const std::string &osPathForOption,
                                  CSLConstList papszOptions,
-                                 CPLString &osSecretAccessKey,
-                                 CPLString &osAccessKeyId);
+                                 std::string &osSecretAccessKey,
+                                 std::string &osAccessKeyId);
 
   protected:
   public:
-    VSIOSSHandleHelper(const CPLString &osSecretAccessKey,
-                       const CPLString &osAccessKeyId,
-                       const CPLString &osEndpoint, const CPLString &osBucket,
-                       const CPLString &osObjectKey, bool bUseHTTPS,
+    VSIOSSHandleHelper(const std::string &osSecretAccessKey,
+                       const std::string &osAccessKeyId,
+                       const std::string &osEndpoint,
+                       const std::string &osBucket,
+                       const std::string &osObjectKey, bool bUseHTTPS,
                        bool bUseVirtualHosting);
     ~VSIOSSHandleHelper();
 
     static VSIOSSHandleHelper *
     BuildFromURI(const char *pszURI, const char *pszFSPrefix,
                  bool bAllowNoObject, CSLConstList papszOptions = nullptr);
-    static CPLString BuildURL(const CPLString &osEndpoint,
-                              const CPLString &osBucket,
-                              const CPLString &osObjectKey, bool bUseHTTPS,
-                              bool bUseVirtualHosting);
+    static std::string BuildURL(const std::string &osEndpoint,
+                                const std::string &osBucket,
+                                const std::string &osObjectKey, bool bUseHTTPS,
+                                bool bUseVirtualHosting);
 
     struct curl_slist *
-    GetCurlHeaders(const CPLString &osVerb,
+    GetCurlHeaders(const std::string &osVerb,
                    const struct curl_slist *psExistingHeaders,
                    const void *pabyDataContent = nullptr,
                    size_t nBytesContent = 0) const override;
 
-    bool CanRestartOnError(const char *, const char *pszHeaders, bool bSetError,
-                           bool *pbUpdateMap = nullptr) override;
+    bool CanRestartOnError(const char *, const char *pszHeaders,
+                           bool bSetError) override;
 
-    const CPLString &GetURL() const override
+    const std::string &GetURL() const override
     {
         return m_osURL;
     }
-    const CPLString &GetBucket() const
+
+    const std::string &GetBucket() const
     {
         return m_osBucket;
     }
-    const CPLString &GetObjectKey() const
+
+    const std::string &GetObjectKey() const
     {
         return m_osObjectKey;
     }
-    const CPLString &GetEndpoint() const
+
+    const std::string &GetEndpoint() const
     {
         return m_osEndpoint;
     }
+
     bool GetVirtualHosting() const
     {
         return m_bUseVirtualHosting;
     }
 
-    CPLString GetCopySourceHeader() const override
+    std::string GetCopySourceHeader() const override
     {
         return "x-oss-copy-source";
     }
 
-    void SetEndpoint(const CPLString &osStr);
+    void SetEndpoint(const std::string &osStr);
     void SetVirtualHosting(bool b);
 
-    CPLString GetSignedURL(CSLConstList papszOptions);
+    std::string GetSignedURL(CSLConstList papszOptions);
 };
 
 class VSIOSSUpdateParams
 {
-  public:
-    CPLString m_osEndpoint{};
-
-    VSIOSSUpdateParams() = default;
+  private:
+    std::string m_osEndpoint{};
 
     explicit VSIOSSUpdateParams(const VSIOSSHandleHelper *poHelper)
         : m_osEndpoint(poHelper->GetEndpoint())
@@ -137,6 +123,16 @@ class VSIOSSUpdateParams
     {
         poHelper->SetEndpoint(m_osEndpoint);
     }
+
+    static std::mutex gsMutex;
+    static std::map<std::string, VSIOSSUpdateParams> goMapBucketsToOSSParams;
+
+  public:
+    VSIOSSUpdateParams() = default;
+
+    static void UpdateMapFromHandle(VSIOSSHandleHelper *poHandleHelper);
+    static void UpdateHandleFromMap(VSIOSSHandleHelper *poHandleHelper);
+    static void ClearCache();
 };
 
 #endif /* HAVE_CURL */

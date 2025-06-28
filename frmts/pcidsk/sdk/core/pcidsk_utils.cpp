@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "pcidsk_config.h"
@@ -39,6 +23,12 @@
 #include <cmath>
 #include <cstdarg>
 #include <iostream>
+
+extern "C"
+{
+int CPL_DLL CPLToupper(int c);
+int CPL_DLL CPLTolower(int c);
+}
 
 #if !defined(va_copy) && defined(__va_copy)
 #define va_copy __va_copy
@@ -59,10 +49,16 @@ void    PCIDSK::GetCurrentDateTime( char *out_time )
 
 {
     time_t          clock;
-    char            ctime_out[25];
+    char            ctime_out[26] = {0};
 
     time( &clock );
-    strncpy( ctime_out, ctime(&clock), 24 ); // TODO: reentrance issue?
+#ifdef HAVE_CTIME_R
+    ctime_r(&clock, ctime_out);
+#elif defined(_WIN32)
+    ctime_s(ctime_out, sizeof(ctime_out), &clock);
+#else
+    strncpy( ctime_out, ctime(&clock), 25 );
+#endif
 
     // ctime() products: "Wed Jun 30 21:49:08 1993\n"
 
@@ -98,8 +94,7 @@ std::string &PCIDSK::UCaseStr( std::string &target )
 {
     for( unsigned int i = 0; i < target.size(); i++ )
     {
-        if( islower(target[i]) )
-            target[i] = (char) toupper(target[i]);
+        target[i] = (char) CPLToupper(static_cast<unsigned char>(target[i]));
     }
 
     return target;
@@ -321,12 +316,13 @@ bool PCIDSK::BigEndianSystem()
 /*      _DBLayout metadata.                                             */
 /************************************************************************/
 
-void PCIDSK::ParseTileFormat(std::string oOptions,
+void PCIDSK::ParseTileFormat(const std::string& oOptionsIn,
                              int & nTileSize, std::string & oCompress)
 {
     nTileSize = PCIDSK_DEFAULT_TILE_SIZE;
     oCompress = "NONE";
 
+    std::string oOptions(oOptionsIn);
     UCaseStr(oOptions);
 
     std::string::size_type nStart = oOptions.find_first_not_of(" ");
@@ -334,23 +330,23 @@ void PCIDSK::ParseTileFormat(std::string oOptions,
 
     while (nStart != std::string::npos || nEnd != std::string::npos)
     {
-        std::string oToken = oOptions.substr(nStart, nEnd - nStart);
+        std::string osToken = oOptions.substr(nStart, nEnd - nStart);
 
-        if (oToken.size() > 5 && STARTS_WITH(oToken.c_str(), "TILED"))
+        if (osToken.size() > 5 && STARTS_WITH(osToken.c_str(), "TILED"))
         {
             // the TILED entry can be TILED# or TILED=#
-            int nPos = oToken[5] == '=' ? 6 : 5;
+            int nPos = osToken[5] == '=' ? 6 : 5;
 
-            nTileSize = atoi(oToken.substr(nPos).c_str());
+            nTileSize = atoi(osToken.substr(nPos).c_str());
 
             if (nTileSize <= 0)
-                ThrowPCIDSKException("Invalid tile option: %s", oToken.c_str());
+                ThrowPCIDSKException("Invalid tile option: %s", osToken.c_str());
         }
-        else if (oToken == "NONE" || oToken == "RLE" ||
-                 STARTS_WITH(oToken.c_str(), "JPEG") ||
-                 STARTS_WITH(oToken.c_str(), "QUADTREE"))
+        else if (osToken == "NONE" || osToken == "RLE" ||
+                 STARTS_WITH(osToken.c_str(), "JPEG") ||
+                 STARTS_WITH(osToken.c_str(), "QUADTREE"))
         {
-            oCompress = oToken;
+            oCompress = std::move(osToken);
         }
 
         nStart = oOptions.find_first_not_of(" ", nEnd);
@@ -402,10 +398,8 @@ int PCIDSK::pci_strcasecmp( const char *string1, const char *string2 )
         char c1 = string1[i];
         char c2 = string2[i];
 
-        if( islower(c1) )
-            c1 = (char) toupper(c1);
-        if( islower(c2) )
-            c2 = (char) toupper(c2);
+        c1 = (char) CPLToupper(static_cast<unsigned char>(c1));
+        c2 = (char) CPLToupper(static_cast<unsigned char>(c2));
 
         if( c1 < c2 )
             return -1;
@@ -440,10 +434,8 @@ int PCIDSK::pci_strncasecmp( const char *string1, const char *string2, size_t le
         char c1 = string1[i];
         char c2 = string2[i];
 
-        if( islower(c1) )
-            c1 = (char) toupper(c1);
-        if( islower(c2) )
-            c2 = (char) toupper(c2);
+        c1 = (char) CPLToupper(static_cast<unsigned char>(c1));
+        c2 = (char) CPLToupper(static_cast<unsigned char>(c2));
 
         if( c1 < c2 )
             return -1;
@@ -604,13 +596,11 @@ std::string PCIDSK::DefaultMergeRelativePath(const PCIDSK::IOInterfaces *io_inte
 /* -------------------------------------------------------------------- */
 /*      Merge paths.                                                    */
 /* -------------------------------------------------------------------- */
-    std::string base_path = ExtractPath( base );
-    std::string result;
+    std::string result = ExtractPath( base );
 
-    if( base_path == "" )
+    if( result.empty() )
         return src_filename;
 
-    result = base_path;
     result += path_split;
     result += src_filename;
 

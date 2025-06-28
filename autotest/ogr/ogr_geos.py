@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test GEOS integration in OGR - geometric operations.
@@ -47,7 +46,7 @@ def test_ogr_geos_union():
 
     result = pnt1.Union(pnt2)
 
-    assert not ogrtest.check_feature_geometry(result, "MULTIPOINT (10 20,30 20)")
+    ogrtest.check_feature_geometry(result, "MULTIPOINT (10 20,30 20)")
 
 
 ###############################################################################
@@ -61,9 +60,7 @@ def test_ogr_geos_intersection():
 
     result = g1.Intersection(g2)
 
-    assert not ogrtest.check_feature_geometry(result, "POLYGON ((0 0,5 5,10 0,0 0))"), (
-        "Got: %s" % result.ExportToWkt()
-    )
+    ogrtest.check_feature_geometry(result, "POLYGON ((0 0,5 5,10 0,0 0))")
 
 
 ###############################################################################
@@ -77,9 +74,7 @@ def test_ogr_geos_difference():
 
     result = g1.Difference(g2)
 
-    assert not ogrtest.check_feature_geometry(
-        result, "POLYGON ((5 5,10 10,10 0,5 5))"
-    ), ("Got: %s" % result.ExportToWkt())
+    ogrtest.check_feature_geometry(result, "POLYGON ((5 5,10 10,10 0,5 5))")
 
 
 ###############################################################################
@@ -93,9 +88,9 @@ def test_ogr_geos_symmetric_difference():
 
     result = g1.SymmetricDifference(g2)
 
-    assert not ogrtest.check_feature_geometry(
+    ogrtest.check_feature_geometry(
         result, "MULTIPOLYGON (((5 5,0 0,0 10,5 5)),((5 5,10 10,10 0,5 5)))"
-    ), ("Got: %s" % result.ExportToWkt())
+    )
 
 
 ###############################################################################
@@ -109,9 +104,9 @@ def test_ogr_geos_sym_difference():
 
     result = g1.SymDifference(g2)
 
-    assert not ogrtest.check_feature_geometry(
+    ogrtest.check_feature_geometry(
         result, "MULTIPOLYGON (((5 5,0 0,0 10,5 5)),((5 5,10 10,10 0,5 5)))"
-    ), ("Got: %s" % result.ExportToWkt())
+    )
 
 
 ###############################################################################
@@ -274,18 +269,14 @@ def test_ogr_geos_centroid():
 
     centroid = g1.Centroid()
 
-    assert (
-        ogrtest.check_feature_geometry(centroid, "POINT(6.666666667 3.333333333)") == 0
-    ), ("Got: %s" % centroid.ExportToWkt())
+    ogrtest.check_feature_geometry(centroid, "POINT(6.666666667 3.333333333)")
 
     # Test with a self intersecting polygon too.
     # This particular polygon has two triangles. The right triangle is larger.
     g2 = ogr.CreateGeometryFromWkt("POLYGON((0 0, 0 2, 2 -0.1, 2 2.1, 0 0))")
     centroid2 = g2.Centroid()
 
-    assert ogrtest.check_feature_geometry(centroid2, "POINT (8.0 1.0)") == 0, (
-        "Got: %s" % centroid2.ExportToWkt()
-    )
+    ogrtest.check_feature_geometry(centroid2, "POINT (8.0 1.0)")
 
 
 ###############################################################################
@@ -299,9 +290,7 @@ def test_ogr_geos_centroid_multipolygon():
 
     centroid = g1.Centroid()
 
-    assert ogrtest.check_feature_geometry(centroid, "POINT (1.5 0.5)") == 0, (
-        "Got: %s" % centroid.ExportToWkt()
-    )
+    ogrtest.check_feature_geometry(centroid, "POINT (1.5 0.5)")
 
 
 ###############################################################################
@@ -314,6 +303,53 @@ def test_ogr_geos_centroid_point_empty():
     centroid = g1.Centroid()
 
     assert centroid.ExportToWkt() == "POINT EMPTY", "Got: %s" % centroid.ExportToWkt()
+
+
+###############################################################################
+
+
+def test_ogr_geos_centroid_polygon_with_empty_interior_ring():
+
+    g = ogr.CreateGeometryFromWkt("POLYGON((0 0,0 1,1 1,1 0,0 0))")
+    g.AddGeometry(ogr.Geometry(ogr.wkbLinearRing))
+
+    centroid = g.Centroid()
+
+    assert centroid.ExportToWkt() == "POINT (0.5 0.5)"
+
+
+###############################################################################
+
+
+@pytest.mark.require_geos(3, 12)
+def test_ogr_geos_pointzm_empty():
+
+    g1 = ogr.CreateGeometryFromWkt("POINT ZM EMPTY")
+
+    g2 = g1.Union(g1)
+
+    # GEOS 3.12 returns MULTIPOINT ZM EMPTY, but also accept POINT ZM EMPTY
+    # to be future proof...
+    # Also accept "POINT EMPTY", as returned by GEOS 3.13.1
+    # (cf https://github.com/libgeos/geos/issues/1248)
+    assert g2.ExportToIsoWkt() in (
+        "POINT EMPTY",
+        "MULTIPOINT ZM EMPTY",
+        "POINT ZM EMPTY",
+    )
+
+
+###############################################################################
+
+
+@pytest.mark.require_geos(3, 12)
+def test_ogr_geos_pointzm():
+
+    g1 = ogr.CreateGeometryFromWkt("POINT ZM (1 2 3 4)")
+
+    g2 = g1.Union(g1)
+
+    assert g2.ExportToIsoWkt() == "POINT ZM (1 2 3 4)"
 
 
 ###############################################################################
@@ -358,14 +394,9 @@ def test_ogr_geos_unioncascaded():
     gdal.ErrorReset()
     cascadedunion = g1.UnionCascaded()
 
-    assert (
-        ogrtest.check_feature_geometry(
-            cascadedunion,
-            "POLYGON ((0 0,0 1,0.5 1.0,0.5 1.5,1.5 1.5,1.5 0.5,1.0 0.5,1 0,0 0))",
-        )
-        == 0
-    ), (
-        "Got: %s" % cascadedunion.ExportToWkt()
+    ogrtest.check_feature_geometry(
+        cascadedunion,
+        "POLYGON ((0 0,0 1,0.5 1.0,0.5 1.5,1.5 1.5,1.5 0.5,1.0 0.5,1 0,0 0))",
     )
 
 
@@ -398,18 +429,19 @@ def test_ogr_geos_convexhull():
 ###############################################################################
 
 
+@gdaltest.disable_exceptions()
 def test_ogr_geos_concavehull():
 
     g1 = ogr.CreateGeometryFromWkt("MULTIPOINT(0 0,0.4 0.5,0 1,1 1,0.6 0.5,1 0)")
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         res = g1.ConcaveHull(0.5, False)
 
     if res is None:
         assert "GEOS 3.11" in gdal.GetLastErrorMsg()
         pytest.skip(gdal.GetLastErrorMsg())
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         res = g1.ConcaveHull(-1, False)
     assert res is None
 
@@ -520,7 +552,7 @@ def test_ogr_geos_isvalid_false():
 
     g1 = ogr.CreateGeometryFromWkt("POLYGON((0 0,1 1,1 2,1 1,0 0))")
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         isring = g1.IsValid()
 
     assert isring == 0
@@ -534,8 +566,8 @@ def test_ogr_geos_isvalid_false_too_few_points():
         "POLYGON ((0 0, 10 0, 10 10, 0 10, 0 0), (2 2, 3 2, 2 2))"
     )
 
-    with ogrtest.enable_exceptions():  # fail test if exception is thrown
-        with gdaltest.error_handler():
+    with ogr.ExceptionMgr():  # fail test if exception is thrown
+        with gdal.quiet_errors():
             isvalid = g1.IsValid()
 
     assert isvalid == 0
@@ -610,3 +642,35 @@ def test_ogr_geos_prepared_geom():
     # Test workaround for https://github.com/libgeos/geos/pull/423
     assert not pg.Intersects(ogr.CreateGeometryFromWkt("POINT EMPTY"))
     assert not pg.Contains(ogr.CreateGeometryFromWkt("POINT EMPTY"))
+
+
+###############################################################################
+
+
+def test_ogr_geos_set_precision():
+
+    g = ogr.CreateGeometryFromWkt("LINESTRING (1 1,9 9)")
+    g = g.SetPrecision(10)
+    assert g.ExportToWkt() == "LINESTRING (0 0,10 10)"
+
+
+###############################################################################
+
+
+def test_ogr_geos_set_unary_union_TINZ():
+
+    g = ogr.CreateGeometryFromWkt("TIN Z (((0 0 10,0 1 10,1 1 10,0 0 10)))")
+    g = g.UnaryUnion()
+    assert g.ExportToIsoWkt() == "POLYGON Z ((0 0 10,0 1 10,1 1 10,0 0 10))"
+
+
+###############################################################################
+
+
+def test_ogr_geos_set_unary_union_GEOMETRYCOLLECTIONZ_POLYGONZ():
+
+    g = ogr.CreateGeometryFromWkt(
+        "GEOMETRYCOLLECTION Z (POLYGON Z ((0 0 10,0 1 10,1 1 10,0 0 10)))"
+    )
+    g = g.UnaryUnion()
+    assert g.ExportToIsoWkt() == "POLYGON Z ((0 0 10,0 1 10,1 1 10,0 0 10))"

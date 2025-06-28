@@ -43,7 +43,7 @@ int LLVMFuzzerInitialize(int * /*argc*/, char ***argv)
     const char *exe_path = (*argv)[0];
     if (CPLGetConfigOption("GDAL_DATA", nullptr) == nullptr)
     {
-        CPLSetConfigOption("GDAL_DATA", CPLGetPath(exe_path));
+        CPLSetConfigOption("GDAL_DATA", CPLGetPathSafe(exe_path).c_str());
     }
     CPLSetConfigOption("CPL_TMPDIR", "/tmp");
     CPLSetConfigOption("DISABLE_OPEN_REAL_NETCDF_FILES", "YES");
@@ -96,12 +96,19 @@ int LLVMFuzzerTestOneInput(const uint8_t *buf, size_t len)
     }
 
     const std::string osRealFilename("/vsimem/" + osFilename);
-    VSIFCloseL(VSIFileFromMemBuffer(osRealFilename.c_str(), paby,
-                                    static_cast<size_t>(nSize), TRUE));
+    VSILFILE *fp = VSIFileFromMemBuffer(osRealFilename.c_str(), paby,
+                                        static_cast<size_t>(nSize), TRUE);
+    if (fp)
+    {
+        VSIFCloseL(fp);
+        delete GDALDataset::Open(osRealFilename.c_str());
+    }
+    else
+    {
+        VSIFree(paby);
+    }
 
-    delete GDALDataset::Open(osRealFilename.c_str());
-
-    VSIUnlink(osRealFilename.c_str());
+    VSIRmdirRecursive("/vsimem/");
 
     return 0;
 }

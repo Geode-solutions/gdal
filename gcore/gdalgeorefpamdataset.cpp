@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdalgeorefpamdataset.h"
@@ -48,12 +32,6 @@ GDALGeorefPamDataset::GDALGeorefPamDataset()
       m_nPixelIsPointGeorefSrcIndex(-1), m_bGotPAMGeorefSrcIndex(false),
       m_nPAMGeorefSrcIndex(0), m_bPAMLoaded(false), m_papszMainMD(nullptr)
 {
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -139,7 +117,7 @@ const char *GDALGeorefPamDataset::GetMetadataItem(const char *pszName,
 /*                           TryLoadXML()                              */
 /************************************************************************/
 
-CPLErr GDALGeorefPamDataset::TryLoadXML(char **papszSiblingFiles)
+CPLErr GDALGeorefPamDataset::TryLoadXML(CSLConstList papszSiblingFiles)
 {
     m_bPAMLoaded = true;
     CPLErr eErr = GDALPamDataset::TryLoadXML(papszSiblingFiles);
@@ -293,7 +271,7 @@ const OGRSpatialReference *GDALGeorefPamDataset::GetSpatialRef() const
 /*      inside our file, unless GDAL_GEOREF_SOURCES is defined.         */
 /************************************************************************/
 
-CPLErr GDALGeorefPamDataset::GetGeoTransform(double *padfTransform)
+CPLErr GDALGeorefPamDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     const int nPAMIndex = GetPAMGeorefSrcIndex();
@@ -301,7 +279,7 @@ CPLErr GDALGeorefPamDataset::GetGeoTransform(double *padfTransform)
         ((bGeoTransformValid && nPAMIndex <= m_nGeoTransformGeorefSrcIndex) ||
          m_nGeoTransformGeorefSrcIndex < 0 || !bGeoTransformValid))
     {
-        if (GDALPamDataset::GetGeoTransform(padfTransform) == CE_None)
+        if (GDALPamDataset::GetGeoTransform(gt) == CE_None)
         {
             m_nGeoTransformGeorefSrcIndex = nPAMIndex;
             return CE_None;
@@ -310,7 +288,7 @@ CPLErr GDALGeorefPamDataset::GetGeoTransform(double *padfTransform)
 
     if (bGeoTransformValid)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return (CE_None);
     }
 
@@ -336,4 +314,5 @@ int GDALGeorefPamDataset::GetPAMGeorefSrcIndex() const
     }
     return m_nPAMGeorefSrcIndex;
 }
+
 //! @endcond

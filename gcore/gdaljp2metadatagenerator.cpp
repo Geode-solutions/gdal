@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2015, European Union Satellite Centre
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -42,6 +26,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic ignored "-Wdocumentation"
+#pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
 #pragma clang diagnostic ignored "-Wzero-as-null-pointer-constant"
 #endif
 
@@ -94,16 +79,19 @@ class GDALGMLJP2Expr
     CPLString osValue{};
 
     GDALGMLJP2Expr() = default;
+
     explicit GDALGMLJP2Expr(const char *pszVal)
         : eType(GDALGMLJP2ExprType::GDALGMLJP2Expr_STRING_LITERAL),
           osValue(pszVal)
     {
     }
+
     explicit GDALGMLJP2Expr(const CPLString &osVal)
         : eType(GDALGMLJP2ExprType::GDALGMLJP2Expr_STRING_LITERAL),
           osValue(osVal)
     {
     }
+
     ~GDALGMLJP2Expr() = default;
 
     GDALGMLJP2Expr Evaluate(xmlXPathContextPtr pXPathCtx, xmlDocPtr pDoc);
@@ -227,13 +215,13 @@ GDALGMLJP2Expr *GDALGMLJP2Expr::Build(const char *pszOriStr,
                 if (nParenthesisIndent < 0)
                 {
                     pszStr++;
-                    GDALGMLJP2Expr *poExpr = new GDALGMLJP2Expr();
-                    poExpr->eType = GDALGMLJP2ExprType::GDALGMLJP2Expr_XPATH;
-                    poExpr->osValue = l_osValue;
 #if DEBUG_VERBOSE
                     CPLDebug("GMLJP2", "XPath expression '%s'",
                              l_osValue.c_str());
 #endif
+                    GDALGMLJP2Expr *poExpr = new GDALGMLJP2Expr();
+                    poExpr->eType = GDALGMLJP2ExprType::GDALGMLJP2Expr_XPATH;
+                    poExpr->osValue = std::move(l_osValue);
                     return poExpr;
                 }
                 l_osValue += *pszStr;
@@ -357,7 +345,12 @@ static CPLString GDALGMLJP2EvalExpr(const CPLString &osTemplate,
 /************************************************************************/
 
 static void GDALGMLJP2XPathErrorHandler(void * /* userData */,
-                                        xmlErrorPtr error)
+#if LIBXML_VERSION >= 21200
+                                        const xmlError *error
+#else
+                                        xmlErrorPtr error
+#endif
+)
 {
     if (error->domain == XML_FROM_XPATH && error->str1 != nullptr &&
         error->int1 < static_cast<int>(strlen(error->str1)))
@@ -435,28 +428,36 @@ static void GDALGMLJP2XPathUUID(xmlXPathParserContextPtr ctxt, int nargs)
     CHECK_ARITY(0);
 
     CPLString osRet;
-    static int nCounter = 0;
-    // coverity[store_truncates_time_t]
-    srand(static_cast<unsigned int>(time(nullptr)) + nCounter);
-    ++nCounter;
+
+    // From POSIX.1-2001 as an example of an implementation of rand()
+    const auto fakeRand = []()
+    {
+        static uint32_t nCounter =
+            static_cast<unsigned int>(time(nullptr) & UINT_MAX);
+        uint32_t nCounterLocal = static_cast<uint32_t>(
+            (static_cast<uint64_t>(nCounter) * 1103515245U + 12345U) &
+            UINT32_MAX);
+        nCounter = nCounterLocal;
+        return (nCounterLocal / 65536U) % 32768U;
+    };
+
     for (int i = 0; i < 4; i++)
-        osRet += GDALGMLJP2HexFormatter(rand() & 0xFF);
+        osRet += GDALGMLJP2HexFormatter(fakeRand() & 0xFF);
     osRet += "-";
-    osRet += GDALGMLJP2HexFormatter(rand() & 0xFF);
-    osRet += GDALGMLJP2HexFormatter(rand() & 0xFF);
+    osRet += GDALGMLJP2HexFormatter(fakeRand() & 0xFF);
+    osRet += GDALGMLJP2HexFormatter(fakeRand() & 0xFF);
     osRet += "-";
     // Set the version number bits (4 == random).
-    osRet += GDALGMLJP2HexFormatter((rand() & 0x0F) | 0x40);
-    osRet += GDALGMLJP2HexFormatter(rand() & 0xFF);
+    osRet += GDALGMLJP2HexFormatter((fakeRand() & 0x0F) | 0x40);
+    osRet += GDALGMLJP2HexFormatter(fakeRand() & 0xFF);
     osRet += "-";
     // Set the variant bits.
-    osRet += GDALGMLJP2HexFormatter((rand() & 0x3F) | 0x80);
-    osRet += GDALGMLJP2HexFormatter(rand() & 0xFF);
+    osRet += GDALGMLJP2HexFormatter((fakeRand() & 0x3F) | 0x80);
+    osRet += GDALGMLJP2HexFormatter(fakeRand() & 0xFF);
     osRet += "-";
     for (int i = 0; i < 6; ++i)
     {
-        // coverity[dont_call]
-        osRet += GDALGMLJP2HexFormatter(rand() & 0xFF);
+        osRet += GDALGMLJP2HexFormatter(fakeRand() & 0xFF);
     }
 
     valuePush(ctxt, xmlXPathNewString(

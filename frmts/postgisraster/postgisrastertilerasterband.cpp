@@ -5,31 +5,12 @@
  * driver
  * Author:   Jorge Arevalo, jorge.arevalo@deimos-space.com
  *                          jorgearevalo@libregis.org
- * Last changes: $Id$
  *
  ***********************************************************************
  * Copyright (c) 2009 - 2013, Jorge Arevalo
  * Copyright (c) 2013-2018, Even Rouault
  *
- * Permission is hereby granted, free of charge, to any person obtaining
- * a copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT.IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
- * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 #include "postgisraster.h"
 #include <memory>
@@ -98,12 +79,10 @@ CPLErr PostGISRasterTileRasterBand::IReadBlock(int /*nBlockXOff*/,
     PostGISRasterTileDataset *poRTDS =
         cpl::down_cast<PostGISRasterTileDataset *>(poDS);
 
-    const double dfTileUpperLeftX =
-        poRTDS->adfGeoTransform[GEOTRSFRM_TOPLEFT_X];
-    const double dfTileUpperLeftY =
-        poRTDS->adfGeoTransform[GEOTRSFRM_TOPLEFT_Y];
-    const double dfTileResX = poRTDS->adfGeoTransform[1];
-    const double dfTileResY = poRTDS->adfGeoTransform[5];
+    const double dfTileUpperLeftX = poRTDS->m_gt[GEOTRSFRM_TOPLEFT_X];
+    const double dfTileUpperLeftY = poRTDS->m_gt[GEOTRSFRM_TOPLEFT_Y];
+    const double dfTileResX = poRTDS->m_gt[1];
+    const double dfTileResY = poRTDS->m_gt[5];
     const int nTileXSize = nBlockXSize;
     const int nTileYSize = nBlockYSize;
 
@@ -182,6 +161,7 @@ CPLErr PostGISRasterTileRasterBand::IReadBlock(int /*nBlockXOff*/,
             CPLFree(x);
         }
     };
+
     std::unique_ptr<GByte, CPLFreer> pbyDataAutoFreed(
         CPLHexToBinary(PQgetvalue(poResult, 0, 0), &nWKBLength));
     GByte *pbyData = pbyDataAutoFreed.get();

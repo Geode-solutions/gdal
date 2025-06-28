@@ -8,23 +8,7 @@
  * Copyright (c) 2007, Mateusz Loskot
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <algorithm>
@@ -66,8 +50,8 @@ OGRGeoJSONLayer::OGRGeoJSONLayer(const char *pszName,
                                  OGRGeoJSONDataSource *poDS,
                                  OGRGeoJSONReader *poReader)
     : OGRMemLayer(pszName, poSRSIn, eGType), poDS_(poDS), poReader_(poReader),
-      bHasAppendedFeatures_(false), bUpdated_(false),
-      bOriginalIdModified_(false), nTotalFeatureCount_(0)
+      bHasAppendedFeatures_(false), bOriginalIdModified_(false),
+      nTotalFeatureCount_(0)
 {
     SetAdvertizeUTF8(true);
     SetUpdatable(poDS->IsUpdatable());
@@ -91,7 +75,14 @@ void OGRGeoJSONLayer::TerminateAppendSession()
 {
     if (bHasAppendedFeatures_)
     {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
         VSILFILE *fp = poReader_->GetFP();
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         VSIFPrintfL(fp, "\n]\n}\n");
         VSIFFlushL(fp);
         bHasAppendedFeatures_ = false;
@@ -238,21 +229,50 @@ bool OGRGeoJSONLayer::IngestAll()
 }
 
 /************************************************************************/
+/*                     SetOrUpdateFeaturePreparation()                  */
+/************************************************************************/
+
+bool OGRGeoJSONLayer::SetOrUpdateFeaturePreparation()
+{
+    if (!IsUpdatable())
+        return false;
+    if (poReader_)
+    {
+        auto nNextIndex = nFeatureReadSinceReset_;
+        if (!IngestAll())
+            return false;
+        SetNextByIndex(nNextIndex);
+    }
+    return true;
+}
+
+/************************************************************************/
 /*                           ISetFeature()                              */
 /************************************************************************/
 
 OGRErr OGRGeoJSONLayer::ISetFeature(OGRFeature *poFeature)
 {
-    if (!IsUpdatable())
+    if (!SetOrUpdateFeaturePreparation())
         return OGRERR_FAILURE;
-    if (poReader_)
-    {
-        auto nNextIndex = nFeatureReadSinceReset_;
-        if (!IngestAll())
-            return OGRERR_FAILURE;
-        SetNextByIndex(nNextIndex);
-    }
     return OGRMemLayer::ISetFeature(poFeature);
+}
+
+/************************************************************************/
+/*                         IUpdateFeature()                             */
+/************************************************************************/
+
+OGRErr OGRGeoJSONLayer::IUpdateFeature(OGRFeature *poFeature,
+                                       int nUpdatedFieldsCount,
+                                       const int *panUpdatedFieldsIdx,
+                                       int nUpdatedGeomFieldsCount,
+                                       const int *panUpdatedGeomFieldsIdx,
+                                       bool bUpdateStyleString)
+{
+    if (!SetOrUpdateFeaturePreparation())
+        return OGRERR_FAILURE;
+    return OGRMemLayer::IUpdateFeature(
+        poFeature, nUpdatedFieldsCount, panUpdatedFieldsIdx,
+        nUpdatedGeomFieldsCount, panUpdatedGeomFieldsIdx, bUpdateStyleString);
 }
 
 /************************************************************************/
@@ -295,7 +315,8 @@ OGRErr OGRGeoJSONLayer::ICreateFeature(OGRFeature *poFeature)
                     szBuffer[10] = 0;
                     int i = 9;
                     // Locate final }
-                    while (isspace(szBuffer[i]) && i > 0)
+                    while (isspace(static_cast<unsigned char>(szBuffer[i])) &&
+                           i > 0)
                         i--;
                     if (szBuffer[i] != '}')
                     {
@@ -305,7 +326,8 @@ OGRErr OGRGeoJSONLayer::ICreateFeature(OGRFeature *poFeature)
                     if (i > 0)
                         i--;
                     // Locate ']' ending features array
-                    while (isspace(szBuffer[i]) && i > 0)
+                    while (isspace(static_cast<unsigned char>(szBuffer[i])) &&
+                           i > 0)
                         i--;
                     if (szBuffer[i] != ']')
                     {
@@ -314,7 +336,8 @@ OGRErr OGRGeoJSONLayer::ICreateFeature(OGRFeature *poFeature)
                     }
                     if (i > 0)
                         i--;
-                    while (isspace(szBuffer[i]) && i > 0)
+                    while (isspace(static_cast<unsigned char>(szBuffer[i])) &&
+                           i > 0)
                         i--;
                     // Locate '}' ending last feature, or '[' starting features
                     // array
@@ -338,7 +361,7 @@ OGRErr OGRGeoJSONLayer::ICreateFeature(OGRFeature *poFeature)
                     VSIFPrintfL(fp, ",\n");
                 }
                 json_object *poObj =
-                    OGRGeoJSONWriteFeature(poFeature, OGRGeoJSONWriteOptions());
+                    OGRGeoJSONWriteFeature(poFeature, oWriteOptions_);
                 VSIFPrintfL(fp, "%s", json_object_to_json_string(poObj));
                 json_object_put(poObj);
 
@@ -378,7 +401,7 @@ OGRErr OGRGeoJSONLayer::DeleteFeature(GIntBig nFID)
 /*                           CreateField()                              */
 /************************************************************************/
 
-OGRErr OGRGeoJSONLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRGeoJSONLayer::CreateField(const OGRFieldDefn *poField, int bApproxOK)
 {
     if (!IsUpdatable() || !IngestAll())
         return OGRERR_FAILURE;
@@ -423,12 +446,53 @@ OGRErr OGRGeoJSONLayer::AlterFieldDefn(int iField, OGRFieldDefn *poNewFieldDefn,
 /*                         CreateGeomField()                            */
 /************************************************************************/
 
-OGRErr OGRGeoJSONLayer::CreateGeomField(OGRGeomFieldDefn *poGeomField,
+OGRErr OGRGeoJSONLayer::CreateGeomField(const OGRGeomFieldDefn *poGeomField,
                                         int bApproxOK)
 {
     if (!IsUpdatable() || !IngestAll())
         return OGRERR_FAILURE;
     return OGRMemLayer::CreateGeomField(poGeomField, bApproxOK);
+}
+
+OGRErr OGRGeoJSONLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                                   bool bForce)
+{
+    if (iGeomField != 0)
+    {
+        return OGRERR_FAILURE;
+    }
+
+    if (poReader_ && poReader_->ExtentRead() &&
+        TestCapability(OLCFastGetExtent))
+    {
+        *psExtent = poReader_->GetExtent3D();
+        return OGRERR_NONE;
+    }
+    else
+    {
+        return OGRMemLayer::IGetExtent(iGeomField, psExtent, bForce);
+    }
+}
+
+OGRErr OGRGeoJSONLayer::IGetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
+                                     bool bForce)
+{
+
+    if (iGeomField != 0)
+    {
+        return OGRERR_FAILURE;
+    }
+
+    if (poReader_ && poReader_->ExtentRead() &&
+        TestCapability(OLCFastGetExtent3D))
+    {
+        *psExtent3D = poReader_->GetExtent3D();
+        return OGRERR_NONE;
+    }
+    else
+    {
+        return OGRMemLayer::IGetExtent3D(iGeomField, psExtent3D, bForce);
+    }
 }
 
 /************************************************************************/
@@ -440,10 +504,15 @@ int OGRGeoJSONLayer::TestCapability(const char *pszCap)
 {
     if (EQUAL(pszCap, OLCCurveGeometries))
         return FALSE;
+    else if (EQUAL(pszCap, OLCMeasuredGeometries))
+        return m_bSupportsMGeometries;
     else if (EQUAL(pszCap, OLCZGeometries))
-        return TRUE;
+        return m_bSupportsZGeometries;
     else if (EQUAL(pszCap, OLCStringsAsUTF8))
         return TRUE;
+    else if (EQUAL(pszCap, OLCFastGetExtent) ||
+             EQUAL(pszCap, OLCFastGetExtent3D))
+        return m_poFilterGeom == nullptr && m_poAttrQuery == nullptr;
     return OGRMemLayer::TestCapability(pszCap);
 }
 
@@ -508,9 +577,10 @@ void OGRGeoJSONLayer::AddFeature(OGRFeature *poFeature)
     if (!CPL_INT64_FITS_ON_INT32(nFID))
         SetMetadataItem(OLMD_FID64, "YES");
 
+    const bool bIsUpdatable = IsUpdatable();
     SetUpdatable(true);  // Temporary toggle on updatable flag.
     CPL_IGNORE_RET_VAL(OGRMemLayer::SetFeature(poFeature));
-    SetUpdatable(poDS_->IsUpdatable());
+    SetUpdatable(bIsUpdatable);
     SetUpdated(false);
 }
 
@@ -526,22 +596,34 @@ void OGRGeoJSONLayer::DetectGeometryType()
     ResetReading();
     bool bFirstGeometry = true;
     OGRwkbGeometryType eLayerGeomType = wkbUnknown;
-    OGRFeature *poFeature = nullptr;
-    while ((poFeature = GetNextFeature()) != nullptr)
+    for (const auto &poFeature : *this)
     {
-        OGRGeometry *poGeometry = poFeature->GetGeometryRef();
+        const OGRGeometry *poGeometry = poFeature->GetGeometryRef();
         if (nullptr != poGeometry)
         {
             OGRwkbGeometryType eGeomType = poGeometry->getGeometryType();
-            if (!OGRGeoJSONUpdateLayerGeomType(this, bFirstGeometry, eGeomType,
+            if (!OGRGeoJSONUpdateLayerGeomType(bFirstGeometry, eGeomType,
                                                eLayerGeomType))
             {
-                delete poFeature;
                 break;
             }
         }
-        delete poFeature;
+    }
+
+    {
+        auto poFDefn = GetLayerDefn();
+        auto oTemporaryUnsealer(poFDefn->GetTemporaryUnsealer());
+        poFDefn->SetGeomType(eLayerGeomType);
     }
 
     ResetReading();
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRGeoJSONLayer::GetDataset()
+{
+    return poDS_;
 }

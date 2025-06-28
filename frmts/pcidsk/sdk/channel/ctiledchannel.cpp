@@ -10,23 +10,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "pcidsk_config.h"
@@ -138,7 +122,7 @@ void CTiledChannel::ReadTile(void * buffer, uint32 nCol, uint32 nRow)
         // Do byte swapping if needed.
         if( needs_swap )
         {
-            SwapPixels( buffer, nDataType, nTileXSize * nTileYSize );
+            SwapPixels( buffer, nDataType, static_cast<size_t>(nTileXSize) * nTileYSize );
         }
 
         return;
@@ -153,7 +137,7 @@ void CTiledChannel::ReadTile(void * buffer, uint32 nCol, uint32 nRow)
         // Do byte swapping if needed.
         if( needs_swap )
         {
-            SwapPixels( buffer, nDataType, nTileXSize * nTileYSize );
+            SwapPixels( buffer, nDataType, static_cast<size_t>(nTileXSize) * nTileYSize );
         }
 
         return;
@@ -188,7 +172,7 @@ void CTiledChannel::ReadTile(void * buffer, uint32 nCol, uint32 nRow)
 /* -------------------------------------------------------------------- */
     if( needs_swap )
         SwapPixels( oUncompressedData.buffer, nDataType,
-                    nTileXSize * nTileYSize );
+                    static_cast<size_t>(nTileXSize) * nTileYSize );
 
     memcpy(buffer, oUncompressedData.buffer, oUncompressedData.buffer_size);
 }
@@ -320,7 +304,7 @@ int CTiledChannel::ReadBlock( int iBlock, void *buffer,
         {
             memcpy((char*) buffer + iy * xsize * nPixelSize,
                    oTileData.buffer + ((iy + yoff) * nTileXSize + xoff) * nPixelSize,
-                   xsize * nPixelSize);
+                   static_cast<size_t>(xsize) * nPixelSize);
         }
     }
 
@@ -670,7 +654,7 @@ void CTiledChannel::RLECompressBlock( PCIDSKBuffer &oUncompressedData,
             oCompressedData.buffer[dst_offset++] = (char) count;
             memcpy( oCompressedData.buffer + dst_offset,
                     src + src_offset,
-                    count * nPixelSize );
+                    cpl::fits_on<int>(count * nPixelSize) );
             src_offset += count * nPixelSize;
             dst_offset += count * nPixelSize;
         }
@@ -717,7 +701,7 @@ void CTiledChannel::JPEGCompressBlock( PCIDSKBuffer &oDecompressedData,
 
     const char * compression = mpoTileLayer->GetCompressType();
 
-    if (strlen(compression) > 4 && isdigit(compression[4]))
+    if (strlen(compression) > 4 && isdigit(static_cast<unsigned char>(compression[4])))
         quality = atoi(compression + 4);
 
 /* -------------------------------------------------------------------- */

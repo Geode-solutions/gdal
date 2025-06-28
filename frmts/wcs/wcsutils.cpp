@@ -10,23 +10,7 @@
  * Copyright (c) 2017, Ari Jolma
  * Copyright (c) 2017, Finnish Environment Institute
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_spatialref.h"
@@ -45,18 +29,18 @@ void Swap(double &a, double &b)
     b = tmp;
 }
 
-CPLString URLEncode(const CPLString &str)
+std::string URLEncode(const std::string &str)
 {
-    char *pszEncoded = CPLEscapeString(str, -1, CPLES_URL);
-    CPLString str2 = pszEncoded;
+    char *pszEncoded = CPLEscapeString(str.c_str(), -1, CPLES_URL);
+    std::string str2 = pszEncoded;
     CPLFree(pszEncoded);
     return str2;
 }
 
-CPLString URLRemoveKey(const char *url, const CPLString &key)
+std::string URLRemoveKey(const char *url, const std::string &key)
 {
     CPLString retval = url;
-    CPLString key_is = key + "=";
+    const std::string key_is = key + "=";
     while (true)
     {
         size_t pos = retval.ifind(key_is);
@@ -70,29 +54,27 @@ CPLString URLRemoveKey(const char *url, const CPLString &key)
             break;
         }
     }
-    if (retval.back() == '&')
+    if (!retval.empty() && retval.back() == '&')
     {
-        retval.erase(retval.size() - 1);
+        retval.pop_back();
     }
-    return retval;
+    std::string retValAsStdString = std::move(retval);
+    return retValAsStdString;
 }
 
-std::vector<CPLString> &SwapFirstTwo(std::vector<CPLString> &array)
+std::vector<std::string> &SwapFirstTwo(std::vector<std::string> &array)
 {
     if (array.size() >= 2)
     {
-        CPLString tmp = array[0];
-        array[0] = array[1];
-        array[1] = tmp;
-        return array;
+        std::swap(array[0], array[1]);
     }
     return array;
 }
 
-std::vector<CPLString> Split(const char *value, const char *delim,
-                             bool swap_the_first_two)
+std::vector<std::string> Split(const char *value, const char *delim,
+                               bool swap_the_first_two)
 {
-    std::vector<CPLString> array;
+    std::vector<std::string> array;
     char **tokens = CSLTokenizeString2(
         value, delim,
         CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES | CSLT_HONOURSTRINGS);
@@ -109,10 +91,10 @@ std::vector<CPLString> Split(const char *value, const char *delim,
     return array;
 }
 
-CPLString Join(const std::vector<CPLString> &array, const char *delim,
-               bool swap_the_first_two)
+std::string Join(const std::vector<std::string> &array, const char *delim,
+                 bool swap_the_first_two)
 {
-    CPLString str;
+    std::string str;
     const auto arraySize = array.size();
     for (unsigned int i = 0; i < arraySize; ++i)
     {
@@ -139,29 +121,29 @@ CPLString Join(const std::vector<CPLString> &array, const char *delim,
     return str;
 }
 
-std::vector<int> Ilist(const std::vector<CPLString> &array, unsigned int from,
+std::vector<int> Ilist(const std::vector<std::string> &array, unsigned int from,
                        size_t count)
 {
     std::vector<int> retval;
     for (unsigned int i = from; i < array.size() && i < from + count; ++i)
     {
-        retval.push_back(atoi(array[i]));
+        retval.push_back(atoi(array[i].c_str()));
     }
     return retval;
 }
 
-std::vector<double> Flist(const std::vector<CPLString> &array,
+std::vector<double> Flist(const std::vector<std::string> &array,
                           unsigned int from, size_t count)
 {
     std::vector<double> retval;
     for (unsigned int i = from; i < array.size() && i < from + count; ++i)
     {
-        retval.push_back(CPLAtof(array[i]));
+        retval.push_back(CPLAtof(array[i].c_str()));
     }
     return retval;
 }
 
-int IndexOf(const CPLString &str, const std::vector<CPLString> &array)
+int IndexOf(const std::string &str, const std::vector<std::string> &array)
 {
     int index = -1;
     for (unsigned int i = 0; i < array.size(); ++i)
@@ -189,8 +171,8 @@ int IndexOf(int i, const std::vector<int> &array)
     return index;
 }
 
-std::vector<int> IndexOf(const std::vector<CPLString> &strs,
-                         const std::vector<CPLString> &array)
+std::vector<int> IndexOf(const std::vector<std::string> &strs,
+                         const std::vector<std::string> &array)
 {
     std::vector<int> retval;
     for (unsigned int i = 0; i < strs.size(); ++i)
@@ -200,8 +182,8 @@ std::vector<int> IndexOf(const std::vector<CPLString> &strs,
     return retval;
 }
 
-int IndexOf(const CPLString &key,
-            const std::vector<std::vector<CPLString>> &kvps)
+int IndexOf(const std::string &key,
+            const std::vector<std::vector<std::string>> &kvps)
 {
     int index = -1;
     for (unsigned int i = 0; i < kvps.size(); ++i)
@@ -227,7 +209,7 @@ bool Contains(const std::vector<int> &array, int value)
     return false;
 }
 
-CPLString FromParenthesis(const CPLString &s)
+std::string FromParenthesis(const std::string &s)
 {
     size_t beg = s.find_first_of("(");
     size_t end = s.find_last_of(")");
@@ -238,13 +220,14 @@ CPLString FromParenthesis(const CPLString &s)
     return s.substr(beg + 1, end - beg - 1);
 }
 
-std::vector<CPLString> ParseSubset(const std::vector<CPLString> &subset_array,
-                                   const CPLString &dim)
+std::vector<std::string>
+ParseSubset(const std::vector<std::string> &subset_array,
+            const std::string &dim)
 {
     // array is SUBSET defs, a SUBSET def is dim[,crs](low[,high])
-    std::vector<CPLString> retval;
+    std::vector<std::string> retval;
     unsigned int i;
-    CPLString params;
+    std::string params;
     for (i = 0; i < subset_array.size(); ++i)
     {
         params = subset_array[i];
@@ -265,8 +248,8 @@ std::vector<CPLString> ParseSubset(const std::vector<CPLString> &subset_array,
     }
     if (retval.size() > 0)
     {
-        std::vector<CPLString> params_array =
-            Split(FromParenthesis(params), ",");
+        std::vector<std::string> params_array =
+            Split(FromParenthesis(params).c_str(), ",");
         retval.push_back(params_array[0]);
         if (params_array.size() > 1)
         {
@@ -284,9 +267,9 @@ std::vector<CPLString> ParseSubset(const std::vector<CPLString> &subset_array,
 /*      FileIsReadable                                                  */
 /* -------------------------------------------------------------------- */
 
-bool FileIsReadable(const CPLString &filename)
+bool FileIsReadable(const std::string &filename)
 {
-    VSILFILE *file = VSIFOpenL(filename, "r");
+    VSILFILE *file = VSIFOpenL(filename.c_str(), "r");
     if (file)
     {
         VSIFCloseL(file);
@@ -295,7 +278,7 @@ bool FileIsReadable(const CPLString &filename)
     return false;
 }
 
-CPLString RemoveExt(const CPLString &filename)
+std::string RemoveExt(const std::string &filename)
 {
     size_t pos = filename.find_last_of(".");
     if (pos != std::string::npos)
@@ -309,12 +292,12 @@ CPLString RemoveExt(const CPLString &filename)
 /*      MakeDir                                                         */
 /* -------------------------------------------------------------------- */
 
-bool MakeDir(const CPLString &dirname)
+bool MakeDir(const std::string &dirname)
 {
     VSIStatBufL stat;
-    if (VSIStatL(dirname, &stat) != 0)
+    if (VSIStatL(dirname.c_str(), &stat) != 0)
     {
-        CPLString parent = CPLGetDirname(dirname);
+        std::string parent = CPLGetDirnameSafe(dirname.c_str());
         if (!parent.empty() && parent != ".")
         {
             if (!MakeDir(parent))
@@ -322,7 +305,7 @@ bool MakeDir(const CPLString &dirname)
                 return false;
             }
         }
-        return VSIMkdir(dirname, 0755) == 0;
+        return VSIMkdir(dirname.c_str(), 0755) == 0;
     }
     return true;
 }
@@ -363,7 +346,7 @@ bool CPLGetXMLBoolean(CPLXMLNode *poRoot, const char *pszPath)
 bool CPLUpdateXML(CPLXMLNode *poRoot, const char *pszPath,
                   const char *new_value)
 {
-    CPLString old_value = CPLGetXMLValue(poRoot, pszPath, "");
+    std::string old_value = CPLGetXMLValue(poRoot, pszPath, "");
     if (new_value != old_value)
     {
         CPLSetXMLValue(poRoot, pszPath, new_value);
@@ -377,15 +360,16 @@ bool CPLUpdateXML(CPLXMLNode *poRoot, const char *pszPath,
 /*      Copy child node 'key' into metadata as MDI element.             */
 /* -------------------------------------------------------------------- */
 
-void XMLCopyMetadata(CPLXMLNode *parent, CPLXMLNode *metadata, CPLString key)
+void XMLCopyMetadata(CPLXMLNode *parent, CPLXMLNode *metadata,
+                     const std::string &key)
 {
-    CPLXMLNode *node = CPLGetXMLNode(parent, key);
+    CPLXMLNode *node = CPLGetXMLNode(parent, key.c_str());
     if (node)
     {
         CPLAddXMLAttributeAndValue(
             CPLCreateXMLElementAndValue(metadata, "MDI",
                                         CPLGetXMLValue(node, nullptr, "")),
-            "key", key);
+            "key", key.c_str());
     }
 }
 
@@ -395,18 +379,18 @@ void XMLCopyMetadata(CPLXMLNode *parent, CPLXMLNode *metadata, CPLString key)
 /*      The file db is the cache index with lines of unique_key=URL     */
 /* -------------------------------------------------------------------- */
 
-bool SetupCache(CPLString &cache, bool clear)
+bool SetupCache(std::string &cache, bool clear)
 {
     if (cache == "")
     {
-#ifdef WIN32
+#ifdef _WIN32
         const char *home = CPLGetConfigOption("USERPROFILE", nullptr);
 #else
         const char *home = CPLGetConfigOption("HOME", nullptr);
 #endif
         if (home)
         {
-            cache = CPLFormFilename(home, ".gdal", nullptr);
+            cache = CPLFormFilenameSafe(home, ".gdal", nullptr);
         }
         else
         {
@@ -420,12 +404,12 @@ bool SetupCache(CPLString &cache, bool clear)
                 username = CPLGetConfigOption("USER", nullptr);
             if (dir && username)
             {
-                CPLString subdir = ".gdal_";
+                std::string subdir = ".gdal_";
                 subdir += username;
-                cache = CPLFormFilename(dir, subdir, nullptr);
+                cache = CPLFormFilenameSafe(dir, subdir.c_str(), nullptr);
             }
         }
-        cache = CPLFormFilename(cache, "wcs_cache", nullptr);
+        cache = CPLFormFilenameSafe(cache.c_str(), "wcs_cache", nullptr);
     }
     if (!MakeDir(cache))
     {
@@ -433,7 +417,7 @@ bool SetupCache(CPLString &cache, bool clear)
     }
     if (clear)
     {
-        char **folder = VSIReadDir(cache);
+        char **folder = VSIReadDir(cache.c_str());
         int size = folder ? CSLCount(folder) : 0;
         for (int i = 0; i < size; i++)
         {
@@ -441,21 +425,22 @@ bool SetupCache(CPLString &cache, bool clear)
             {
                 continue;
             }
-            CPLString filepath = CPLFormFilename(cache, folder[i], nullptr);
-            remove(filepath);
+            const std::string filepath =
+                CPLFormFilenameSafe(cache.c_str(), folder[i], nullptr);
+            CPL_IGNORE_RET_VAL(VSIUnlink(filepath.c_str()));
         }
         CSLDestroy(folder);
     }
     // make sure the index exists and is writable
-    CPLString db = CPLFormFilename(cache, "db", nullptr);
-    VSILFILE *f = VSIFOpenL(db, "r");
+    const std::string db = CPLFormFilenameSafe(cache.c_str(), "db", nullptr);
+    VSILFILE *f = VSIFOpenL(db.c_str(), "r");
     if (f)
     {
         VSIFCloseL(f);
     }
     else
     {
-        f = VSIFOpenL(db, "w");
+        f = VSIFOpenL(db.c_str(), "w");
         if (f)
         {
             VSIFCloseL(f);
@@ -472,16 +457,16 @@ bool SetupCache(CPLString &cache, bool clear)
     return true;
 }
 
-static bool CompareStrings(const CPLString &a, const CPLString &b)
+static bool CompareStrings(const std::string &a, const std::string &b)
 {
-    return strcmp(a, b) < 0;
+    return a.compare(b) < 0;
 }
 
-std::vector<CPLString> ReadCache(const CPLString &cache)
+std::vector<std::string> ReadCache(const std::string &cache)
 {
-    std::vector<CPLString> contents;
-    CPLString db = CPLFormFilename(cache, "db", nullptr);
-    char **data = CSLLoad(db);
+    std::vector<std::string> contents;
+    const std::string db = CPLFormFilenameSafe(cache.c_str(), "db", nullptr);
+    char **data = CSLLoad(db.c_str());
     if (data)
     {
         for (int i = 0; data[i]; ++i)
@@ -512,15 +497,16 @@ std::vector<CPLString> ReadCache(const CPLString &cache)
 /*      and all files with the basename is deleted.                     */
 /* -------------------------------------------------------------------- */
 
-bool DeleteEntryFromCache(const CPLString &cache, const CPLString &key,
-                          const CPLString &value)
+bool DeleteEntryFromCache(const std::string &cache, const std::string &key,
+                          const std::string &value)
 {
     // Depending on which one of key and value is not "" delete the relevant
     // entry.
-    CPLString db = CPLFormFilename(cache, "db", nullptr);
-    char **data = CSLLoad(db);  // returns NULL in error and for empty files
+    const std::string db = CPLFormFilenameSafe(cache.c_str(), "db", nullptr);
+    char **data =
+        CSLLoad(db.c_str());  // returns NULL in error and for empty files
     char **data2 = CSLAddNameValue(nullptr, "foo", "bar");
-    CPLString filename = "";
+    std::string filename = "";
     if (data)
     {
         for (int i = 0; data[i]; ++i)
@@ -549,11 +535,11 @@ bool DeleteEntryFromCache(const CPLString &cache, const CPLString &key,
         }
         CSLDestroy(data);
     }
-    CSLSave(data2, db);  // returns 0 in error and for empty arrays
+    CSLSave(data2, db.c_str());  // returns 0 in error and for empty arrays
     CSLDestroy(data2);
     if (filename != "")
     {
-        char **folder = VSIReadDir(cache);
+        char **folder = VSIReadDir(cache.c_str());
         int size = folder ? CSLCount(folder) : 0;
         for (int i = 0; i < size; i++)
         {
@@ -561,11 +547,12 @@ bool DeleteEntryFromCache(const CPLString &cache, const CPLString &key,
             {
                 continue;
             }
-            CPLString name = folder[i];
+            std::string name = folder[i];
             if (name.find(filename) != std::string::npos)
             {
-                CPLString filepath = CPLFormFilename(cache, name, nullptr);
-                if (VSIUnlink(filepath) == -1)
+                const std::string filepath =
+                    CPLFormFilenameSafe(cache.c_str(), name.c_str(), nullptr);
+                if (VSIUnlink(filepath.c_str()) == -1)
                 {
                     // error but can't do much, raise a warning?
                 }
@@ -584,12 +571,12 @@ bool DeleteEntryFromCache(const CPLString &cache, const CPLString &key,
 /*      the key, and the ext.                                           */
 /* -------------------------------------------------------------------- */
 
-CPLErr SearchCache(const CPLString &cache, const CPLString &url,
-                   CPLString &filename, const CPLString &ext, bool &found)
+CPLErr SearchCache(const std::string &cache, const std::string &url,
+                   std::string &filename, const std::string &ext, bool &found)
 {
     found = false;
-    CPLString db = CPLFormFilename(cache, "db", nullptr);
-    VSILFILE *f = VSIFOpenL(db, "r");
+    const std::string db = CPLFormFilenameSafe(cache.c_str(), "db", nullptr);
+    VSILFILE *f = VSIFOpenL(db.c_str(), "r");
     if (!f)
     {
         CPLError(CE_Failure, CPLE_FileIO, "Can't open file '%s': %i\n",
@@ -604,7 +591,7 @@ CPLErr SearchCache(const CPLString &cache, const CPLString &url,
             continue;
         }
         *value = '\0';
-        if (strcmp(url, value + 1) == 0)
+        if (url == (value + 1))
         {
             filename = line;
             found = true;
@@ -614,7 +601,8 @@ CPLErr SearchCache(const CPLString &cache, const CPLString &url,
     VSIFCloseL(f);
     if (found)
     {
-        filename = CPLFormFilename(cache, (filename + ext).c_str(), nullptr);
+        filename = CPLFormFilenameSafe(cache.c_str(), (filename + ext).c_str(),
+                                       nullptr);
         found = FileIsReadable(filename);
         // if not readable, we should delete the entry
     }
@@ -629,15 +617,15 @@ CPLErr SearchCache(const CPLString &cache, const CPLString &url,
 /*      name, the filename, and the ext.                                */
 /* -------------------------------------------------------------------- */
 
-CPLErr AddEntryToCache(const CPLString &cache, const CPLString &url,
-                       CPLString &filename, const CPLString &ext)
+CPLErr AddEntryToCache(const std::string &cache, const std::string &url,
+                       std::string &filename, const std::string &ext)
 {
     // todo: check for lock and do something if locked(?)
     // todo: lock the cache
     // assuming the url is not in the cache
-    CPLString store = filename;
-    CPLString db = CPLFormFilename(cache, "db", nullptr);
-    VSILFILE *f = VSIFOpenL(db, "a");
+    const std::string store = filename;
+    const std::string db = CPLFormFilenameSafe(cache.c_str(), "db", nullptr);
+    VSILFILE *f = VSIFOpenL(db.c_str(), "a");
     if (!f)
     {
         CPLError(CE_Failure, CPLE_FileIO, "Can't open file '%s': %i\n",
@@ -646,7 +634,7 @@ CPLErr AddEntryToCache(const CPLString &cache, const CPLString &url,
     }
 
     // create a new file into the cache using filename as template
-    CPLString path = "";
+    std::string path = "";
     VSIStatBufL stat;
     do
     {
@@ -657,25 +645,29 @@ CPLErr AddEntryToCache(const CPLString &cache, const CPLString &url,
         {
             if (filename.at(i) == 'X')
             {
-                // coverity[dont_call]
+#ifndef __COVERITY__
                 filename.replace(i, 1, 1, chars[rand() % (sizeof(chars) - 1)]);
+#else
+                filename.replace(i, 1, 1, chars[i % (sizeof(chars) - 1)]);
+#endif
             }
         }
         // replace X with random character from a-zA-Z
-        path = CPLFormFilename(cache, (filename + ext).c_str(), nullptr);
-    } while (VSIStatExL(path, &stat, VSI_STAT_EXISTS_FLAG) == 0);
-    VSILFILE *f2 = VSIFOpenL(path, "w");
+        path = CPLFormFilenameSafe(cache.c_str(), (filename + ext).c_str(),
+                                   nullptr);
+    } while (VSIStatExL(path.c_str(), &stat, VSI_STAT_EXISTS_FLAG) == 0);
+    VSILFILE *f2 = VSIFOpenL(path.c_str(), "w");
     if (f2)
     {
         VSIFCloseL(f2);
     }
 
-    CPLString entry =
+    std::string entry =
         filename + "=" + url + "\n";  // '=' for compatibility with CSL
     VSIFWriteL(entry.c_str(), sizeof(char), entry.size(), f);
     VSIFCloseL(f);
 
-    filename = path;
+    filename = std::move(path);
     return CE_None;
 }
 
@@ -684,33 +676,35 @@ CPLErr AddEntryToCache(const CPLString &cache, const CPLString &url,
 // 'from' path may be later used to get metadata from elements below 'from' so
 // it is returned in the appended form
 CPLXMLNode *AddSimpleMetaData(char ***metadata, CPLXMLNode *node,
-                              CPLString &path, const CPLString &from,
-                              const std::vector<CPLString> &keys)
+                              std::string &path, const std::string &from,
+                              const std::vector<std::string> &keys)
 {
-    CPLXMLNode *node2 = CPLGetXMLNode(node, from);
+    CPLXMLNode *node2 = CPLGetXMLNode(node, from.c_str());
     if (node2)
     {
         path = path + from + ".";
         for (unsigned int i = 0; i < keys.size(); i++)
         {
-            CPLXMLNode *node3 = CPLGetXMLNode(node2, keys[i]);
+            CPLXMLNode *node3 = CPLGetXMLNode(node2, keys[i].c_str());
             if (node3)
             {
-                CPLString name = path + keys[i];
+                const std::string name = path + keys[i];
                 CPLString value = CPLGetXMLValue(node3, nullptr, "");
                 value.Trim();
-                *metadata = CSLSetNameValue(*metadata, name, value);
+                *metadata =
+                    CSLSetNameValue(*metadata, name.c_str(), value.c_str());
             }
         }
     }
     return node2;
 }
 
-CPLString GetKeywords(CPLXMLNode *root, const CPLString &path,
-                      const CPLString &kw)
+std::string GetKeywords(CPLXMLNode *root, const std::string &path,
+                        const std::string &kw)
 {
-    CPLString words = "";
-    CPLXMLNode *keywords = (path != "") ? CPLGetXMLNode(root, path) : root;
+    std::string words = "";
+    CPLXMLNode *keywords =
+        (path != "") ? CPLGetXMLNode(root, path.c_str()) : root;
     if (keywords)
     {
         std::vector<unsigned int> epsg_codes;
@@ -736,11 +730,11 @@ CPLString GetKeywords(CPLXMLNode *root, const CPLString &path,
                     size_t pos = word.find(epsg[i]);
                     if (pos == 0)
                     {
-                        CPLString code =
+                        std::string code =
                             word.substr(strlen(epsg[i]), std::string::npos);
                         if (code.find_first_not_of(DIGITS) == std::string::npos)
                         {
-                            epsg_codes.push_back(atoi(code));
+                            epsg_codes.push_back(atoi(code.c_str()));
                             continue;
                         }
                     }
@@ -771,7 +765,7 @@ CPLString GetKeywords(CPLXMLNode *root, const CPLString &path,
         }
         if (epsg_codes.size() > 0)
         {
-            CPLString codes;
+            std::string codes;
             std::sort(epsg_codes.begin(), epsg_codes.end());
             unsigned int pajazzo = 0, i = 0, a = 0, b = 0;
             while (1)
@@ -846,11 +840,11 @@ CPLString GetKeywords(CPLXMLNode *root, const CPLString &path,
     return words;
 }
 
-CPLString ParseCRS(CPLXMLNode *node)
+std::string ParseCRS(CPLXMLNode *node)
 {
     // test for attrs crs (OWS) and srsName (GML), and text contents of subnode
     // (GridBaseCRS)
-    CPLString crs = CPLGetXMLValue(node, "crs", "");
+    std::string crs = CPLGetXMLValue(node, "crs", "");
     if (crs == "")
     {
         crs = CPLGetXMLValue(node, "srsName", "");
@@ -887,7 +881,7 @@ CPLString ParseCRS(CPLXMLNode *node)
 // if appropriate, try to create WKT description from CRS name
 // return false if failure
 // appropriate means, that the name is a real CRS
-bool CRS2Projection(const CPLString &crs, OGRSpatialReference *sr,
+bool CRS2Projection(const std::string &crs, OGRSpatialReference *sr,
                     char **projection)
 {
     if (*projection != nullptr)
@@ -908,7 +902,7 @@ bool CRS2Projection(const CPLString &crs, OGRSpatialReference *sr,
         // not a map projection
         return true;
     }
-    CPLString crs2 = crs;
+    std::string crs2 = crs;
     // rasdaman uses urls, which return gml:ProjectedCRS XML, which is not
     // recognized by GDAL currently
     if (crs2.find("EPSG") != std::string::npos)
@@ -929,7 +923,8 @@ bool CRS2Projection(const CPLString &crs, OGRSpatialReference *sr,
     OGRSpatialReference local_sr;
     OGRSpatialReference *sr_pointer = sr != nullptr ? sr : &local_sr;
     if (sr_pointer->SetFromUserInput(
-            crs2, OGRSpatialReference::SET_FROM_USER_INPUT_LIMITATIONS_get()) ==
+            crs2.c_str(),
+            OGRSpatialReference::SET_FROM_USER_INPUT_LIMITATIONS_get()) ==
         OGRERR_NONE)
     {
         sr_pointer->exportToWkt(projection);
@@ -938,7 +933,7 @@ bool CRS2Projection(const CPLString &crs, OGRSpatialReference *sr,
     return false;
 }
 
-bool CRSImpliesAxisOrderSwap(const CPLString &crs, bool &swap,
+bool CRSImpliesAxisOrderSwap(const std::string &crs, bool &swap,
                              char **projection)
 {
     OGRSpatialReference oSRS;
@@ -970,28 +965,28 @@ std::vector<std::vector<int>> ParseGridEnvelope(CPLXMLNode *node,
                                                 bool swap_the_first_two)
 {
     std::vector<std::vector<int>> envelope;
-    std::vector<CPLString> array =
+    std::vector<std::string> array =
         Split(CPLGetXMLValue(node, "low", ""), " ", swap_the_first_two);
     std::vector<int> lows;
     for (unsigned int i = 0; i < array.size(); ++i)
     {
-        lows.push_back(atoi(array[i]));
+        lows.push_back(atoi(array[i].c_str()));
     }
-    envelope.push_back(lows);
+    envelope.push_back(std::move(lows));
     array = Split(CPLGetXMLValue(node, "high", ""), " ", swap_the_first_two);
     std::vector<int> highs;
     for (unsigned int i = 0; i < array.size(); ++i)
     {
-        highs.push_back(atoi(array[i]));
+        highs.push_back(atoi(array[i].c_str()));
     }
-    envelope.push_back(highs);
+    envelope.push_back(std::move(highs));
     return envelope;
 }
 
-std::vector<CPLString> ParseBoundingBox(CPLXMLNode *node)
+std::vector<std::string> ParseBoundingBox(CPLXMLNode *node)
 {
-    std::vector<CPLString> bbox;
-    CPLString lc = CPLGetXMLValue(node, "lowerCorner", ""), uc;
+    std::vector<std::string> bbox;
+    std::string lc = CPLGetXMLValue(node, "lowerCorner", ""), uc;
     if (lc == "")
     {
         lc = CPLGetXMLValue(node, "LowerCorner", "");

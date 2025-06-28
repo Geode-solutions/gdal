@@ -11,23 +11,7 @@
  * Copyright (c) 1999, 2000, Daniel Morissette
  * Copyright (c) 2014, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 
 #include "cpl_port.h"
@@ -56,8 +40,7 @@
 TABMAPIndexBlock::TABMAPIndexBlock(TABAccess eAccessMode /*= TABRead*/)
     : TABRawBinBlock(eAccessMode, TRUE), m_numEntries(0), m_nMinX(1000000000),
       m_nMinY(1000000000), m_nMaxX(-1000000000), m_nMaxY(-1000000000),
-      m_poBlockManagerRef(nullptr), m_poCurChild(nullptr), m_nCurChildIndex(-1),
-      m_poParentRef(nullptr)
+      m_poBlockManagerRef(nullptr), m_nCurChildIndex(-1), m_poParentRef(nullptr)
 {
     memset(m_asEntries, 0, sizeof(m_asEntries));
 }
@@ -82,8 +65,7 @@ void TABMAPIndexBlock::UnsetCurChild()
     {
         if (m_eAccess == TABWrite || m_eAccess == TABReadWrite)
             m_poCurChild->CommitToFile();
-        delete m_poCurChild;
-        m_poCurChild = nullptr;
+        m_poCurChild.reset();
     }
     m_nCurChildIndex = -1;
 }
@@ -564,8 +546,7 @@ GInt32 TABMAPIndexBlock::ChooseLeafForInsert(GInt32 nXMin, GInt32 nYMin,
     if (m_poCurChild)
     {
         m_poCurChild->CommitToFile();
-        delete m_poCurChild;
-        m_poCurChild = nullptr;
+        m_poCurChild.reset();
         m_nCurChildIndex = -1;
     }
 
@@ -582,21 +563,18 @@ GInt32 TABMAPIndexBlock::ChooseLeafForInsert(GInt32 nXMin, GInt32 nYMin,
     // Prevent error message if referred block not committed yet.
     CPLPushErrorHandler(CPLQuietErrorHandler);
 
-    TABRawBinBlock *poBlock =
+    auto poBlock = std::unique_ptr<TABRawBinBlock>(
         TABCreateMAPBlockFromFile(m_fp, m_asEntries[nBestCandidate].nBlockPtr,
-                                  m_nBlockSize, TRUE, TABReadWrite);
+                                  m_nBlockSize, TRUE, TABReadWrite));
     if (poBlock != nullptr && poBlock->GetBlockClass() == TABMAP_INDEX_BLOCK)
     {
-        m_poCurChild = cpl::down_cast<TABMAPIndexBlock *>(poBlock);
-        poBlock = nullptr;
+        m_poCurChild.reset(
+            cpl::down_cast<TABMAPIndexBlock *>(poBlock.release()));
         m_nCurChildIndex = nBestCandidate;
         m_poCurChild->SetParentRef(this);
         m_poCurChild->SetMAPBlockManagerRef(m_poBlockManagerRef);
         bFound = TRUE;
     }
-
-    if (poBlock)
-        delete poBlock;
 
     CPLPopErrorHandler();
     CPLErrorReset();
@@ -762,8 +740,7 @@ int TABMAPIndexBlock::AddEntry(GInt32 nXMin, GInt32 nYMin, GInt32 nXMax,
         if (m_poCurChild)
         {
             m_poCurChild->CommitToFile();
-            delete m_poCurChild;
-            m_poCurChild = nullptr;
+            m_poCurChild.reset();
             m_nCurChildIndex = -1;
         }
 
@@ -781,22 +758,20 @@ int TABMAPIndexBlock::AddEntry(GInt32 nXMin, GInt32 nYMin, GInt32 nXMax,
             // Prevent error message if referred block not committed yet.
             CPLPushErrorHandler(CPLQuietErrorHandler);
 
-            TABRawBinBlock *poBlock = TABCreateMAPBlockFromFile(
-                m_fp, m_asEntries[nBestCandidate].nBlockPtr, m_nBlockSize, TRUE,
-                TABReadWrite);
+            auto poBlock =
+                std::unique_ptr<TABRawBinBlock>(TABCreateMAPBlockFromFile(
+                    m_fp, m_asEntries[nBestCandidate].nBlockPtr, m_nBlockSize,
+                    TRUE, TABReadWrite));
             if (poBlock != nullptr &&
                 poBlock->GetBlockClass() == TABMAP_INDEX_BLOCK)
             {
-                m_poCurChild = cpl::down_cast<TABMAPIndexBlock *>(poBlock);
-                poBlock = nullptr;
+                m_poCurChild.reset(
+                    cpl::down_cast<TABMAPIndexBlock *>(poBlock.release()));
                 m_nCurChildIndex = nBestCandidate;
                 m_poCurChild->SetParentRef(this);
                 m_poCurChild->SetMAPBlockManagerRef(m_poBlockManagerRef);
                 bFound = TRUE;
             }
-
-            if (poBlock)
-                delete poBlock;
 
             CPLPopErrorHandler();
             CPLErrorReset();
@@ -1259,7 +1234,7 @@ int TABMAPIndexBlock::SplitRootNode(GInt32 nNewEntryXMin, GInt32 nNewEntryYMin,
      * Since a root note cannot be split, we add a level of nodes
      * under it and we'll do the split at that level.
      *----------------------------------------------------------------*/
-    TABMAPIndexBlock *poNewNode = new TABMAPIndexBlock(m_eAccess);
+    auto poNewNode = std::make_unique<TABMAPIndexBlock>(m_eAccess);
 
     if (poNewNode->InitNewBlock(m_fp, m_nBlockSize,
                                 m_poBlockManagerRef->AllocNewBlock("INDEX")) !=
@@ -1285,9 +1260,7 @@ int TABMAPIndexBlock::SplitRootNode(GInt32 nNewEntryXMin, GInt32 nNewEntryYMin,
      *----------------------------------------------------------------*/
     if (m_poCurChild)
     {
-        poNewNode->SetCurChildRef(m_poCurChild, m_nCurChildIndex);
-        m_poCurChild->SetParentRef(poNewNode);
-        m_poCurChild = nullptr;
+        poNewNode->SetCurChild(std::move(m_poCurChild), m_nCurChildIndex);
         m_nCurChildIndex = -1;
     }
 
@@ -1303,7 +1276,7 @@ int TABMAPIndexBlock::SplitRootNode(GInt32 nNewEntryXMin, GInt32 nNewEntryYMin,
      * Keep a reference to the new child
      *----------------------------------------------------------------*/
     poNewNode->SetParentRef(this);
-    m_poCurChild = poNewNode;
+    m_poCurChild = std::move(poNewNode);
     m_nCurChildIndex = m_numEntries - 1;
 
     /*-----------------------------------------------------------------
@@ -1431,14 +1404,16 @@ void TABMAPIndexBlock::SetParentRef(TABMAPIndexBlock *poParent)
 }
 
 /**********************************************************************
- *                   TABMAPIndexBlock::SetCurChildRef()
+ *                   TABMAPIndexBlock::SetCurChild()
  *
  * Used to transfer a child object from one node to another
  **********************************************************************/
-void TABMAPIndexBlock::SetCurChildRef(TABMAPIndexBlock *poChild,
-                                      int nChildIndex)
+void TABMAPIndexBlock::SetCurChild(std::unique_ptr<TABMAPIndexBlock> &&poChild,
+                                   int nChildIndex)
 {
-    m_poCurChild = poChild;
+    if (poChild)
+        poChild->SetParentRef(this);
+    m_poCurChild = std::move(poChild);
     m_nCurChildIndex = nChildIndex;
 }
 

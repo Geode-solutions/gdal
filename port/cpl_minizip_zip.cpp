@@ -33,7 +33,7 @@
    archives Oct-2009 - Mathias Svensson - Did some code cleanup and refactoring
    to get better overview of some functions. Oct-2009 - Mathias Svensson - Added
    zipRemoveExtraInfoBlock to strip extra field data from its ZIP64 data It is
-   used when recreting zip archive with RAW when deleting items from a zip.
+   used when recreating zip archive with RAW when deleting items from a zip.
                                  ZIP64 data is automatically added to items that
    needs it, and existing ZIP64 data need to be removed. Oct-2009 - Mathias
    Svensson - Added support for BZIP2 as compression mode (bzip2 lib is
@@ -692,7 +692,7 @@ static int LoadCentralDirectoryRecord(zip64_internal *pziinit)
     {
         hasZIP64Record = 1;
     }
-    else if (central_pos == 0)
+    else /* if (central_pos == 0) */
     {
         central_pos = zip64local_SearchCentralDir(&pziinit->z_filefunc,
                                                   pziinit->filestream);
@@ -1133,6 +1133,17 @@ extern int ZEXPORT cpl_zipOpenNewFileInZip3(
 
     if (filename == nullptr)
         filename = "-";
+
+    // The filename and comment length must fit in 16 bits.
+    if ((filename != nullptr) && (strlen(filename) > 0xffff))
+        return ZIP_PARAMERROR;
+    if ((comment != nullptr) && (strlen(comment) > 0xffff))
+        return ZIP_PARAMERROR;
+    // The extra field length must fit in 16 bits. If the member also requires
+    // a Zip64 extra block, that will also need to fit within that 16-bit
+    // length, but that will be checked for later.
+    if ((size_extrafield_local > 0xffff) || (size_extrafield_global > 0xffff))
+        return ZIP_PARAMERROR;
 
     if (comment == nullptr)
         size_comment = 0;
@@ -2093,7 +2104,36 @@ CPLErr CPLCreateFileInZip(void *hZip, const char *pszFilename,
 #endif
         );
 
-        pszCPFilename = CPLRecode(pszFilename, CPL_ENC_UTF8, pszDestEncoding);
+        {
+            CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+            pszCPFilename =
+                CPLRecode(pszFilename, CPL_ENC_UTF8, pszDestEncoding);
+
+            char *pszBackToUTF8 =
+                CPLRecode(pszCPFilename, pszDestEncoding, CPL_ENC_UTF8);
+            if (strcmp(pszBackToUTF8, pszFilename) != 0)
+            {
+                // If the UTF-8 name cannot be properly encoded to CPL_ZIP_ENCODING,
+                // then generate an ASCII name for it where non-ASCII characters
+                // are replaced by an hexadecimal representation
+                std::string s;
+                for (int i = 0; pszFilename[i]; ++i)
+                {
+                    if (static_cast<unsigned char>(pszFilename[i]) <= 127)
+                    {
+                        s += pszFilename[i];
+                    }
+                    else
+                    {
+                        s += CPLSPrintf("0x%02X", static_cast<unsigned char>(
+                                                      pszFilename[i]));
+                    }
+                }
+                CPLFree(pszCPFilename);
+                pszCPFilename = CPLStrdup(s.c_str());
+            }
+            CPLFree(pszBackToUTF8);
+        }
 
         /* Create a Info-ZIP Unicode Path Extra Field (0x7075) */
         const size_t nDataLength =
@@ -2278,7 +2318,7 @@ CPLErr CPLCloseFileInZip(void *hZip)
 
 /** Add a file inside a ZIP file opened/created with CPLCreateZip().
  *
- * This combines calls sto CPLCreateFileInZip(), CPLWriteFileInZip(),
+ * This combines calls to CPLCreateFileInZip(), CPLWriteFileInZip(),
  * and CPLCloseFileInZip() in a more convenient and powerful way.
  *
  * In particular, this enables to add a compressed file using the seek
@@ -2329,14 +2369,13 @@ CPLErr CPLAddFileInZip(void *hZip, const char *pszArchiveFilename,
     CPLZip *psZip = static_cast<CPLZip *>(hZip);
     zip64_internal *zi = reinterpret_cast<zip64_internal *>(psZip->hZip);
 
-    std::unique_ptr<VSIVirtualHandle> poFileHandleAutoClose;
+    VSIVirtualHandleUniquePtr poFileHandleAutoClose;
     if (!fpInput)
     {
         fpInput = VSIFOpenL(pszInputFilename, "rb");
         if (!fpInput)
             return CE_Failure;
-        poFileHandleAutoClose.reset(
-            reinterpret_cast<VSIVirtualHandle *>(fpInput));
+        poFileHandleAutoClose.reset(fpInput);
     }
 
     VSIFSeekL(fpInput, 0, SEEK_END);

@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #include "segment/cpcidskgcp2segment.h"
 
@@ -37,6 +21,8 @@
 #include <string>
 
 using namespace PCIDSK;
+
+PCIDSKGCPSegment::~PCIDSKGCPSegment() = default;
 
 CPCIDSKGCP2Segment::CPCIDSKGCP2Segment(PCIDSKFile *fileIn, int segmentIn, const char *segment_pointer)
     : CPCIDSKSegment(fileIn, segmentIn, segment_pointer), loaded_(false)
@@ -133,11 +119,11 @@ void CPCIDSKGCP2Segment::Load()
         double x = pimpl_->seg_data.GetDouble(offset + 48, 22);
         double y = pimpl_->seg_data.GetDouble(offset + 70, 22);
 
-        char cElevDatum = (char)toupper(pimpl_->seg_data.buffer[offset + 47]);
+        char cElevDatum = (char)toupper(static_cast<unsigned char>(pimpl_->seg_data.buffer[offset + 47]));
         PCIDSK::GCP::EElevationDatum elev_datum = cElevDatum != 'M' ?
             GCP::EEllipsoidal : GCP::EMeanSeaLevel;
 
-        char elev_unit_c = (char)toupper(pimpl_->seg_data.buffer[offset + 46]);
+        char elev_unit_c = (char)toupper(static_cast<unsigned char>(pimpl_->seg_data.buffer[offset + 46]));
         PCIDSK::GCP::EElevationUnit elev_unit = elev_unit_c == 'M' ? GCP::EMetres :
             elev_unit_c == 'F' ? GCP::EInternationalFeet :
             elev_unit_c == 'A' ? GCP::EAmericanFeet : GCP::EUnknown;

@@ -77,63 +77,93 @@ layer has more than one style or a tile matrix set, a list of
 subdatasets will be returned. If there is only one layer, it will be
 opened on the default style and the first tile matrix set listed.
 
+Starting with GDAL 3.10, specifying the ``-if WMTS`` option to command line utilities
+accepting it, or ``WMTS`` as the only value of the ``papszAllowedDrivers`` of
+:cpp:func:`GDALOpenEx`, also forces the driver to recognize the passed
+filename/URL, when it is not using subdataset syntax (it can typically be used to
+force open a HDF5 file that would be nominally recognized by the HDF5 driver).
+
 Open options
 ------------
 
 The following open options are available:
 
-- **URL**: URL (or filename for local files) to GetCapabilities response document.
-  Required if not specified in the connection string (e.g if using "WMTS:" only)
+-  .. oo:: URL
 
-- **LAYER**: Layer identifier
+      URL (or filename for local files) to GetCapabilities response document.
+      Required if not specified in the connection string (e.g if using "WMTS:" only)
 
-- **TILEMATRIXSET**: Tile Matrix Set identifier, which determines the CRS into
-  which the layer will be exposed. Must be one of the listed tile matrix
-  for the layer.
+-  .. oo:: LAYER
 
-- **TILEMATRIX**: Tile Matrix identifier. Must be one of the listed tile matrix of
-  the select tile matrix set for the layer. Mutually exclusive with ZOOM_LEVEL.
-  If not specified the last tile matrix, i.e. the one with the best resolution,
-  is selected.
+      Layer identifier
 
-- **ZOOM_LEVEL**: Index of the maximum zoom level tile matrix to use for the
-  full resolution GDAL dataset (lower zoom levels will be used for overviews).
-  The first one (ie the one of lower resolution) is indexed 0.
-  Mutually exclusive with TILEMATRIX.
-  If not specified the last tile matrix, i.e. the one with the best resolution,
-  is selected.
+-  .. oo:: TILEMATRIXSET
 
-- **STYLE**: Style identifier. Must be one of layer.
+     Tile Matrix Set identifier, which determines the CRS into
+     which the layer will be exposed. Must be one of the listed tile matrix
+     for the layer.
 
-- **EXTENDBEYONDDATELINE** = YES/NO.  Whether to make the extent go over dateline
-  and warp tile requests. See ExtendBeyondDateLine parameter of the local service
-  description XML file described below for more details.
+-  .. oo:: TILEMATRIX
 
-- **EXTENT_METHOD** = AUTO/LAYER_BBOX/TILE_MATRIX_SET/MOST_PRECISE_TILE_MATRIX.
-  GDAL needs to retrieve an extent for the layer. Different sources are possible.
-  WGS84BoundingBox element at the Layer level, BoundingBox elements with potentially
-  several CRS at the Layer level, BoundingBox of the TileMatrixSet definitions
-  shared by all layers, and TileMatrixLimit definitions at the Layer level.
-  By default (AUTO), GDAL will try first with a WGS84BoundingBox/BoundingBox corresponding
-  to the CRS implied by the select TileMatrixSet. If not available, if will
-  fallback to a BoundingBox in another CRS and reproject it to the selected CRS.
-  If not available, it will fallback to the most precise tile matrix of the
-  selected TileMatrixSet and will clip it with the bounding box implied by the
-  most precise zoom level of the TileMatrixLimit of the layer.
-  If LAYER_BBOX is specified, only WGS84BoundingBox/BoundingBox elements are
-  considered.
-  If TILE_MATRIX_SET is specified, the BoundingBox element of the selected
-  TileMatrixSet will be used.
-  If MOST_PRECISE_TILE_MATRIX is specified, the implit extent of the
-  most precise tile matrix will be used.
+      Tile Matrix identifier. Must be one of the listed tile matrix of
+      the select tile matrix set for the layer. Mutually exclusive with ZOOM_LEVEL.
+      If not specified the last tile matrix, i.e. the one with the best resolution,
+      is selected.
 
-- **CLIP_EXTENT_WITH_MOST_PRECISE_TILE_MATRIX** = YES/NO (GDAL >= 3.4.2).
-  Whether to use the implied bounds of the most precise TileMatrix to clip the
-  layer extent (defaults to NO if the layer bounding box is used, YES otherwise)
+-  .. oo:: ZOOM_LEVEL
 
-- **CLIP_EXTENT_WITH_MOST_PRECISE_TILE_MATRIX_LIMITS** = YES/NO (GDAL >= 3.4.2).
-  Whether to use the implied bounds of the most precise TileMatrixLimit to clip the
-  layer extent (defaults to NO if the layer bounding box is used, YES otherwise)
+      Index of the maximum zoom level tile matrix to use for the
+      full resolution GDAL dataset (lower zoom levels will be used for overviews).
+      The first one (ie the one of lower resolution) is indexed 0.
+      Mutually exclusive with TILEMATRIX.
+      If not specified the last tile matrix, i.e. the one with the best resolution,
+      is selected.
+
+-  .. oo:: STYLE
+
+      Style identifier. Must be one of layer.
+
+-  .. oo:: EXTENDBEYONDDATELINE
+      :choices: YES, N
+
+      Whether to make the extent go over dateline
+      and warp tile requests. See ExtendBeyondDateLine parameter of the local service
+      description XML file described below for more details.
+
+-  .. oo:: EXTENT_METHOD
+      :choices: AUTO, LAYER_BBOX, TILE_MATRIX_SET, MOST_PRECISE_TILE_MATRIX
+      :default: AUTO
+
+      GDAL needs to retrieve an extent for the layer. Different sources are possible.
+      WGS84BoundingBox element at the Layer level, BoundingBox elements with potentially
+      several CRS at the Layer level, BoundingBox of the TileMatrixSet definitions
+      shared by all layers, and TileMatrixLimit definitions at the Layer level.
+      By default (AUTO), GDAL will try first with a WGS84BoundingBox/BoundingBox corresponding
+      to the CRS implied by the select TileMatrixSet. If not available, if will
+      fallback to a BoundingBox in another CRS and reproject it to the selected CRS.
+      If not available, it will fallback to the most precise tile matrix of the
+      selected TileMatrixSet and will clip it with the bounding box implied by the
+      most precise zoom level of the TileMatrixLimit of the layer.
+      If LAYER_BBOX is specified, only WGS84BoundingBox/BoundingBox elements are
+      considered.
+      If TILE_MATRIX_SET is specified, the BoundingBox element of the selected
+      TileMatrixSet will be used.
+      If MOST_PRECISE_TILE_MATRIX is specified, the implicit extent of the
+      most precise tile matrix will be used.
+
+-  .. oo:: CLIP_EXTENT_WITH_MOST_PRECISE_TILE_MATRIX
+      :choices: YES, NO
+      :since: 3.4.2
+
+      Whether to use the implied bounds of the most precise TileMatrix to clip the
+      layer extent (defaults to NO if the layer bounding box is used, YES otherwise)
+
+-  .. oo:: CLIP_EXTENT_WITH_MOST_PRECISE_TILE_MATRIX_LIMITS
+      :choices: YES, NO
+      :since: 3.4.2
+
+      Whether to use the implied bounds of the most precise TileMatrixLimit to clip the
+      layer extent (defaults to NO if the layer bounding box is used, YES otherwise)
 
 
 Local service description XML file
@@ -145,16 +175,16 @@ It is important that there be no spaces or other content before the
 +-----------------------------------+-----------------------------------+
 | <GDAL_WMTS>                       |                                   |
 +-----------------------------------+-----------------------------------+
-| <GetCapabilitiesUrl>http://foo/WM | URL (or filename for local files) |
-| TSCapabilities.xml</GetCapabiliti | to GetCapabilities response       |
-| esUrl>                            | document (required). For a KVP    |
+| <GetCapabilitiesUrl>              | URL (or filename for local files) |
+| http://foo/WMTSCapabilities.xml   | to GetCapabilities response       |
+| </GetCapabilitiesUrl>             | document (required). For a KVP    |
 |                                   | only server, will be like         |
 |                                   | http://end_point?SERVICE=WMTS&amp |
 |                                   | ;REQUEST=GetCapabilities          |
 |                                   | .                                 |
 +-----------------------------------+-----------------------------------+
 | <ExtraQueryParameters>foo=bar&amp;| URL query parameters to add to    |
-|                                   | all requests (GetCapabilities,    |
+| </ExtraQueryParameters>           | all requests (GetCapabilities,    |
 |                                   | GetTile, GetFeatureInfo)          |
 |                                   | (added in GDAL 3.5.1)             |
 +-----------------------------------+-----------------------------------+
@@ -174,8 +204,8 @@ It is important that there be no spaces or other content before the
 |                                   | may be needed to disambiguate     |
 |                                   | between several tile matrix sets) |
 +-----------------------------------+-----------------------------------+
-| <TileMatrix>tile_matrix_id</TileM | Tile Matrix identifier. Must be   |
-| atrix>                            | one of the listed tile matrix of  |
+| <TileMatrix>tile_matrix_id        | Tile Matrix identifier. Must be   |
+| </TileMatrix>                     | one of the listed tile matrix of  |
 |                                   | the select tile matrix set for    |
 |                                   | the layer. (optional, GDAL >=     |
 |                                   | 2.2. Exclusive with ZoomLevel. If |
@@ -199,8 +229,8 @@ It is important that there be no spaces or other content before the
 |                                   | disambiguate between several      |
 |                                   | Format)                           |
 +-----------------------------------+-----------------------------------+
-| <InfoFormat>application/xml</Info | Info format, used by              |
-| Format>                           | GetFeatureInfo requests. Must be  |
+| <InfoFormat>application/xml       | Info format, used by              |
+| </InfoFormat>                     | GetFeatureInfo requests. Must be  |
 |                                   | one of the listed InfoFormat for  |
 |                                   | the layer. (optional, but may be  |
 |                                   | needed to disambiguate between    |
@@ -237,8 +267,8 @@ It is important that there be no spaces or other content before the
 +-----------------------------------+-----------------------------------+
 | </DataWindow>                     |                                   |
 +-----------------------------------+-----------------------------------+
-| <Projection>EPSG:4326</Projection | Declared projection, in case the  |
-| >                                 | one of the TileMatrixSet is not   |
+| <Projection>EPSG:4326             | Declared projection, in case the  |
+| </Projection>                     | one of the TileMatrixSet is not   |
 |                                   | desirable (optional, defaults to  |
 |                                   | value of the TileMatrixSet)       |
 +-----------------------------------+-----------------------------------+
@@ -251,8 +281,8 @@ It is important that there be no spaces or other content before the
 |                                   | Float32, Float64, etc..           |
 |                                   | (optional, defaults to Byte)      |
 +-----------------------------------+-----------------------------------+
-| <ExtendBeyondDateLine>false</Exte | Whether to make the extent go     |
-| ndBeyondDateLine>                 | over dateline and warp tile       |
+| <ExtendBeyondDateLine>false       | Whether to make the extent go     |
+| </ExtendBeyondDateLine>           | over dateline and warp tile       |
 |                                   | requests. Only appropriate when   |
 |                                   | the 2 following conditions are    |
 |                                   | met (optional, defaults to        |
@@ -322,8 +352,8 @@ It is important that there be no spaces or other content before the
 +-----------------------------------+-----------------------------------+
 | </Cache>                          |                                   |
 +-----------------------------------+-----------------------------------+
-| <MaxConnections>2</MaxConnections | Maximum number of simultaneous    |
-| >                                 | connections. (optional, defaults  |
+| <MaxConnections>2                 | Maximum number of simultaneous    |
+| </MaxConnections                  | connections. (optional, defaults  |
 |                                   | to 2)                             |
 +-----------------------------------+-----------------------------------+
 | <Timeout>300</Timeout>            | Connection timeout in seconds.    |
@@ -335,12 +365,11 @@ It is important that there be no spaces or other content before the
 |                                   | (optional, defaults to false)     |
 +-----------------------------------+-----------------------------------+
 | <UserAgent>GDAL WMS driver        | HTTP User-agent string. Some      |
-| (http://www.gdal.org/frmt_wms.htm | servers might require a           |
-| l)</UserAgent>                    | well-known user-agent such as     |
+| (http://gdal.org/frmt_wms.html)   | servers might require a           |
+| </UserAgent>                      | well-known user-agent such as     |
 |                                   | "Mozilla/5.0" (optional, defaults |
 |                                   | to "GDAL WMS driver               |
-|                                   | (http://www.gdal.org/frmt_wms.htm |
-|                                   | l)").                             |
+|                                   | (http://gdal.org/frmt_wms.html)   |
 +-----------------------------------+-----------------------------------+
 | <Accept>mimetype>/Accept>         | HTTP Accept header to specify the |
 |                                   | MIME type of the expected output  |
@@ -357,11 +386,11 @@ It is important that there be no spaces or other content before the
 |                                   | to false, but set to true in      |
 |                                   | autogenerated XML).               |
 +-----------------------------------+-----------------------------------+
-| <Referer>http://example.foo/</Ref | HTTP Referer string. Some servers |
-| erer>                             | might require it (optional).      |
+| <Referer>http://example.foo/      | HTTP Referer string. Some servers |
+| </Referer>                        | might require it (optional).      |
 +-----------------------------------+-----------------------------------+
-| <ZeroBlockHttpCodes>204,404</Zero | Comma separated list of HTTP      |
-| BlockHttpCodes>                   | response codes that will be       |
+| <ZeroBlockHttpCodes>204,404       | Comma separated list of HTTP      |
+| </ZeroBlockHttpCodes>             | response codes that will be       |
 |                                   | interpreted as a 0 filled image   |
 |                                   | (i.e. black for 3 bands, and      |
 |                                   | transparent for 4 bands) instead  |
@@ -370,8 +399,8 @@ It is important that there be no spaces or other content before the
 |                                   | but set to 204,404 in             |
 |                                   | autogenerated XML)                |
 +-----------------------------------+-----------------------------------+
-| <ZeroBlockOnServerException>true< | Whether to treat a Service        |
-| /ZeroBlockOnServerException>      | Exception returned by the server  |
+| <ZeroBlockOnServerException>true  | Whether to treat a Service        |
+| </ZeroBlockOnServerException>     | Exception returned by the server  |
 |                                   | as a 0 filled image instead of    |
 |                                   | aborting the request. (optional,  |
 |                                   | defaults to false, but set to     |
@@ -379,11 +408,9 @@ It is important that there be no spaces or other content before the
 +-----------------------------------+-----------------------------------+
 | </GDAL_WMTS>                      |                                   |
 +-----------------------------------+-----------------------------------+
-|                                   |                                   |
-+-----------------------------------+-----------------------------------+
 
 Starting with GDAL 2.3, additional HTTP headers can be sent by setting the
-GDAL_HTTP_HEADER_FILE configuration option to point to a filename of a text
+:config:`GDAL_HTTP_HEADER_FILE` configuration option to point to a filename of a text
 file with “key: value” HTTP headers.
 
 GetFeatureInfo request
@@ -434,6 +461,23 @@ generates the following file:
 
 The generated file will come with default values that you may need to
 edit.
+
+Caching
+-------
+
+.. include:: wms_wmts_cache.rst
+
+Configuration options
+---------------------
+
+|about-config-options|
+The following configuration options are available:
+
+- :copy-config:`GDAL_MAX_CONNECTIONS`
+
+- :copy-config:`GDAL_ENABLE_WMS_CACHE`
+
+- :copy-config:`GDAL_DEFAULT_WMS_CACHE_PATH`
 
 See Also
 --------

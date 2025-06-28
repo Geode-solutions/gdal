@@ -10,7 +10,22 @@ set(SOURCE
     ogrdwgdriver.cpp
     ogrdwglayer.cpp
     ogrteigha.cpp)
-add_gdal_driver(TARGET ogr_DWG_DGNV8 SOURCES ${SOURCE} DRIVER_NAME_OPTION DWG PLUGIN_CAPABLE)
+add_gdal_driver(TARGET ogr_DWG_DGNV8
+                SOURCES ${SOURCE}
+                CORE_SOURCES
+                      ogrdgnv8drivercore.cpp
+                      ogrdwgdrivercore.cpp
+                DRIVER_NAME_OPTION DWG
+                SKIP_GDAL_PRIV_HEADER  # because of issue with _REENTRANT
+                PLUGIN_CAPABLE
+                NO_SHARED_SYMBOL_WITH_CORE
+  NO_CXX_WFLAGS_EFFCXX
+  NO_WFLAG_OLD_STYLE_CAST
+)
+if(NOT TARGET ogr_DWG_DGNV8)
+    return()
+endif()
+
 if (OGR_ENABLE_DRIVER_DWG_PLUGIN)
   # a bit ugly but we need those symbols from the DXF driver Note: we need to use target_sources() to add them, and not
   # edit the SOURCE variable, as the OGR_ENABLE_DRIVER_DWG_PLUGIN variable is automatically created only after

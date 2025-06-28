@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  GMLAS driver testing.
@@ -13,25 +12,10 @@
 # ******************************************************************************
 # Copyright (c) 2016, Even Rouault, <even dot rouault at spatialys dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import difflib
 import os
 import os.path
 from http.server import BaseHTTPRequestHandler
@@ -47,26 +31,26 @@ pytestmark = pytest.mark.require_driver("GMLAS")
 
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
 def startup_and_cleanup():
 
-    gdal.SetConfigOption("GMLAS_WARN_UNEXPECTED", "YES")
-
     # FileGDB embedded libxml2 cause random crashes with CPLValidateXML() use of external libxml2
-    old_val_GDAL_XML_VALIDATION = gdal.GetConfigOption("GDAL_XML_VALIDATION")
-    if (
-        ogr.GetDriverByName("FileGDB") is not None
-        and old_val_GDAL_XML_VALIDATION is None
-    ):
-        gdal.SetConfigOption("GDAL_XML_VALIDATION", "NO")
+    # hence GDAL_XML_VALIDATION=NO
 
-    yield
+    with gdaltest.config_options(
+        {"GMLAS_WARN_UNEXPECTED": "YES", "GDAL_XML_VALIDATION": "NO"}
+    ):
+        yield
 
     files = gdal.ReadDir("/vsimem/")
     if files is not None:
         print("Remaining files: " + str(files))
-
-    gdal.SetConfigOption("GMLAS_WARN_UNEXPECTED", None)
-    gdal.SetConfigOption("GDAL_XML_VALIDATION", old_val_GDAL_XML_VALIDATION)
 
 
 ###############################################################################
@@ -79,7 +63,6 @@ def compare_ogrinfo_output(gmlfile, reffile, options=""):
     if test_cli_utilities.get_ogrinfo_path() is None:
         pytest.skip()
 
-    tmpfilename = "tmp/" + os.path.basename(gmlfile) + ".txt"
     ret = gdaltest.runexternal(
         test_cli_utilities.get_ogrinfo_path()
         + " -ro -al GMLAS:"
@@ -98,12 +81,20 @@ def compare_ogrinfo_output(gmlfile, reffile, options=""):
     expected = open(reffile, "rb").read().decode("utf-8")
     expected = expected.replace("\r\n", "\n")
     if ret != expected:
-        print(ret.encode("utf-8"))
-        open(tmpfilename, "wb").write(ret.encode("utf-8"))
-        print("Diff:")
-        os.system("diff -u " + reffile + " " + tmpfilename)
-        # os.unlink(tmpfilename)
-        pytest.fail("Got:")
+        xml_diff = "\n".join(
+            [
+                line
+                for line in difflib.unified_diff(
+                    ret.splitlines(),
+                    expected.splitlines(),
+                    fromfile="expected",
+                    tofile="got",
+                    lineterm="",
+                )
+            ]
+        )
+
+        pytest.fail("ogrinfo output does not match.\n" + xml_diff)
 
 
 ###############################################################################
@@ -207,7 +198,7 @@ def test_ogr_gmlas_no_datafile_with_xsd_option():
 
 def test_ogr_gmlas_no_datafile_xsd_which_is_not_xsd():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("GMLAS:", open_options=["XSD=data/gmlas/gmlas_test1.xml"])
     assert ds is None
     assert gdal.GetLastErrorMsg().find("invalid content in 'schema' element") >= 0
@@ -219,7 +210,7 @@ def test_ogr_gmlas_no_datafile_xsd_which_is_not_xsd():
 
 def test_ogr_gmlas_no_datafile_no_xsd():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("GMLAS:")
     assert ds is None
     assert (
@@ -236,7 +227,7 @@ def test_ogr_gmlas_no_datafile_no_xsd():
 
 def test_ogr_gmlas_non_existing_gml():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("GMLAS:/vsimem/i_do_not_exist.gml")
     assert ds is None
     assert gdal.GetLastErrorMsg().find("Cannot open /vsimem/i_do_not_exist.gml") >= 0
@@ -248,7 +239,7 @@ def test_ogr_gmlas_non_existing_gml():
 
 def test_ogr_gmlas_non_existing_xsd():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("GMLAS:", open_options=["XSD=/vsimem/i_do_not_exist.xsd"])
     assert ds is None
     assert gdal.GetLastErrorMsg().find("Cannot resolve /vsimem/i_do_not_exist.xsd") >= 0
@@ -265,7 +256,7 @@ def test_ogr_gmlas_gml_without_schema_location():
         """<MYNS:main_elt xmlns:MYNS="http://myns"/>""",
     )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("GMLAS:/vsimem/ogr_gmlas_gml_without_schema_location.xml")
     assert ds is None
     assert (
@@ -284,7 +275,7 @@ def test_ogr_gmlas_gml_without_schema_location():
 
 def test_ogr_gmlas_invalid_schema():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_invalid_schema.xml")
     assert ds is None
     assert gdal.GetLastErrorMsg().find("invalid content") >= 0
@@ -298,7 +289,7 @@ def test_ogr_gmlas_invalid_xml():
 
     ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_invalid_xml.xml")
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     assert f is None
     assert (
@@ -317,7 +308,7 @@ def test_ogr_gmlas_gml_Reference():
     assert ds.GetLayerCount() == 3
 
     lyr = ds.GetLayerByName("main_elt")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     if (
         f["reference_existing_target_elt_with_required_id_href"] != "#BAZ"
@@ -380,7 +371,7 @@ def test_ogr_gmlas_unexpected_repeated_element():
 
     ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_unexpected_repeated_element.xml")
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     if (
         f is None or f["foo"] != "foo_again"
@@ -401,7 +392,7 @@ def test_ogr_gmlas_unexpected_repeated_element_variant():
 
     ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_unexpected_repeated_element_variant.xml")
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     if (
         f is None or f["foo"] != "foo_again"
@@ -427,7 +418,7 @@ def test_ogr_gmlas_geometryproperty():
         ],
     )
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         geom_field_count = lyr.GetLayerDefn().GetGeomFieldCount()
     assert geom_field_count == 15
     f = lyr.GetNextFeature()
@@ -496,12 +487,10 @@ def test_ogr_gmlas_geometryproperty():
     f = lyr.GetNextFeature()
     geom_idx = lyr.GetLayerDefn().GetGeomFieldIndex("geometryProperty")
     geom = f.GetGeomFieldRef(geom_idx)
-    if ogrtest.check_feature_geometry(geom, "POINT (3.0 0.0)") != 0:
-        f.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(geom, "POINT (3.0 0.0)")
 
     # Failed reprojection
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     geom_idx = lyr.GetLayerDefn().GetGeomFieldIndex("geometryProperty")
     if f.GetGeomFieldRef(geom_idx) is not None:
@@ -514,7 +503,7 @@ def test_ogr_gmlas_geometryproperty():
         open_options=["SWAP_COORDINATES=NO"],
     )
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     geom_idx = lyr.GetLayerDefn().GetGeomFieldIndex("geometryProperty")
     wkt = f.GetGeomFieldRef(geom_idx).ExportToWkt()
@@ -535,7 +524,7 @@ def test_ogr_gmlas_geometryproperty():
         open_options=["SWAP_COORDINATES=YES"],
     )
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     geom_idx = lyr.GetLayerDefn().GetGeomFieldIndex("geometryProperty")
     wkt = f.GetGeomFieldRef(geom_idx).ExportToWkt()
@@ -592,7 +581,7 @@ def test_ogr_gmlas_abstractgeometry():
 # Test validation against schema
 
 
-class MyHandler(object):
+class MyHandler:
     def __init__(self):
         self.error_list = []
 
@@ -607,12 +596,10 @@ def test_ogr_gmlas_validate():
     ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_validate.xml")
     assert ds is not None
     myhandler = MyHandler()
-    gdal.PushErrorHandler(myhandler.error_handler)
-    gdal.SetConfigOption("GMLAS_WARN_UNEXPECTED", None)
-    lyr = ds.GetLayer(0)
-    lyr.GetFeatureCount()
-    gdal.SetConfigOption("GMLAS_WARN_UNEXPECTED", "YES")
-    gdal.PopErrorHandler()
+    with gdaltest.error_handler(myhandler.error_handler):
+        with gdal.config_option("GMLAS_WARN_UNEXPECTED", "NO"):
+            lyr = ds.GetLayer(0)
+            lyr.GetFeatureCount()
     assert not myhandler.error_list
 
     ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_validate.xml")
@@ -725,7 +712,7 @@ def test_ogr_gmlas_no_namespace():
 def test_ogr_gmlas_conf():
 
     # Non existing file
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "GMLAS:data/gmlas/gmlas_test1.xml",
             open_options=["CONFIG_FILE=not_existing"],
@@ -734,7 +721,7 @@ def test_ogr_gmlas_conf():
 
     # Broken conf file
     gdal.FileFromMemBuffer("/vsimem/my_conf.xml", "<broken>")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "GMLAS:data/gmlas/gmlas_test1.xml",
             open_options=["CONFIG_FILE=/vsimem/my_conf.xml"],
@@ -744,7 +731,7 @@ def test_ogr_gmlas_conf():
 
     # Valid XML, but not validating
     gdal.FileFromMemBuffer("/vsimem/my_conf.xml", "<not_validating/>")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.OpenEx(
             "GMLAS:data/gmlas/gmlas_test1.xml",
             open_options=["CONFIG_FILE=/vsimem/my_conf.xml"],
@@ -785,7 +772,7 @@ def test_ogr_gmlas_conf():
     )
     assert ds is not None
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert lyr.GetLayerDefn().GetFieldIndex("geometryProperty_xml") < 0
     f = lyr.GetNextFeature()
     geom_idx = lyr.GetLayerDefn().GetGeomFieldIndex("geometryProperty")
@@ -815,7 +802,7 @@ def test_ogr_gmlas_conf():
     assert ds.GetLayerCount() == 1
 
     # Turn on validation and error on validation
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "GMLAS:data/gmlas/gmlas_validate.xml",
             open_options=[
@@ -845,7 +832,7 @@ def test_ogr_gmlas_conf_ignored_xpath():
         "foo[1]",
         "foo[@bar='baz']",
     ]:
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             gdal.OpenEx(
                 "GMLAS:",
                 open_options=[
@@ -862,7 +849,7 @@ def test_ogr_gmlas_conf_ignored_xpath():
         assert gdal.GetLastErrorMsg().find("XPath syntax") >= 0, xpath
 
     # Test duplicating mapping
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.OpenEx(
             "GMLAS:",
             open_options=[
@@ -894,7 +881,7 @@ def test_ogr_gmlas_conf_ignored_xpath():
     assert ds is not None
     lyr = ds.GetLayerByName("main_elt")
     assert lyr.GetLayerDefn().GetFieldIndex("otherns_id") < 0
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         lyr.GetNextFeature()
     assert (
         gdal.GetLastErrorMsg().find(
@@ -1049,7 +1036,7 @@ def test_ogr_gmlas_cache():
     )
 
     # First try with remote schema download disabled
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "GMLAS:/vsimem/ogr_gmlas_cache.xml",
             open_options=[
@@ -1059,7 +1046,7 @@ def test_ogr_gmlas_cache():
     assert ds is None and gdal.GetLastErrorMsg().find("Cannot resolve") >= 0
 
     # Test invalid cache directory
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "GMLAS:/vsimem/ogr_gmlas_cache.xml",
             open_options=[
@@ -1131,7 +1118,7 @@ def test_ogr_gmlas_cache():
     assert ds.GetLayerCount() == 1
 
     # Re try but ask for refresh
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "GMLAS:/vsimem/ogr_gmlas_cache.xml",
             open_options=[
@@ -1146,7 +1133,7 @@ def test_ogr_gmlas_cache():
     # Re try with non existing cached schema
     gdal.Unlink("/vsimem/my/gmlas_cache/" + gdal.ReadDir("/vsimem/my/gmlas_cache")[0])
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "GMLAS:/vsimem/ogr_gmlas_cache.xml",
             open_options=[
@@ -1221,21 +1208,21 @@ def test_ogr_gmlas_composition_compositionPart():
 # from _Feature/AbstractFeature
 
 
-def test_ogr_gmlas_instantiate_only_gml_feature():
+def test_ogr_gmlas_instantiate_only_gml_feature(tmp_vsimem):
+
+    path = str(tmp_vsimem / "with space")
 
     with gdaltest.tempfile(
-        "/vsimem/with space/gmlas_instantiate_only_gml_feature.xsd",
+        f"{path}/gmlas_instantiate_only_gml_feature.xsd",
         open("data/gmlas/gmlas_instantiate_only_gml_feature.xsd", "rb").read(),
     ):
         with gdaltest.tempfile(
-            "/vsimem/with space/gmlas_fake_gml32.xsd",
+            f"{path}/gmlas_fake_gml32.xsd",
             open("data/gmlas/gmlas_fake_gml32.xsd", "rb").read(),
         ):
             ds = gdal.OpenEx(
                 "GMLAS:",
-                open_options=[
-                    "XSD=/vsimem/with space/gmlas_instantiate_only_gml_feature.xsd"
-                ],
+                open_options=[f"XSD={path}/gmlas_instantiate_only_gml_feature.xsd"],
             )
     assert ds.GetLayerCount() == 1
     ds = None
@@ -1610,20 +1597,19 @@ def test_ogr_gmlas_xlink_resolver():
     # Enable remote resolution (but local caching disabled)
     gdal.FileFromMemBuffer("/vsimem/resource.xml", "bar")
     gdal.FileFromMemBuffer("/vsimem/resource2.xml", "baz")
-    gdal.SetConfigOption("GMLAS_XLINK_RAM_CACHE_SIZE", "5")
-    ds = gdal.OpenEx(
-        "GMLAS:/vsimem/ogr_gmlas_xlink_resolver.xml",
-        open_options=[
-            """CONFIG_FILE=<Configuration>
-        <XLinkResolution>
-            <CacheDirectory>/vsimem/gmlas_xlink_cache</CacheDirectory>
-            <DefaultResolution enabled="true">
-                <AllowRemoteDownload>true</AllowRemoteDownload>
-            </DefaultResolution>
-        </XLinkResolution></Configuration>"""
-        ],
-    )
-    gdal.SetConfigOption("GMLAS_XLINK_RAM_CACHE_SIZE", None)
+    with gdal.config_option("GMLAS_XLINK_RAM_CACHE_SIZE", "5"):
+        ds = gdal.OpenEx(
+            "GMLAS:/vsimem/ogr_gmlas_xlink_resolver.xml",
+            open_options=[
+                """CONFIG_FILE=<Configuration>
+            <XLinkResolution>
+                <CacheDirectory>/vsimem/gmlas_xlink_cache</CacheDirectory>
+                <DefaultResolution enabled="true">
+                    <AllowRemoteDownload>true</AllowRemoteDownload>
+                </DefaultResolution>
+            </XLinkResolution></Configuration>"""
+            ],
+        )
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     if f["my_link_rawcontent"] != "bar":
@@ -1650,7 +1636,7 @@ def test_ogr_gmlas_xlink_resolver():
     gdal.Unlink("/vsimem/resource2.xml")
     lyr.ResetReading()
     # /vsimem/resource.xml has been evicted from the cache
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     if f["my_link_rawcontent"] is not None:
         webserver.server_stop(webserver_process, webserver_port)
@@ -1740,7 +1726,7 @@ def test_ogr_gmlas_xlink_resolver():
         ],
     )
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     if f.IsFieldSet("my_link_rawcontent"):
         f.DumpReadable()
@@ -1765,7 +1751,7 @@ def test_ogr_gmlas_xlink_resolver():
         ],
     )
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     if gdal.GetLastErrorMsg() == "":
         webserver.server_stop(webserver_process, webserver_port)
@@ -2014,6 +2000,8 @@ bar"""
         "/vsimem/subdir2/resource2_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_super_very_long.xml"
     )
     gdal.Unlink("/vsimem/non_matching_resource.xml")
+    gdal.RmdirRecursive("/vsimem/subdir1")
+    gdal.RmdirRecursive("/vsimem/subdir2")
 
 
 ###############################################################################
@@ -2090,7 +2078,7 @@ def test_ogr_gmlas_truncated_xml():
 
     ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_truncated_xml.xml")
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     if f is not None:
         f.DumpReadable()
@@ -2163,26 +2151,30 @@ def test_ogr_gmlas_identifier_case_ambiguity():
 # Test writing support
 
 
-@pytest.mark.require_driver("SQLite")
-def test_ogr_gmlas_writer():
+@pytest.fixture()
+def gmlas_test1_generated_xml(tmp_path, tmp_vsimem):
+
+    if ogr.GetDriverByName("SQLite") is None:
+        pytest.skip("SQLite support required")
 
     src_ds = gdal.OpenEx(
         "GMLAS:data/gmlas/gmlas_test1.xml", open_options=["EXPOSE_METADATA_LAYERS=YES"]
     )
     tmp_ds = gdal.VectorTranslate(
-        "/vsimem/ogr_gmlas_writer.db", src_ds, format="SQLite"
+        tmp_vsimem / "ogr_gmlas_writer.db", src_ds, format="SQLite"
     )
     src_ds = None
+
     ret_ds = gdal.VectorTranslate(
-        "tmp/gmlas_test1_generated.xml",
+        tmp_path / "gmlas_test1_generated.xml",
         tmp_ds,
         format="GMLAS",
         datasetCreationOptions=["WRAPPING=GMLAS_FEATURECOLLECTION"],
     )
-    tmp_ds = None
-    gdal.Unlink("/vsimem/ogr_gmlas_writer.db")
 
     assert ret_ds is not None
+
+    return tmp_path / "gmlas_test1_generated.xml"
 
 
 ###############################################################################
@@ -2190,9 +2182,9 @@ def test_ogr_gmlas_writer():
 
 
 @pytest.mark.require_driver("SQLite")
-def test_ogr_gmlas_writer_check_xml_xsd():
+def test_ogr_gmlas_writer_check_xml_xsd(gmlas_test1_generated_xml):
 
-    got = open("tmp/gmlas_test1_generated.xml", "rt").read()
+    got = open(gmlas_test1_generated_xml, "rt").read()
     got = got.replace("\r\n", "\n")
     pos = got.find("http://myns ") + len("http://myns ")
     pos_end = got.find('"', pos)
@@ -2213,7 +2205,7 @@ def test_ogr_gmlas_writer_check_xml_xsd():
         )
         pytest.fail("Got:")
 
-    got = open("tmp/gmlas_test1_generated.xsd", "rt").read()
+    got = open(gmlas_test1_generated_xml.with_suffix(".xsd"), "rt").read()
     got = got.replace("\r\n", "\n")
     pos = got.find('schemaLocation="') + len('schemaLocation="')
     pos_end = got.find('"', pos)
@@ -2241,7 +2233,7 @@ def test_ogr_gmlas_writer_check_xml_xsd():
 
 
 @pytest.mark.require_driver("SQLite")
-def test_ogr_gmlas_writer_check_xml_read_back():
+def test_ogr_gmlas_writer_check_xml_read_back(gmlas_test1_generated_xml):
 
     # Skip tests when -fsanitize is used
     if gdaltest.is_travis_branch("sanitize"):
@@ -2250,14 +2242,12 @@ def test_ogr_gmlas_writer_check_xml_read_back():
     import test_cli_utilities
 
     if test_cli_utilities.get_ogrinfo_path() is None:
-        gdal.Unlink("tmp/gmlas_test1_generated.xml")
-        gdal.Unlink("tmp/gmlas_test1_generated.xsd")
         pytest.skip()
 
     # Compare the ogrinfo dump of the generated .xml with a reference one
     ret = gdaltest.runexternal(
         test_cli_utilities.get_ogrinfo_path()
-        + " -ro -al GMLAS:tmp/gmlas_test1_generated.xml -oo VALIDATE=YES "
+        + f" -ro -al GMLAS:{gmlas_test1_generated_xml} -oo VALIDATE=YES "
         + "-oo EXPOSE_METADATA_LAYERS=YES "
         + "-oo @KEEP_RELATIVE_PATHS_FOR_METADATA=YES "
         + "-oo @EXPOSE_SCHEMAS_NAME_IN_METADATA=NO "
@@ -2266,7 +2256,7 @@ def test_ogr_gmlas_writer_check_xml_read_back():
     expected = open("data/gmlas/gmlas_test1.txt", "rt").read()
     expected = expected.replace("\r\n", "\n")
     expected = expected.replace(
-        "data/gmlas/gmlas_test1.xml", "tmp/gmlas_test1_generated.xml"
+        "data/gmlas/gmlas_test1.xml", str(gmlas_test1_generated_xml)
     )
     expected = expected.replace(
         "data/gmlas/gmlas_test1.xsd",
@@ -2280,30 +2270,19 @@ def test_ogr_gmlas_writer_check_xml_read_back():
     )
 
     if ret_for_comparison != expected:
-        print(open("tmp/gmlas_test1_generated.xml", "rt").read())
-        print("")
-
-        print("XSD:")
-        print(open("tmp/gmlas_test1_generated.xsd", "rt").read())
-        print("")
-
-        print("ogrinfo dump:")
-        print(ret)
-        print("")
-
-        open("tmp/gmlas_test1_generated_got.txt", "wt").write(ret_for_comparison)
-        open("tmp/gmlas_test1_generated_expected.txt", "wt").write(expected)
-        print("Diff:")
-        os.system(
-            "diff -u tmp/gmlas_test1_generated_expected.txt tmp/gmlas_test1_generated_got.txt"
+        xml_diff = "\n".join(
+            [
+                line
+                for line in difflib.unified_diff(
+                    ret_for_comparison.splitlines(),
+                    expected.splitlines(),
+                    fromfile="expected",
+                    tofile="got",
+                    lineterm="",
+                )
+            ]
         )
-
-        os.unlink("tmp/gmlas_test1_generated_expected.txt")
-        os.unlink("tmp/gmlas_test1_generated_got.txt")
-        pytest.fail("XML:")
-
-    gdal.Unlink("tmp/gmlas_test1_generated.xml")
-    gdal.Unlink("tmp/gmlas_test1_generated.xsd")
+        pytest.fail("XML output does not match.\n" + xml_diff)
 
 
 ###############################################################################
@@ -2316,7 +2295,7 @@ def test_ogr_gmlas_writer_gml():
         "GMLAS:data/gmlas/gmlas_geometryproperty_gml32_no_error.gml",
         open_options=["EXPOSE_METADATA_LAYERS=YES", "@HASH=hash"],
     )
-    tmp_ds = gdal.VectorTranslate("", src_ds, format="Memory")
+    tmp_ds = gdal.VectorTranslate("", src_ds, format="MEM")
     src_ds = None
     # Test also with GMLAS: prefix as it is likely people might use it
     # as it is needed for the read side.
@@ -2375,7 +2354,7 @@ def test_ogr_gmlas_writer_gml_assign_srs():
         "GMLAS:data/gmlas/gmlas_geometryproperty_gml32_no_error.gml",
         open_options=["EXPOSE_METADATA_LAYERS=YES", "@HASH=hash"],
     )
-    tmp_ds = gdal.VectorTranslate("", src_ds, format="Memory")
+    tmp_ds = gdal.VectorTranslate("", src_ds, format="MEM")
     src_ds = None
 
     ret_ds = gdal.VectorTranslate(
@@ -2451,7 +2430,7 @@ def test_ogr_gmlas_writer_gml_original_xml():
             "CONFIG_FILE=<Configuration><LayerBuildingRules><GML><IncludeGeometryXML>true</IncludeGeometryXML></GML></LayerBuildingRules></Configuration>",
         ],
     )
-    tmp_ds = gdal.VectorTranslate("", src_ds, format="Memory")
+    tmp_ds = gdal.VectorTranslate("", src_ds, format="MEM")
     src_ds = None
     ret_ds = gdal.VectorTranslate(
         "/vsimem/ogr_gmlas_writer_gml.xml",
@@ -2504,7 +2483,7 @@ def test_ogr_gmlas_writer_options():
         "GMLAS:data/gmlas/gmlas_geometryproperty_gml32_no_error.gml",
         open_options=["@HASH=hash"],
     )
-    tmp_ds = gdal.VectorTranslate("", src_ds, format="Memory")
+    tmp_ds = gdal.VectorTranslate("", src_ds, format="MEM")
     src_ds = None
     ret_ds = gdal.VectorTranslate(
         "/vsimem/ogr_gmlas_writer_options.xml",
@@ -2555,7 +2534,7 @@ def test_ogr_gmlas_writer_options():
         "GMLAS:data/gmlas/gmlas_geometryproperty_gml32_no_error.gml",
         open_options=["@HASH=hash", "EXPOSE_METADATA_LAYERS=YES"],
     )
-    tmp_ds = gdal.VectorTranslate("", src_ds, format="Memory")
+    tmp_ds = gdal.VectorTranslate("", src_ds, format="MEM")
     src_ds = None
     ret_ds = gdal.VectorTranslate(
         "/vsimem/ogr_gmlas_writer_options.xml",
@@ -2590,7 +2569,7 @@ def test_ogr_gmlas_writer_options():
         "GMLAS:data/gmlas/gmlas_geometryproperty_gml32_no_error.gml",
         open_options=["@HASH=hash", "EXPOSE_METADATA_LAYERS=YES"],
     )
-    tmp_ds = gdal.VectorTranslate("", src_ds, format="Memory")
+    tmp_ds = gdal.VectorTranslate("", src_ds, format="MEM")
     src_ds = None
     ret_ds = gdal.VectorTranslate(
         "/vsimem/ogr_gmlas_writer_options.xml",
@@ -2652,10 +2631,10 @@ def test_ogr_gmlas_writer_options():
 def test_ogr_gmlas_writer_errors():
 
     # Source dataset is empty
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate(
             "/vsimem/valid.xml",
-            gdal.GetDriverByName("Memory").Create("", 0, 0, 0, 0),
+            gdal.GetDriverByName("MEM").Create("", 0, 0, 0, 0),
             format="GMLAS",
         )
     assert (
@@ -2665,9 +2644,9 @@ def test_ogr_gmlas_writer_errors():
 
     # Missing input schemas
     src_ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_geometryproperty_gml32_no_error.gml")
-    tmp_ds = gdal.VectorTranslate("", src_ds, format="Memory")
+    tmp_ds = gdal.VectorTranslate("", src_ds, format="MEM")
     src_ds = None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate("/vsimem/valid.xml", tmp_ds, format="GMLAS")
     assert (
         ret_ds is None
@@ -2678,7 +2657,7 @@ def test_ogr_gmlas_writer_errors():
     )
 
     # Invalid input schema
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate(
             "/vsimem/valid.xml",
             tmp_ds,
@@ -2695,9 +2674,9 @@ def test_ogr_gmlas_writer_errors():
         "GMLAS:data/gmlas/gmlas_geometryproperty_gml32_no_error.gml",
         open_options=["EXPOSE_METADATA_LAYERS=YES"],
     )
-    tmp_ds = gdal.VectorTranslate("", src_ds, format="Memory")
+    tmp_ds = gdal.VectorTranslate("", src_ds, format="MEM")
     src_ds = None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate(
             "/i_am/not/valid.xml",
             tmp_ds,
@@ -2710,7 +2689,7 @@ def test_ogr_gmlas_writer_errors():
     )
 
     # .xsd extension not allowed
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate(
             "/i_am/not/valid.xsd",
             tmp_ds,
@@ -2723,7 +2702,7 @@ def test_ogr_gmlas_writer_errors():
     )
 
     # Invalid output .xsd name
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate(
             "/vsimem/valid.xml",
             tmp_ds,
@@ -2740,7 +2719,7 @@ def test_ogr_gmlas_writer_errors():
     gdal.Unlink("/vsimem/valid.xml")
 
     # Invalid CONFIG_FILE
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate(
             "/vsimem/valid.xml",
             tmp_ds,
@@ -2753,7 +2732,7 @@ def test_ogr_gmlas_writer_errors():
     )
 
     # Invalid layer name
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate(
             "/vsimem/valid.xml",
             tmp_ds,
@@ -2770,9 +2749,9 @@ def test_ogr_gmlas_writer_errors():
     gdal.Unlink("/vsimem/valid.xml")
 
     # _ogr_layers_metadata not found
-    src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, 0)
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, 0)
     src_ds.CreateLayer("_ogr_other_metadata")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate("/vsimem/valid.xml", src_ds, format="GMLAS")
     assert (
         ret_ds is None
@@ -2780,10 +2759,10 @@ def test_ogr_gmlas_writer_errors():
     )
 
     # _ogr_fields_metadata not found
-    src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, 0)
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, 0)
     src_ds.CreateLayer("_ogr_other_metadata")
     src_ds.CreateLayer("_ogr_layers_metadata")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate("/vsimem/valid.xml", src_ds, format="GMLAS")
     assert (
         ret_ds is None
@@ -2791,11 +2770,11 @@ def test_ogr_gmlas_writer_errors():
     )
 
     # _ogr_layer_relationships not found
-    src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, 0)
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, 0)
     src_ds.CreateLayer("_ogr_other_metadata")
     src_ds.CreateLayer("_ogr_layers_metadata")
     src_ds.CreateLayer("_ogr_fields_metadata")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate("/vsimem/valid.xml", src_ds, format="GMLAS")
     assert (
         ret_ds is None
@@ -2803,12 +2782,12 @@ def test_ogr_gmlas_writer_errors():
     )
 
     # Cannot find field layer_name in _ogr_layers_metadata layer
-    src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, 0)
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, 0)
     src_ds.CreateLayer("_ogr_other_metadata")
     src_ds.CreateLayer("_ogr_layers_metadata")
     src_ds.CreateLayer("_ogr_fields_metadata")
     src_ds.CreateLayer("_ogr_layer_relationships")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret_ds = gdal.VectorTranslate("/vsimem/valid.xml", src_ds, format="GMLAS")
     assert (
         ret_ds is None
@@ -3075,7 +3054,7 @@ def test_ogr_gmlas_any_field_at_end_of_declaration():
     # Will warn about 'Unexpected element with xpath=main_elt/extra (subxpath=main_elt/extra) found'
     # This should be fixed at some point
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         f = lyr.GetNextFeature()
     assert gdal.GetLastErrorMsg() != ""
     if f.GetField("foo") != "bar":
@@ -3181,7 +3160,7 @@ def test_ogr_gmlas_no_element_in_first_choice_schema():
 
 def test_ogr_gmlas_internal_xlink_href():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_internal_xlink_href.xml")
         lyr = ds.GetLayerByName("main_elt")
         f = lyr.GetNextFeature()
@@ -3355,7 +3334,7 @@ def test_ogr_gmlas_internal_xlink_href():
 
 def test_ogr_gmlas_invalid_version_xsd():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("GMLAS:data/gmlas/gmlas_invalid_version_xsd.xml")
     assert ds is None
 
@@ -3368,7 +3347,7 @@ def test_ogr_gmlas_invalid_version_xsd():
 def test_ogr_gmlas_huge_memory_allocation():
 
     with gdaltest.config_option("OGR_GMLAS_XERCES_MAX_TIME", "0"):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ds = gdal.OpenEx("GMLAS:data/gmlas/test_max_mem_xerces.xml")
         assert ds is None
 
@@ -3385,7 +3364,7 @@ def test_ogr_gmlas_huge_memory_allocation():
 def test_ogr_gmlas_huge_processing_time():
 
     with gdaltest.config_option("OGR_GMLAS_XERCES_MAX_TIME", "0.5"):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ds = gdal.OpenEx("GMLAS:data/gmlas/test_max_time_xerces.xml")
         assert ds is None
 
@@ -3419,3 +3398,139 @@ def test_ogr_gmlas_read_srsDimension_3_on_top_gml_Envelope():
         f.GetGeometryRef().ExportToIsoWkt()
         == "LINESTRING Z (1 2 3,4 5 6,7 8 9,10 11 12)"
     )
+
+
+###############################################################################
+# Test getting real GML and ISO schemas and the optimizations to fetch them
+# through .zip archives
+
+
+@pytest.mark.require_curl()
+def test_ogr_gmlas_get_gml_and_iso_schemas(tmp_path):
+
+    iso19139_url = "https://schemas.opengis.net/iso/19139/iso19139-20070417.zip"
+    inspire_url = "https://inspire.ec.europa.eu/schemas/base/3.3/BaseTypes.xsd"
+    for url in [iso19139_url, inspire_url]:
+        conn = gdaltest.gdalurlopen(url, timeout=4)
+        if conn is None:
+            pytest.skip(f"cannot open {url}")
+
+    cache_path = str(tmp_path / "cache")
+
+    ds = gdal.OpenEx(
+        "GMLAS:",
+        open_options=[
+            "XSD=" + inspire_url,
+            f"CONFIG_FILE=<Configuration><AllowRemoteSchemaDownload>true</AllowRemoteSchemaDownload><SchemaCache><Directory>{cache_path}</Directory></SchemaCache><LayerBuildingRules><IdentifierMaxLength>10</IdentifierMaxLength><PostgreSQLIdentifierLaundering>false</PostgreSQLIdentifierLaundering></LayerBuildingRules></Configuration>",
+        ],
+    )
+    assert ds
+
+
+###############################################################################
+# Test bugfix for https://github.com/r-spatial/sf/issues/2371
+
+
+@pytest.mark.require_curl()
+def test_ogr_gmlas_bugfix_sf_2371():
+
+    urls = (
+        "http://repository.gdi-de.org/schemas/adv/citygml/building/1.0/buildingLoD1.xsd",
+        "http://docs.oasis-open.org/election/external/xAL.xsd",
+    )
+
+    ds = gdal.OpenEx("GMLAS:data/gmlas/citygml_empty_lod1.gml")
+
+    if ds is None:
+        for url in urls:
+            conn = gdaltest.gdalurlopen(url, timeout=4)
+            if conn is None:
+                pytest.skip(f"cannot open {url}")
+
+    lyr = ds.GetLayerByName("address1")
+    assert lyr.GetFeatureCount() == 0
+
+
+###############################################################################
+# Test force opening a GMLAS file
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_gmlas_force_opening(tmp_vsimem):
+
+    ds = gdal.OpenEx("data/gmlas/gmlas_test1.xml", allowed_drivers=["GMLAS"])
+    assert ds.GetDriver().GetDescription() == "GMLAS"
+
+
+###############################################################################
+# Test we don't crash on a OSSFuzz generated xsd
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_gmlas_ossfuzz_70511():
+
+    with gdal.quiet_errors(), pytest.raises(
+        Exception, match="Cannot get type definition for attribute y"
+    ):
+        gdal.OpenEx("GMLAS:", open_options=["XSD=data/gmlas/test_ossfuzz_70511.xsd"])
+
+
+###############################################################################
+# Test we don't spend too much time parsing documents featuring the billion
+# laugh attack
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.require_curl()
+def test_ogr_gmlas_billion_laugh():
+
+    with gdal.quiet_errors(), pytest.raises(Exception, match="File probably corrupted"):
+        with gdal.OpenEx("GMLAS:data/gml/billionlaugh.gml") as ds:
+            assert ds.GetDriver().GetDescription() == "GMLAS"
+            for lyr in ds:
+                for f in lyr:
+                    pass
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/12027
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize(
+    "filename, attrname, value",
+    [
+        ("data/gmlas/choice_str_inlined.xml", "a_b_str_attr", ["val1", "val2"]),
+        ("data/gmlas/choice_int_inlined.xml", "a_b_int_attr", [1, 2]),
+        ("data/gmlas/choice_int64_inlined.xml", "a_b_int64_attr", [123456789123, 2]),
+        ("data/gmlas/choice_double_inlined.xml", "a_b_double_attr", [1.5, 2.5]),
+    ],
+)
+def test_ogr_gmlas_choice_inlined(filename, attrname, value):
+    with gdal.OpenEx(f"GMLAS:{filename}") as ds:
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f[attrname] == value
+
+
+###############################################################################
+# Test opening a CityGML 2.0 file without schema location
+
+
+@pytest.mark.require_curl()
+def test_ogr_gmlas_citygml_lod2_no_schema_location():
+
+    urls = (
+        "http://repository.gdi-de.org/schemas/adv/citygml/building/1.0/buildingLoD1.xsd",
+        "http://docs.oasis-open.org/election/external/xAL.xsd",
+    )
+
+    ds = gdal.OpenEx("GMLAS:data/gmlas/lod2_empty_no_schema_location.gml")
+
+    if ds is None:
+        for url in urls:
+            conn = gdaltest.gdalurlopen(url, timeout=4)
+            if conn is None:
+                pytest.skip(f"cannot open {url}")
+
+    assert ds.GetLayerCount() == 1537

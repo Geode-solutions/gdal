@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     gdal_java.i
  * Project:  GDAL SWIG Interface
@@ -43,6 +42,7 @@ import org.gdal.ogr.StyleTable;
 import org.gdal.ogr.Layer;
 import org.gdal.ogr.Feature;
 import org.gdal.ogr.FieldDomain;
+import org.gdal.ogr.GeomFieldDefn;
 %}
 
 %pragma(java) moduleimports=%{
@@ -61,20 +61,29 @@ import org.gdal.ogr.StyleTable;
 import org.gdal.ogr.Layer;
 import org.gdal.ogr.Feature;
 import org.gdal.ogr.FieldDomain;
+import org.gdal.ogr.GeomFieldDefn;
 %}
 
-%typemap(javaimports) GDALMDArrayHS %{
-import org.gdal.osr.SpatialReference;
+%typemap(javaimports) GDALDimensionHS %{
+import java.util.Vector;
+%}
+
+%typemap(javaimports) GDALExtendedDataTypeHS %{
+import org.gdal.gdal.ExtendedDataType;
 %}
 
 %typemap(javaimports) GDALGroupHS %{
+import java.math.BigInteger;
+import java.util.Vector;
+import org.gdal.gdal.Dimension;
+import org.gdal.gdal.ExtendedDataType;
+import org.gdal.gdal.MDArray;
 import org.gdal.ogr.Layer;
 %}
 
-
 %pragma(java) modulecode=%{
 
-    /* Uninstanciable class */
+    /* Uninstantiable class */
     private gdal()
     {
     }
@@ -115,6 +124,7 @@ import org.gdal.ogr.Layer;
 %}
 
 %typemap(javacode) GDAL_GCP %{
+
   public GCP(double x, double y, double z, double pixel, double line)
   {
       this(x, y, z, pixel, line, "", "");
@@ -129,8 +139,377 @@ import org.gdal.ogr.Layer;
   {
       this(x, y, 0.0, pixel, line, "", "");
   }
+
 %}
 
+%typemap(javaimports) GDALMDArrayHS %{
+import org.gdal.osr.SpatialReference;
+import org.gdal.gdalconst.gdalconst;
+import org.gdal.gdal.Dimension;
+import java.util.Vector;
+import java.util.List;
+import java.util.ArrayList;
+import java.lang.Integer;
+%}
+
+%{
+
+  static GDALDimensionH GDALMDArrayGetDim(GDALMDArrayH hMDA, size_t index) {
+
+    size_t dimCount;
+
+    GDALDimensionH* dims = GDALMDArrayGetDimensions(hMDA, &dimCount);
+
+    GDALDimensionH retVal;
+
+    if (index < 0 || index >= dimCount) {
+
+      retVal = NULL;
+    }
+    else {
+
+      retVal = dims[index];
+
+      dims[index] = NULL;  // make sure we do not free our index
+    }
+
+    // free all the other indices
+
+    GDALReleaseDimensions(dims, dimCount);
+
+    return retVal;
+  }
+
+  static bool MDArrayRead(GDALMDArrayH hMDA,
+                            int numDims,
+                            const GInt64 *arrayStartIdxes,
+                            const GInt64 *counts,
+                            const GInt64 *arraySteps,
+                            GInt64 *bufferStrides,
+                            void* arrayOut,
+                            size_t arrayByteSize,
+                            GDALExtendedDataTypeH data_type)
+  {
+    size_t* localCounts =
+      (size_t*) malloc(sizeof(size_t) * numDims);
+
+    GPtrDiff_t* localBufferStrides =
+      (GPtrDiff_t*) malloc(sizeof(GPtrDiff_t) * numDims);
+
+    for (int i = 0; i < numDims; i++) {
+      localCounts[i] = (size_t) counts[i];
+      localBufferStrides[i] = (GPtrDiff_t) bufferStrides[i];
+    }
+
+    bool retVal = GDALMDArrayRead(hMDA,
+                                   (const GUInt64*) arrayStartIdxes,
+                                   localCounts,
+                                   arraySteps,
+                                   localBufferStrides,
+                                   data_type,
+                                   arrayOut,
+                                   arrayOut,
+                                   arrayByteSize);
+
+    free(localBufferStrides);
+    free(localCounts);
+
+    return retVal;
+  }
+
+  static bool MDArrayWrite(GDALMDArrayH hMDA,
+                            int numDims,
+                            const GInt64 *arrayStartIdxes,
+                            const GInt64 *counts,
+                            const GInt64 *arraySteps,
+                            GInt64 *bufferStrides,
+                            void* arrayIn,
+                            size_t arrayByteSize,
+                            GDALExtendedDataTypeH data_type)
+  {
+    size_t* localCounts =
+      (size_t*) malloc(sizeof(size_t) * numDims);
+
+    GPtrDiff_t* localBufferStrides =
+      (GPtrDiff_t*) malloc(sizeof(GPtrDiff_t) * numDims);
+
+    for (int i = 0; i < numDims; i++) {
+      localCounts[i] = (size_t) counts[i];
+      localBufferStrides[i] = (GPtrDiff_t) bufferStrides[i];
+    }
+
+    bool retVal = GDALMDArrayWrite(hMDA,
+                                    (const GUInt64*) arrayStartIdxes,
+                                    localCounts,
+                                    arraySteps,
+                                    localBufferStrides,
+                                    data_type,
+                                    arrayIn,
+                                    arrayIn,
+                                    arrayByteSize);
+
+    free(localBufferStrides);
+    free(localCounts);
+
+    return retVal;
+  }
+
+%}
+
+%extend GDALMDArrayHS {
+
+%newobject GetDimension;
+  GDALDimensionHS* GetDimension(size_t index) {
+    return GDALMDArrayGetDim(self, index);
+  }
+
+%define DEFINE_READ_MDA_DATA(ctype, buffer_type_code)
+  %apply(int nList, GInt64 *pList) { (int starts,  GInt64 *startsValues) };
+  %apply(int nList, GInt64 *pList) { (int counts,  GInt64 *countsValues) };
+  %apply(int nList, GInt64 *pList) { (int steps,   GInt64 *stepsValues) };
+  %apply(int nList, GInt64 *pList) { (int strides, GInt64 *stridesValues) };
+  %apply (ctype *arrayOut, size_t arraySize) { (ctype *arrayOut, size_t arraySize) };
+  bool Read(int starts,  GInt64 *startsValues,
+            int counts,  GInt64 *countsValues,
+            int steps,   GInt64 *stepsValues,
+            int strides, GInt64 *stridesValues,
+            ctype *arrayOut,
+            size_t arraySize
+           )
+  {
+    size_t numDims = GDALMDArrayGetDimensionCount(self);
+
+    if (starts != numDims ||
+        counts != numDims ||
+        steps != numDims ||
+        strides != numDims)
+    {
+      return false;
+    }
+
+    GDALExtendedDataTypeH buffer_type =
+      GDALExtendedDataTypeCreate(buffer_type_code);
+
+    bool result =
+        MDArrayRead(self,
+                        counts,
+                        startsValues,
+                        countsValues,
+                        stepsValues,
+                        stridesValues,
+                        arrayOut,
+                        arraySize,
+                        buffer_type);
+
+    GDALExtendedDataTypeRelease(buffer_type);
+
+    return result;
+  }
+%enddef
+
+  DEFINE_READ_MDA_DATA(char,     GDT_Byte)
+  DEFINE_READ_MDA_DATA(short,    GDT_Int16)
+  DEFINE_READ_MDA_DATA(int,      GDT_Int32)
+  DEFINE_READ_MDA_DATA(int64_t,  GDT_Int64)
+  DEFINE_READ_MDA_DATA(float,    GDT_Float32)
+  DEFINE_READ_MDA_DATA(double,   GDT_Float64)
+
+%define DEFINE_WRITE_MDA_DATA(ctype, buffer_type_code)
+  %apply(int nList, GInt64 *pList) { (int starts,  GInt64 *startsValues) };
+  %apply(int nList, GInt64 *pList) { (int counts,  GInt64 *countsValues) };
+  %apply(int nList, GInt64 *pList) { (int steps,   GInt64 *stepsValues) };
+  %apply(int nList, GInt64 *pList) { (int strides, GInt64 *stridesValues) };
+  %apply (ctype *arrayIn, size_t arraySize) { (ctype *arrayIn, size_t arraySize) };
+  bool Write(int starts,  GInt64 *startsValues,
+             int counts,  GInt64 *countsValues,
+             int steps,   GInt64 *stepsValues,
+             int strides, GInt64 *stridesValues,
+             ctype *arrayIn,
+             size_t arraySize
+            )
+  {
+    size_t numDims = GDALMDArrayGetDimensionCount(self);
+
+    if (starts != numDims ||
+        counts != numDims ||
+        steps != numDims ||
+        strides != numDims)
+    {
+      return false;
+    }
+
+    GDALExtendedDataTypeH buffer_type =
+      GDALExtendedDataTypeCreate(buffer_type_code);
+
+    bool result =
+        MDArrayWrite(self,
+                        counts,
+                        startsValues,
+                        countsValues,
+                        stepsValues,
+                        stridesValues,
+                        arrayIn,
+                        arraySize,
+                        buffer_type);
+
+    GDALExtendedDataTypeRelease(buffer_type);
+
+    return result;
+  }
+%enddef
+
+  DEFINE_WRITE_MDA_DATA(char    , GDT_Byte)
+  DEFINE_WRITE_MDA_DATA(short   , GDT_Int16)
+  DEFINE_WRITE_MDA_DATA(int     , GDT_Int32)
+  DEFINE_WRITE_MDA_DATA(int64_t , GDT_Int64)
+  DEFINE_WRITE_MDA_DATA(float   , GDT_Float32)
+  DEFINE_WRITE_MDA_DATA(double  , GDT_Float64)
+
+} /* extend */
+
+%typemap(javacode) GDALMDArrayHS %{
+
+   public Dimension[] GetDimensions() {
+
+       long size = GetDimensionCount();
+
+       if (size > Integer.MAX_VALUE)
+           throw new IllegalArgumentException("java array can hold at most "+Integer.MAX_VALUE+" values.");
+
+       Dimension[] arr = new Dimension[(int) size];
+
+       for (int i = 0; i < size; i++) {
+           Dimension dim = GetDimension(i);
+           arr[i] = dim;
+       }
+
+       return arr;
+   }
+
+   private long[] defaultSteps(int numDims) {
+
+       long[] retVal = new long[numDims];
+
+       for (int i = 0; i < numDims; i++) {
+           retVal[i] = 1;
+       }
+
+       return retVal;
+   }
+
+   private long[] defaultStrides(long[] counts) {
+
+       int numDims = counts.length;
+
+       long[] retVal = new long[numDims];
+
+       if (numDims>0)
+       {
+           retVal[numDims-1] = 1;
+           for (int i = numDims - 2; i >= 0; i--) {
+               retVal[i] = retVal[i+1] * counts[i+1];
+           }
+       }
+
+       return retVal;
+   }
+
+   public boolean Read(long[] starts, long[] counts, long[] steps, byte[] outputBuffer) {
+       return Read(starts, counts, steps, defaultStrides(counts), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, long[] steps, short[] outputBuffer) {
+       return Read(starts, counts, steps, defaultStrides(counts), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, long[] steps, int[] outputBuffer) {
+       return Read(starts, counts, steps, defaultStrides(counts), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, long[] steps, long[] outputBuffer) {
+       return Read(starts, counts, steps, defaultStrides(counts), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, long[] steps, float[] outputBuffer) {
+       return Read(starts, counts, steps, defaultStrides(counts), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, long[] steps, double[] outputBuffer) {
+       return Read(starts, counts, steps, defaultStrides(counts), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, byte[] outputBuffer) {
+       return Read(starts, counts, defaultSteps(counts.length), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, short[] outputBuffer) {
+       return Read(starts, counts, defaultSteps(counts.length), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, int[] outputBuffer) {
+       return Read(starts, counts, defaultSteps(counts.length), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, long[] outputBuffer) {
+       return Read(starts, counts, defaultSteps(counts.length), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, float[] outputBuffer) {
+       return Read(starts, counts, defaultSteps(counts.length), outputBuffer);
+   }
+
+   public boolean Read(long[] starts, long[] counts, double[] outputBuffer) {
+       return Read(starts, counts, defaultSteps(counts.length), outputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, long[] steps, byte[] inputBuffer) {
+       return Write(starts, counts, steps, defaultStrides(counts), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, long[] steps, short[] inputBuffer) {
+       return Write(starts, counts, steps, defaultStrides(counts), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, long[] steps, int[] inputBuffer) {
+       return Write(starts, counts, steps, defaultStrides(counts), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, long[] steps, long[] inputBuffer) {
+       return Write(starts, counts, steps, defaultStrides(counts), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, long[] steps, float[] inputBuffer) {
+       return Write(starts, counts, steps, defaultStrides(counts), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, long[] steps, double[] inputBuffer) {
+       return Write(starts, counts, steps, defaultStrides(counts), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, byte[] inputBuffer) {
+       return Write(starts, counts, defaultSteps(counts.length), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, short[] inputBuffer) {
+       return Write(starts, counts, defaultSteps(counts.length), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, int[] inputBuffer) {
+       return Write(starts, counts, defaultSteps(counts.length), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, long[] inputBuffer) {
+       return Write(starts, counts, defaultSteps(counts.length), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, float[] inputBuffer) {
+       return Write(starts, counts, defaultSteps(counts.length), inputBuffer);
+   }
+
+   public boolean Write(long[] starts, long[] counts, double[] inputBuffer) {
+       return Write(starts, counts, defaultSteps(counts.length), inputBuffer);
+   }
+%}
 
 %typemap(javaimports) GDALDriverShadow %{
 import java.util.Vector;
@@ -170,6 +549,30 @@ import org.gdal.gdalconst.gdalconstConstants;
   }
 
 %}
+
+%typemap(javabody_derived) GDALDatasetShadow %{
+  private long swigCPtr;
+
+  public Dataset(long cPtr, boolean cMemoryOwn) {
+    super(gdalJNI.Dataset_SWIGUpcast(cPtr), cMemoryOwn);
+    swigCPtr = cPtr;
+  }
+
+  public static long getCPtr(Dataset obj) {
+    return (obj == null) ? 0 : obj.swigCPtr;
+  }
+%}
+
+%extend GDALDatasetShadow {
+%proxycode %{
+  public int Close() {
+    int ret = gdalJNI.Dataset_CloseInternal(swigCPtr, this);
+    swigCPtr = 0;
+    swigCMemOwn = false;
+    return ret;
+  }
+%}
+}
 
 %typemap(javacode) GDALDatasetShadow %{
 
@@ -214,19 +617,19 @@ import org.gdal.gdalconst.gdalconstConstants;
 %}
 
 %{
-    static CPLErr BandBlockReadWrite_Validate(GDALRasterBandH self, void *nioBuffer, long nioBufferSize)
+    static CPLErr BandBlockReadWrite_Validate(GDALRasterBandH self, void *nioBuffer, size_t nioBufferSize)
     {
         int nBlockXSize, nBlockYSize;
         GDALDataType eDataType;
         GDALGetBlockSize(self, &nBlockXSize, &nBlockYSize);
         eDataType = GDALGetRasterDataType(self);
-        int nDataTypeSize = GDALGetDataTypeSize( eDataType ) / 8;
+        int nDataTypeSize = GDALGetDataTypeSizeBytes( eDataType );
         if (nBlockXSize > (INT_MAX / nDataTypeSize) / nBlockYSize)
         {
             CPLError(CE_Failure, CPLE_AppDefined, "Integer overflow");
             return CE_Failure;
         }
-        if (nioBufferSize < nBlockXSize * nBlockYSize * nDataTypeSize)
+        if (nioBufferSize < (size_t)nBlockXSize * nBlockYSize * nDataTypeSize)
         {
             CPLError(CE_Failure, CPLE_AppDefined, "Buffer not big enough");
             return CE_Failure;
@@ -247,15 +650,16 @@ static CPLErr DatasetRasterIO( GDALDatasetH hDS, GDALRWFlag eRWFlag,
                             int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            void *regularArray, long nRegularArraySize,
+                            void *regularArray, size_t nRegularArraySize,
                             int band_list, int *pband_list,
                             int nPixelSpace, int nLineSpace, int nBandSpace,
                             GDALDataType gdal_type, size_t sizeof_ctype)
 {
-    if ((gdal_type == GDT_Int16 && buf_type != GDT_Int16 && buf_type != GDT_UInt16 && buf_type != GDT_CInt16) ||
-        (gdal_type == GDT_Int32 && buf_type != GDT_Int32 && buf_type != GDT_UInt32 && buf_type != GDT_CInt32) ||
-        (gdal_type == GDT_Float32 && buf_type != GDT_Float32 && buf_type != GDT_CFloat32) ||
-        (gdal_type == GDT_Float64 && buf_type != GDT_Float64 && buf_type != GDT_CFloat64))
+  if ((gdal_type == GDT_Int16 && buf_type != GDT_Int16 && buf_type != GDT_UInt16 && buf_type != GDT_CInt16) ||
+      (gdal_type == GDT_Int32 && buf_type != GDT_Int32 && buf_type != GDT_UInt32 && buf_type != GDT_CInt32) ||
+      (gdal_type == GDT_Int64 && buf_type != GDT_Int64 && buf_type != GDT_UInt64) ||
+      (gdal_type == GDT_Float32 && buf_type != GDT_Float32 && buf_type != GDT_CFloat32) ||
+      (gdal_type == GDT_Float64 && buf_type != GDT_Float64 && buf_type != GDT_CFloat64))
   {
       CPLError(CE_Failure, CPLE_AppDefined,
               "Java array type is not compatible with GDAL data type");
@@ -271,52 +675,58 @@ static CPLErr DatasetRasterIO( GDALDatasetH hDS, GDALRWFlag eRWFlag,
   }
 
   GIntBig nMinBufferSizeInBytes = ComputeDatasetRasterIOSize (
-                         buf_xsize, buf_ysize, GDALGetDataTypeSize(buf_type) / 8,
+                         buf_xsize, buf_ysize, GDALGetDataTypeSizeBytes(buf_type),
                          band_list, pband_list, band_list,
                          nPixelSpace, nLineSpace, nBandSpace, sizeof_ctype > 1 );
+
   if (nMinBufferSizeInBytes > 0x7fffffff)
   {
      CPLError(CE_Failure, CPLE_IllegalArg, "Integer overflow");
      nMinBufferSizeInBytes = 0;
   }
+
   if (nMinBufferSizeInBytes == 0)
       return CE_Failure;
+
   if (nRegularArraySize < nMinBufferSizeInBytes)
   {
       CPLError(CE_Failure, CPLE_AppDefined,
               "Buffer is too small");
       return CE_Failure;
   }
+
   return  GDALDatasetRasterIO( hDS, eRWFlag, xoff, yoff, xsize, ysize,
                                 regularArray, buf_xsize, buf_ysize,
                                 buf_type, band_list, pband_list, nPixelSpace, nLineSpace, nBandSpace );
-
 }
-
 
 %}
 
 
 %extend GDALDatasetShadow {
+
 %apply (int nList, int* pList) { (int band_list, int *pband_list) };
-%apply (void* nioBuffer, long nioBufferSize) { (void* nioBuffer, long nioBufferSize) };
 
-%apply (char *regularArrayOut, long nRegularArraySizeOut) { (char *regularArrayOut, long nRegularArraySizeOut) };
-%apply (short *regularArrayOut, long nRegularArraySizeOut) { (short *regularArrayOut, long nRegularArraySizeOut) };
-%apply (int *regularArrayOut, long nRegularArraySizeOut) { (int *regularArrayOut, long nRegularArraySizeOut) };
-%apply (float *regularArrayOut, long nRegularArraySizeOut) { (float *regularArrayOut, long nRegularArraySizeOut) };
-%apply (double *regularArrayOut, long nRegularArraySizeOut) { (double *regularArrayOut, long nRegularArraySizeOut) };
+%apply (void* nioBuffer, size_t nioBufferSize) { (void* nioBuffer, size_t nioBufferSize) };
 
-%apply (char *regularArrayIn, long nRegularArraySizeIn) { (char *regularArrayIn, long nRegularArraySizeIn) };
-%apply (short *regularArrayIn, long nRegularArraySizeIn) { (short *regularArrayIn, long nRegularArraySizeIn) };
-%apply (int *regularArrayIn, long nRegularArraySizeIn) { (int *regularArrayIn, long nRegularArraySizeIn) };
-%apply (float *regularArrayIn, long nRegularArraySizeIn) { (float *regularArrayIn, long nRegularArraySizeIn) };
-%apply (double *regularArrayIn, long nRegularArraySizeIn) { (double *regularArrayIn, long nRegularArraySizeIn) };
+%apply (char *regularArrayOut, size_t nRegularArraySizeOut) { (char *regularArrayOut, size_t nRegularArraySizeOut) };
+%apply (short *regularArrayOut, size_t nRegularArraySizeOut) { (short *regularArrayOut, size_t nRegularArraySizeOut) };
+%apply (int *regularArrayOut, size_t nRegularArraySizeOut) { (int *regularArrayOut, size_t nRegularArraySizeOut) };
+%apply (int64_t *regularArrayOut, size_t nRegularArraySizeOut) { (int64_t *regularArrayOut, size_t nRegularArraySizeOut) };
+%apply (float *regularArrayOut, size_t nRegularArraySizeOut) { (float *regularArrayOut, size_t nRegularArraySizeOut) };
+%apply (double *regularArrayOut, size_t nRegularArraySizeOut) { (double *regularArrayOut, size_t nRegularArraySizeOut) };
+
+%apply (char *regularArrayIn, size_t nRegularArraySizeIn) { (char *regularArrayIn, size_t nRegularArraySizeIn) };
+%apply (short *regularArrayIn, size_t nRegularArraySizeIn) { (short *regularArrayIn, size_t nRegularArraySizeIn) };
+%apply (int *regularArrayIn, size_t nRegularArraySizeIn) { (int *regularArrayIn, size_t nRegularArraySizeIn) };
+%apply (int64_t *regularArrayIn, size_t nRegularArraySizeIn) { (int64_t *regularArrayIn, size_t nRegularArraySizeIn) };
+%apply (float *regularArrayIn, size_t nRegularArraySizeIn) { (float *regularArrayIn, size_t nRegularArraySizeIn) };
+%apply (double *regularArrayIn, size_t nRegularArraySizeIn) { (double *regularArrayIn, size_t nRegularArraySizeIn) };
 
   CPLErr ReadRaster_Direct( int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            void *nioBuffer, long nioBufferSize,
+                            void *nioBuffer, size_t nioBufferSize,
                             int band_list, int *pband_list,
                             int nPixelSpace = 0, int nLineSpace = 0, int nBandSpace = 0)
 {
@@ -335,7 +745,7 @@ static CPLErr DatasetRasterIO( GDALDatasetH hDS, GDALRWFlag eRWFlag,
 CPLErr ReadRaster( int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            ctype *regularArrayOut, long nRegularArraySizeOut,
+                            ctype *regularArrayOut, size_t nRegularArraySizeOut,
                             int band_list, int *pband_list,
                             int nPixelSpace = 0, int nLineSpace = 0, int nBandSpace = 0)
 {
@@ -353,6 +763,7 @@ CPLErr ReadRaster( int xoff, int yoff, int xsize, int ysize,
   DEFINE_DS_READ_RASTER(char, GDT_Byte)
   DEFINE_DS_READ_RASTER(short, GDT_Int16)
   DEFINE_DS_READ_RASTER(int, GDT_Int32)
+  DEFINE_DS_READ_RASTER(int64_t, GDT_Int64)
   DEFINE_DS_READ_RASTER(float, GDT_Float32)
   DEFINE_DS_READ_RASTER(double, GDT_Float64)
 
@@ -360,7 +771,7 @@ CPLErr ReadRaster( int xoff, int yoff, int xsize, int ysize,
   CPLErr WriteRaster_Direct( int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            void *nioBuffer, long nioBufferSize,
+                            void *nioBuffer, size_t nioBufferSize,
                             int band_list, int *pband_list,
                             int nPixelSpace = 0, int nLineSpace = 0, int nBandSpace = 0)
 {
@@ -378,7 +789,7 @@ CPLErr ReadRaster( int xoff, int yoff, int xsize, int ysize,
   CPLErr WriteRaster( int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            ctype *regularArrayIn, long nRegularArraySizeIn,
+                            ctype *regularArrayIn, size_t nRegularArraySizeIn,
                             int band_list, int *pband_list,
                             int nPixelSpace = 0, int nLineSpace = 0, int nBandSpace = 0)
 {
@@ -396,6 +807,7 @@ CPLErr ReadRaster( int xoff, int yoff, int xsize, int ysize,
   DEFINE_DS_WRITE_RASTER(char, GDT_Byte)
   DEFINE_DS_WRITE_RASTER(short, GDT_Int16)
   DEFINE_DS_WRITE_RASTER(int, GDT_Int32)
+  DEFINE_DS_WRITE_RASTER(int64_t, GDT_Int64)
   DEFINE_DS_WRITE_RASTER(float, GDT_Float32)
   DEFINE_DS_WRITE_RASTER(double, GDT_Float64)
 
@@ -414,12 +826,13 @@ static CPLErr BandRasterIO( GDALRasterBandH hBand, GDALRWFlag eRWFlag,
                             int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            void *regularArrayOut, long nRegularArraySizeOut,
+                            void *regularArrayOut, size_t nRegularArraySizeOut,
                             int nPixelSpace, int nLineSpace,
                             GDALDataType gdal_type, size_t sizeof_ctype)
 {
     if ((gdal_type == GDT_Int16 && buf_type != GDT_Int16 && buf_type != GDT_UInt16 && buf_type != GDT_CInt16) ||
         (gdal_type == GDT_Int32 && buf_type != GDT_Int32 && buf_type != GDT_UInt32 && buf_type != GDT_CInt32) ||
+        (gdal_type == GDT_Int64 && buf_type != GDT_Int64 && buf_type != GDT_UInt64) ||
         (gdal_type == GDT_Float32 && buf_type != GDT_Float32 && buf_type != GDT_CFloat32) ||
         (gdal_type == GDT_Float64 && buf_type != GDT_Float64 && buf_type != GDT_CFloat64))
     {
@@ -429,7 +842,7 @@ static CPLErr BandRasterIO( GDALRasterBandH hBand, GDALRWFlag eRWFlag,
     }
 
     GIntBig nMinBufferSizeInBytes = ComputeBandRasterIOSize (
-                            buf_xsize, buf_ysize, GDALGetDataTypeSize(buf_type) / 8,
+                            buf_xsize, buf_ysize, GDALGetDataTypeSizeBytes(buf_type),
                             nPixelSpace, nLineSpace, sizeof_ctype > 1 );
     if (nMinBufferSizeInBytes > 0x7fffffff)
     {
@@ -456,7 +869,7 @@ static CPLErr BandRasterIO( GDALRasterBandH hBand, GDALRWFlag eRWFlag,
   CPLErr ReadRaster_Direct( int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            void *nioBuffer, long nioBufferSize,
+                            void *nioBuffer, size_t nioBufferSize,
                             int nPixelSpace = 0, int nLineSpace = 0)
   {
     return BandRasterIO( self, GF_Read,
@@ -472,7 +885,7 @@ static CPLErr BandRasterIO( GDALRasterBandH hBand, GDALRWFlag eRWFlag,
   CPLErr ReadRaster( int xoff, int yoff, int xsize, int ysize,
                      int buf_xsize, int buf_ysize,
                      GDALDataType buf_type,
-                     ctype *regularArrayOut, long nRegularArraySizeOut,
+                     ctype *regularArrayOut, size_t nRegularArraySizeOut,
                      int nPixelSpace = 0, int nLineSpace = 0)
   {
     return BandRasterIO( self, GF_Read,
@@ -488,13 +901,14 @@ static CPLErr BandRasterIO( GDALRasterBandH hBand, GDALRWFlag eRWFlag,
   DEFINE_READ_RASTER(char, GDT_Byte)
   DEFINE_READ_RASTER(short, GDT_Int16)
   DEFINE_READ_RASTER(int, GDT_Int32)
+  DEFINE_READ_RASTER(int64_t, GDT_Int64)
   DEFINE_READ_RASTER(float, GDT_Float32)
   DEFINE_READ_RASTER(double, GDT_Float64)
 
   CPLErr WriteRaster_Direct( int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            void *nioBuffer, long nioBufferSize,
+                            void *nioBuffer, size_t nioBufferSize,
                             int nPixelSpace = 0, int nLineSpace = 0)
   {
     return BandRasterIO( self, GF_Write,
@@ -510,7 +924,7 @@ static CPLErr BandRasterIO( GDALRasterBandH hBand, GDALRWFlag eRWFlag,
   CPLErr WriteRaster( int xoff, int yoff, int xsize, int ysize,
                             int buf_xsize, int buf_ysize,
                             GDALDataType buf_type,
-                            ctype *regularArrayIn, long nRegularArraySizeIn,
+                            ctype *regularArrayIn, size_t nRegularArraySizeIn,
                             int nPixelSpace = 0, int nLineSpace = 0)
   {
     return BandRasterIO( self, GF_Write,
@@ -526,10 +940,11 @@ static CPLErr BandRasterIO( GDALRasterBandH hBand, GDALRWFlag eRWFlag,
   DEFINE_WRITE_RASTER(char, GDT_Byte)
   DEFINE_WRITE_RASTER(short, GDT_Int16)
   DEFINE_WRITE_RASTER(int, GDT_Int32)
+  DEFINE_WRITE_RASTER(int64_t, GDT_Int64)
   DEFINE_WRITE_RASTER(float, GDT_Float32)
   DEFINE_WRITE_RASTER(double, GDT_Float64)
 
-  CPLErr ReadBlock_Direct( int nXBlockOff, int nYBlockOff, void *nioBuffer, long nioBufferSize )
+  CPLErr ReadBlock_Direct( int nXBlockOff, int nYBlockOff, void *nioBuffer, size_t nioBufferSize )
   {
     if (BandBlockReadWrite_Validate((GDALRasterBandH)self, nioBuffer, nioBufferSize) != CE_None)
       return CE_Failure;
@@ -537,26 +952,28 @@ static CPLErr BandRasterIO( GDALRasterBandH hBand, GDALRWFlag eRWFlag,
     return GDALReadBlock(self, nXBlockOff, nYBlockOff, nioBuffer);
   }
 
-  CPLErr WriteBlock_Direct( int nXBlockOff, int nYBlockOff, void *nioBuffer, long nioBufferSize )
+  CPLErr WriteBlock_Direct( int nXBlockOff, int nYBlockOff, void *nioBuffer, size_t nioBufferSize )
   {
     if (BandBlockReadWrite_Validate((GDALRasterBandH)self, nioBuffer, nioBufferSize) != CE_None)
       return CE_Failure;
 
     return GDALWriteBlock(self, nXBlockOff, nYBlockOff, nioBuffer);
   }
-/* %clear (void *nioBuffer, long nioBufferSize); */
+/* %clear (void *nioBuffer, size_t nioBufferSize); */
 
-%clear (char *regularArrayOut, long nRegularArraySizeOut);
-%clear (short *regularArrayOut, long nRegularArraySizeOut);
-%clear (int *regularArrayOut, long nRegularArraySizeOut);
-%clear (float *regularArrayOut, long nRegularArraySizeOut);
-%clear (double *regularArrayOut, long nRegularArraySizeOut);
+%clear (char *regularArrayOut, size_t nRegularArraySizeOut);
+%clear (short *regularArrayOut, size_t nRegularArraySizeOut);
+%clear (int *regularArrayOut, size_t nRegularArraySizeOut);
+%clear (int64_t *regularArrayOut, size_t nRegularArraySizeOut);
+%clear (float *regularArrayOut, size_t nRegularArraySizeOut);
+%clear (double *regularArrayOut, size_t nRegularArraySizeOut);
 
-%clear (char *regularArrayIn, long nRegularArraySizeIn);
-%clear (short *regularArrayIn, long nRegularArraySizeIn);
-%clear (int *regularArrayIn, long nRegularArraySizeIn);
-%clear (float *regularArrayIn, long nRegularArraySizeIn);
-%clear (double *regularArrayIn, long nRegularArraySizeIn);
+%clear (char *regularArrayIn, size_t nRegularArraySizeIn);
+%clear (short *regularArrayIn, size_t nRegularArraySizeIn);
+%clear (int *regularArrayIn, size_t nRegularArraySizeIn);
+%clear (int64_t *regularArrayIn, size_t nRegularArraySizeIn);
+%clear (float *regularArrayIn, size_t nRegularArraySizeIn);
+%clear (double *regularArrayIn, size_t nRegularArraySizeIn);
 
 %apply (int nList, int* pListOut) {(int buckets, int *panHistogram)};
 %apply Pointer NONNULL { int *panHistogram };
@@ -705,6 +1122,7 @@ import java.awt.Color;
 
 %typemap(javaimports) GDALRasterBandShadow %{
 import org.gdal.gdalconst.gdalconstConstants;
+import org.gdal.osr.SpatialReference;
 %}
 
 
@@ -756,7 +1174,7 @@ import org.gdal.gdalconst.gdalconstConstants;
    public java.nio.ByteBuffer ReadRaster_Direct(int xoff, int yoff, int xsize, int ysize,
                                                 int buf_xsize, int buf_ysize, int buf_type)
    {
-       long buf_size = buf_xsize * buf_ysize * (gdal.GetDataTypeSize(buf_type) / 8);
+       long buf_size = buf_xsize * buf_ysize * gdal.GetDataTypeSizeBytes(buf_type);
        if ((int)buf_size != buf_size)
                throw new OutOfMemoryError();
        java.nio.ByteBuffer nioBuffer = java.nio.ByteBuffer.allocateDirect((int)buf_size);
@@ -799,6 +1217,14 @@ import org.gdal.gdalconst.gdalconstConstants;
 
    public int ReadRaster(int xoff, int yoff, int xsize, int ysize, int[] array) {
        return ReadRaster(xoff, yoff, xsize, ysize, xsize, ysize, gdalconstConstants.GDT_Int32, array);
+   }
+
+   public int ReadRaster(int xoff, int yoff, int xsize, int ysize, int buf_type, long[] array) {
+       return ReadRaster(xoff, yoff, xsize, ysize, xsize, ysize, buf_type, array);
+   }
+
+   public int ReadRaster(int xoff, int yoff, int xsize, int ysize, long[] array) {
+       return ReadRaster(xoff, yoff, xsize, ysize, xsize, ysize, gdalconstConstants.GDT_Int64, array);
    }
 
    public int ReadRaster(int xoff, int yoff, int xsize, int ysize, int buf_type, float[] array) {
@@ -856,6 +1282,14 @@ import org.gdal.gdalconst.gdalconstConstants;
        return WriteRaster(xoff, yoff, xsize, ysize, xsize, ysize, gdalconstConstants.GDT_Int32, array);
    }
 
+   public int WriteRaster(int xoff, int yoff, int xsize, int ysize, int buf_type, long[] array) {
+       return WriteRaster(xoff, yoff, xsize, ysize, xsize, ysize, buf_type, array);
+   }
+
+   public int WriteRaster(int xoff, int yoff, int xsize, int ysize, long[] array) {
+       return WriteRaster(xoff, yoff, xsize, ysize, xsize, ysize, gdalconstConstants.GDT_Int64, array);
+   }
+
    public int WriteRaster(int xoff, int yoff, int xsize, int ysize, int buf_type, float[] array) {
        return WriteRaster(xoff, yoff, xsize, ysize, xsize, ysize, buf_type, array);
    }
@@ -889,7 +1323,8 @@ import org.gdal.gdalconst.gdalconstConstants;
 // Add a Java reference to prevent premature garbage collection and resulting use
 // of dangling C++ pointer. Intended for methods that return pointers or
 // references to a member variable.
-%typemap(javaout) GDALRasterBandShadow* GetRasterBand,
+%typemap(javaout) GDALDatasetShadow* GetThreadSafeDataset,
+                  GDALRasterBandShadow* GetRasterBand,
                   GDALRasterBandShadow* GetOverview,
                   GDALRasterBandShadow* GetMaskBand,
                   GDALColorTableShadow* GetColorTable,
@@ -952,6 +1387,73 @@ import org.gdal.gdalconst.gdalconstConstants;
   }
 %}
 
+%{
+  static size_t GDALAttributeGetDimSize(GDALAttributeH attH, size_t index) {
+
+    size_t size;
+
+    size_t count;
+
+    GUInt64* sizes = GDALAttributeGetDimensionsSize(attH, &count);
+
+    if (index < 0 || index >= count) {
+
+      size = (size_t) 0;
+    }
+    else {
+
+      size = (size_t) sizes[index];
+    }
+
+    CPLFree(sizes);
+
+    return size;
+  }
+
+%}
+
+%extend GDALAttributeHS {
+
+    size_t GetDimensionSize(size_t index) {
+        return GDALAttributeGetDimSize(self, index);
+    }
+
+} /* extend */
+
+
+%typemap(javacode) GDALAttributeHS %{
+
+   public long[] GetDimensionSizes() {
+
+       long size = GetDimensionCount();
+
+       if (size > Integer.MAX_VALUE)
+           throw new IllegalArgumentException("java array can hold at most "+Integer.MAX_VALUE+" values.");
+
+       long[] arr = new long[(int) size];
+
+       for (int i = 0; i < size; i++) {
+           arr[i] = GetDimensionSize(i);
+       }
+
+       return arr;
+   }
+%}
+
 %include callback.i
 
 %include typemaps_java.i
+
+
+// Also defined in python/gdal_python.i and csharp/gdal_csharp.i
+
+%rename (GetMemFileBuffer) wrapper_VSIGetMemFileBuffer;
+
+%apply (GByte* outBytes) {GByte*};
+%inline %{
+GByte* wrapper_VSIGetMemFileBuffer(const char *utf8_path, vsi_l_offset *length)
+{
+    return VSIGetMemFileBuffer(utf8_path, length, 0);
+}
+%}
+%clear GByte*;

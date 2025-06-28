@@ -8,23 +8,7 @@
  * Copyright (c) 2001, Frank Warmerdam
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************
  *
  * Independent Security Audit 2003/04/05 Andrey Kiselev:
@@ -624,7 +608,7 @@ CPLXMLNode *CPLParseXMLString(const char *pszString)
     const CPLString osErrMsg = CPLGetLastErrorMsg();
 
     // Reset it now.
-    CPLErrorReset();
+    CPLErrorSetState(CE_None, CPLE_AppDefined, "");
 
     /* -------------------------------------------------------------------- */
     /*      Check for a UTF-8 BOM and skip if found                         */
@@ -2249,8 +2233,9 @@ void CPLCleanXMLElementName(char *pszTarget)
 
     for (; *pszTarget != '\0'; pszTarget++)
     {
-        if ((*(reinterpret_cast<unsigned char *>(pszTarget)) & 0x80) ||
-            isalnum(*pszTarget) || *pszTarget == '_' || *pszTarget == '.')
+        if ((static_cast<unsigned char>(*pszTarget) & 0x80) ||
+            isalnum(static_cast<unsigned char>(*pszTarget)) ||
+            *pszTarget == '_' || *pszTarget == '.')
         {
             // Ok.
         }
@@ -2259,6 +2244,41 @@ void CPLCleanXMLElementName(char *pszTarget)
             *pszTarget = '_';
         }
     }
+}
+
+/************************************************************************/
+/*                     CPLXMLNodeGetRAMUsageEstimate()                  */
+/************************************************************************/
+
+static size_t CPLXMLNodeGetRAMUsageEstimate(const CPLXMLNode *psNode,
+                                            bool bVisitSiblings)
+{
+    size_t nRet = sizeof(CPLXMLNode);
+    // malloc() aligns on 16-byte boundaries on 64 bit.
+    nRet += std::max(2 * sizeof(void *), strlen(psNode->pszValue) + 1);
+    if (bVisitSiblings)
+    {
+        for (const CPLXMLNode *psIter = psNode->psNext; psIter;
+             psIter = psIter->psNext)
+        {
+            nRet += CPLXMLNodeGetRAMUsageEstimate(psIter, false);
+        }
+    }
+    if (psNode->psChild)
+    {
+        nRet += CPLXMLNodeGetRAMUsageEstimate(psNode->psChild, true);
+    }
+    return nRet;
+}
+
+/** Return a conservative estimate of the RAM usage of this node, its children
+ * and siblings. The returned values is in bytes.
+ *
+ * @since 3.9
+ */
+size_t CPLXMLNodeGetRAMUsageEstimate(const CPLXMLNode *psNode)
+{
+    return CPLXMLNodeGetRAMUsageEstimate(psNode, true);
 }
 
 /************************************************************************/

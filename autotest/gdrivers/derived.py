@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test derived driver
@@ -9,29 +8,15 @@
 ###############################################################################
 # Copyright (c) 2016, Julien Michel, <julien dot michel at cnes dot fr>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
 import pytest
 
 from osgeo import gdal
+
+pytestmark = pytest.mark.require_driver("Derived")
 
 
 def test_derived_test1():
@@ -147,24 +132,25 @@ def test_derived_test2():
 
 def test_derived_test3():
 
-    with gdaltest.error_handler():
-        # Missing filename
-        ds = gdal.Open("DERIVED_SUBDATASET:LOGAMPLITUDE")
-    assert ds is None
+    with pytest.raises(Exception):
+        gdal.Open("DERIVED_SUBDATASET:LOGAMPLITUDE")
 
-    with gdaltest.error_handler():
-        ds = gdal.Open("DERIVED_SUBDATASET:invalid_alg:../gcore/data/byte.tif")
-    assert ds is None
+    with pytest.raises(Exception):
+        gdal.Open("DERIVED_SUBDATASET:invalid_alg:../gcore/data/byte.tif")
 
-    with gdaltest.error_handler():
-        ds = gdal.Open("DERIVED_SUBDATASET:LOGAMPLITUDE:dataset_does_not_exist")
-    assert ds is None
+    with pytest.raises(Exception):
+        gdal.Open("DERIVED_SUBDATASET:LOGAMPLITUDE:dataset_does_not_exist")
 
-    with gdaltest.error_handler():
+    with pytest.raises(Exception):
         # Raster with zero band
-        ds = gdal.Open("DERIVED_SUBDATASET:LOGAMPLITUDE:data/hdf5/CSK_DGM.h5")
-    assert ds is None
+        gdal.Open("DERIVED_SUBDATASET:LOGAMPLITUDE:data/hdf5/CSK_DGM.h5")
 
+
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_derived_vrt_errors():
     for function in [
         "real",
         "imag",
@@ -188,7 +174,7 @@ def test_derived_test3():
             '<VRTDataset rasterXSize="1" rasterYSize="1"><VRTRasterBand subClass="VRTDerivedRasterBand"><PixelFunctionType>%s</PixelFunctionType></VRTRasterBand></VRTDataset>'
             % function
         )
-        with gdaltest.error_handler():
+        with pytest.raises(Exception):
             ds.GetRasterBand(1).Checksum()
 
 

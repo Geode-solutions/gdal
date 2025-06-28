@@ -10,23 +10,7 @@
  *               2007, Jens Oberender
  * Copyright (c) 2007-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #include "cpl_port.h"
 #include "ogr_kml.h"
@@ -51,17 +35,7 @@
 /*                         OGRKMLDataSource()                           */
 /************************************************************************/
 
-OGRKMLDataSource::OGRKMLDataSource()
-    :
-#ifdef HAVE_EXPAT
-      poKMLFile_(nullptr),
-#endif
-      pszName_(nullptr), papoLayers_(nullptr), nLayers_(0),
-      pszNameField_(nullptr), pszDescriptionField_(nullptr),
-      pszAltitudeMode_(nullptr), papszCreateOptions_(nullptr),
-      fpOutput_(nullptr), bIssuedCTError_(false)
-{
-}
+OGRKMLDataSource::OGRKMLDataSource() = default;
 
 /************************************************************************/
 /*                        ~OGRKMLDataSource()                           */
@@ -98,7 +72,6 @@ OGRKMLDataSource::~OGRKMLDataSource()
     }
 
     CSLDestroy(papszCreateOptions_);
-    CPLFree(pszName_);
     CPLFree(pszNameField_);
     CPLFree(pszDescriptionField_);
     CPLFree(pszAltitudeMode_);
@@ -135,8 +108,6 @@ int OGRKMLDataSource::Open(const char *pszNewName, int bTestOpen)
         poKMLFile_ = nullptr;
         return FALSE;
     }
-
-    pszName_ = CPLStrdup(pszNewName);
 
     /* -------------------------------------------------------------------- */
     /*      If we aren't sure it is KML, validate it by start parsing       */
@@ -335,8 +306,6 @@ int OGRKMLDataSource::Create(const char *pszName, char **papszOptions)
     if (strcmp(pszName, "/dev/stdout") == 0)
         pszName = "/vsistdout/";
 
-    pszName_ = CPLStrdup(pszName);
-
     fpOutput_ = VSIFOpenExL(pszName, "wb", true);
     if (fpOutput_ == nullptr)
     {
@@ -363,10 +332,10 @@ int OGRKMLDataSource::Create(const char *pszName, char **papszOptions)
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *OGRKMLDataSource::ICreateLayer(const char *pszLayerName,
-                                         OGRSpatialReference *poSRS,
-                                         OGRwkbGeometryType eType,
-                                         char ** /* papszOptions */)
+OGRLayer *
+OGRKMLDataSource::ICreateLayer(const char *pszLayerName,
+                               const OGRGeomFieldDefn *poGeomFieldDefn,
+                               CSLConstList /* papszOptions*/)
 {
     CPLAssert(nullptr != pszLayerName);
 
@@ -378,10 +347,14 @@ OGRLayer *OGRKMLDataSource::ICreateLayer(const char *pszLayerName,
         CPLError(CE_Failure, CPLE_NoWriteAccess,
                  "Data source %s opened for read access.  "
                  "New layer %s cannot be created.",
-                 pszName_, pszLayerName);
+                 GetDescription(), pszLayerName);
 
         return nullptr;
     }
+
+    const auto eType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSRS =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
 
     /* -------------------------------------------------------------------- */
     /*      Close the previous layer (if there is one open)                 */

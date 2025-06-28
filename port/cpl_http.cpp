@@ -8,23 +8,7 @@
  * Copyright (c) 2006, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -43,6 +27,8 @@
 #include "cpl_http.h"
 #include "cpl_error.h"
 #include "cpl_multiproc.h"
+#include "cpl_vsi_virtual.h"
+#include "cpl_vsil_curl_class.h"
 
 // gcc or clang complains about C-style cast in #define like
 // CURL_ZERO_TERMINATED
@@ -58,10 +44,9 @@
 #ifdef HAVE_OPENSSL_CRYPTO
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-#include <openssl/engine.h>
 #include <openssl/x509v3.h>
 
-#if defined(WIN32)
+#if defined(_WIN32)
 #include <wincrypt.h>
 #endif
 
@@ -85,7 +70,7 @@ static CPLMutex *hSessionMapMutex = nullptr;
 static bool bHasCheckVersion = false;
 static bool bSupportGZip = false;
 static bool bSupportHTTP2 = false;
-#if defined(WIN32) && defined(HAVE_OPENSSL_CRYPTO)
+#if defined(_WIN32) && defined(HAVE_OPENSSL_CRYPTO)
 static std::vector<X509 *> *poWindowsCertificateList = nullptr;
 
 #if (OPENSSL_VERSION_NUMBER < 0x10100000L)
@@ -96,7 +81,7 @@ static std::vector<X509 *> *poWindowsCertificateList = nullptr;
 #define X509_get_extended_key_usage(x) (x->ex_xkusage)
 #endif
 
-#endif  // defined(WIN32) && defined(HAVE_OPENSSL_CRYPTO)
+#endif  // defined(_WIN32) && defined(HAVE_OPENSSL_CRYPTO)
 
 #if defined(HAVE_OPENSSL_CRYPTO) && OPENSSL_VERSION_NUMBER < 0x10100000
 
@@ -156,7 +141,7 @@ static void CPLOpenSSLCleanup()
 
 #endif
 
-#if defined(WIN32) && defined(HAVE_OPENSSL_CRYPTO)
+#if defined(_WIN32) && defined(HAVE_OPENSSL_CRYPTO)
 
 /************************************************************************/
 /*                    CPLWindowsCertificateListCleanup()                */
@@ -289,7 +274,7 @@ static CURLcode CPL_ssl_ctx_callback(CURL *, void *pSSL, void *)
     return CURLE_OK;
 }
 
-#endif  // defined(WIN32) && defined (HAVE_OPENSSL_CRYPTO)
+#endif  // defined(_WIN32) && defined (HAVE_OPENSSL_CRYPTO)
 
 /************************************************************************/
 /*                       CheckCurlFeatures()                            */
@@ -419,7 +404,6 @@ static size_t CPLHdrWriteFct(void *buffer, size_t size, size_t nmemb,
     return nmemb;
 }
 
-#if CURL_AT_LEAST_VERSION(7, 56, 0)
 /************************************************************************/
 /*                        CPLHTTPReadFunction()                         */
 /************************************************************************/
@@ -447,7 +431,6 @@ static void CPLHTTPFreeFunction(void *arg)
 {
     VSIFCloseL(static_cast<VSILFILE *>(arg));
 }
-#endif  // CURL_AT_LEAST_VERSION(7,56,0)
 
 typedef struct
 {
@@ -480,16 +463,6 @@ static int NewProcessFunction(void *p, curl_off_t dltotal, curl_off_t dlnow,
     }
     return 0;
 }
-
-#if !CURL_AT_LEAST_VERSION(7, 32, 0)
-static int ProcessFunction(void *p, double dltotal, double dlnow,
-                           double ultotal, double ulnow)
-{
-    return NewProcessFunction(
-        p, static_cast<curl_off_t>(dltotal), static_cast<curl_off_t>(dlnow),
-        static_cast<curl_off_t>(ultotal), static_cast<curl_off_t>(ulnow));
-}
-#endif
 
 #endif /* def HAVE_CURL */
 
@@ -537,12 +510,13 @@ constexpr TupleEnvVarOptionName asAssocEnvVarOptionName[] = {
     {"GDAL_HTTP_PROXYUSERPWD", "PROXYUSERPWD"},
     {"GDAL_PROXY_AUTH", "PROXYAUTH"},
     {"GDAL_HTTP_NETRC", "NETRC"},
+    {"GDAL_HTTP_NETRC_FILE", "NETRC_FILE"},
     {"GDAL_HTTP_MAX_RETRY", "MAX_RETRY"},
     {"GDAL_HTTP_RETRY_DELAY", "RETRY_DELAY"},
+    {"GDAL_HTTP_RETRY_CODES", "RETRY_CODES"},
     {"GDAL_CURL_CA_BUNDLE", "CAINFO"},
     {"CURL_CA_BUNDLE", "CAINFO"},
     {"SSL_CERT_FILE", "CAINFO"},
-    {"GDAL_HTTP_HEADER_FILE", "HEADER_FILE"},
     {"GDAL_HTTP_CAPATH", "CAPATH"},
     {"GDAL_HTTP_SSL_VERIFYSTATUS", "SSL_VERIFYSTATUS"},
     {"GDAL_HTTP_USE_CAPI_STORE", "USE_CAPI_STORE"},
@@ -550,6 +524,7 @@ constexpr TupleEnvVarOptionName asAssocEnvVarOptionName[] = {
     {"GDAL_HTTP_HEADER_FILE", "HEADER_FILE"},
     {"GDAL_HTTP_AUTH", "HTTPAUTH"},
     {"GDAL_GSSAPI_DELEGATION", "GSSAPI_DELEGATION"},
+    {"GDAL_HTTP_BEARER", "HTTP_BEARER"},
     {"GDAL_HTTP_COOKIE", "COOKIE"},
     {"GDAL_HTTP_COOKIEFILE", "COOKIEFILE"},
     {"GDAL_HTTP_COOKIEJAR", "COOKIEJAR"},
@@ -562,42 +537,95 @@ constexpr TupleEnvVarOptionName asAssocEnvVarOptionName[] = {
 
 char **CPLHTTPGetOptionsFromEnv(const char *pszFilename)
 {
-    char **papszOptions = nullptr;
-    for (size_t i = 0; i < CPL_ARRAYSIZE(asAssocEnvVarOptionName); ++i)
+    CPLStringList aosOptions;
+    std::string osNonStreamingFilename;
+    if (pszFilename && STARTS_WITH(pszFilename, "/vsi"))
     {
-        const char *pszVal =
-            pszFilename
-                ? VSIGetPathSpecificOption(pszFilename,
-                                           asAssocEnvVarOptionName[i].pszEnvVar,
-                                           nullptr)
-                : CPLGetConfigOption(asAssocEnvVarOptionName[i].pszEnvVar,
-                                     nullptr);
-        if (pszVal != nullptr)
+        VSIFilesystemHandler *poFSHandler =
+            VSIFileManager::GetHandler(pszFilename);
+        osNonStreamingFilename =
+            poFSHandler->GetNonStreamingFilename(pszFilename);
+        if (osNonStreamingFilename == pszFilename)
         {
-            papszOptions = CSLSetNameValue(
-                papszOptions, asAssocEnvVarOptionName[i].pszOptionName, pszVal);
+            osNonStreamingFilename.clear();
+        }
+        else
+        {
+            // CPLDebug("HTTP", "Non-streaming filename for %s: %s", pszFilename, osNonStreamingFilename.c_str());
         }
     }
-    return papszOptions;
+    for (const auto &sTuple : asAssocEnvVarOptionName)
+    {
+        const char *pszVal = nullptr;
+        if (pszFilename)
+        {
+            pszVal = VSIGetPathSpecificOption(pszFilename, sTuple.pszEnvVar,
+                                              nullptr);
+            if (!pszVal && !osNonStreamingFilename.empty())
+            {
+                pszVal = VSIGetPathSpecificOption(
+                    osNonStreamingFilename.c_str(), sTuple.pszEnvVar, nullptr);
+            }
+        }
+        if (!pszVal)
+        {
+            pszVal = CPLGetConfigOption(sTuple.pszEnvVar, nullptr);
+        }
+        if (pszVal)
+        {
+            aosOptions.AddNameValue(sTuple.pszOptionName, pszVal);
+        }
+    }
+    return aosOptions.StealList();
 }
 
 /************************************************************************/
 /*                      CPLHTTPGetNewRetryDelay()                       */
 /************************************************************************/
 
-double CPLHTTPGetNewRetryDelay(int response_code, double dfOldDelay,
-                               const char *pszErrBuf, const char *pszCurlError)
+/** Return the new retry delay.
+ *
+ * This takes into account the HTTP response code, the previous delay, the
+ * HTTP payload error message, the Curl error message and a potential list of
+ * retriable HTTP codes.
+ *
+ * @param response_code HTTP response code (e.g. 400)
+ * @param dfOldDelay Previous delay (nominally in second)
+ * @param pszErrBuf HTTP response body of the failed request (may be NULL)
+ * @param pszCurlError Curl error as returned by CURLOPT_ERRORBUFFER (may be NULL)
+ * @param pszRetriableCodes nullptr to limit to the default hard-coded scenarios,
+ * "ALL" to ask to retry for all non-200 codes, or a comma-separated list of
+ * HTTP codes (e.g. "400,500") that are accepted for retry.
+ * @return the new delay, or 0 if no retry should be attempted.
+ */
+static double CPLHTTPGetNewRetryDelay(int response_code, double dfOldDelay,
+                                      const char *pszErrBuf,
+                                      const char *pszCurlError,
+                                      const char *pszRetriableCodes)
 {
-    if (response_code == 429 || response_code == 500 ||
-        (response_code >= 502 && response_code <= 504) ||
-        // S3 sends some client timeout errors as 400 Client Error
-        (response_code == 400 && pszErrBuf &&
-         strstr(pszErrBuf, "RequestTimeout")) ||
-        (pszCurlError && (strstr(pszCurlError, "Connection timed out") ||
-                          strstr(pszCurlError, "Operation timed out") ||
-                          strstr(pszCurlError, "Connection was reset"))))
+    bool bRetry = false;
+    if (pszRetriableCodes && pszRetriableCodes[0])
     {
-        // 'Operation tmied out': seen during some long running operation 'hang'
+        bRetry = EQUAL(pszRetriableCodes, "ALL") ||
+                 strstr(pszRetriableCodes, CPLSPrintf("%d", response_code));
+    }
+    else if (response_code == 429 || response_code == 500 ||
+             (response_code >= 502 && response_code <= 504) ||
+             // S3 sends some client timeout errors as 400 Client Error
+             (response_code == 400 && pszErrBuf &&
+              strstr(pszErrBuf, "RequestTimeout")) ||
+             (pszCurlError &&
+              (strstr(pszCurlError, "Connection timed out") ||
+               strstr(pszCurlError, "Operation timed out") ||
+               strstr(pszCurlError, "Connection reset by peer") ||
+               strstr(pszCurlError, "Connection was reset") ||
+               strstr(pszCurlError, "SSL connection timeout"))))
+    {
+        bRetry = true;
+    }
+    if (bRetry)
+    {
+        // 'Operation timed out': seen during some long running operation 'hang'
         // no error but no response from server and we are in the cURL loop
         // infinitely.
 
@@ -608,14 +636,99 @@ double CPLHTTPGetNewRetryDelay(int response_code, double dfOldDelay,
 
         // Use an exponential backoff factor of 2 plus some random jitter
         // We don't care about cryptographic quality randomness, hence:
-        // coverity[dont_call]
+#ifndef __COVERITY__
         return dfOldDelay * (2 + rand() * 0.5 / RAND_MAX);
+#else
+        return dfOldDelay * 2;
+#endif
     }
     else
     {
         return 0;
     }
 }
+
+/*! @cond Doxygen_Suppress */
+
+/************************************************************************/
+/*                      CPLHTTPRetryParameters()                        */
+/************************************************************************/
+
+/** Constructs a CPLHTTPRetryParameters instance from configuration
+ * options or path-specific options.
+ *
+ * @param aosHTTPOptions HTTP options returned by CPLHTTPGetOptionsFromEnv()
+ */
+CPLHTTPRetryParameters::CPLHTTPRetryParameters(
+    const CPLStringList &aosHTTPOptions)
+    : nMaxRetry(atoi(aosHTTPOptions.FetchNameValueDef(
+          "MAX_RETRY", CPLSPrintf("%d", CPL_HTTP_MAX_RETRY)))),
+      dfInitialDelay(CPLAtof(aosHTTPOptions.FetchNameValueDef(
+          "RETRY_DELAY", CPLSPrintf("%f", CPL_HTTP_RETRY_DELAY)))),
+      osRetryCodes(aosHTTPOptions.FetchNameValueDef("RETRY_CODES", ""))
+{
+}
+
+/************************************************************************/
+/*                        CPLHTTPRetryContext()                         */
+/************************************************************************/
+
+/** Constructor */
+CPLHTTPRetryContext::CPLHTTPRetryContext(const CPLHTTPRetryParameters &oParams)
+    : m_oParameters(oParams), m_dfNextDelay(oParams.dfInitialDelay)
+{
+}
+
+/************************************************************************/
+/*                     CPLHTTPRetryContext::CanRetry()                  */
+/************************************************************************/
+
+/** Returns whether we can attempt a new retry, based on the retry counter,
+ * and increment that counter.
+ */
+bool CPLHTTPRetryContext::CanRetry()
+{
+    if (m_nRetryCount >= m_oParameters.nMaxRetry)
+        return false;
+    m_nRetryCount++;
+    return true;
+}
+
+/** Returns whether we can attempt a new retry, based on the retry counter,
+ * the response code, payload and curl error buffers.
+ *
+ * If successful, the retry counter is incremented, and GetCurrentDelay()
+ * returns the delay to apply with CPLSleep().
+ */
+bool CPLHTTPRetryContext::CanRetry(int response_code, const char *pszErrBuf,
+                                   const char *pszCurlError)
+{
+    if (m_nRetryCount >= m_oParameters.nMaxRetry)
+        return false;
+    m_dfCurDelay = m_dfNextDelay;
+    m_dfNextDelay = CPLHTTPGetNewRetryDelay(response_code, m_dfNextDelay,
+                                            pszErrBuf, pszCurlError,
+                                            m_oParameters.osRetryCodes.c_str());
+    if (m_dfNextDelay == 0.0)
+        return false;
+    m_nRetryCount++;
+    return true;
+}
+
+/************************************************************************/
+/*                CPLHTTPRetryContext::GetCurrentDelay()                */
+/************************************************************************/
+
+/** Returns the delay to apply. Only valid after a successful call to CanRetry() */
+double CPLHTTPRetryContext::GetCurrentDelay() const
+{
+    if (m_nRetryCount == 0)
+        CPLDebug("CPL",
+                 "GetCurrentDelay() should only be called after CanRetry()");
+    return m_dfCurDelay;
+}
+
+/*! @endcond Doxygen_Suppress */
 
 #ifdef HAVE_CURL
 
@@ -659,6 +772,7 @@ class CPLHTTPPostFields
     CPLHTTPPostFields() = default;
     CPLHTTPPostFields &operator=(const CPLHTTPPostFields &) = delete;
     CPLHTTPPostFields(const CPLHTTPPostFields &) = delete;
+
     CPLErr Fill(CURL *http_handle, CSLConstList papszOptions)
     {
         // Fill POST form if present
@@ -669,12 +783,8 @@ class CPLHTTPPostFields
 
         if (pszFormFilePath != nullptr || pszParametersCount != nullptr)
         {
-#if CURL_AT_LEAST_VERSION(7, 56, 0)
             mime = curl_mime_init(http_handle);
             curl_mimepart *mimepart = curl_mime_addpart(mime);
-#else   // CURL_AT_LEAST_VERSION(7,56,0)
-            struct curl_httppost *lastptr = nullptr;
-#endif  // CURL_AT_LEAST_VERSION(7,56,0)
             if (pszFormFilePath != nullptr)
             {
                 const char *pszFormFileName =
@@ -688,7 +798,6 @@ class CPLHTTPPostFields
                 VSIStatBufL sStat;
                 if (VSIStatL(pszFormFilePath, &sStat) == 0)
                 {
-#if CURL_AT_LEAST_VERSION(7, 56, 0)
                     VSILFILE *mime_fp = VSIFOpenL(pszFormFilePath, "rb");
                     if (mime_fp != nullptr)
                     {
@@ -706,11 +815,6 @@ class CPLHTTPPostFields
                         return CE_Failure;
                     }
 
-#else   // CURL_AT_LEAST_VERSION(7,56,0)
-                    curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME,
-                                 pszFormFileName, CURLFORM_FILE,
-                                 pszFormFilePath, CURLFORM_END);
-#endif  // CURL_AT_LEAST_VERSION(7,56,0)
                     CPLDebug("HTTP", "Send file: %s, COPYNAME: %s",
                              pszFormFilePath, pszFormFileName);
                 }
@@ -751,42 +855,26 @@ class CPLHTTPPostFields
                     return CE_Failure;
                 }
 
-#if CURL_AT_LEAST_VERSION(7, 56, 0)
                 mimepart = curl_mime_addpart(mime);
                 curl_mime_name(mimepart, pszKey);
                 CPL_IGNORE_RET_VAL(
                     curl_mime_data(mimepart, pszValue, CURL_ZERO_TERMINATED));
-#else   // CURL_AT_LEAST_VERSION(7,56,0)
-                curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME, pszKey,
-                             CURLFORM_COPYCONTENTS, pszValue, CURLFORM_END);
-#endif  // CURL_AT_LEAST_VERSION(7,56,0)
 
                 CPLDebug("HTTP", "COPYNAME: %s, COPYCONTENTS: %s", pszKey,
                          pszValue);
             }
 
-#if CURL_AT_LEAST_VERSION(7, 56, 0)
             unchecked_curl_easy_setopt(http_handle, CURLOPT_MIMEPOST, mime);
-#else   // CURL_AT_LEAST_VERSION(7,56,0)
-            unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTPPOST, formpost);
-#endif  // CURL_AT_LEAST_VERSION(7,56,0)
         }
         return CE_None;
     }
 
     ~CPLHTTPPostFields()
     {
-#if CURL_AT_LEAST_VERSION(7, 56, 0)
         if (mime != nullptr)
         {
             curl_mime_free(mime);
         }
-#else   // CURL_AT_LEAST_VERSION(7,56,0)
-        if (formpost != nullptr)
-        {
-            curl_formfree(formpost);
-        }
-#endif  // CURL_AT_LEAST_VERSION(7,56,0)
     }
 
     std::string GetErrorMessage() const
@@ -795,11 +883,7 @@ class CPLHTTPPostFields
     }
 
   private:
-#if CURL_AT_LEAST_VERSION(7, 56, 0)
     curl_mime *mime = nullptr;
-#else   // CURL_AT_LEAST_VERSION(7,56,0)
-    struct curl_httppost *formpost = nullptr;
-#endif  // CURL_AT_LEAST_VERSION(7,56,0)
     std::string osErrMsg{};
 };
 
@@ -947,115 +1031,31 @@ int CPLHTTPPopFetchCallback(void)
 /**
  * \brief Fetch a document from an url and return in a string.
  *
- * @param pszURL valid URL recognized by underlying download library (libcurl)
- * @param papszOptions option list as a NULL-terminated array of strings. May be
- * NULL. The following options are handled : <ul>
+ * Different options may be passed through the papszOptions function parameter,
+ * or for most of them through a configuration option:
+ * <ul>
  * <li>CONNECTTIMEOUT=val, where
  * val is in seconds (possibly with decimals). This is the maximum delay for the
- * connection to be established before being aborted (GDAL >= 2.2).</li>
+ * connection to be established before being aborted (GDAL >= 2.2).
+ * Corresponding configuration option: GDAL_HTTP_CONNECTTIMEOUT.
+ * </li>
  * <li>TIMEOUT=val, where val is in seconds. This is the maximum delay for the
- * whole request to complete before being aborted.</li>
+ * whole request to complete before being aborted.
+ * Corresponding configuration option: GDAL_HTTP_TIMEOUT.
+ * </li>
  * <li>LOW_SPEED_TIME=val,
  * where val is in seconds. This is the maximum time where the transfer speed
  * should be below the LOW_SPEED_LIMIT (if not specified 1b/s), before the
- * transfer to be considered too slow and aborted. (GDAL >= 2.1)</li>
+ * transfer to be considered too slow and aborted. (GDAL >= 2.1).
+ * Corresponding configuration option: GDAL_HTTP_LOW_SPEED_TIME.
+ * </li>
  * <li>LOW_SPEED_LIMIT=val, where val is in bytes/second. See LOW_SPEED_TIME.
- * Has only effect if LOW_SPEED_TIME is specified too. (GDAL >= 2.1)</li>
+ * Has only effect if LOW_SPEED_TIME is specified too. (GDAL >= 2.1).
+ * Corresponding configuration option: GDAL_HTTP_LOW_SPEED_LIMIT.
+ * </li>
  * <li>HEADERS=val, where val is an extra header to use when getting a web page.
- *                  For example "Accept: application/x-ogcwkt"</li>
- * <li>HEADER_FILE=filename: filename of a text file with "key: value" headers.
- *     (GDAL >= 2.2)</li>
- * <li>HTTPAUTH=[BASIC/NTLM/NEGOTIATE/ANY] to specify an authentication scheme
- * to use.</li>
- * <li>USERPWD=userid:password to specify a user and password for
- * authentication</li>
- * <li>GSSAPI_DELEGATION=[NONE/POLICY/ALWAYS] set allowed
- * GSS-API delegation. Relevant only with HTTPAUTH=NEGOTIATE (GDAL >= 3.3).</li>
- * <li>POSTFIELDS=val, where val is a nul-terminated string to be passed to the
- * server with a POST request.</li>
- * <li>PROXY=val, to make requests go through a
- * proxy server, where val is of the form proxy.server.com:port_number. This
- * option affects both HTTP and HTTPS URLs.</li>
- * <li>HTTPS_PROXY=val (GDAL
- * >= 2.4), the same meaning as PROXY, but this option is taken into account
- * only for HTTPS URLs.</li>
- * <li>PROXYUSERPWD=val, where val is of the form
- * username:password</li>
- * <li>PROXYAUTH=[BASIC/NTLM/DIGEST/NEGOTIATE/ANY] to
- * specify an proxy authentication scheme to use.</li>
- * <li>NETRC=[YES/NO] to
- * enable or disable use of $HOME/.netrc, default YES.</li>
- * <li>CUSTOMREQUEST=val, where val is GET, PUT, POST, DELETE, etc.. (GDAL
- * >= 1.9.0)</li>
- * <li>FORM_FILE_NAME=val, where val is upload file name. If this
- * option and FORM_FILE_PATH present, request type will set to POST.</li>
- * <li>FORM_FILE_PATH=val, where val is upload file path.</li>
- * <li>FORM_KEY_0=val...FORM_KEY_N, where val is name of form item.</li>
- * <li>FORM_VALUE_0=val...FORM_VALUE_N, where val is value of the form
- * item.</li>
- * <li>FORM_ITEM_COUNT=val, where val is count of form items.</li>
- * <li>COOKIE=val, where val is formatted as COOKIE1=VALUE1; COOKIE2=VALUE2;
- * ...</li>
- * <li>COOKIEFILE=val, where val is file name to read cookies from
- * (GDAL >= 2.4)</li>
- * <li>COOKIEJAR=val, where val is file name to store cookies
- * to (GDAL >= 2.4)</li>
- * <li>MAX_RETRY=val, where val is the maximum number of
- * retry attempts if a 429, 502, 503 or 504 HTTP error occurs. Default is 0.
- * (GDAL >= 2.0)</li>
- * <li>RETRY_DELAY=val, where val is the number of seconds
- * between retry attempts. Default is 30. (GDAL >= 2.0)</li>
- * <li>MAX_FILE_SIZE=val, where val is a number of bytes (GDAL >= 2.2)</li>
- * <li>CAINFO=/path/to/bundle.crt. This is path to Certificate Authority (CA)
- *     bundle file. By default, it will be looked for in a system location. If
- *     the CAINFO option is not defined, GDAL will also look in the
- *     CURL_CA_BUNDLE and SSL_CERT_FILE environment variables respectively
- *     and use the first one found as the CAINFO value (GDAL >= 2.1.3). The
- *     GDAL_CURL_CA_BUNDLE environment variable may also be used to set the
- *     CAINFO value in GDAL >= 3.2.</li>
- * <li>HTTP_VERSION=1.0/1.1/2/2TLS (GDAL >= 2.3). Specify HTTP version to use.
- *     Will default to 1.1 generally (except on some controlled environments,
- *     like Google Compute Engine VMs, where 2TLS will be the default).
- *     Support for HTTP/2 requires curl 7.33 or later, built against nghttp2.
- *     "2TLS" means that HTTP/2 will be attempted for HTTPS connections only.
- * Whereas "2" means that HTTP/2 will be attempted for HTTP or HTTPS.</li>
- * <li>SSL_VERIFYSTATUS=YES/NO (GDAL >= 2.3, and curl >= 7.41): determines
- * whether the status of the server cert using the "Certificate Status Request"
- * TLS extension (aka. OCSP stapling) should be checked. If this option is
- * enabled but the server does not support the TLS extension, the verification
- * will fail. Default to NO.</li>
- * <li>USE_CAPI_STORE=YES/NO (GDAL >= 2.3,
- * Windows only): whether CA certificates from the Windows certificate store.
- * Defaults to NO.</li>
- * <li>TCP_KEEPALIVE=YES/NO (GDAL >= 3.6): whether to
- * enable TCP keep-alive. Defaults to NO</li> <li>TCP_KEEPIDLE=integer, in
- * seconds (GDAL >= 3.6): keep-alive idle time. Defaults to 60. Only taken into
- * account if TCP_KEEPALIVE=YES.</li>
- * <li>TCP_KEEPINTVL=integer, in seconds
- * (GDAL >= 3.6): interval time between keep-alive probes. Defaults to 60. Only
- * taken into account if TCP_KEEPALIVE=YES.</li>
- * <li>USERAGENT=string: value of User-Agent header. Starting with GDAL 3.7,
- * GDAL core sets it by default (during driver initialization) to GDAL/x.y.z
- * where x.y.z is the GDAL version number. Applications may override it with the
- * CPLHTTPSetDefaultUserAgent() function.</li>
- * </ul>
- *
- * Alternatively, if not defined in the papszOptions arguments, the
- * CONNECTTIMEOUT, TIMEOUT,
- * LOW_SPEED_TIME, LOW_SPEED_LIMIT, USERPWD, PROXY, HTTPS_PROXY, PROXYUSERPWD,
- * PROXYAUTH, NETRC, MAX_RETRY and RETRY_DELAY, HEADER_FILE, HTTP_VERSION,
- * SSL_VERIFYSTATUS, USE_CAPI_STORE, GSSAPI_DELEGATION, TCP_KEEPALIVE,
- * TCP_KEEPIDLE, TCP_KEEPINTVL, USERAGENT values are searched in the
- * configuration options
- * respectively named GDAL_HTTP_CONNECTTIMEOUT, GDAL_HTTP_TIMEOUT,
- * GDAL_HTTP_LOW_SPEED_TIME, GDAL_HTTP_LOW_SPEED_LIMIT, GDAL_HTTP_USERPWD,
- * GDAL_HTTP_PROXY, GDAL_HTTPS_PROXY, GDAL_HTTP_PROXYUSERPWD, GDAL_PROXY_AUTH,
- * GDAL_HTTP_NETRC, GDAL_HTTP_MAX_RETRY, GDAL_HTTP_RETRY_DELAY,
- * GDAL_HTTP_HEADER_FILE, GDAL_HTTP_VERSION, GDAL_HTTP_SSL_VERIFYSTATUS,
- * GDAL_HTTP_USE_CAPI_STORE, GDAL_GSSAPI_DELEGATION,
- * GDAL_HTTP_TCP_KEEPALIVE, GDAL_HTTP_TCP_KEEPIDLE, GDAL_HTTP_TCP_KEEPINTVL,
- * GDAL_HTTP_USERAGENT
- *
+ *                  For example "Accept: application/x-ogcwkt"
+ * Corresponding configuration option: GDAL_HTTP_HEADERS.
  * Starting with GDAL 3.6, the GDAL_HTTP_HEADERS configuration option can also
  * be used to specify a comma separated list of key: value pairs. This is an
  * alternative to the GDAL_HTTP_HEADER_FILE mechanism. If a comma or a
@@ -1064,9 +1064,176 @@ int CPLHTTPPopFetchCallback(void)
  * double quote character must be backslash-escaped. e.g GDAL_HTTP_HEADERS=Foo:
  * Bar,"Baz: escaped backslash \\, escaped double-quote \", end of
  * value",Another: Header
+ * </li>
+ * <li>HEADER_FILE=filename: filename of a text file with "key: value" headers.
+ *     The content of the file is not cached, and thus it is read again before
+ *     issuing each HTTP request. (GDAL >= 2.2)
+ * Corresponding configuration option: GDAL_HTTP_HEADER_FILE.
+ * </li>
+ * <li>HTTPAUTH=[BASIC/NTLM/NEGOTIATE/ANY/ANYSAFE/BEARER] to specify an
+ * authentication scheme to use.
+ * Corresponding configuration option: GDAL_HTTP_AUTH.
+ * </li>
+ * <li>USERPWD=userid:password to specify a user and password for
+ * authentication.
+ * Corresponding configuration option: GDAL_HTTP_USERPWD.
+ * </li>
+ * <li>GSSAPI_DELEGATION=[NONE/POLICY/ALWAYS] set allowed
+ * GSS-API delegation. Relevant only with HTTPAUTH=NEGOTIATE (GDAL >= 3.3).
+ * Corresponding configuration option: GDAL_GSSAPI_DELEGATION (note: no "HTTP_" in the name)
+ * </li>
+ * <li>HTTP_BEARER=val set OAuth 2.0 Bearer Access Token.
+ * Relevant only with HTTPAUTH=BEARER (GDAL >= 3.9).
+ * Corresponding configuration option: GDAL_HTTP_BEARER
+ * </li>
+ * <li>POSTFIELDS=val, where val is a nul-terminated string to be passed to the
+ * server with a POST request.
+ * No Corresponding configuration option.
+ * </li>
+ * <li>PROXY=val, to make requests go through a
+ * proxy server, where val is of the form proxy.server.com:port_number. This
+ * option affects both HTTP and HTTPS URLs.
+ * Corresponding configuration option: GDAL_HTTP_PROXY.
+ * </li>
+ * <li>HTTPS_PROXY=val (GDAL
+ * >= 2.4), the same meaning as PROXY, but this option is taken into account
+ * only for HTTPS URLs.
+ * Corresponding configuration option: GDAL_HTTPS_PROXY.
+ * </li>
+ * <li>PROXYUSERPWD=val, where val is of the form username:password.
+ * Corresponding configuration option: GDAL_HTTP_PROXYUSERPWD
+ * </li>
+ * <li>PROXYAUTH=[BASIC/NTLM/DIGEST/NEGOTIATE/ANY/ANYSAFE] to
+ * specify an proxy authentication scheme to use..
+ * Corresponding configuration option: GDAL_PROXYAUTH (note: no "HTTP_" in the name)
+ * </li>
+ * <li>NETRC=[YES/NO] to
+ * enable or disable use of $HOME/.netrc (or NETRC_FILE), default YES.
+ * Corresponding configuration option: GDAL_HTTP_NETRC.
+ * </li>
+ * <li>NETRC_FILE=file name to read .netrc info from  (GDAL >= 3.7).
+ * Corresponding configuration option: GDAL_HTTP_NETRC_FILE.
+ * </li>
+ * <li>CUSTOMREQUEST=val, where val is GET, PUT, POST, DELETE, etc...
+ * No corresponding configuration option.
+ * </li>
+ * <li>FORM_FILE_NAME=val, where val is upload file name. If this
+ * option and FORM_FILE_PATH present, request type will set to POST.
+ * No corresponding configuration option.
+ * </li>
+ * <li>FORM_FILE_PATH=val, where val is upload file path.
+ * No corresponding configuration option.
+ * </li>
+ * <li>FORM_KEY_0=val...FORM_KEY_N, where val is name of form item.
+ * No corresponding configuration option.
+ * </li>
+ * <li>FORM_VALUE_0=val...FORM_VALUE_N, where val is value of the form
+ * item.
+ * No corresponding configuration option.
+ * </li>
+ * <li>FORM_ITEM_COUNT=val, where val is count of form items.
+ * No corresponding configuration option.
+ * </li>
+ * <li>COOKIE=val, where val is formatted as COOKIE1=VALUE1; COOKIE2=VALUE2;...
+ * Corresponding configuration option: GDAL_HTTP_COOKIE.</li>
+ * <li>COOKIEFILE=val, where val is file name to read cookies from
+ * (GDAL >= 2.4).
+ * Corresponding configuration option: GDAL_HTTP_COOKIEFILE.</li>
+ * <li>COOKIEJAR=val, where val is file name to store cookies to (GDAL >= 2.4).
+ * Corresponding configuration option: GDAL_HTTP_COOKIEJAR.</li>
+ * <li>MAX_RETRY=val, where val is the maximum number of
+ * retry attempts, when a retry is allowed (cf RETRY_CODES option).
+ * Default is 0, meaning no retry.
+ * Corresponding configuration option: GDAL_HTTP_MAX_RETRY.
+ * </li>
+ * <li>RETRY_DELAY=val, where val is the number of seconds
+ * between retry attempts. Default is 30.
+ * Corresponding configuration option: GDAL_HTTP_RETRY_DELAY.
+ * <li>RETRY_CODES=val, where val is "ALL" or a comma-separated list of HTTP
+ * codes that are considered for retry. By default, 429, 500, 502, 503 or 504
+ * HTTP errors are considered, as well as other situations with a particular
+ * HTTP or Curl error message. (GDAL >= 3.10).
+ * Corresponding configuration option: GDAL_HTTP_RETRY_CODES.
+ * </li>
+ * <li>MAX_FILE_SIZE=val, where val is a number of bytes (GDAL >= 2.2)
+ * No corresponding configuration option.
+ * </li>
+ * <li>CAINFO=/path/to/bundle.crt. This is path to Certificate Authority (CA)
+ *     bundle file. By default, it will be looked for in a system location. If
+ *     the CAINFO option is not defined, GDAL will also look in the
+ *     CURL_CA_BUNDLE and SSL_CERT_FILE environment variables respectively
+ *     and use the first one found as the CAINFO value (GDAL >= 2.1.3). The
+ *     GDAL_CURL_CA_BUNDLE environment variable may also be used to set the
+ *     CAINFO value in GDAL >= 3.2.</li>
+ * <li>HTTP_VERSION=1.0/1.1/2/2TLS (GDAL >= 2.3)/2PRIOR_KNOWLEDGE (GDAL >= 3.10).
+ *     Specify HTTP version to use.
+ *     Will default to 1.1 generally (except on some controlled environments,
+ *     like Google Compute Engine VMs, where 2TLS will be the default).
+ *     Support for HTTP/2 requires curl 7.33 or later, built against nghttp2.
+ *     "2TLS" means that HTTP/2 will be attempted for HTTPS connections only.
+ *     Whereas "2" means that HTTP/2 will be attempted for HTTP or HTTPS.
+ *     "2PRIOR_KNOWLEDGE" means that the server will be assumed to support
+ *     HTTP/2.
+ *     Corresponding configuration option: GDAL_HTTP_VERSION.
+ * </li>
+ * <li>SSL_VERIFYSTATUS=YES/NO (GDAL >= 2.3, and curl >= 7.41): determines
+ * whether the status of the server cert using the "Certificate Status Request"
+ * TLS extension (aka. OCSP stapling) should be checked. If this option is
+ * enabled but the server does not support the TLS extension, the verification
+ * will fail. Default to NO.
+ * Corresponding configuration option: GDAL_HTTP_SSL_VERIFYSTATUS.
+ * </li>
+ * <li>USE_CAPI_STORE=YES/NO (GDAL >= 2.3,
+ * Windows only): whether CA certificates from the Windows certificate store.
+ * Defaults to NO.
+ * Corresponding configuration option: GDAL_HTTP_USE_CAPI_STORE.
+ * </li>
+ * <li>TCP_KEEPALIVE=YES/NO (GDAL >= 3.6): whether to
+ * enable TCP keep-alive. Defaults to NO.
+ * Corresponding configuration option: GDAL_HTTP_TCP_KEEPALIVE.
+ * </li>
+ * <li>TCP_KEEPIDLE=integer, in
+ * seconds (GDAL >= 3.6): keep-alive idle time. Defaults to 60. Only taken into
+ * account if TCP_KEEPALIVE=YES.
+ * Corresponding configuration option: GDAL_HTTP_TCP_KEEPIDLE.
+ * </li>
+ * <li>TCP_KEEPINTVL=integer, in seconds
+ * (GDAL >= 3.6): interval time between keep-alive probes. Defaults to 60. Only
+ * taken into account if TCP_KEEPALIVE=YES.
+ * Corresponding configuration option: GDAL_HTTP_TCP_KEEPINTVL.
+ * </li>
+ * <li>USERAGENT=string: value of User-Agent header. Starting with GDAL 3.7,
+ * GDAL core sets it by default (during driver initialization) to GDAL/x.y.z
+ * where x.y.z is the GDAL version number. Applications may override it with the
+ * CPLHTTPSetDefaultUserAgent() function.
+ * Corresponding configuration option: GDAL_HTTP_USERAGENT.
+ * </li>
+ * <li>SSLCERT=filename (GDAL >= 3.7): Filename of the the SSL client certificate.
+ * Cf https://curl.se/libcurl/c/CURLOPT_SSLCERT.html.
+ * Corresponding configuration option: GDAL_HTTP_SSLCERT.
+ * </li>
+ * <li>SSLCERTTYPE=string (GDAL >= 3.7): Format of the SSL certificate: "PEM"
+ * or "DER". Cf https://curl.se/libcurl/c/CURLOPT_SSLCERTTYPE.html.
+ * Corresponding configuration option: GDAL_HTTP_SSLCERTTYPE.
+ * </li>
+ * <li>SSLKEY=filename (GDAL >= 3.7): Private key file for TLS and SSL client
+ * certificate. Cf https://curl.se/libcurl/c/CURLOPT_SSLKEY.html.
+ * Corresponding configuration option: GDAL_HTTP_SSLKEY.
+ * </li>
+ * <li>KEYPASSWD=string (GDAL >= 3.7): Passphrase to private key.
+ * Cf https://curl.se/libcurl/c/CURLOPT_KEYPASSWD.html.
+ * Corresponding configuration option: GDAL_HTTP_KEYPASSWD.
+ * </ul>
+ *
+ * If an option is specified through papszOptions and as a configuration option,
+ * the former takes precedence over the later.
  *
  * Starting with GDAL 3.7, the above configuration options can also be specified
  * as path-specific options with VSISetPathSpecificOption().
+ *
+ * @param pszURL valid URL recognized by underlying download library (libcurl)
+ * @param papszOptions option list as a NULL-terminated array of strings. May be
+ * NULL.
  *
  * @return a CPLHTTPResult* structure that must be freed by
  * CPLHTTPDestroyResult(), or NULL if libcurl support is disabled
@@ -1181,7 +1348,7 @@ CPLHTTPResult *CPLHTTPFetchEx(const char *pszURL, CSLConstList papszOptions,
         for (size_t i = pCtx->stack.size(); i > 0;)
         {
             --i;
-            auto &cbk = pCtx->stack[i];
+            const auto &cbk = pCtx->stack[i];
             auto cbkFunc = cbk.first;
             auto pUserData = cbk.second;
             auto res = cbkFunc(pszURL, papszOptions, pfnProgress, pProgressArg,
@@ -1344,17 +1511,10 @@ CPLHTTPResult *CPLHTTPFetchEx(const char *pszURL, CSLConstList papszOptions,
     CurlProcessData stProcessData = {pfnProgress, pProgressArg};
     if (nullptr != pfnProgress)
     {
-#if CURL_AT_LEAST_VERSION(7, 32, 0)
         unchecked_curl_easy_setopt(http_handle, CURLOPT_XFERINFOFUNCTION,
                                    NewProcessFunction);
         unchecked_curl_easy_setopt(http_handle, CURLOPT_XFERINFODATA,
                                    &stProcessData);
-#else
-        unchecked_curl_easy_setopt(http_handle, CURLOPT_PROGRESSFUNCTION,
-                                   ProcessFunction);
-        unchecked_curl_easy_setopt(http_handle, CURLOPT_PROGRESSDATA,
-                                   &stProcessData);
-#endif  // CURL_AT_LEAST_VERSION(7,32,0)
         unchecked_curl_easy_setopt(http_handle, CURLOPT_NOPROGRESS, 0L);
     }
 
@@ -1380,8 +1540,7 @@ CPLHTTPResult *CPLHTTPFetchEx(const char *pszURL, CSLConstList papszOptions,
     }
 
     /* -------------------------------------------------------------------- */
-    /*      If 429, 502, 503 or 504 status code retry this HTTP call until max
-     */
+    /*      Depending on status code, retry this HTTP call until max        */
     /*      retry has been reached                                          */
     /* -------------------------------------------------------------------- */
     const char *pszRetryDelay = CSLFetchNameValue(papszOptions, "RETRY_DELAY");
@@ -1395,6 +1554,9 @@ CPLHTTPResult *CPLHTTPFetchEx(const char *pszURL, CSLConstList papszOptions,
     // coverity[tainted_data]
     double dfRetryDelaySecs = CPLAtof(pszRetryDelay);
     int nMaxRetries = atoi(pszMaxRetries);
+    const char *pszRetryCodes = CSLFetchNameValue(papszOptions, "RETRY_CODES");
+    if (!pszRetryCodes)
+        pszRetryCodes = CPLGetConfigOption("GDAL_HTTP_RETRY_CODES", nullptr);
     int nRetryCount = 0;
 
     while (true)
@@ -1426,7 +1588,7 @@ CPLHTTPResult *CPLHTTPFetchEx(const char *pszURL, CSLConstList papszOptions,
             const double dfNewRetryDelay = CPLHTTPGetNewRetryDelay(
                 static_cast<int>(response_code), dfRetryDelaySecs,
                 reinterpret_cast<const char *>(psResult->pabyData),
-                szCurlErrBuf);
+                szCurlErrBuf, pszRetryCodes);
             if (dfNewRetryDelay > 0 && nRetryCount < nMaxRetries)
             {
                 CPLError(CE_Warning, CPLE_AppDefined,
@@ -1544,7 +1706,7 @@ CPLHTTPResult *CPLHTTPFetchEx(const char *pszURL, CSLConstList papszOptions,
     CPLHTTPFetchCleanup(http_handle, headers, pszPersistent, papszOptions);
 
     return psResult;
-#endif  /* def HAVE_CURL */
+#endif /* def HAVE_CURL */
 }
 
 #ifdef HAVE_CURL
@@ -1552,16 +1714,14 @@ CPLHTTPResult *CPLHTTPFetchEx(const char *pszURL, CSLConstList papszOptions,
 /*                       CPLMultiPerformWait()                          */
 /************************************************************************/
 
-bool CPLMultiPerformWait(void *hCurlMultiHandleIn, int &repeats)
+bool CPLMultiPerformWait(void *hCurlMultiHandleIn, int & /*repeats*/)
 {
     CURLM *hCurlMultiHandle = static_cast<CURLM *>(hCurlMultiHandleIn);
 
     // Wait for events on the sockets
 
-#if CURL_AT_LEAST_VERSION(7, 66, 0)
     // Using curl_multi_poll() is preferred to avoid hitting the 1024 file
     // descriptor limit
-    (void)repeats;
 
     int numfds = 0;
     if (curl_multi_poll(hCurlMultiHandle, nullptr, 0, 1000, &numfds) !=
@@ -1570,53 +1730,6 @@ bool CPLMultiPerformWait(void *hCurlMultiHandleIn, int &repeats)
         CPLError(CE_Failure, CPLE_AppDefined, "curl_multi_poll() failed");
         return false;
     }
-#elif CURL_AT_LEAST_VERSION(7, 28, 0)
-    // Using curl_multi_wait() is preferred to avoid hitting the 1024 file
-    // descriptor limit
-    int numfds = 0;
-    if (curl_multi_wait(hCurlMultiHandle, nullptr, 0, 1000, &numfds) !=
-        CURLM_OK)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "curl_multi_wait() failed");
-        return false;
-    }
-    /* 'numfds' being zero means either a timeout or no file descriptors to
-        wait for. Try timeout on first occurrence, then assume no file
-        descriptors and no file descriptors to wait for 100
-        milliseconds. */
-    if (!numfds)
-    {
-        repeats++; /* count number of repeated zero numfds */
-        if (repeats > 1)
-        {
-            CPLSleep(0.1); /* sleep 100 milliseconds */
-        }
-    }
-    else
-    {
-        repeats = 0;
-    }
-#else   // CURL_AT_LEAST_VERSION(7,28,0)
-    (void)repeats;
-
-    struct timeval timeout;
-    fd_set fdread, fdwrite, fdexcep;
-    int maxfd;
-    FD_ZERO(&fdread);
-    FD_ZERO(&fdwrite);
-    FD_ZERO(&fdexcep);
-    curl_multi_fdset(hCurlMultiHandle, &fdread, &fdwrite, &fdexcep, &maxfd);
-    if (maxfd >= 0)
-    {
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 100000;
-        if (select(maxfd + 1, &fdread, &fdwrite, &fdexcep, &timeout) < 0)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined, "select() failed");
-            return false;
-        }
-    }
-#endif  // CURL_AT_LEAST_VERSION(7,28,0)
     return true;
 }
 
@@ -1711,7 +1824,7 @@ CPLHTTPResult **CPLHTTPMultiFetch(const char *const *papszURL, int nURLCount,
             auto oIter = poSessionMultiMap->find(osSessionName);
             if (oIter != poSessionMultiMap->end())
             {
-                curl_multi_cleanup(oIter->second);
+                VSICURLMultiCleanup(oIter->second);
                 poSessionMultiMap->erase(oIter);
                 if (poSessionMultiMap->empty())
                 {
@@ -1887,7 +2000,7 @@ CPLHTTPResult **CPLHTTPMultiFetch(const char *const *papszURL, int nURLCount,
     }
 
     if (!pszPersistent)
-        curl_multi_cleanup(hCurlMultiHandle);
+        VSICURLMultiCleanup(hCurlMultiHandle);
 
     for (size_t i = 0; i < aHeaders.size(); i++)
         curl_slist_free_all(aHeaders[i]);
@@ -1921,7 +2034,7 @@ void CPLHTTPDestroyMultiResult(CPLHTTPResult **papsResults, int nCount)
 
 #ifdef HAVE_CURL
 
-#ifdef WIN32
+#ifdef _WIN32
 
 #include <windows.h>
 
@@ -1984,7 +2097,7 @@ static int CPLHTTPCurlDebugFunction(CURL *handle, curl_infotype type,
     {
         std::string osMsg(data, size);
         if (!osMsg.empty() && osMsg.back() == '\n')
-            osMsg.resize(osMsg.size() - 1);
+            osMsg.pop_back();
         CPLDebug(pszDebugKey, "%s", osMsg.c_str());
     }
     return 0;
@@ -2014,7 +2127,7 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
     {
         unchecked_curl_easy_setopt(http_handle, CURLOPT_VERBOSE, 1);
 
-        if (CPLGetConfigOption("CPL_DEBUG", nullptr) != nullptr)
+        if (CPLIsDebugEnabled())
         {
             unchecked_curl_easy_setopt(http_handle, CURLOPT_DEBUGFUNCTION,
                                        CPLHTTPCurlDebugFunction);
@@ -2034,36 +2147,26 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
     else if (pszHttpVersion && (strcmp(pszHttpVersion, "2") == 0 ||
                                 strcmp(pszHttpVersion, "2.0") == 0))
     {
-#if CURL_AT_LEAST_VERSION(7, 33, 0)
         if (bSupportHTTP2)
         {
             // Try HTTP/2 both for HTTP and HTTPS. With fallback to HTTP/1.1
             unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTP_VERSION,
                                        CURL_HTTP_VERSION_2_0);
         }
-        else
-#endif  // CURL_AT_LEAST_VERSION(7,33,0)
+    }
+    else if (pszHttpVersion && strcmp(pszHttpVersion, "2PRIOR_KNOWLEDGE") == 0)
+    {
+        if (bSupportHTTP2)
         {
-            static bool bHasWarned = false;
-            if (!bHasWarned)
-            {
-#if CURL_AT_LEAST_VERSION(7, 33, 0)
-                CPLError(CE_Warning, CPLE_NotSupported,
-                         "HTTP/2 not available in this build of Curl. "
-                         "It needs to be built against nghttp2");
-#else  // CURL_AT_LEAST_VERSION(7,33,0)
-                CPLError(CE_Warning, CPLE_NotSupported,
-                         "HTTP/2 not supported by this version of Curl. "
-                         "You need curl 7.33 or later, with nghttp2 support");
-
-#endif  // CURL_AT_LEAST_VERSION(7,33,0)
-                bHasWarned = true;
-            }
+            // Assume HTTP/2 is supported by the server. The cURL docs indicate
+            // that it makes no difference for HTTPS, but it does seem to work
+            // in practice.
+            unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTP_VERSION,
+                                       CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE);
         }
     }
     else if (pszHttpVersion == nullptr || strcmp(pszHttpVersion, "2TLS") == 0)
     {
-#if CURL_AT_LEAST_VERSION(7, 47, 0)
         if (bSupportHTTP2)
         {
             // Only enable this mode if explicitly required, or if the
@@ -2086,25 +2189,6 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
                                            CURL_HTTP_VERSION_2TLS);
             }
         }
-        else
-#endif  // CURL_AT_LEAST_VERSION(7,47,0)
-            if (pszHttpVersion != nullptr)
-            {
-                static bool bHasWarned = false;
-                if (!bHasWarned)
-                {
-#if CURL_AT_LEAST_VERSION(7, 47, 0)
-                    CPLError(CE_Warning, CPLE_NotSupported,
-                             "HTTP/2 not available in this build of Curl. "
-                             "It needs to be built against nghttp2");
-#else   // CURL_AT_LEAST_VERSION(7,47,0)
-                CPLError(CE_Warning, CPLE_NotSupported,
-                         "HTTP_VERSION=2TLS not available in this version "
-                         "of Curl. You need curl 7.47 or later");
-#endif  // CURL_AT_LEAST_VERSION(7,47,0)
-                    bHasWarned = true;
-                }
-            }
     }
     else
     {
@@ -2135,18 +2219,37 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
                                    CURLAUTH_NTLM);
     else if (EQUAL(pszHttpAuth, "ANY"))
         unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
-#ifdef CURLAUTH_NEGOTIATE
+    else if (EQUAL(pszHttpAuth, "ANYSAFE"))
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTPAUTH,
+                                   CURLAUTH_ANYSAFE);
+    else if (EQUAL(pszHttpAuth, "BEARER"))
+    {
+        const char *pszAuthorizationHeaderAllowed = CSLFetchNameValueDef(
+            papszOptions, "AUTHORIZATION_HEADER_ALLOWED", "YES");
+        const bool bAuthorizationHeaderAllowed =
+            CPLTestBool(pszAuthorizationHeaderAllowed);
+        if (bAuthorizationHeaderAllowed)
+        {
+            const char *pszBearer =
+                CSLFetchNameValue(papszOptions, "HTTP_BEARER");
+            if (pszBearer == nullptr)
+                pszBearer = CPLGetConfigOption("GDAL_HTTP_BEARER", nullptr);
+            if (pszBearer != nullptr)
+                unchecked_curl_easy_setopt(http_handle, CURLOPT_XOAUTH2_BEARER,
+                                           pszBearer);
+            unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTPAUTH,
+                                       CURLAUTH_BEARER);
+        }
+    }
     else if (EQUAL(pszHttpAuth, "NEGOTIATE"))
         unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTPAUTH,
                                    CURLAUTH_NEGOTIATE);
-#endif  // CURLAUTH_NEGOTIATE
     else
     {
         CPLError(CE_Warning, CPLE_AppDefined,
                  "Unsupported HTTPAUTH value '%s', ignored.", pszHttpAuth);
     }
 
-#if CURL_AT_LEAST_VERSION(7, 22, 0)
     const char *pszGssDelegation =
         CSLFetchNameValue(papszOptions, "GSSAPI_DELEGATION");
     if (pszGssDelegation == nullptr)
@@ -2176,7 +2279,6 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
                  "Unsupported GSSAPI_DELEGATION value '%s', ignored.",
                  pszGssDelegation);
     }
-#endif  // #if CURL_AT_LEAST_VERSION(7,22,0)
 
     // Support use of .netrc - default enabled.
     const char *pszHttpNetrc = CSLFetchNameValue(papszOptions, "NETRC");
@@ -2184,6 +2286,15 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
         pszHttpNetrc = CPLGetConfigOption("GDAL_HTTP_NETRC", "YES");
     if (pszHttpNetrc == nullptr || CPLTestBool(pszHttpNetrc))
         unchecked_curl_easy_setopt(http_handle, CURLOPT_NETRC, 1L);
+
+    // Custom .netrc file location
+    const char *pszHttpNetrcFile =
+        CSLFetchNameValue(papszOptions, "NETRC_FILE");
+    if (pszHttpNetrcFile == nullptr)
+        pszHttpNetrcFile = CPLGetConfigOption("GDAL_HTTP_NETRC_FILE", nullptr);
+    if (pszHttpNetrcFile)
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_NETRC_FILE,
+                                   pszHttpNetrcFile);
 
     // Support setting userid:password.
     const char *pszUserPwd = CSLFetchNameValue(papszOptions, "USERPWD");
@@ -2233,25 +2344,31 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
     else if (EQUAL(pszProxyAuth, "ANY"))
         unchecked_curl_easy_setopt(http_handle, CURLOPT_PROXYAUTH,
                                    CURLAUTH_ANY);
-#ifdef CURLAUTH_NEGOTIATE
+    else if (EQUAL(pszProxyAuth, "ANYSAFE"))
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_PROXYAUTH,
+                                   CURLAUTH_ANYSAFE);
     else if (EQUAL(pszProxyAuth, "NEGOTIATE"))
         unchecked_curl_easy_setopt(http_handle, CURLOPT_PROXYAUTH,
                                    CURLAUTH_NEGOTIATE);
-#endif  // CURLAUTH_NEGOTIATE
     else
     {
         CPLError(CE_Warning, CPLE_AppDefined,
                  "Unsupported PROXYAUTH value '%s', ignored.", pszProxyAuth);
     }
 
-    // CURLOPT_SUPPRESS_CONNECT_HEADERS is defined in curl 7.54.0 or newer.
-#if CURL_AT_LEAST_VERSION(7, 54, 0)
     unchecked_curl_easy_setopt(http_handle, CURLOPT_SUPPRESS_CONNECT_HEADERS,
                                1L);
-#endif  // CURL_AT_LEAST_VERSION(7,54,0)
 
-    // Enable following redirections.  Requires libcurl 7.10.1 at least.
     unchecked_curl_easy_setopt(http_handle, CURLOPT_FOLLOWLOCATION, 1);
+    const char *pszUnrestrictedAuth = CPLGetConfigOption(
+        "CPL_VSIL_CURL_AUTHORIZATION_HEADER_ALLOWED_IF_REDIRECT",
+        "IF_SAME_HOST");
+    if (!EQUAL(pszUnrestrictedAuth, "IF_SAME_HOST") &&
+        CPLTestBool(pszUnrestrictedAuth))
+    {
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_UNRESTRICTED_AUTH, 1);
+    }
+
     unchecked_curl_easy_setopt(http_handle, CURLOPT_MAXREDIRS, 10);
     unchecked_curl_easy_setopt(http_handle, CURLOPT_POSTREDIR,
                                CURL_REDIR_POST_ALL);
@@ -2318,16 +2435,16 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
         pszUseCAPIStore = CPLGetConfigOption("GDAL_HTTP_USE_CAPI_STORE", "NO");
     if (CPLTestBool(pszUseCAPIStore))
     {
-#if defined(WIN32) && defined(HAVE_OPENSSL_CRYPTO)
+#if defined(_WIN32) && defined(HAVE_OPENSSL_CRYPTO)
         // Use certificates from Windows certificate store; requires
         // crypt32.lib, OpenSSL crypto and ssl libraries.
         unchecked_curl_easy_setopt(http_handle, CURLOPT_SSL_CTX_FUNCTION,
                                    *CPL_ssl_ctx_callback);
-#else   // defined(WIN32) && defined(HAVE_OPENSSL_CRYPTO)
+#else   // defined(_WIN32) && defined(HAVE_OPENSSL_CRYPTO)
         CPLError(CE_Warning, CPLE_NotSupported,
                  "GDAL_HTTP_USE_CAPI_STORE requested, but libcurl too old, "
                  "non-Windows platform or OpenSSL missing.");
-#endif  // defined(WIN32) && defined(HAVE_OPENSSL_CRYPTO)
+#endif  // defined(_WIN32) && defined(HAVE_OPENSSL_CRYPTO)
     }
 
     // Enable OCSP stapling if requested.
@@ -2338,13 +2455,7 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
             CPLGetConfigOption("GDAL_HTTP_SSL_VERIFYSTATUS", "NO");
     if (CPLTestBool(pszSSLVerifyStatus))
     {
-#if CURL_AT_LEAST_VERSION(7, 41, 0)
         unchecked_curl_easy_setopt(http_handle, CURLOPT_SSL_VERIFYSTATUS, 1L);
-#else   // CURL_AT_LEAST_VERSION(7,41,0)
-        CPLError(CE_Warning, CPLE_NotSupported,
-                 "GDAL_HTTP_SSL_VERIFYSTATUS requested, but libcurl too old "
-                 "to support it.");
-#endif  // CURL_AT_LEAST_VERSION(7,41,0)
     }
 
     // Custom path to SSL certificates.
@@ -2359,7 +2470,7 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
         // Name of environment variable used by the curl binary (tested
         // after CURL_CA_BUNDLE
         pszCAInfo = CPLGetConfigOption("SSL_CERT_FILE", nullptr);
-#ifdef WIN32
+#ifdef _WIN32
     if (pszCAInfo == nullptr)
     {
         pszCAInfo = CPLFindWin32CurlCaBundleCrt();
@@ -2375,6 +2486,38 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
     {
         unchecked_curl_easy_setopt(http_handle, CURLOPT_CAPATH, pszCAPath);
     }
+
+    // Support for SSL client certificates
+
+    // Filename of the the client certificate
+    const char *pszSSLCert = CSLFetchNameValue(papszOptions, "SSLCERT");
+    if (!pszSSLCert)
+        pszSSLCert = CPLGetConfigOption("GDAL_HTTP_SSLCERT", nullptr);
+    if (pszSSLCert)
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_SSLCERT, pszSSLCert);
+
+    // private key file for TLS and SSL client cert
+    const char *pszSSLKey = CSLFetchNameValue(papszOptions, "SSLKEY");
+    if (!pszSSLKey)
+        pszSSLKey = CPLGetConfigOption("GDAL_HTTP_SSLKEY", nullptr);
+    if (pszSSLKey)
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_SSLKEY, pszSSLKey);
+
+    // type of client SSL certificate ("PEM", "DER", ...)
+    const char *pszSSLCertType = CSLFetchNameValue(papszOptions, "SSLCERTTYPE");
+    if (!pszSSLCertType)
+        pszSSLCertType = CPLGetConfigOption("GDAL_HTTP_SSLCERTTYPE", nullptr);
+    if (pszSSLCertType)
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_SSLCERTTYPE,
+                                   pszSSLCertType);
+
+    // passphrase to private key
+    const char *pszKeyPasswd = CSLFetchNameValue(papszOptions, "KEYPASSWD");
+    if (!pszKeyPasswd)
+        pszKeyPasswd = CPLGetConfigOption("GDAL_HTTP_KEYPASSWD", nullptr);
+    if (pszKeyPasswd)
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_KEYPASSWD,
+                                   pszKeyPasswd);
 
     /* Set Referer */
     const char *pszReferer = CSLFetchNameValue(papszOptions, "REFERER");
@@ -2478,6 +2621,35 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
     }
 
     struct curl_slist *headers = nullptr;
+    const char *pszAccept = CSLFetchNameValue(papszOptions, "ACCEPT");
+    if (pszAccept)
+    {
+        headers =
+            curl_slist_append(headers, CPLSPrintf("Accept: %s", pszAccept));
+    }
+
+    const auto AddHeader = [&headers, pszAccept](const char *pszHeader)
+    {
+        if (STARTS_WITH_CI(pszHeader, "Accept:") && pszAccept)
+        {
+            const char *pszVal = pszHeader + strlen("Accept:");
+            while (*pszVal == ' ')
+                ++pszVal;
+            if (!EQUAL(pszVal, pszAccept))
+            {
+                // Cf https://github.com/OSGeo/gdal/issues/7691#issuecomment-2873711603
+                CPLDebug(
+                    "HTTP",
+                    "Ignoring '%s' since ACCEPT option = '%s' is specified",
+                    pszHeader, pszAccept);
+            }
+        }
+        else
+        {
+            headers = curl_slist_append(headers, pszHeader);
+        }
+    };
+
     const char *pszHeaderFile = CSLFetchNameValue(papszOptions, "HEADER_FILE");
     if (pszHeaderFile == nullptr)
         pszHeaderFile = CPLGetConfigOption("GDAL_HTTP_HEADER_FILE", nullptr);
@@ -2501,7 +2673,7 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
             const char *pszLine = nullptr;
             while ((pszLine = CPLReadLineL(fp)) != nullptr)
             {
-                headers = curl_slist_append(headers, pszLine);
+                AddHeader(pszLine);
             }
             VSIFCloseL(fp);
         }
@@ -2519,12 +2691,17 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
             const char *pszComma = strchr(pszHeaders, ',');
             if (pszComma != nullptr && strchr(pszComma, ':') == nullptr)
             {
-                headers = curl_slist_append(headers, pszHeaders);
+                AddHeader(pszHeaders);
                 bHeadersDone = true;
             }
         }
         if (!bHeadersDone)
         {
+            const char *pszAuthorizationHeaderAllowed = CSLFetchNameValueDef(
+                papszOptions, "AUTHORIZATION_HEADER_ALLOWED", "YES");
+            const bool bAuthorizationHeaderAllowed =
+                CPLTestBool(pszAuthorizationHeaderAllowed);
+
             // We accept both raw headers with \r\n as a separator, or as
             // a comma separated list of foo: bar values.
             const CPLStringList aosTokens(
@@ -2533,7 +2710,11 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
                     : CSLTokenizeString2(pszHeaders, ",", CSLT_HONOURSTRINGS));
             for (int i = 0; i < aosTokens.size(); ++i)
             {
-                headers = curl_slist_append(headers, aosTokens[i]);
+                if (bAuthorizationHeaderAllowed ||
+                    !STARTS_WITH_CI(aosTokens[i], "Authorization:"))
+                {
+                    AddHeader(aosTokens[i]);
+                }
             }
         }
     }
@@ -2636,7 +2817,7 @@ void CPLHTTPCleanup()
         {
             for (auto &kv : *poSessionMultiMap)
             {
-                curl_multi_cleanup(kv.second);
+                VSICURLMultiCleanup(kv.second);
             }
             delete poSessionMultiMap;
             poSessionMultiMap = nullptr;
@@ -2647,7 +2828,7 @@ void CPLHTTPCleanup()
     CPLDestroyMutex(hSessionMapMutex);
     hSessionMapMutex = nullptr;
 
-#if defined(WIN32) && defined(HAVE_OPENSSL_CRYPTO)
+#if defined(_WIN32) && defined(HAVE_OPENSSL_CRYPTO)
     // This cleanup must be absolutely done before CPLOpenSSLCleanup()
     // for some unknown reason, but otherwise X509_free() in
     // CPLWindowsCertificateListCleanup() will crash.

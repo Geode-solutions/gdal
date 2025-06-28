@@ -14,7 +14,24 @@ add_gdal_driver(
           kearat.cpp
           kearat.h
           libkea_headers.h
-          PLUGIN_CAPABLE)
+  CORE_SOURCES
+          keadrivercore.cpp
+  PLUGIN_CAPABLE
+  NO_SHARED_SYMBOL_WITH_CORE
+  NO_CXX_WFLAGS_EFFCXX
+  NO_WFLAG_OLD_STYLE_CAST
+)
+
+if(TARGET gdal_KEA_core)
+    target_include_directories(gdal_KEA_core PRIVATE ${HDF5_INCLUDE_DIRS})
+    target_include_directories(gdal_KEA_core PRIVATE $<TARGET_PROPERTY:KEA::KEA,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(gdal_KEA_core PRIVATE $<TARGET_PROPERTY:KEA::KEA,INTERFACE_COMPILE_DEFINITIONS>)
+endif()
+
+if(NOT TARGET gdal_KEA)
+    return()
+endif()
+
 gdal_standard_includes(gdal_KEA)
 target_include_directories(gdal_KEA PRIVATE ${HDF5_INCLUDE_DIRS})
 gdal_target_link_libraries(gdal_KEA PRIVATE KEA::KEA ${HDF5_CXX_LIBRARIES})

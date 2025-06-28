@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for OGR VDV driver.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2015, Even Rouault <even.rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -39,6 +22,13 @@ import pytest
 from osgeo import gdal, ogr
 
 pytestmark = pytest.mark.require_driver("VDV")
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 ###############################################################################
 # Basic test of .idf file
@@ -148,7 +138,7 @@ def test_ogr_idf_2():
 # Create a VDV file
 
 
-def test_ogr_vdv_1(filename="tmp/test.x10", dsco=None, lco=None):
+def ogr_create_vdv(filename, dsco=None, lco=None):
 
     dsco = [] if dsco is None else dsco
     lco = [] if lco is None else lco
@@ -156,6 +146,7 @@ def test_ogr_vdv_1(filename="tmp/test.x10", dsco=None, lco=None):
     ds = ogr.GetDriverByName("VDV").CreateDataSource(filename, options=dsco)
     ds.CreateLayer("empty", options=lco)
     lyr = ds.CreateLayer("lyr_1", options=lco)
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
     lyr.CreateField(ogr.FieldDefn("str_field", ogr.OFTString))
     lyr.CreateField(ogr.FieldDefn("int_field", ogr.OFTInteger))
     lyr.CreateField(ogr.FieldDefn("int64_field", ogr.OFTInteger64))
@@ -199,16 +190,35 @@ def test_ogr_vdv_1(filename="tmp/test.x10", dsco=None, lco=None):
     ds = None
 
 
+@pytest.fixture()
+def test_vdv(request, tmp_path):
+
+    fmt = request.param
+
+    if fmt == "single_file":
+        src_filename = tmp_path / "test.x10"
+        dsco = None
+        lco = None
+    elif fmt == "directory":
+        src_filename = tmp_path / "test_x10"
+        dsco = ["SINGLE_FILE=NO"]
+        lco = ["EXTENSION=txt"]
+
+    ogr_create_vdv(src_filename, dsco, lco)
+
+    return src_filename
+
+
 ###############################################################################
 # Read it
 
 
-def test_ogr_vdv_2(src_filename="tmp/test.x10"):
+@pytest.mark.parametrize("test_vdv", ("single_file", "directory"), indirect=True)
+def test_ogr_vdv_2(tmp_vsimem, test_vdv):
 
-    out_filename = "/vsimem/vdv/ogr_vdv_2.x10"
-    gdal.Unlink(out_filename)
+    out_filename = tmp_vsimem / "ogr_vdv_2.x10"
 
-    src_ds = ogr.Open(src_filename)
+    src_ds = ogr.Open(test_vdv)
     out_ds = ogr.GetDriverByName("VDV").CreateDataSource(out_filename)
     layer_names = [
         src_ds.GetLayer(idx).GetName() for idx in range(src_ds.GetLayerCount())
@@ -270,14 +280,13 @@ eof; 4
 
     assert got == expected
 
-    gdal.Unlink(out_filename)
-
 
 ###############################################################################
 # Run test_ogrsf on it
 
 
-def test_ogr_vdv_3():
+@pytest.mark.parametrize("test_vdv", ("single_file", "directory"), indirect=True)
+def test_ogr_vdv_3(tmp_path, test_vdv):
 
     import test_cli_utilities
 
@@ -285,43 +294,7 @@ def test_ogr_vdv_3():
         pytest.skip()
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_test_ogrsf_path() + " -ro tmp/test.x10"
-    )
-
-    assert ret.find("INFO") != -1 and ret.find("ERROR") == -1
-
-
-###############################################################################
-# Create a VDV directory
-
-
-def test_ogr_vdv_4():
-    return test_ogr_vdv_1(
-        filename="tmp/test_x10", dsco=["SINGLE_FILE=NO"], lco=["EXTENSION=txt"]
-    )
-
-
-###############################################################################
-# Read it
-
-
-def test_ogr_vdv_5():
-    return test_ogr_vdv_2(src_filename="tmp/test_x10")
-
-
-###############################################################################
-# Run test_ogrsf on it
-
-
-def test_ogr_vdv_6():
-
-    import test_cli_utilities
-
-    if test_cli_utilities.get_test_ogrsf_path() is None:
-        pytest.skip()
-
-    ret = gdaltest.runexternal(
-        test_cli_utilities.get_test_ogrsf_path() + " -ro tmp/test_x10"
+        f"{test_cli_utilities.get_test_ogrsf_path()} -ro {test_vdv}"
     )
 
     assert ret.find("INFO") != -1 and ret.find("ERROR") == -1
@@ -331,136 +304,132 @@ def test_ogr_vdv_6():
 # Run VDV452
 
 
-def test_ogr_vdv_7():
-
-    tests = [
+@pytest.mark.parametrize(
+    "profile,lyrname,longname,latname",
+    [
         ("VDV-452", "STOP", "POINT_LONGITUDE", "POINT_LATITUDE"),
         ("VDV-452-ENGLISH", "STOP", "POINT_LONGITUDE", "POINT_LATITUDE"),
         ("VDV-452", "REC_ORT", "ORT_POS_LAENGE", "ORT_POS_BREITE"),
         ("VDV-452-GERMAN", "REC_ORT", "ORT_POS_LAENGE", "ORT_POS_BREITE"),
-    ]
+    ],
+)
+def test_ogr_vdv_7(tmp_vsimem, profile, lyrname, longname, latname):
 
-    out_filename = "/vsimem/vdv/ogr_vdv_7.x10"
+    out_filename = tmp_vsimem / "ogr_vdv_7.x10"
 
-    for (profile, lyrname, longname, latname) in tests:
+    ds = ogr.GetDriverByName("VDV").CreateDataSource(out_filename)
+    lyr = ds.CreateLayer(
+        lyrname, geom_type=ogr.wkbPoint, options=["PROFILE=" + profile]
+    )
+    f = ogr.Feature(lyr.GetLayerDefn())
+    lng = -(123 + 45.0 / 60 + 56.789 / 3600)
+    lat = -(23 + 45.0 / 60 + 56.789 / 3600)
+    f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(%.10f %.10f)" % (lng, lat)))
+    lyr.CreateFeature(f)
+    ds = None
 
-        ds = ogr.GetDriverByName("VDV").CreateDataSource(out_filename)
+    ds = ogr.Open(out_filename)
+    lyr = ds.GetLayer(0)
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
+    f = lyr.GetNextFeature()
+    assert f[longname] == -1234556789
+    assert f[latname] == -234556789
+    ogrtest.check_feature_geometry(f, "POINT (-123.765774722222 -23.7657747222222)")
+    ds = None
+
+
+@pytest.mark.parametrize(
+    "profile,strict",
+    [("VDV-452", True), ("VDV-452-ENGLISH", False), ("VDV-452-GERMAN", False)],
+)
+def test_ogr_vdv_7bis(tmp_vsimem, profile, strict):
+
+    out_filename = tmp_vsimem / "ogr_vdv_7.x10"
+
+    ds = ogr.GetDriverByName("VDV").CreateDataSource(out_filename)
+    gdal.ErrorReset()
+    with gdal.quiet_errors():
         lyr = ds.CreateLayer(
-            lyrname, geom_type=ogr.wkbPoint, options=["PROFILE=" + profile]
+            "UNKNOWN",
+            options=["PROFILE=" + profile, "PROFILE_STRICT=" + str(strict)],
         )
-        f = ogr.Feature(lyr.GetLayerDefn())
-        lng = -(123 + 45.0 / 60 + 56.789 / 3600)
-        lat = -(23 + 45.0 / 60 + 56.789 / 3600)
-        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(%.10f %.10f)" % (lng, lat)))
-        lyr.CreateFeature(f)
-        ds = None
+    assert gdal.GetLastErrorMsg() != ""
+    if strict and lyr is not None:
+        pytest.fail()
+    elif not strict and lyr is None:
+        pytest.fail()
 
-        ds = ogr.Open(out_filename)
-        lyr = ds.GetLayer(0)
-        f = lyr.GetNextFeature()
-        if (
-            f[longname] != -1234556789
-            or f[latname] != -234556789
-            or ogrtest.check_feature_geometry(
-                f, "POINT (-123.765774722222 -23.7657747222222)"
-            )
-            != 0
-        ):
-            f.DumpReadable()
-            pytest.fail()
-        ds = None
-
-        gdal.Unlink("/vsimem/vdv/ogr_vdv_7.x10")
-
-    tests = [("VDV-452", True), ("VDV-452-ENGLISH", False), ("VDV-452-GERMAN", False)]
-
-    for (profile, strict) in tests:
-
-        ds = ogr.GetDriverByName("VDV").CreateDataSource(out_filename)
-        gdal.ErrorReset()
-        gdal.PushErrorHandler()
-        lyr = ds.CreateLayer(
-            "UNKNOWN", options=["PROFILE=" + profile, "PROFILE_STRICT=" + str(strict)]
-        )
-        gdal.PopErrorHandler()
-        assert gdal.GetLastErrorMsg() != ""
-        if strict and lyr is not None:
-            pytest.fail()
-        elif not strict and lyr is None:
-            pytest.fail()
-
-        if profile == "VDV-452-GERMAN":
-            lyr_name = "REC_ORT"
-        else:
-            lyr_name = "STOP"
-        lyr = ds.CreateLayer(
-            lyr_name, options=["PROFILE=" + profile, "PROFILE_STRICT=" + str(strict)]
-        )
-        gdal.ErrorReset()
-        gdal.PushErrorHandler()
+    if profile == "VDV-452-GERMAN":
+        lyr_name = "REC_ORT"
+    else:
+        lyr_name = "STOP"
+    lyr = ds.CreateLayer(
+        lyr_name, options=["PROFILE=" + profile, "PROFILE_STRICT=" + str(strict)]
+    )
+    gdal.ErrorReset()
+    with gdal.quiet_errors():
         ret = lyr.CreateField(ogr.FieldDefn("UNKNOWN"))
-        gdal.PopErrorHandler()
-        assert gdal.GetLastErrorMsg() != ""
-        if strict and ret == 0:
-            pytest.fail()
-        elif not strict and ret != 0:
-            pytest.fail()
+    assert gdal.GetLastErrorMsg() != ""
+    if strict and ret == 0:
+        pytest.fail()
+    elif not strict and ret != 0:
+        pytest.fail()
 
-        ds = None
-
-        gdal.Unlink("/vsimem/vdv/ogr_vdv_7.x10")
+    ds = None
 
 
 ###############################################################################
 # Test a few error cases
 
 
-def test_ogr_vdv_8():
+def test_ogr_vdv_8a():
 
-    gdal.PushErrorHandler()
-    ds = ogr.GetDriverByName("VDV").CreateDataSource("/does/not_exist")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = ogr.GetDriverByName("VDV").CreateDataSource("/does/not_exist")
     assert ds is None
 
-    gdal.PushErrorHandler()
-    ds = ogr.GetDriverByName("VDV").CreateDataSource(
-        "/does/not_exist", options=["SINGLE_FILE=FALSE"]
-    )
-    gdal.PopErrorHandler()
+
+def test_ogr_vdv_8b():
+    with gdal.quiet_errors():
+        ds = ogr.GetDriverByName("VDV").CreateDataSource(
+            "/does/not_exist", options=["SINGLE_FILE=FALSE"]
+        )
     assert ds is None
+
+
+def test_ogr_vdv_8c(tmp_path):
+    if not sys.platform.startswith("linux"):
+        pytest.skip("Test requires Linux")
 
     # Add layer in non writable directory
-    if sys.platform.startswith("linux"):
-        os.mkdir("tmp/ogr_vdv_8")
-        open("tmp/ogr_vdv_8/empty.x10", "wb").write(
-            "tbl; foo\natr;\nfrm;\n".encode("latin1")
-        )
-        # 0555 = 365
-        os.chmod("tmp/ogr_vdv_8", 365)
-        try:
-            open("tmp/ogr_vdv_8/another_file", "wb").close()
-            shutil.rmtree("tmp/ogr_vdv_8")
-            do_test = False
-        except Exception:
-            do_test = True
-        if do_test:
-            ds = ogr.Open("tmp/ogr_vdv_8", update=1)
-            gdal.PushErrorHandler()
+    os.mkdir(tmp_path / "ogr_vdv_8")
+    open(tmp_path / "ogr_vdv_8" / "empty.x10", "wb").write(
+        "tbl; foo\natr;\nfrm;\n".encode("latin1")
+    )
+    os.chmod(tmp_path / "ogr_vdv_8", 0o555)
+    try:
+        open(tmp_path / "ogr_vdv_8" / "another_file", "wb").close()
+        shutil.rmtree(tmp_path / "ogr_vdv_8")
+        do_test = False
+    except Exception:
+        do_test = True
+    if do_test:
+        ds = ogr.Open(tmp_path / "ogr_vdv_8", update=1)
+        with gdal.quiet_errors():
             lyr = ds.CreateLayer("another_layer")
-            gdal.PopErrorHandler()
-            # 0755 = 493
-            os.chmod("tmp/ogr_vdv_8", 493)
-            ds = None
-            shutil.rmtree("tmp/ogr_vdv_8")
-            assert lyr is None
+        os.chmod(tmp_path / "ogr_vdv_8", 0o755)
+        ds = None
+        shutil.rmtree(tmp_path / "ogr_vdv_8")
+        assert lyr is None
 
-    out_filename = "/vsimem/vdv/ogr_vdv_8.x10"
+
+def test_ogr_vdv_8d(tmp_vsimem):
+    out_filename = tmp_vsimem / "ogr_vdv_8.x10"
     ds = ogr.GetDriverByName("VDV").CreateDataSource(out_filename)
 
     # File already exists
-    gdal.PushErrorHandler()
-    ds2 = ogr.GetDriverByName("VDV").CreateDataSource(out_filename)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds2 = ogr.GetDriverByName("VDV").CreateDataSource(out_filename)
     assert ds2 is None
 
     assert ds.TestCapability(ogr.ODsCCreateLayer) == 1
@@ -471,18 +440,16 @@ def test_ogr_vdv_8():
 
     lyr1.ResetReading()
 
-    gdal.PushErrorHandler()
-    lyr1.GetNextFeature()
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        lyr1.GetNextFeature()
 
     lyr1.CreateFeature(ogr.Feature(lyr1.GetLayerDefn()))
 
     # Layer structure is now frozen
     assert lyr1.TestCapability(ogr.OLCCreateField) == 0
 
-    gdal.PushErrorHandler()
-    ret = lyr1.CreateField(ogr.FieldDefn("not_allowed"))
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ret = lyr1.CreateField(ogr.FieldDefn("not_allowed"))
     assert ret != 0
 
     lyr2 = ds.CreateLayer("lyr2")
@@ -492,14 +459,17 @@ def test_ogr_vdv_8():
 
     assert lyr1.TestCapability(ogr.OLCSequentialWrite) == 0
 
-    gdal.PushErrorHandler()
-    ret = lyr1.CreateFeature(ogr.Feature(lyr1.GetLayerDefn()))
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ret = lyr1.CreateFeature(ogr.Feature(lyr1.GetLayerDefn()))
     assert ret != 0
 
     assert lyr1.GetFeatureCount() == 1
 
     ds = None
+
+
+def test_ogr_vdv_8e(tmp_vsimem):
+    out_filename = tmp_vsimem / "ogr_vdv_8.x10"
 
     # Test appending new layer to file without eof
     gdal.FileFromMemBuffer(
@@ -563,22 +533,3 @@ eof; 2
     gdal.VSIFCloseL(f)
 
     assert got == expected
-
-    gdal.Unlink(out_filename)
-
-
-###############################################################################
-# Cleanup
-
-
-def test_ogr_vdv_cleanup():
-
-    gdal.Unlink("tmp/test.x10")
-    gdal.Unlink("/vsimem/vdv/ogr_vdv_2.x10")
-    gdal.Unlink("/vsimem/vdv/ogr_vdv_7.x10")
-    gdal.Unlink("/vsimem/vdv/ogr_vdv_8.x10")
-    files = gdal.ReadDir("tmp/test_x10")
-    if files is not None:
-        for f in files:
-            gdal.Unlink("tmp/test_x10/" + f)
-    gdal.Rmdir("tmp/test_x10")

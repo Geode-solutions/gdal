@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Private definitions for OGR/OpenStreeMap driver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_OSM_H_INCLUDED
@@ -46,7 +29,7 @@
 
 #include "ogrsqlitevfs.h"
 
-class ConstCharComp
+class OGROSMConstCharComp
 {
   public:
     bool operator()(const char *a, const char *b) const
@@ -58,24 +41,28 @@ class ConstCharComp
 class OGROSMComputedAttribute
 {
   public:
-    CPLString osName;
-    int nIndex;
-    OGRFieldType eType;
-    CPLString osSQL;
-    sqlite3_stmt *hStmt;
-    std::vector<CPLString> aosAttrToBind;
-    std::vector<int> anIndexToBind;
-    bool bHardcodedZOrder;
+    CPLString osName{};
+    int nIndex = -1;
+    OGRFieldType eType = OFTString;
+    CPLString osSQL{};
+    sqlite3_stmt *hStmt = nullptr;
+    std::vector<CPLString> aosAttrToBind{};
+    std::vector<int> anIndexToBind{};
+    bool bHardcodedZOrder = false;
 
-    OGROSMComputedAttribute()
-        : nIndex(-1), eType(OFTString), hStmt(nullptr), bHardcodedZOrder(false)
+    OGROSMComputedAttribute() = default;
+
+    explicit OGROSMComputedAttribute(const char *pszName) : osName(pszName)
     {
     }
-    explicit OGROSMComputedAttribute(const char *pszName)
-        : osName(pszName), nIndex(-1), eType(OFTString), hStmt(nullptr),
-          bHardcodedZOrder(false)
-    {
-    }
+
+    OGROSMComputedAttribute(OGROSMComputedAttribute &&) = default;
+    OGROSMComputedAttribute &operator=(OGROSMComputedAttribute &&) = default;
+
+  private:
+    OGROSMComputedAttribute(const OGROSMComputedAttribute &) = delete;
+    OGROSMComputedAttribute &
+    operator=(const OGROSMComputedAttribute &) = delete;
 };
 
 /************************************************************************/
@@ -92,21 +79,18 @@ class OGROSMLayer final : public OGRLayer
     int m_nIdxLayer = 0;
     OGRFeatureDefn *m_poFeatureDefn = nullptr;
     OGRSpatialReference *m_poSRS = nullptr;
-    long m_nFeatureCount = 0;
 
     std::vector<char *>
         m_apszNames{}; /* Needed to keep a "reference" to the string inserted
                           into oMapFieldNameToIndex */
-    std::map<const char *, int, ConstCharComp> m_oMapFieldNameToIndex{};
+    std::map<const char *, int, OGROSMConstCharComp> m_oMapFieldNameToIndex{};
 
     std::vector<OGROSMComputedAttribute> m_oComputedAttributes{};
 
     bool m_bResetReadingAllowed = false;
 
-    int m_nFeatureArraySize = 0;
-    int m_nFeatureArrayMaxSize = 0;
-    int m_nFeatureArrayIndex = 0;
-    OGRFeature **m_papoFeatures = nullptr;
+    size_t m_nFeatureArrayIndex = 0;
+    std::vector<std::unique_ptr<OGRFeature>> m_apoFeatures{};
 
     bool m_bHasOSMId = false;
     int m_nIndexOSMId = -1;
@@ -123,25 +107,27 @@ class OGROSMLayer final : public OGRLayer
 
     bool m_bHasWarnedTooManyFeatures = false;
 
-    char *m_pszAllTags = nullptr;
-    bool m_bHasWarnedAllTagsTruncated = false;
+    std::string m_osAllTagsBuffer{};
 
     bool m_bUserInterested = true;
 
-    bool AddToArray(OGRFeature *poFeature, int bCheckFeatureThreshold);
+    bool AddToArray(std::unique_ptr<OGRFeature>, bool bCheckFeatureThreshold);
 
     int AddInOtherOrAllTags(const char *pszK);
 
     char szLaunderedFieldName[256];
     const char *GetLaunderedFieldName(const char *pszName);
 
-    std::vector<char *> apszInsignificantKeys;
-    std::map<const char *, int, ConstCharComp> aoSetInsignificantKeys;
+    std::vector<char *> apszInsignificantKeys{};
+    std::map<const char *, int, OGROSMConstCharComp> aoSetInsignificantKeys{};
 
-    std::vector<char *> apszIgnoreKeys;
-    std::map<const char *, int, ConstCharComp> aoSetIgnoreKeys;
+    std::vector<char *> apszIgnoreKeys{};
+    std::map<const char *, int, OGROSMConstCharComp> aoSetIgnoreKeys{};
 
-    std::set<std::string> aoSetWarnKeys;
+    std::set<std::string> aoSetWarnKeys{};
+
+    OGROSMLayer(const OGROSMLayer &) = delete;
+    OGROSMLayer &operator=(const OGROSMLayer &) = delete;
 
   public:
     OGROSMLayer(OGROSMDataSource *m_poDS, int m_nIdxLayer, const char *pszName);
@@ -165,27 +151,26 @@ class OGROSMLayer final : public OGRLayer
 
     virtual OGRErr SetAttributeFilter(const char *pszAttrQuery) override;
 
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override;
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    virtual OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                              bool bForce) override;
 
     const OGREnvelope *GetSpatialFilterEnvelope();
 
-    int AddFeature(OGRFeature *poFeature, int bAttrFilterAlreadyEvaluated,
-                   int *pbFilteredOut = nullptr,
-                   int bCheckFeatureThreshold = TRUE);
+    bool AddFeature(std::unique_ptr<OGRFeature> poFeature,
+                    bool bAttrFilterAlreadyEvaluated,
+                    bool *pbFilteredOut = nullptr,
+                    bool bCheckFeatureThreshold = true);
     void ForceResetReading();
 
-    void AddField(const char *pszName, OGRFieldType eFieldType);
+    void AddField(const char *pszName, OGRFieldType eFieldType,
+                  OGRFieldSubType eSubType = OFSTNone);
     int GetFieldIndex(const char *pszName);
 
     bool HasOSMId() const
     {
         return m_bHasOSMId;
     }
+
     void SetHasOSMId(bool bIn)
     {
         m_bHasOSMId = bIn;
@@ -195,6 +180,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasVersion;
     }
+
     void SetHasVersion(bool bIn)
     {
         m_bHasVersion = bIn;
@@ -204,6 +190,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasTimestamp;
     }
+
     void SetHasTimestamp(bool bIn)
     {
         m_bHasTimestamp = bIn;
@@ -213,6 +200,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasUID;
     }
+
     void SetHasUID(bool bIn)
     {
         m_bHasUID = bIn;
@@ -222,6 +210,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasUser;
     }
+
     void SetHasUser(bool bIn)
     {
         m_bHasUser = bIn;
@@ -231,6 +220,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasChangeset;
     }
+
     void SetHasChangeset(bool bIn)
     {
         m_bHasChangeset = bIn;
@@ -240,6 +230,7 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasOtherTags;
     }
+
     void SetHasOtherTags(bool bIn)
     {
         m_bHasOtherTags = bIn;
@@ -249,19 +240,21 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_bHasAllTags;
     }
+
     void SetHasAllTags(bool bIn)
     {
         m_bHasAllTags = bIn;
     }
 
     void SetFieldsFromTags(OGRFeature *poFeature, GIntBig nID, bool bIsWayID,
-                           unsigned int nTags, OSMTag *pasTags,
-                           OSMInfo *psInfo);
+                           unsigned int nTags, const OSMTag *pasTags,
+                           const OSMInfo *psInfo);
 
     void SetDeclareInterest(bool bIn)
     {
         m_bUserInterested = bIn;
     }
+
     bool IsUserInterested() const
     {
         return m_bUserInterested;
@@ -271,9 +264,11 @@ class OGROSMLayer final : public OGRLayer
     {
         return m_poAttrQuery != nullptr;
     }
+
     int EvaluateAttributeFilter(OGRFeature *poFeature);
 
     void AddInsignificantKey(const char *pszK);
+
     int IsSignificantKey(const char *pszK) const
     {
         return aoSetInsignificantKeys.find(pszK) ==
@@ -291,15 +286,15 @@ class OGROSMLayer final : public OGRLayer
 /*                        OGROSMDataSource                              */
 /************************************************************************/
 
-typedef struct
+struct KeyDesc
 {
-    char *pszK;
-    int nKeyIndex;
-    int nOccurrences;
-    std::vector<char *> asValues;
-    std::map<const char *, int, ConstCharComp>
-        anMapV; /* map that is the reverse of asValues */
-} KeyDesc;
+    char *pszK = nullptr;
+    int nKeyIndex = 0;
+    int nOccurrences = 0;
+    std::vector<char *> apszValues{};
+    //! map that is the reverse of apszValues
+    std::map<const char *, int, OGROSMConstCharComp> anMapV{};
+};
 
 typedef struct
 {
@@ -307,6 +302,7 @@ typedef struct
                         nOffsetInpabyNonRedundantKeys */
     short bVIsIndex; /* whether we should use nValueIndex or
                         nOffsetInpabyNonRedundantValues */
+
     union
     {
         int nKeyIndex; /* index of OGROSMDataSource.asKeys */
@@ -314,9 +310,10 @@ typedef struct
                                               OGROSMDataSource.pabyNonRedundantKeys
                                             */
     } uKey;
+
     union
     {
-        int nValueIndex;                     /* index of KeyDesc.asValues */
+        int nValueIndex;                     /* index of KeyDesc.apszValues */
         int nOffsetInpabyNonRedundantValues; /* offset in
                                                 OGROSMDataSource.pabyNonRedundantValues
                                               */
@@ -326,6 +323,7 @@ typedef struct
 typedef struct
 {
     GIntBig nOff;
+
     /* Note: only one of nth bucket pabyBitmap or panSectorSize must be free'd
      */
     union
@@ -343,20 +341,20 @@ typedef struct
     int nLat;
 } LonLat;
 
-typedef struct
+struct WayFeaturePair
 {
-    GIntBig nWayID;
-    GIntBig
-        *panNodeRefs; /* point to a sub-array of OGROSMDataSource.anReqIds */
-    unsigned int nRefs;
-    unsigned int nTags;
-    IndexedKVP *pasTags; /*  point to a sub-array of
+    GIntBig nWayID = 0;
+    /* point to a sub-array of OGROSMDataSource.anReqIds */
+    GIntBig *panNodeRefs = nullptr;
+    unsigned int nRefs = 0;
+    unsigned int nTags = 0;
+    IndexedKVP *pasTags = nullptr; /*  point to a sub-array of
                             OGROSMDataSource.pasAccumulatedTags */
-    OSMInfo sInfo;
-    OGRFeature *poFeature;
-    bool bIsArea : 1;
-    bool bAttrFilterAlreadyEvaluated : 1;
-} WayFeaturePair;
+    OSMInfo sInfo{};
+    std::unique_ptr<OGRFeature> poFeature{};
+    bool bIsArea = false;
+    bool bAttrFilterAlreadyEvaluated = false;
+};
 
 #ifdef ENABLE_NODE_LOOKUP_BY_HASHING
 typedef struct
@@ -367,13 +365,13 @@ typedef struct
 } CollisionBucket;
 #endif
 
-class OGROSMDataSource final : public OGRDataSource
+class OGROSMDataSource final : public GDALDataset
 {
     friend class OGROSMLayer;
 
-    int m_nLayers = 0;
-    OGROSMLayer **m_papoLayers = nullptr;
-    char *m_pszName = nullptr;
+    std::vector<std::unique_ptr<OGROSMLayer>> m_apoLayers{};
+
+    std::string m_osConfigFile{};
 
     OGREnvelope m_sExtent{};
     bool m_bExtentValid = false;
@@ -391,7 +389,6 @@ class OGROSMDataSource final : public OGRDataSource
     sqlite3 *m_hDB = nullptr;
     sqlite3_stmt *m_hInsertNodeStmt = nullptr;
     sqlite3_stmt *m_hInsertWayStmt = nullptr;
-    sqlite3_stmt *m_hSelectNodeBetweenStmt = nullptr;
     sqlite3_stmt **m_pahSelectNodeStmt = nullptr;
     sqlite3_stmt **m_pahSelectWayStmt = nullptr;
     sqlite3_stmt *m_hInsertPolygonsStandaloneStmt = nullptr;
@@ -406,8 +403,6 @@ class OGROSMDataSource final : public OGRDataSource
     bool m_bMustUnlink = true;
     CPLString m_osTmpDBName{};
 
-    int m_nNodesInTransaction = 0;
-
     std::unordered_set<std::string> aoSetClosedWaysArePolygons{};
     int m_nMinSizeKeysInSetClosedWaysArePolygons = 0;
     int m_nMaxSizeKeysInSetClosedWaysArePolygons = 0;
@@ -420,6 +415,7 @@ class OGROSMDataSource final : public OGRDataSource
 
     bool m_bReportAllNodes = false;
     bool m_bReportAllWays = false;
+    bool m_bTagsAsHSTORE = true;  // if false, as JSON
 
     bool m_bFeatureAdded = false;
 
@@ -478,11 +474,10 @@ class OGROSMDataSource final : public OGRDataSource
     unsigned int MAX_INDEXED_VALUES_PER_KEY = 0;
     GByte *pabyNonRedundantValues = nullptr;
     int nNonRedundantValuesLen = 0;
-    WayFeaturePair *m_pasWayFeaturePairs = nullptr;
-    int m_nWayFeaturePairs = 0;
+    std::vector<WayFeaturePair> m_asWayFeaturePairs{};
 
-    std::vector<KeyDesc *> m_asKeys{};
-    std::map<const char *, KeyDesc *, ConstCharComp>
+    std::vector<KeyDesc *> m_apsKeys{};
+    std::map<const char *, KeyDesc *, OGROSMConstCharComp>
         m_aoMapIndexedKeys{}; /* map that is the reverse of asKeys */
 
     CPLString m_osNodesFilename{};
@@ -504,30 +499,31 @@ class OGROSMDataSource final : public OGRDataSource
     static const GIntBig FILESIZE_INVALID = -1;
     GIntBig m_nFileSize = FILESIZE_NOT_INIT;
 
-    void CompressWay(bool bIsArea, unsigned int nTags, IndexedKVP *pasTags,
-                     int nPoints, LonLat *pasLonLatPairs, OSMInfo *psInfo,
+    void CompressWay(bool bIsArea, unsigned int nTags,
+                     const IndexedKVP *pasTags, int nPoints,
+                     const LonLat *pasLonLatPairs, const OSMInfo *psInfo,
                      std::vector<GByte> &abyCompressedWay);
     void UncompressWay(int nBytes, const GByte *pabyCompressedWay,
                        bool *pbIsArea, std::vector<LonLat> &asCoords,
                        unsigned int *pnTags, OSMTag *pasTags, OSMInfo *psInfo);
 
-    bool ParseConf(char **papszOpenOptions);
+    bool ParseConf(CSLConstList papszOpenOptions);
     bool CreateTempDB();
     bool SetDBOptions();
-    bool SetCacheSize();
+    void SetCacheSize();
     bool CreatePreparedStatements();
     void CloseDB();
 
-    bool IndexPoint(OSMNode *psNode);
-    bool IndexPointSQLite(OSMNode *psNode);
+    bool IndexPoint(const OSMNode *psNode);
+    bool IndexPointSQLite(const OSMNode *psNode);
     bool FlushCurrentSector();
     bool FlushCurrentSectorCompressedCase();
     bool FlushCurrentSectorNonCompressedCase();
-    bool IndexPointCustom(OSMNode *psNode);
+    bool IndexPointCustom(const OSMNode *psNode);
 
     void IndexWay(GIntBig nWayID, bool bIsArea, unsigned int nTags,
-                  IndexedKVP *pasTags, LonLat *pasLonLatPairs, int nPairs,
-                  OSMInfo *psInfo);
+                  const IndexedKVP *pasTags, const LonLat *pasLonLatPairs,
+                  int nPairs, const OSMInfo *psInfo);
 
     bool StartTransactionCacheDB();
     bool CommitTransactionCacheDB();
@@ -545,12 +541,12 @@ class OGROSMDataSource final : public OGRDataSource
 
     unsigned int
     LookupWays(std::map<GIntBig, std::pair<int, void *>> &aoMapWays,
-               OSMRelation *psRelation);
+               const OSMRelation *psRelation);
 
-    OGRGeometry *BuildMultiPolygon(OSMRelation *psRelation,
+    OGRGeometry *BuildMultiPolygon(const OSMRelation *psRelation,
                                    unsigned int *pnTags, OSMTag *pasTags);
-    OGRGeometry *BuildGeometryCollection(OSMRelation *psRelation,
-                                         int bMultiLineString);
+    OGRGeometry *BuildGeometryCollection(const OSMRelation *psRelation,
+                                         bool bMultiLineString);
 
     bool TransferToDiskIfNecesserary();
 
@@ -560,18 +556,18 @@ class OGROSMDataSource final : public OGRDataSource
         int iCurLayer, const std::vector<OGROSMComputedAttribute> &oAttributes);
     bool IsClosedWayTaggedAsPolygon(unsigned int nTags, const OSMTag *pasTags);
 
+    OGROSMDataSource(const OGROSMDataSource &) = delete;
+    OGROSMDataSource &operator=(const OGROSMDataSource &) = delete;
+
   public:
     OGROSMDataSource();
     virtual ~OGROSMDataSource();
 
-    virtual const char *GetName() override
-    {
-        return m_pszName;
-    }
     virtual int GetLayerCount() override
     {
-        return m_nLayers;
+        return static_cast<int>(m_apoLayers.size());
     }
+
     virtual OGRLayer *GetLayer(int) override;
 
     virtual int TestCapability(const char *) override;
@@ -587,17 +583,17 @@ class OGROSMDataSource final : public OGRDataSource
                                        GDALProgressFunc pfnProgress,
                                        void *pProgressData) override;
 
-    int Open(const char *pszFilename, char **papszOpenOptions);
+    int Open(const char *pszFilename, CSLConstList papszOpenOptions);
 
     int MyResetReading();
     bool ParseNextChunk(int nIdxLayer, GDALProgressFunc pfnProgress,
                         void *pProgressData);
-    OGRErr GetExtent(OGREnvelope *psExtent);
+    OGRErr GetNativeExtent(OGREnvelope *psExtent);
     int IsInterleavedReading();
 
-    void NotifyNodes(unsigned int nNodes, OSMNode *pasNodes);
-    void NotifyWay(OSMWay *psWay);
-    void NotifyRelation(OSMRelation *psRelation);
+    void NotifyNodes(unsigned int nNodes, const OSMNode *pasNodes);
+    void NotifyWay(const OSMWay *psWay);
+    void NotifyRelation(const OSMRelation *psRelation);
     void NotifyBounds(double dfXMin, double dfYMin, double dfXMax,
                       double dfYMax);
 
@@ -605,6 +601,7 @@ class OGROSMDataSource final : public OGRDataSource
     {
         return m_poCurrentLayer;
     }
+
     void SetCurrentLayer(OGROSMLayer *poLyr)
     {
         m_poCurrentLayer = poLyr;

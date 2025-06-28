@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -36,6 +20,7 @@
 #include "ogr_spatialref.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
 
@@ -50,7 +35,7 @@ class RRASTERDataset final : public RawDataset
     bool m_bHeaderDirty = false;
     CPLString m_osGriFilename{};
     bool m_bGeoTransformValid = false;
-    double m_adfGeoTransform[6]{0, 1, 0, 0, 0, -1};
+    GDALGeoTransform m_gt{};
     VSILFILE *m_fpImage = nullptr;
     OGRSpatialReference m_oSRS{};
     std::shared_ptr<GDALRasterAttributeTable> m_poRAT{};
@@ -90,8 +75,8 @@ class RRASTERDataset final : public RawDataset
                                    GDALProgressFunc pfnProgress,
                                    void *pProgressData);
 
-    CPLErr GetGeoTransform(double *) override;
-    CPLErr SetGeoTransform(double *padfGeoTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
@@ -104,7 +89,9 @@ class RRASTERDataset final : public RawDataset
     {
         m_bHeaderDirty = true;
     }
+
     void InitImageIfNeeded();
+
     inline bool IsSignedByte() const
     {
         return m_bSignedByte;
@@ -328,7 +315,7 @@ static void GetMinMax(const T *buffer, int nBufXSize, int nBufYSize,
         for (int iX = 0; iX < nBufXSize; iX++)
         {
             const double dfVal = buffer[iY * nLineSpace + iX * nPixelSpace];
-            if (dfVal != dfNoDataValue && !CPLIsNan(dfVal))
+            if (dfVal != dfNoDataValue && !std::isnan(dfVal))
             {
                 dfMin = std::min(dfMin, dfVal);
                 dfMax = std::max(dfMax, dfVal);
@@ -546,7 +533,7 @@ void RRASTERDataset::RewriteHeader()
     int bGotNoDataValue = false;
     double dfNoDataValue = GetRasterBand(1)->GetNoDataValue(&bGotNoDataValue);
     if (bGotNoDataValue)
-        VSIFPrintfL(fp, "nodatavalue=%.18g\n", dfNoDataValue);
+        VSIFPrintfL(fp, "nodatavalue=%.17g\n", dfNoDataValue);
 
 #if CPL_IS_LSB
     VSIFPrintfL(fp, "byteorder=%s\n", m_bNativeOrder ? "little" : "big");
@@ -571,8 +558,8 @@ void RRASTERDataset::RewriteHeader()
             osMinValue.clear();
             break;
         }
-        osMinValue += CPLSPrintf("%.18g", poBand->m_dfMin);
-        osMaxValue += CPLSPrintf("%.18g", poBand->m_dfMax);
+        osMinValue += CPLSPrintf("%.17g", poBand->m_dfMin);
+        osMaxValue += CPLSPrintf("%.17g", poBand->m_dfMax);
     }
     if (!osMinValue.empty())
     {
@@ -634,7 +621,7 @@ void RRASTERDataset::RewriteHeader()
                     else if (eColType == GFT_Real)
                     {
                         osRatValues +=
-                            CPLSPrintf("%.18g", poRAT->GetValueAsDouble(j, i));
+                            CPLSPrintf("%.17g", poRAT->GetValueAsDouble(j, i));
                     }
                     else
                     {
@@ -767,12 +754,10 @@ void RRASTERDataset::RewriteHeader()
     VSIFPrintfL(fp, "nrows=%d\n", nRasterYSize);
     VSIFPrintfL(fp, "ncols=%d\n", nRasterXSize);
 
-    VSIFPrintfL(fp, "xmin=%.18g\n", m_adfGeoTransform[0]);
-    VSIFPrintfL(fp, "ymin=%.18g\n",
-                m_adfGeoTransform[3] + nRasterYSize * m_adfGeoTransform[5]);
-    VSIFPrintfL(fp, "xmax=%.18g\n",
-                m_adfGeoTransform[0] + nRasterXSize * m_adfGeoTransform[1]);
-    VSIFPrintfL(fp, "ymax=%.18g\n", m_adfGeoTransform[3]);
+    VSIFPrintfL(fp, "xmin=%.17g\n", m_gt[0]);
+    VSIFPrintfL(fp, "ymin=%.17g\n", m_gt[3] + nRasterYSize * m_gt[5]);
+    VSIFPrintfL(fp, "xmax=%.17g\n", m_gt[0] + nRasterXSize * m_gt[1]);
+    VSIFPrintfL(fp, "ymax=%.17g\n", m_gt[3]);
 
     if (!m_oSRS.IsEmpty())
     {
@@ -814,11 +799,11 @@ char **RRASTERDataset::GetFileList()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr RRASTERDataset::GetGeoTransform(double *padfGeoTransform)
+CPLErr RRASTERDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
     if (m_bGeoTransformValid)
     {
-        memcpy(padfGeoTransform, m_adfGeoTransform, 6 * sizeof(double));
+        gt = m_gt;
         return CE_None;
     }
     return CE_Failure;
@@ -828,7 +813,7 @@ CPLErr RRASTERDataset::GetGeoTransform(double *padfGeoTransform)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr RRASTERDataset::SetGeoTransform(double *padfGeoTransform)
+CPLErr RRASTERDataset::SetGeoTransform(const GDALGeoTransform &gt)
 
 {
     if (GetAccess() != GA_Update)
@@ -839,16 +824,16 @@ CPLErr RRASTERDataset::SetGeoTransform(double *padfGeoTransform)
     }
 
     // We only support non-rotated images with info in the .HDR file.
-    if (padfGeoTransform[2] != 0.0 || padfGeoTransform[4] != 0.0)
+    if (gt[2] != 0.0 || gt[4] != 0.0)
     {
         CPLError(CE_Warning, CPLE_NotSupported,
                  "Rotated / skewed images not supported");
-        return GDALPamDataset::SetGeoTransform(padfGeoTransform);
+        return GDALPamDataset::SetGeoTransform(gt);
     }
 
     // Record new geotransform.
     m_bGeoTransformValid = true;
-    memcpy(m_adfGeoTransform, padfGeoTransform, sizeof(double) * 6);
+    m_gt = gt;
     SetHeaderDirty();
 
     return CE_None;
@@ -931,7 +916,7 @@ int RRASTERDataset::Identify(GDALOpenInfo *poOpenInfo)
 
 {
     if (poOpenInfo->nHeaderBytes < 40 || poOpenInfo->fpL == nullptr ||
-        !EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "grd"))
+        !poOpenInfo->IsExtensionEqualToCI("grd"))
     {
         return FALSE;
     }
@@ -1023,7 +1008,7 @@ bool RRASTERDataset::ComputeSpacings(const CPLString &osBandOrder, int nCols,
 
 static float CastToFloat(double dfVal)
 {
-    if (CPLIsInf(dfVal) || CPLIsNan(dfVal) ||
+    if (std::isinf(dfVal) || std::isnan(dfVal) ||
         (dfVal >= -std::numeric_limits<float>::max() &&
          dfVal <= std::numeric_limits<float>::max()))
     {
@@ -1041,6 +1026,8 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
     if (!Identify(poOpenInfo))
         return nullptr;
 
+    auto poDS = std::make_unique<RRASTERDataset>();
+
     const char *pszLine = nullptr;
     int nRows = 0;
     int nCols = 0;
@@ -1050,21 +1037,17 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
     double dfYMax = 0.0;
     int l_nBands = 1;
     CPLString osDataType;
-    CPLString osBandOrder;
     CPLString osProjection;
     CPLString osWkt;
     CPLString osByteOrder;
     CPLString osNoDataValue("NA");
     CPLString osMinValue;
     CPLString osMaxValue;
-    CPLString osCreator;
-    CPLString osCreated;
     CPLString osLayerName;
     CPLString osRatNames;
     CPLString osRatTypes;
     CPLString osRatValues;
     bool bInLegend = false;
-    CPLString osLegend;
     VSIRewindL(poOpenInfo->fpL);
     while ((pszLine = CPLReadLine2L(poOpenInfo->fpL, 1024 * 1024, nullptr)) !=
            nullptr)
@@ -1076,17 +1059,17 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
         }
         if (bInLegend)
         {
-            osLegend += pszLine;
-            osLegend += "\n";
+            poDS->m_osLegend += pszLine;
+            poDS->m_osLegend += "\n";
         }
         char *pszKey = nullptr;
         const char *pszValue = CPLParseNameValue(pszLine, &pszKey);
         if (pszKey && pszValue)
         {
             if (EQUAL(pszKey, "creator"))
-                osCreator = pszValue;
+                poDS->m_osCreator = pszValue;
             if (EQUAL(pszKey, "created"))
-                osCreated = pszValue;
+                poDS->m_osCreated = pszValue;
             else if (EQUAL(pszKey, "ncols"))
                 nCols = atoi(pszValue);
             else if (EQUAL(pszKey, "nrows"))
@@ -1106,7 +1089,7 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
             else if (EQUAL(pszKey, "nbands"))
                 l_nBands = atoi(pszValue);
             else if (EQUAL(pszKey, "bandorder"))
-                osBandOrder = pszValue;
+                poDS->m_osBandOrder = pszValue;
             else if (EQUAL(pszKey, "datatype"))
                 osDataType = pszValue;
             else if (EQUAL(pszKey, "byteorder"))
@@ -1160,7 +1143,7 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
                  osDataType.c_str());
         return nullptr;
     }
-    if (l_nBands > 1 && osBandOrder.empty())
+    if (l_nBands > 1 && poDS->m_osBandOrder.empty())
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Missing 'bandorder'");
         return nullptr;
@@ -1185,39 +1168,40 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
     int nPixelOffset = 0;
     int nLineOffset = 0;
     vsi_l_offset nBandOffset = 0;
-    if (!ComputeSpacings(osBandOrder, nCols, nRows, l_nBands, eDT, nPixelOffset,
-                         nLineOffset, nBandOffset))
+    if (!ComputeSpacings(poDS->m_osBandOrder, nCols, nRows, l_nBands, eDT,
+                         nPixelOffset, nLineOffset, nBandOffset))
     {
         return nullptr;
     }
 
-    CPLString osGriFilename;
-    CPLString osDirname(CPLGetDirname(poOpenInfo->pszFilename));
-    CPLString osBasename(CPLGetBasename(poOpenInfo->pszFilename));
-    CPLString osGRDExtension(CPLGetExtension(poOpenInfo->pszFilename));
+    CPLString osDirname(CPLGetDirnameSafe(poOpenInfo->pszFilename));
+    CPLString osBasename(CPLGetBasenameSafe(poOpenInfo->pszFilename));
+    CPLString osGRDExtension(poOpenInfo->osExtension);
     CPLString osGRIExtension((osGRDExtension[0] == 'g') ? "gri" : "GRI");
     char **papszSiblings = poOpenInfo->GetSiblingFiles();
     if (papszSiblings)
     {
-        int iFile =
-            CSLFindString(papszSiblings,
-                          CPLFormFilename(nullptr, osBasename, osGRIExtension));
+        int iFile = CSLFindString(
+            papszSiblings,
+            CPLFormFilenameSafe(nullptr, osBasename, osGRIExtension).c_str());
         if (iFile < 0)
             return nullptr;
-        osGriFilename =
-            CPLFormFilename(osDirname, papszSiblings[iFile], nullptr);
+        poDS->m_osGriFilename =
+            CPLFormFilenameSafe(osDirname, papszSiblings[iFile], nullptr);
     }
     else
     {
-        osGriFilename = CPLFormFilename(osDirname, osBasename, osGRIExtension);
+        poDS->m_osGriFilename =
+            CPLFormFilenameSafe(osDirname, osBasename, osGRIExtension);
     }
 
-    VSILFILE *fpImage = VSIFOpenL(
-        osGriFilename, (poOpenInfo->eAccess == GA_Update) ? "rb+" : "rb");
+    VSILFILE *fpImage =
+        VSIFOpenL(poDS->m_osGriFilename,
+                  (poOpenInfo->eAccess == GA_Update) ? "rb+" : "rb");
     if (fpImage == nullptr)
     {
         CPLError(CE_Failure, CPLE_FileIO, "Cannot open %s",
-                 osGriFilename.c_str());
+                 poDS->m_osGriFilename.c_str());
         return nullptr;
     }
 
@@ -1229,24 +1213,18 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
         return nullptr;
     }
 
-    RRASTERDataset *poDS = new RRASTERDataset;
     poDS->eAccess = poOpenInfo->eAccess;
     poDS->nRasterXSize = nCols;
     poDS->nRasterYSize = nRows;
     poDS->m_bGeoTransformValid = true;
-    poDS->m_adfGeoTransform[0] = dfXMin;
-    poDS->m_adfGeoTransform[1] = (dfXMax - dfXMin) / nCols;
-    poDS->m_adfGeoTransform[2] = 0.0;
-    poDS->m_adfGeoTransform[3] = dfYMax;
-    poDS->m_adfGeoTransform[4] = 0.0;
-    poDS->m_adfGeoTransform[5] = -(dfYMax - dfYMin) / nRows;
-    poDS->m_osGriFilename = osGriFilename;
+    poDS->m_gt[0] = dfXMin;
+    poDS->m_gt[1] = (dfXMax - dfXMin) / nCols;
+    poDS->m_gt[2] = 0.0;
+    poDS->m_gt[3] = dfYMax;
+    poDS->m_gt[4] = 0.0;
+    poDS->m_gt[5] = -(dfYMax - dfYMin) / nRows;
     poDS->m_fpImage = fpImage;
     poDS->m_bNativeOrder = bNativeOrder;
-    poDS->m_osCreator = osCreator;
-    poDS->m_osCreated = osCreated;
-    poDS->m_osBandOrder = osBandOrder;
-    poDS->m_osLegend = osLegend;
 
     if (osWkt.empty())
     {
@@ -1260,11 +1238,11 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
         poDS->m_oSRS.importFromWkt(osWkt.c_str());
     }
 
-    if (!osCreator.empty())
-        poDS->GDALDataset::SetMetadataItem("CREATOR", osCreator);
+    if (!poDS->m_osCreator.empty())
+        poDS->GDALDataset::SetMetadataItem("CREATOR", poDS->m_osCreator);
 
-    if (!osCreated.empty())
-        poDS->GDALDataset::SetMetadataItem("CREATED", osCreated);
+    if (!poDS->m_osCreated.empty())
+        poDS->GDALDataset::SetMetadataItem("CREATED", poDS->m_osCreated);
 
     // Instantiate RAT
     if (!osRatNames.empty() && !osRatTypes.empty() && !osRatValues.empty())
@@ -1370,10 +1348,13 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
     CPLStringList aosLayerNames(CSLTokenizeString2(osLayerName, ":", 0));
     for (int i = 1; i <= l_nBands; i++)
     {
-        RRASTERRasterBand *poBand =
-            new RRASTERRasterBand(poDS, i, fpImage, nBandOffset * (i - 1),
-                                  nPixelOffset, nLineOffset, eDT, bNativeOrder);
-        poDS->SetBand(i, poBand);
+        auto poBand = std::make_unique<RRASTERRasterBand>(
+            poDS.get(), i, fpImage, nBandOffset * (i - 1), nPixelOffset,
+            nLineOffset, eDT, bNativeOrder);
+        if (!poBand->IsValid())
+        {
+            return nullptr;
+        }
         if (!osNoDataValue.empty() && !EQUAL(osNoDataValue, "NA"))
         {
             double dfNoDataValue = CPLAtof(osNoDataValue);
@@ -1405,9 +1386,10 @@ GDALDataset *RRASTERDataset::Open(GDALOpenInfo *poOpenInfo)
         poBand->m_poCT = poDS->m_poCT;
         if (poBand->m_poCT)
             poBand->SetColorInterpretation(GCI_PaletteIndex);
+        poDS->SetBand(i, std::move(poBand));
     }
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/
@@ -1436,7 +1418,7 @@ GDALDataset *RRASTERDataset::Create(const char *pszFilename, int nXSize,
         return nullptr;
     }
 
-    CPLString osGRDExtension(CPLGetExtension(pszFilename));
+    CPLString osGRDExtension(CPLGetExtensionSafe(pszFilename));
     if (!EQUAL(osGRDExtension, "grd"))
     {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -1455,11 +1437,13 @@ GDALDataset *RRASTERDataset::Create(const char *pszFilename, int nXSize,
         return nullptr;
     }
 
-    CPLString osGRIExtension((osGRDExtension[0] == 'g') ? "gri" : "GRI");
-    CPLString osGriFilename(CPLResetExtension(pszFilename, osGRIExtension));
+    const std::string osGRIExtension((osGRDExtension[0] == 'g') ? "gri"
+                                                                : "GRI");
+    const std::string osGriFilename(
+        CPLResetExtensionSafe(pszFilename, osGRIExtension.c_str()));
 
     // Try to create the file.
-    VSILFILE *fpImage = VSIFOpenL(osGriFilename, "wb+");
+    VSILFILE *fpImage = VSIFOpenL(osGriFilename.c_str(), "wb+");
 
     if (fpImage == nullptr)
     {
@@ -1568,6 +1552,11 @@ void GDALRegister_RRASTER()
     poDriver->pfnIdentify = RRASTERDataset::Identify;
     poDriver->pfnCreate = RRASTERDataset::Create;
     poDriver->pfnCreateCopy = RRASTERDataset::CreateCopy;
+
+    poDriver->SetMetadataItem(GDAL_DCAP_UPDATE, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_UPDATE_ITEMS, "GeoTransform SRS NoData "
+                                                     "RasterValues "
+                                                     "DatasetMetadata");
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
 }

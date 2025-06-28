@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2016 Julien Michel <julien dot michel at cnes dot fr>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 #include "../vrt/vrtdataset.h"
 #include "gdal_pam.h"
@@ -33,9 +17,8 @@ class DerivedDataset final : public VRTDataset
 {
   public:
     DerivedDataset(int nXSize, int nYSize);
-    ~DerivedDataset()
-    {
-    }
+
+    ~DerivedDataset();
 
     static int Identify(GDALOpenInfo *);
     static GDALDataset *Open(GDALOpenInfo *);
@@ -47,6 +30,8 @@ DerivedDataset::DerivedDataset(int nXSize, int nYSize)
     poDriver = nullptr;
     SetWritable(FALSE);
 }
+
+DerivedDataset::~DerivedDataset() = default;
 
 int DerivedDataset::Identify(GDALOpenInfo *poOpenInfo)
 {
@@ -122,7 +107,8 @@ GDALDataset *DerivedDataset::Open(GDALOpenInfo *poOpenInfo)
     CPLString odFilename =
         filename.substr(alg_pos + 1, filename.size() - alg_pos);
 
-    GDALDataset *poTmpDS = (GDALDataset *)GDALOpen(odFilename, GA_ReadOnly);
+    auto poTmpDS = std::unique_ptr<GDALDataset>(
+        GDALDataset::Open(odFilename, GDAL_OF_RASTER | GDAL_OF_VERBOSE_ERROR));
 
     if (poTmpDS == nullptr)
         return nullptr;
@@ -131,7 +117,6 @@ GDALDataset *DerivedDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (nbBands == 0)
     {
-        GDALClose(poTmpDS);
         return nullptr;
     }
 
@@ -153,12 +138,10 @@ GDALDataset *DerivedDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->SetProjection(poTmpDS->GetProjectionRef());
 
     // Transfer geotransform
-    double padfTransform[6];
-    CPLErr transformOk = poTmpDS->GetGeoTransform(padfTransform);
-
-    if (transformOk == CE_None)
+    GDALGeoTransform gt;
+    if (poTmpDS->GetGeoTransform(gt) == CE_None)
     {
-        poDS->SetGeoTransform(padfTransform);
+        poDS->SetGeoTransform(gt);
     }
 
     // Transfer GCPs
@@ -181,16 +164,14 @@ GDALDataset *DerivedDataset::Open(GDALOpenInfo *poOpenInfo)
                                  nCols, nRows);
     }
 
-    GDALClose(poTmpDS);
-
     // If dataset is a real file, initialize overview manager
     VSIStatBufL sStat;
     if (VSIStatL(odFilename, &sStat) == 0)
     {
-        CPLString path = CPLGetPath(odFilename);
+        CPLString path = CPLGetPathSafe(odFilename);
         CPLString ovrFileName = "DERIVED_DATASET_" + odDerivedName + "_" +
                                 CPLGetFilename(odFilename);
-        CPLString ovrFilePath = CPLFormFilename(path, ovrFileName, nullptr);
+        CPLString ovrFilePath = CPLFormFilenameSafe(path, ovrFileName, nullptr);
 
         poDS->oOvManager.Initialize(poDS, ovrFilePath);
     }

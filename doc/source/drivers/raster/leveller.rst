@@ -9,7 +9,7 @@ Leveller -- Daylon Leveller Heightfield
 .. built_in_by_default::
 
 Leveller heightfields store 32-bit elevation values. Format versions 4
-through 9 are supported with various caveats (see below). The file
+through 12 are supported with various caveats (see below). The file
 extension for Leveller heightfields is "TER" (which is the same as
 Terragen, but the driver only recognizes Leveller files).
 
@@ -73,6 +73,6 @@ Header information is written out on the first call to
 See Also:
 ---------
 
--  Implemented as ``gdal/frmts/leveller/levellerdataset.cpp``.
+-  Implemented as :source_file:`frmts/leveller/levellerdataset.cpp`.
 -  Visit `Daylon Graphics <http://www.daylongraphics.com>`__ for the
    Leveller SDK, which documents the Leveller format.

@@ -24,7 +24,7 @@ Driver capabilities
 Georeference
 ------------
 
-Note, that GDAL simple affine georeference model completely unsuitable
+Note that GDAL simple affine georeference model is completely unsuitable
 for the NOAA data. So you should not rely on it. It is recommended to
 use the thin plate spline warper (tps). Automatic image rectification
 can be done with ground control points (GCPs) from the input file.
@@ -128,7 +128,7 @@ indicate such scan lines.
 See Also
 --------
 
--  Implemented as ``gdal/frmts/l1b/l1bdataset.cpp``.
+-  Implemented as :source_file:`frmts/l1b/l1bdataset.cpp`.
 -  NOAA Polar Orbiter Level 1b Data Set documented in the \``POD User's
    Guide'' (TIROS-N -- NOAA-14 satellites) and in the \``NOAA KLM User's
    Guide'' (NOAA-15 -- NOAA-16 satellites). You can find this manuals at

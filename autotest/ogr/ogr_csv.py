@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test OGR CSV driver functionality.
@@ -27,7 +26,14 @@
 # Boston, MA 02111-1307, USA.
 ###############################################################################
 
-import os
+import json
+import math
+import pathlib
+import sys
+
+# Needed since this script is forked by test_ogr_csv_write_to_stdout() and
+# run through regular python3
+sys.path.append("../pymod")
 
 import gdaltest
 import ogrtest
@@ -38,6 +44,13 @@ from osgeo import gdal, ogr, osr
 pytestmark = pytest.mark.require_driver("CSV")
 
 ###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
+###############################################################################
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -46,16 +59,14 @@ def startup_and_cleanup():
     yield
 
     try:
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        ogr.GetDriverByName("CSV").DeleteDataSource("tmp/csvwrk")
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            ogr.GetDriverByName("CSV").DeleteDataSource("tmp/csvwrk")
     except Exception:
         pass
 
     try:
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        ogr.GetDriverByName("CSV").DeleteDataSource("tmp/ogr_csv_29")
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            ogr.GetDriverByName("CSV").DeleteDataSource("tmp/ogr_csv_29")
     except Exception:
         pass
 
@@ -71,8 +82,7 @@ def ogr_csv_check_layer(lyr, expect_code_as_numeric):
     else:
         expect = ["8901", "8902", "8903", "8904"]
 
-    tr = ogrtest.check_features_against_list(lyr, "PRIME_MERIDIAN_CODE", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "PRIME_MERIDIAN_CODE", expect)
 
     lyr.ResetReading()
 
@@ -83,8 +93,7 @@ def ogr_csv_check_layer(lyr, expect_code_as_numeric):
         'Instituto Geografico "Augustin Cadazzi" (IGAC); Bogota',
     ]
 
-    tr = ogrtest.check_features_against_list(lyr, "INFORMATION_SOURCE", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "INFORMATION_SOURCE", expect)
 
     lyr.ResetReading()
 
@@ -97,14 +106,14 @@ def ogr_csv_check_layer(lyr, expect_code_as_numeric):
 def test_ogr_csv_2():
     csv_ds = ogr.Open("data/prime_meridian.csv")
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert csv_ds.CreateLayer("foo") is None
         assert csv_ds.DeleteLayer(0) != 0
 
     lyr = csv_ds.GetLayerByName("prime_meridian")
 
     f = ogr.Feature(lyr.GetLayerDefn())
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert lyr.CreateField(ogr.FieldDefn("foo")) != 0
         assert lyr.CreateFeature(f) != 0
 
@@ -158,52 +167,48 @@ def ogr_csv_copy_layer(csv_ds, csv_tmpds, layer_name, options):
 # Copy prime_meridian.csv to a new subtree under the tmp directory.
 
 
-def test_ogr_csv_3():
-    csv_ds = ogr.Open("data/prime_meridian.csv")
+@pytest.fixture()
+def csvwrk_ds(tmp_path):
 
-    #######################################################
-    # Ensure any old copy of our working datasource is cleaned up
-    try:
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        ogr.GetDriverByName("CSV").DeleteDataSource("tmp/csvwrk")
-        gdal.PopErrorHandler()
-    except Exception:
-        pass
+    src_ds = ogr.Open("data/prime_meridian.csv")
 
     #######################################################
     # Create CSV datasource (directory)
-    csv_tmpds = ogr.GetDriverByName("CSV").CreateDataSource("tmp/csvwrk")
+    csv_tmpds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_path / "csvwrk")
 
     #######################################################
     # Create layer (.csv file)
-    csv_lyr1 = ogr_csv_copy_layer(csv_ds, csv_tmpds, "pm1", None)
+    ogr_csv_copy_layer(src_ds, csv_tmpds, "pm1", None)
 
-    # No longer valid since we have editing capabilities
-    if False:  # pylint: disable=using-constant-test
-        # Check that we cannot add a new field now
-        assert csv_lyr1.TestCapability(ogr.OLCCreateField) == 0
-        field_defn = ogr.FieldDefn("dummy", ogr.OFTString)
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        ret = csv_lyr1.CreateField(field_defn)
-        gdal.PopErrorHandler()
-        assert ret != 0
+    return csv_tmpds
+
+
+@pytest.fixture()
+def csvwrk(csvwrk_ds):
+
+    dirname = csvwrk_ds.GetDescription()
+    csvwrk_ds.Close()
+
+    return pathlib.Path(dirname)
+
+
+def test_ogr_csv_3(csvwrk_ds):
 
     # Verify the some attributes read properly.
     #
     # NOTE: one weird thing is that in this pass the prime_meridian_code field
     # is typed as integer instead of string since it is created literally.
 
-    ogr_csv_check_layer(csv_lyr1, True)
+    ogr_csv_check_layer(csvwrk_ds.GetLayer(0), True)
 
 
-###############################################################################
-# Copy prime_meridian.csv again, in CRLF mode.
+def test_ogr_csv_5(csvwrk):
 
-
-def test_ogr_csv_5():
+    ###############################################################################
+    # Copy prime_meridian.csv again, in CRLF mode.
 
     csv_ds = ogr.Open("data/prime_meridian.csv")
-    csv_tmpds = ogr.Open("tmp/csvwrk", update=1)
+    csv_tmpds = ogr.Open(csvwrk, update=1)
 
     #######################################################
     # Create layer (.csv file)
@@ -220,17 +225,14 @@ def test_ogr_csv_5():
     # Verify the some attributes read properly.
     #
 
-    return ogr_csv_check_layer(csv_lyr2, True)
+    ogr_csv_check_layer(csv_lyr2, True)
 
+    ###############################################################################
+    # Delete a layer and verify it seems to have worked properly.
+    #
 
-###############################################################################
-# Delete a layer and verify it seems to have worked properly.
-#
-
-
-def test_ogr_csv_7():
-
-    csv_tmpds = ogr.Open("tmp/csvwrk", update=1)
+    csv_tmpds = None
+    csv_tmpds = ogr.Open(csvwrk, update=1)
 
     idx = 0
     while idx < csv_tmpds.GetLayerCount():
@@ -248,7 +250,7 @@ def test_ogr_csv_7():
         csv_tmpds.GetLayerCount() == 1 and csv_tmpds.GetLayer(0).GetName() == "pm2"
     ), "Layer not destroyed properly?"
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert csv_tmpds.DeleteLayer(-1) != 0
         assert csv_tmpds.DeleteLayer(csv_tmpds.GetLayerCount()) != 0
 
@@ -258,9 +260,9 @@ def test_ogr_csv_7():
 #
 
 
-def test_ogr_csv_8():
+def test_ogr_csv_8(csvwrk):
 
-    ds = ogr.Open("tmp/csvwrk", update=1)
+    ds = ogr.Open(csvwrk, update=1)
 
     lyr = ds.GetLayer(0)
 
@@ -271,22 +273,18 @@ def test_ogr_csv_8():
 
     lyr.CreateFeature(feat)
 
+    ###############################################################################
+    # Verify the some attributes read properly.
+    #
 
-###############################################################################
-# Verify the some attributes read properly.
-#
-
-
-def test_ogr_csv_9():
-
-    ds = ogr.Open("tmp/csvwrk", update=1)
+    ds = None
+    ds = ogr.Open(csvwrk, update=1)
 
     lyr = ds.GetLayer(0)
 
     expect = ["8901", "8902", "8903", "8904", "7000"]
 
-    tr = ogrtest.check_features_against_list(lyr, "PRIME_MERIDIAN_CODE", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "PRIME_MERIDIAN_CODE", expect)
 
     lyr.ResetReading()
 
@@ -298,8 +296,7 @@ def test_ogr_csv_9():
         "This is a newline test\n",
     ]
 
-    tr = ogrtest.check_features_against_list(lyr, "INFORMATION_SOURCE", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "INFORMATION_SOURCE", expect)
 
 
 ###############################################################################
@@ -307,7 +304,7 @@ def test_ogr_csv_9():
 #
 
 
-def test_ogr_csv_10():
+def test_ogr_csv_10(csvwrk):
 
     csv_ds = ogr.Open("data/prime_meridian.csv")
     lyr = csv_ds.GetLayerByName("prime_meridian")
@@ -342,7 +339,7 @@ def test_ogr_csv_10():
         "DeleteLayer"
     ), "should not have deletelayer on readonly ds."
 
-    csv_tmpds = ogr.Open("tmp/csvwrk", update=1)
+    csv_tmpds = ogr.Open(csvwrk, update=1)
     lyr = csv_tmpds.GetLayer(0)
 
     assert lyr.TestCapability(
@@ -366,20 +363,17 @@ def ogr_csv_check_testcsvt(lyr):
     lyr.ResetReading()
 
     expect = [12, None]
-    tr = ogrtest.check_features_against_list(lyr, "INTCOL", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "INTCOL", expect)
 
     lyr.ResetReading()
 
     expect = [5.7, None]
-    tr = ogrtest.check_features_against_list(lyr, "REALCOL", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "REALCOL", expect)
 
     lyr.ResetReading()
 
     expect = ["foo", ""]
-    tr = ogrtest.check_features_against_list(lyr, "STRINGCOL", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "STRINGCOL", expect)
 
     lyr.ResetReading()
     feat = lyr.GetNextFeature()
@@ -440,20 +434,22 @@ def ogr_csv_check_testcsvt(lyr):
 
 def test_ogr_csv_11():
 
-    csv_ds = ogr.Open("data/csv/testcsvt.csv")
+    csv_ds = gdal.OpenEx("data/csv/testcsvt.csv")
 
     assert csv_ds is not None
 
+    assert csv_ds.GetFileList() == ["data/csv/testcsvt.csv", "data/csv/testcsvt.csvt"]
+
     lyr = csv_ds.GetLayerByName("testcsvt")
 
-    return ogr_csv_check_testcsvt(lyr)
+    ogr_csv_check_testcsvt(lyr)
 
 
 ###############################################################################
 # Verify CREATE_CSVT=YES option
 
 
-def test_ogr_csv_12():
+def test_ogr_csv_12(csvwrk):
 
     csv_ds = ogr.Open("data/csv/testcsvt.csv")
     srclyr = csv_ds.GetLayerByName("testcsvt")
@@ -463,16 +459,15 @@ def test_ogr_csv_12():
     options = [
         "CREATE_CSVT=YES",
     ]
-    csv_tmpds = ogr.Open("tmp/csvwrk", update=1)
+    csv_tmpds = ogr.Open(csvwrk, update=1)
     csv_lyr2 = csv_tmpds.CreateLayer("testcsvt_copy", options=options)
 
     #######################################################
     # Setup Schema
     for i in range(srclyr.GetLayerDefn().GetFieldCount()):
         field_defn = srclyr.GetLayerDefn().GetFieldDefn(i)
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        csv_lyr2.CreateField(field_defn)
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            csv_lyr2.CreateField(field_defn)
 
     #######################################################
     # Recopy source layer into destination layer
@@ -489,7 +484,7 @@ def test_ogr_csv_12():
 
         feat = srclyr.GetNextFeature()
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert csv_tmpds.CreateLayer("testcsvt_copy") is None
 
     #######################################################
@@ -497,7 +492,7 @@ def test_ogr_csv_12():
     csv_tmpds = None
 
     csv_ds = None
-    csv_ds = ogr.Open("tmp/csvwrk/testcsvt_copy.csv")
+    csv_ds = ogr.Open(csvwrk / "testcsvt_copy.csv")
 
     #######################################################
     # Checks copy
@@ -505,16 +500,16 @@ def test_ogr_csv_12():
 
     lyr = csv_ds.GetLayerByName("testcsvt_copy")
 
-    return ogr_csv_check_testcsvt(lyr)
+    ogr_csv_check_testcsvt(lyr)
 
 
 ###############################################################################
 # Verify GEOMETRY=AS_WKT,AS_XY,AS_XYZ,AS_YX options
 
 
-def test_ogr_csv_13():
+def test_ogr_csv_13(csvwrk):
 
-    csv_tmpds = ogr.Open("tmp/csvwrk", update=1)
+    csv_tmpds = ogr.Open(csvwrk, update=1)
 
     # AS_WKT
     options = ["GEOMETRY=AS_WKT", "CREATE_CSVT=YES"]
@@ -584,26 +579,23 @@ def test_ogr_csv_13():
     #######################################################
     # Closes everything and reopen
     csv_tmpds = None
-    csv_tmpds = ogr.Open("tmp/csvwrk")
+    csv_tmpds = ogr.Open(csvwrk)
 
     # Test AS_WKT
     lyr = csv_tmpds.GetLayerByName("as_wkt")
 
     expect = ["POINT (1 2)"]
-    tr = ogrtest.check_features_against_list(lyr, "WKT", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "WKT", expect)
 
     lyr.ResetReading()
     expect = ["avalue"]
-    tr = ogrtest.check_features_against_list(lyr, "ADATA", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "ADATA", expect)
 
     # Test as_wkt_no_field
     lyr = csv_tmpds.GetLayerByName("as_wkt_no_field")
 
     expect = ["POINT (1 2)"]
-    tr = ogrtest.check_features_against_list(lyr, "WKT", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "WKT", expect)
 
     # Test AS_XY
     lyr = csv_tmpds.GetLayerByName("as_xy")
@@ -611,18 +603,15 @@ def test_ogr_csv_13():
     assert lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "X"
 
     expect = [1, None]
-    tr = ogrtest.check_features_against_list(lyr, "X", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "X", expect)
 
     lyr.ResetReading()
     expect = [2, None]
-    tr = ogrtest.check_features_against_list(lyr, "Y", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "Y", expect)
 
     lyr.ResetReading()
     expect = ["avalue", "avalue"]
-    tr = ogrtest.check_features_against_list(lyr, "ADATA", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "ADATA", expect)
 
     # Test AS_YX
     lyr = csv_tmpds.GetLayerByName("as_yx")
@@ -630,13 +619,11 @@ def test_ogr_csv_13():
     assert lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "Y"
 
     expect = [1]
-    tr = ogrtest.check_features_against_list(lyr, "X", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "X", expect)
 
     lyr.ResetReading()
     expect = [2]
-    tr = ogrtest.check_features_against_list(lyr, "Y", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "Y", expect)
 
     # Test AS_XYZ
     lyr = csv_tmpds.GetLayerByName("as_xyz")
@@ -644,27 +631,24 @@ def test_ogr_csv_13():
     assert lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "X"
 
     expect = [1]
-    tr = ogrtest.check_features_against_list(lyr, "X", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "X", expect)
 
     lyr.ResetReading()
     expect = [2]
-    tr = ogrtest.check_features_against_list(lyr, "Y", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "Y", expect)
 
     lyr.ResetReading()
     expect = [3]
-    tr = ogrtest.check_features_against_list(lyr, "Z", expect)
-    assert tr
+    ogrtest.check_features_against_list(lyr, "Z", expect)
 
 
 ###############################################################################
 # Copy prime_meridian.csv again, with SEMICOLON as separator
 
 
-def test_ogr_csv_14():
+def test_ogr_csv_14(csvwrk):
 
-    csv_tmpds = ogr.Open("tmp/csvwrk", update=1)
+    csv_tmpds = ogr.Open(csvwrk, update=1)
     csv_ds = ogr.Open("data/prime_meridian.csv")
 
     #######################################################
@@ -680,18 +664,15 @@ def test_ogr_csv_14():
 
     ogr_csv_check_layer(csv_lyr1, True)
 
+    ###############################################################################
+    # Close the file and check again
+    #
 
-###############################################################################
-# Close the file and check again
-#
-
-
-def test_ogr_csv_16():
-
-    ds = ogr.Open("tmp/csvwrk")
+    ds = None
+    ds = ogr.Open(csvwrk)
     csv_lyr1 = ds.GetLayerByName("pm3")
 
-    return ogr_csv_check_layer(csv_lyr1, False)
+    ogr_csv_check_layer(csv_lyr1, False)
 
 
 ###############################################################################
@@ -714,14 +695,14 @@ def test_ogr_csv_17():
         == "POLYGON((6.25 1.25,7.25 1.25,7.25 2.25,6.25 2.25,6.25 1.25))"
     ), "feature 1: expected wkt value"
 
-    assert not ogrtest.check_feature_geometry(
+    ogrtest.check_feature_geometry(
         feat, "POLYGON((6.25 1.25,7.25 1.25,7.25 2.25,6.25 2.25,6.25 1.25))"
     )
 
     feat = csv_lyr.GetNextFeature()
 
     feat = csv_lyr.GetNextFeature()
-    assert not ogrtest.check_feature_geometry(
+    ogrtest.check_feature_geometry(
         feat, "POLYGON((1.001 1.001,3.999 3.999,3.2 1.6,1.001 1.001))"
     )
 
@@ -730,10 +711,31 @@ def test_ogr_csv_17():
 # Write to /vsistdout/
 
 
-def test_ogr_csv_18():
+def test_ogr_csv_write_to_stdout():
 
+    if gdaltest.is_travis_branch("sanitize"):
+        pytest.skip("fails on sanitize for unknown reason")
+
+    python_exe = sys.executable
+    if sys.platform == "win32":
+        python_exe = python_exe.replace("\\", "/")
+
+    ret = gdaltest.runexternal(python_exe + " ogr_csv.py ogr_csv_write_to_stdout")
+    assert (
+        ret.replace("\r\n", "\n")
+        == """my_geom,foo,bar
+"POINT (0 1)",bar,baz
+"""
+    )
+
+
+def ogr_csv_write_to_stdout():
     ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsistdout/")
-    lyr = ds.CreateLayer("foo", options=["GEOMETRY=AS_WKT"])
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    lyr = ds.CreateLayer(
+        "foo", srs=srs, options=["GEOMETRY=AS_WKT", "GEOMETRY_NAME=my_geom"]
+    )
     lyr.CreateField(ogr.FieldDefn("foo"))
     lyr.CreateField(ogr.FieldDefn("bar"))
     feat = ogr.Feature(feature_def=lyr.GetLayerDefn())
@@ -757,16 +759,16 @@ def test_ogr_csv_19():
     lyr = csv_ds.GetLayerByName("testnull")
 
     lyr.ResetReading()
-    with gdaltest.error_handler():
-        assert ogrtest.check_features_against_list(lyr, "INTCOL", [12])
+    with gdal.quiet_errors():
+        ogrtest.check_features_against_list(lyr, "INTCOL", [12])
     lyr.ResetReading()
-    assert ogrtest.check_features_against_list(lyr, "REALCOL", [5.7])
+    ogrtest.check_features_against_list(lyr, "REALCOL", [5.7])
     lyr.ResetReading()
-    assert ogrtest.check_features_against_list(lyr, "INTCOL2", [None])
+    ogrtest.check_features_against_list(lyr, "INTCOL2", [None])
     lyr.ResetReading()
-    assert ogrtest.check_features_against_list(lyr, "REALCOL2", [None])
+    ogrtest.check_features_against_list(lyr, "REALCOL2", [None])
     lyr.ResetReading()
-    assert ogrtest.check_features_against_list(lyr, "STRINGCOL", ["foo"])
+    ogrtest.check_features_against_list(lyr, "STRINGCOL", ["foo"])
 
 
 ###############################################################################
@@ -870,9 +872,9 @@ def test_ogr_csv_22():
     assert fld0_name == "id", "bad field name"
 
 
-def test_ogr_csv_23():
+def test_ogr_csv_23(csvwrk):
     # create a CSV file with UTF8 BOM
-    ds = ogr.Open("tmp/csvwrk", update=1)
+    ds = ogr.Open(csvwrk, update=1)
     lyr = ds.CreateLayer("utf8", options=["WRITE_BOM=YES", "GEOMETRY=AS_WKT"])
     lyr.CreateField(ogr.FieldDefn("foo", ogr.OFTInteger))
     lyr.CreateField(ogr.FieldDefn("bar", ogr.OFTString))
@@ -887,11 +889,11 @@ def test_ogr_csv_23():
     lyr = None
     ds = None
 
-    data = open("tmp/csvwrk/utf8.csv", "rb").read()
+    data = open(csvwrk / "utf8.csv", "rb").read()
     assert data[:6] == b"\xef\xbb\xbfWKT", "No UTF8 BOM header on output"
 
     # create a CSV file without UTF8 BOM
-    ds = ogr.Open("tmp/csvwrk", update=1)
+    ds = ogr.Open(csvwrk, update=1)
     lyr = ds.CreateLayer("utf8no", options=["WRITE_BOM=YES", "GEOMETRY=AS_WKT"])
     lyr.CreateField(ogr.FieldDefn("foo", ogr.OFTInteger))
     lyr.CreateField(ogr.FieldDefn("bar", ogr.OFTString))
@@ -906,7 +908,7 @@ def test_ogr_csv_23():
     lyr = None
     ds = None
 
-    data = open("tmp/csvwrk/utf8no.csv", "rb").read()
+    data = open(csvwrk / "utf8no.csv", "rb").read()
     assert data[:3] != "\xef\xbb\xbfWKT", "Found UTF8 BOM header on output!"
 
 
@@ -914,14 +916,14 @@ def test_ogr_csv_23():
 # Test single column CSV files
 
 
-def test_ogr_csv_24():
+def test_ogr_csv_24(tmp_vsimem):
 
     # Create an invalid CSV file
-    f = gdal.VSIFOpenL("/vsimem/invalid.csv", "wb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "invalid.csv", "wb")
     gdal.VSIFCloseL(f)
 
     # and check that it doesn't prevent from creating a new CSV file (#4824)
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/single.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "single.csv")
     lyr = ds.CreateLayer("single")
     lyr.CreateField(ogr.FieldDefn("foo", ogr.OFTString))
     feat = ogr.Feature(lyr.GetLayerDefn())
@@ -933,7 +935,7 @@ def test_ogr_csv_24():
     lyr = None
     ds = None
 
-    ds = ogr.Open("/vsimem/single.csv")
+    ds = ogr.Open(tmp_vsimem / "single.csv")
     lyr = ds.GetLayer(0)
     assert lyr.GetLayerDefn().GetFieldCount() == 1
     feat = lyr.GetNextFeature()
@@ -942,16 +944,13 @@ def test_ogr_csv_24():
     assert feat.GetField(0) == "bar"
     ds = None
 
-    gdal.Unlink("/vsimem/single.csv")
-    gdal.Unlink("/vsimem/invalid.csv")
-
 
 ###############################################################################
 # Test newline handling (#4452)
 
 
-def test_ogr_csv_25():
-    ds = ogr.Open("tmp/csvwrk", update=1)
+def test_ogr_csv_25(csvwrk):
+    ds = ogr.Open(csvwrk, update=1)
     lyr = ds.CreateLayer(
         "newlines", options=["LINEFORMAT=LF"]
     )  # just in case tests are run on windows...
@@ -964,9 +963,9 @@ def test_ogr_csv_25():
     lyr = None
     ds = None
 
-    EXPECTED = 'foo,\n"windows newline:\r\nlinux newline:\nend of string:"\n'
+    EXPECTED = 'foo\n"windows newline:\r\nlinux newline:\nend of string:"\n'
 
-    data = open("tmp/csvwrk/newlines.csv", "rb").read().decode("ascii")
+    data = open(csvwrk / "newlines.csv", "rb").read().decode("ascii")
     assert data == EXPECTED, "Newlines changed:\n\texpected=%s\n\tgot=     %s" % (
         repr(EXPECTED),
         repr(data),
@@ -977,8 +976,8 @@ def test_ogr_csv_25():
 # Test number padding behaviour (#4469)
 
 
-def test_ogr_csv_26():
-    ds = ogr.Open("tmp/csvwrk", update=1)
+def test_ogr_csv_26(csvwrk):
+    ds = ogr.Open(csvwrk, update=1)
     lyr = ds.CreateLayer(
         "num_padding", options=["LINEFORMAT=LF"]
     )  # just in case tests are run on windows...
@@ -999,9 +998,9 @@ def test_ogr_csv_26():
     lyr = None
     ds = None
 
-    EXPECTED = "foo,\n10.5000000000000000000000000\n"
+    EXPECTED = "foo\n10.5000000000000000000000000\n"
 
-    data = open("tmp/csvwrk/num_padding.csv", "rb").read().decode("ascii")
+    data = open(csvwrk / "num_padding.csv", "rb").read().decode("ascii")
     assert data == EXPECTED, "expected=%s got= %s" % (repr(EXPECTED), repr(data))
 
 
@@ -1052,20 +1051,18 @@ def test_ogr_csv_27():
 # Check that we don't rewrite erroneously a file that has no header (#5161).
 
 
-def test_ogr_csv_28():
+def test_ogr_csv_28(tmp_path):
 
-    f = open("tmp/ogr_csv_28.csv", "wb")
+    f = open(tmp_path / "ogr_csv_28.csv", "wb")
     f.write("1,2\n".encode("ascii"))
     f.close()
 
-    ds = ogr.Open("tmp/ogr_csv_28.csv", update=1)
+    ds = ogr.Open(tmp_path / "ogr_csv_28.csv", update=1)
     del ds
 
-    f = open("tmp/ogr_csv_28.csv", "rb")
+    f = open(tmp_path / "ogr_csv_28.csv", "rb")
     data = f.read().decode("ascii")
     f.close()
-
-    os.unlink("tmp/ogr_csv_28.csv")
 
     assert data == "1,2\n"
 
@@ -1074,10 +1071,10 @@ def test_ogr_csv_28():
 # Check multi geometry field support
 
 
-def test_ogr_csv_29():
+def test_ogr_csv_29(tmp_path):
 
     ds = ogr.GetDriverByName("CSV").CreateDataSource(
-        "tmp/ogr_csv_29", options=["GEOMETRY=AS_WKT"]
+        tmp_path / "ogr_csv_29", options=["GEOMETRY=AS_WKT"]
     )
     assert ds.TestCapability(ogr.ODsCCurveGeometries) == 1
     lyr = ds.CreateLayer("test", geom_type=ogr.wkbNone)
@@ -1091,7 +1088,7 @@ def test_ogr_csv_29():
         )
         == 0
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             lyr.CreateGeomField(
                 ogr.GeomFieldDefn("geom__WKT_lyr2_EPSG_32632", ogr.wkbPolygon)
@@ -1100,7 +1097,7 @@ def test_ogr_csv_29():
         )
     ds = None
 
-    ds = ogr.Open("tmp/ogr_csv_29", update=1)
+    ds = ogr.Open(tmp_path / "ogr_csv_29", update=1)
     lyr = ds.GetLayerByName("test")
     feat = ogr.Feature(lyr.GetLayerDefn())
     feat.SetGeomField(0, ogr.CreateGeometryFromWkt("POINT (1 2)"))
@@ -1108,7 +1105,7 @@ def test_ogr_csv_29():
     lyr.CreateFeature(feat)
     ds = None
 
-    ds = ogr.Open("tmp/ogr_csv_29")
+    ds = ogr.Open(tmp_path / "ogr_csv_29")
     lyr = ds.GetLayerByName("test")
     assert lyr.GetLayerDefn().GetGeomFieldCount() == 2
     srs = lyr.GetLayerDefn().GetGeomFieldDefn(0).GetSpatialRef()
@@ -1126,20 +1123,16 @@ def test_ogr_csv_29():
         pytest.fail()
     ds = None
 
-
-###############################################################################
-# Run test_ogrsf
-
-
-def test_ogr_csv_30():
+    ###############################################################################
+    # Run test_ogrsf
 
     import test_cli_utilities
 
     if test_cli_utilities.get_test_ogrsf_path() is None:
-        pytest.skip()
+        return
 
     ret = gdaltest.runexternal(
-        test_cli_utilities.get_test_ogrsf_path() + " tmp/ogr_csv_29"
+        test_cli_utilities.get_test_ogrsf_path() + f" {tmp_path}/ogr_csv_29"
     )
 
     assert ret.find("INFO") != -1 and ret.find("ERROR") == -1
@@ -1238,7 +1231,7 @@ def test_ogr_csv_32():
 
     check_size_limit_0()
     with gdaltest.config_option("OGR_CSV_SIMULATE_VSISTDIN", "YES"):
-        with gdaltest.error_handler():  # a warning will be emitted
+        with gdal.quiet_errors():  # a warning will be emitted
             check_size_limit_0()
 
     # We limit to the first "1.5" line
@@ -1520,26 +1513,28 @@ def test_ogr_csv_32():
         )
         lyr = ds.GetLayer(0)
         gdal.ErrorReset()
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        lyr.GetFeature(fid)
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            lyr.GetFeature(fid)
         if gdal.GetLastErrorType() != gdal.CE_Warning:
             f.DumpReadable()
             pytest.fail(fid)
 
+
+def test_ogr_csv_32bis(tmp_vsimem):
+
     # Test Real -> Integer64 (https://github.com/OSGeo/gdal/issues/343)
     gdal.FileFromMemBuffer(
-        "/vsimem/testtypeautodetect.csv",
+        tmp_vsimem / "testtypeautodetect.csv",
         """foo,bar
 1.2,
 1234567890123,""",
     )
     ds = gdal.OpenEx(
-        "/vsimem/testtypeautodetect.csv",
+        tmp_vsimem / "testtypeautodetect.csv",
         gdal.OF_VECTOR,
         open_options=["AUTODETECT_TYPE=YES"],
     )
-    gdal.Unlink("/vsimem/testtypeautodetect.csv")
+
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     if f.GetField(0) != 1.2:
@@ -1587,7 +1582,7 @@ def test_ogr_csv_autodetect_type_only_strings():
 # Test Boolean, Int16 and Float32 support
 
 
-def test_ogr_csv_33():
+def test_ogr_csv_33(tmp_vsimem):
 
     ds = gdal.OpenEx(
         "data/csv/testtypeautodetectboolean.csv",
@@ -1610,7 +1605,7 @@ def test_ogr_csv_33():
             pytest.fail("Field %d" % i)
     ds = None
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/subtypes.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "subtypes.csv")
     lyr = ds.CreateLayer("test", options=["CREATE_CSVT=YES"])
     fld = ogr.FieldDefn("b", ogr.OFTInteger)
     fld.SetSubType(ogr.OFSTBoolean)
@@ -1629,7 +1624,7 @@ def test_ogr_csv_33():
     f = None
     ds = None
 
-    ds = ogr.Open("/vsimem/subtypes.csv")
+    ds = ogr.Open(tmp_vsimem / "subtypes.csv")
     lyr = ds.GetLayer(0)
     assert (
         lyr.GetLayerDefn().GetFieldDefn(0).GetType() == ogr.OFTInteger
@@ -1649,15 +1644,12 @@ def test_ogr_csv_33():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/subtypes.csv")
-    gdal.Unlink("/vsimem/subtypes.csvt")
-
 
 ###############################################################################
 # Test Integer64 support
 
 
-def test_ogr_csv_34():
+def test_ogr_csv_34(tmp_vsimem):
 
     ds = gdal.OpenEx(
         "data/csv/testtypeautodetectinteger64.csv",
@@ -1679,7 +1671,7 @@ def test_ogr_csv_34():
             pytest.fail("Field %d" % i)
     ds = None
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/int64.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "int64.csv")
     lyr = ds.CreateLayer("test", options=["CREATE_CSVT=YES"])
     fld = ogr.FieldDefn("int64", ogr.OFTInteger64)
     lyr.CreateField(fld)
@@ -1689,7 +1681,7 @@ def test_ogr_csv_34():
     f = None
     ds = None
 
-    ds = ogr.Open("/vsimem/int64.csv")
+    ds = ogr.Open(tmp_vsimem / "int64.csv")
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     if f.GetField(0) != 10000000000:
@@ -1697,25 +1689,24 @@ def test_ogr_csv_34():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/int64.csv")
-    gdal.Unlink("/vsimem/int64.csvt")
-
 
 ###############################################################################
 # Test comma separator
 
 
-def test_ogr_csv_35():
+def test_ogr_csv_35(tmp_vsimem):
 
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_35.csv",
+        tmp_vsimem / "ogr_csv_35.csv",
         """FIELD_1  "FIELD 2" FIELD_3
 VAL1   "VAL 2"   "VAL 3"
 """,
     )
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_35.csv", gdal.OF_VECTOR, open_options=["MERGE_SEPARATOR=YES"]
+        tmp_vsimem / "ogr_csv_35.csv",
+        gdal.OF_VECTOR,
+        open_options=["MERGE_SEPARATOR=YES"],
     )
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
@@ -1724,9 +1715,10 @@ VAL1   "VAL 2"   "VAL 3"
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_35.csv")
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/ogr_csv_35.csv")
+def test_ogr_csv_35bis(tmp_vsimem):
+
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "ogr_csv_35.csv")
     lyr = ds.CreateLayer("ogr_csv_35", options=["SEPARATOR=SPACE"])
     lyr.CreateField(ogr.FieldDefn("FIELD_1", ogr.OFTString))
     lyr.CreateField(ogr.FieldDefn("FIELD 2", ogr.OFTString))
@@ -1736,23 +1728,21 @@ VAL1   "VAL 2"   "VAL 3"
     lyr.CreateFeature(f)
     ds = None
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_csv_35.csv", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_csv_35.csv", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
     assert 'FIELD_1 "FIELD 2"' in data and 'VAL1 "VAL 2"' in data
-
-    gdal.Unlink("/vsimem/ogr_csv_35.csv")
 
 
 ###############################################################################
 # Test GEOM_POSSIBLE_NAMES open option
 
 
-def test_ogr_csv_36():
+def test_ogr_csv_36(tmp_vsimem):
 
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_36.csv",
+        tmp_vsimem / "ogr_csv_36.csv",
         """id,mygeometry,format
 1,"POINT(1 2)",wkt
 2,"{""type"": ""Point"", ""coordinates"" : [2, 49]}",geojson
@@ -1763,7 +1753,7 @@ def test_ogr_csv_36():
     )
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_36.csv",
+        tmp_vsimem / "ogr_csv_36.csv",
         gdal.OF_VECTOR,
         open_options=["GEOM_POSSIBLE_NAMES=mygeometry,another_field"],
     )
@@ -1797,7 +1787,7 @@ def test_ogr_csv_36():
 
     # Test prefix* pattern
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_36.csv",
+        tmp_vsimem / "ogr_csv_36.csv",
         gdal.OF_VECTOR,
         open_options=["GEOM_POSSIBLE_NAMES=mygeom*"],
     )
@@ -1810,7 +1800,7 @@ def test_ogr_csv_36():
 
     # Test *suffix pattern
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_36.csv",
+        tmp_vsimem / "ogr_csv_36.csv",
         gdal.OF_VECTOR,
         open_options=["GEOM_POSSIBLE_NAMES=*geometry"],
     )
@@ -1823,7 +1813,7 @@ def test_ogr_csv_36():
 
     # Test *middle* pattern
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_36.csv",
+        tmp_vsimem / "ogr_csv_36.csv",
         gdal.OF_VECTOR,
         open_options=["GEOM_POSSIBLE_NAMES=*geom*"],
     )
@@ -1836,7 +1826,7 @@ def test_ogr_csv_36():
 
     # Test non matching pattern
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_36.csv",
+        tmp_vsimem / "ogr_csv_36.csv",
         gdal.OF_VECTOR,
         open_options=["GEOM_POSSIBLE_NAMES=bla"],
     )
@@ -1846,7 +1836,7 @@ def test_ogr_csv_36():
 
     # Check KEEP_GEOM_COLUMNS=NO
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_36.csv",
+        tmp_vsimem / "ogr_csv_36.csv",
         gdal.OF_VECTOR,
         open_options=["GEOM_POSSIBLE_NAMES=mygeometry", "KEEP_GEOM_COLUMNS=NO"],
     )
@@ -1862,17 +1852,15 @@ def test_ogr_csv_36():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_36.csv")
-
 
 ###############################################################################
 # Test X_POSSIBLE_NAMES, Y_POSSIBLE_NAMES and Z_POSSIBLE_NAMES open options
 
 
-def test_ogr_csv_37():
+def test_ogr_csv_37(tmp_vsimem):
 
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_37.csv",
+        tmp_vsimem / "ogr_csv_37.csv",
         """id,y,other,x,z
 1,49,a,2,"100,5"
 2,"50,5",b,"3,5",
@@ -1882,7 +1870,7 @@ def test_ogr_csv_37():
     )
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_37.csv",
+        tmp_vsimem / "ogr_csv_37.csv",
         gdal.OF_VECTOR,
         open_options=["X_POSSIBLE_NAMES=long,x", "Y_POSSIBLE_NAMES=lat,y"],
     )
@@ -1914,7 +1902,7 @@ def test_ogr_csv_37():
 
     # Check Z_POSSIBLE_NAMES
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_37.csv",
+        tmp_vsimem / "ogr_csv_37.csv",
         gdal.OF_VECTOR,
         open_options=[
             "X_POSSIBLE_NAMES=long,x",
@@ -1946,7 +1934,7 @@ def test_ogr_csv_37():
 
     # Check KEEP_GEOM_COLUMNS=NO
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_37.csv",
+        tmp_vsimem / "ogr_csv_37.csv",
         gdal.OF_VECTOR,
         open_options=[
             "X_POSSIBLE_NAMES=long,x",
@@ -1966,16 +1954,14 @@ def test_ogr_csv_37():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_37.csv")
-
 
 ###############################################################################
 # Test GeoCSV WKT type
 
 
-def test_ogr_csv_38():
+def test_ogr_csv_38(tmp_vsimem):
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/ogr_csv_38.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "ogr_csv_38.csv")
     srs = osr.SpatialReference()
     srs.SetFromUserInput("EPSG:4326")
     lyr = ds.CreateLayer(
@@ -1990,7 +1976,7 @@ def test_ogr_csv_38():
     lyr.CreateFeature(f)
     ds = None
 
-    ds = ogr.Open("/vsimem/ogr_csv_38.csv")
+    ds = ogr.Open(tmp_vsimem / "ogr_csv_38.csv")
     lyr = ds.GetLayer(0)
     assert lyr.GetLayerDefn().GetGeomFieldDefn(0).GetName() == "geom_mygeom"
     assert (
@@ -2007,18 +1993,14 @@ def test_ogr_csv_38():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_38.csv")
-    gdal.Unlink("/vsimem/ogr_csv_38.csvt")
-    gdal.Unlink("/vsimem/ogr_csv_38.prj")
-
 
 ###############################################################################
 # Test GeoCSV CoordX and CoordY types
 
 
-def test_ogr_csv_39():
+def test_ogr_csv_39(tmp_vsimem):
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/ogr_csv_39.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "ogr_csv_39.csv")
     lyr = ds.CreateLayer("ogr_csv_38", options=["GEOMETRY=AS_XY", "CREATE_CSVT=YES"])
     lyr.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
     f = ogr.Feature(lyr.GetLayerDefn())
@@ -2027,7 +2009,7 @@ def test_ogr_csv_39():
     lyr.CreateFeature(f)
     ds = None
 
-    ds = ogr.Open("/vsimem/ogr_csv_39.csv")
+    ds = ogr.Open(tmp_vsimem / "ogr_csv_39.csv")
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     if f.GetGeometryRef().ExportToWkt() != "POINT (2 49)":
@@ -2035,25 +2017,22 @@ def test_ogr_csv_39():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_39.csv")
-    gdal.Unlink("/vsimem/ogr_csv_39.csvt")
-
 
 ###############################################################################
 # Test X_POSSIBLE_NAMES, Y_POSSIBLE_NAMES, GEOM_POSSIBLE_NAMES and KEEP_GEOM_COLUMNS=NO together (#6137)
 
 
-def test_ogr_csv_40():
+def test_ogr_csv_40(tmp_vsimem):
 
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_40.csv",
+        tmp_vsimem / "ogr_csv_40.csv",
         """latitude,longitude,the_geom,id
 49,2,0101000020E61000004486E281C5C257C068B89DDA998F4640,1
 """,
     )
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_40.csv",
+        tmp_vsimem / "ogr_csv_40.csv",
         gdal.OF_VECTOR,
         open_options=[
             "X_POSSIBLE_NAMES=longitude",
@@ -2074,17 +2053,17 @@ def test_ogr_csv_40():
     f = lyr.GetNextFeature()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_40.csv")
+    gdal.Unlink(tmp_vsimem / "ogr_csv_40.csv")
 
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_40.csv",
+        tmp_vsimem / "ogr_csv_40.csv",
         """the_geom,latitude,longitude,id
 0101000020E61000004486E281C5C257C068B89DDA998F4640,49,2,1
 """,
     )
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_40.csv",
+        tmp_vsimem / "ogr_csv_40.csv",
         gdal.OF_VECTOR,
         open_options=[
             "X_POSSIBLE_NAMES=longitude",
@@ -2106,24 +2085,22 @@ def test_ogr_csv_40():
     f = lyr.GetNextFeature()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_40.csv")
-
 
 ###############################################################################
 # Test GEOM_POSSIBLE_NAMES and KEEP_GEOM_COLUMNS=NO together with empty content in geom column (#6152)
 
 
-def test_ogr_csv_41():
+def test_ogr_csv_41(tmp_vsimem):
 
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_41.csv",
+        tmp_vsimem / "ogr_csv_41.csv",
         """id,the_geom,foo
 1,,bar
 """,
     )
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_41.csv",
+        tmp_vsimem / "ogr_csv_41.csv",
         gdal.OF_VECTOR,
         open_options=["GEOM_POSSIBLE_NAMES=the_geom", "KEEP_GEOM_COLUMNS=NO"],
     )
@@ -2134,16 +2111,14 @@ def test_ogr_csv_41():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_41.csv")
-
 
 ###############################################################################
 # Test writing field with empty content
 
 
-def test_ogr_csv_42():
+def test_ogr_csv_42(tmp_vsimem):
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/ogr_csv_42.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "ogr_csv_42.csv")
     lyr = ds.CreateLayer("ogr_csv_42")
     lyr.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
     lyr.CreateField(ogr.FieldDefn("foo", ogr.OFTInteger))
@@ -2152,16 +2127,14 @@ def test_ogr_csv_42():
     assert lyr.CreateFeature(f) == 0
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_42.csv")
-
 
 ###############################################################################
 # Test editing capabilities
 
 
-def test_ogr_csv_43():
+def test_ogr_csv_43(tmp_vsimem):
 
-    filename = "/vsimem/ogr_csv_43.csv"
+    filename = tmp_vsimem / "ogr_csv_43.csv"
     ds = ogr.GetDriverByName("CSV").CreateDataSource(filename)
     lyr = ds.CreateLayer("ogr_csv_43", options=["GEOMETRY=AS_WKT", "CREATE_CSVT=YES"])
     lyr.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
@@ -2179,7 +2152,7 @@ def test_ogr_csv_43():
 
     assert lyr.TestCapability(ogr.OLCCreateField) == 1
     assert lyr.CreateField(ogr.FieldDefn("foo", ogr.OFTString)) == 0
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert lyr.CreateField(ogr.FieldDefn("foo", ogr.OFTString)) != 0
     f = lyr.GetFeature(1)
     f.SetField("foo", "bar")
@@ -2218,7 +2191,7 @@ def test_ogr_csv_43():
     assert f.GetGeometryRef().ExportToWkt() == "POINT (2 49)"
 
     # Invalid index
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert lyr.UpdateFeature(f, [-1], [], False) == ogr.OGRERR_FAILURE
         assert (
             lyr.UpdateFeature(f, [lyr.GetLayerDefn().GetFieldCount()], [], False)
@@ -2288,7 +2261,7 @@ def test_ogr_csv_43():
         pytest.fail()
     f = None
     assert lyr.TestCapability(ogr.OLCDeleteField) == 1
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert lyr.DeleteField(-1) != 0
     assert lyr.DeleteField(lyr.GetLayerDefn().GetFieldIndex("foo")) == 0
     assert lyr.TestCapability(ogr.OLCDeleteFeature) == 1
@@ -2333,9 +2306,9 @@ def test_ogr_csv_43():
     assert lyr.DeleteFeature(f.GetFID()) == 0
     assert lyr.GetFeatureCount() == 2
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         lyr.SetSpatialFilter(-1, None)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         lyr.SetSpatialFilter(1, None)
     lyr.SetSpatialFilterRect(0, 0, 100, 100)
     lyr.SetSpatialFilterRect(0, 0, 0, 100, 100)
@@ -2344,7 +2317,7 @@ def test_ogr_csv_43():
     assert lyr.GetFeatureCount() == 1
     assert lyr.GetExtent() == (2.0, 2.0, 49.0, 49.0)
     assert lyr.GetExtent(geom_field=0) == (2.0, 2.0, 49.0, 49.0)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         lyr.GetExtent(geom_field=-1)
     lyr.SetAttributeFilter(None)
 
@@ -2359,13 +2332,13 @@ def test_ogr_csv_43():
 
     assert lyr.TestCapability(ogr.OLCReorderFields) == 1
     assert lyr.ReorderFields([0, 1]) == 0
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert lyr.ReorderFields([0, -1]) != 0
 
     assert lyr.TestCapability(ogr.OLCAlterFieldDefn) == 1
     fld_defn = lyr.GetLayerDefn().GetFieldDefn(0)
     assert lyr.AlterFieldDefn(0, fld_defn, 0) == 0
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert lyr.AlterFieldDefn(-1, fld_defn, 0) != 0
 
     f = lyr.GetFeature(2)
@@ -2394,17 +2367,14 @@ def test_ogr_csv_43():
     assert lyr.DeleteFeature(2) == ogr.OGRERR_NON_EXISTING_FEATURE
     ds = None
 
-    gdal.Unlink(filename)
-    gdal.Unlink(filename + "t")
-
 
 ###############################################################################
 # Test seeking back while creating
 
 
-def test_ogr_csv_44():
+def test_ogr_csv_44(tmp_vsimem):
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/ogr_csv_44.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "ogr_csv_44.csv")
     lyr = ds.CreateLayer("ogr_csv_44", options=["GEOMETRY=AS_WKT"])
     lyr.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
     f = ogr.Feature(lyr.GetLayerDefn())
@@ -2425,42 +2395,38 @@ def test_ogr_csv_44():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_44.csv")
-
 
 ###############################################################################
 # Test QGIS use case that consists in reopening a file just after calling
 # CreateField() on the main dataset and assuming that file is already serialized.
 
 
-def test_ogr_csv_45():
+def test_ogr_csv_45(tmp_vsimem):
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/ogr_csv_45.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "ogr_csv_45.csv")
     lyr = ds.CreateLayer("ogr_csv_45", options=["GEOMETRY=AS_WKT"])
     lyr.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
     ds = None
 
-    ds = ogr.Open("/vsimem/ogr_csv_45.csv", update=1)
+    ds = ogr.Open(tmp_vsimem / "ogr_csv_45.csv", update=1)
     lyr = ds.GetLayer(0)
     lyr.CreateField(ogr.FieldDefn("foo", ogr.OFTInteger))
 
-    ds2 = ogr.Open("/vsimem/ogr_csv_45.csv")
+    ds2 = ogr.Open(tmp_vsimem / "ogr_csv_45.csv")
     lyr2 = ds2.GetLayer(0)
     assert lyr2.GetLayerDefn().GetFieldCount() == 3
     ds2 = None
 
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_45.csv")
-
 
 ###############################################################################
 # Test edition of CSV files with X_POSSIBLE_NAMES, Y_POSSIBLE_NAMES open options
 
 
-def test_ogr_csv_46():
+def test_ogr_csv_46(tmp_vsimem):
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/ogr_csv_46.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "ogr_csv_46.csv")
     lyr = ds.CreateLayer("ogr_csv_46")
     lyr.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
     lyr.CreateField(ogr.FieldDefn("X", ogr.OFTReal))
@@ -2476,7 +2442,7 @@ def test_ogr_csv_46():
     ds = None
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_46.csv",
+        tmp_vsimem / "ogr_csv_46.csv",
         gdal.OF_VECTOR | gdal.OF_UPDATE,
         open_options=["X_POSSIBLE_NAMES=X", "Y_POSSIBLE_NAMES=Y"],
     )
@@ -2487,7 +2453,7 @@ def test_ogr_csv_46():
     f = None
     ds = None
 
-    ds = ogr.Open("/vsimem/ogr_csv_46.csv")
+    ds = ogr.Open(tmp_vsimem / "ogr_csv_46.csv")
     lyr = ds.GetLayer(0)
     assert lyr.GetLayerDefn().GetFieldCount() == 4
     f = lyr.GetNextFeature()
@@ -2497,7 +2463,7 @@ def test_ogr_csv_46():
     ds = None
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_46.csv",
+        tmp_vsimem / "ogr_csv_46.csv",
         gdal.OF_VECTOR | gdal.OF_UPDATE,
         open_options=[
             "KEEP_GEOM_COLUMNS=NO",
@@ -2512,7 +2478,7 @@ def test_ogr_csv_46():
     f = None
     ds = None
 
-    ds = ogr.Open("/vsimem/ogr_csv_46.csv")
+    ds = ogr.Open(tmp_vsimem / "ogr_csv_46.csv")
     lyr = ds.GetLayer(0)
     assert lyr.GetLayerDefn().GetFieldCount() == 4
     f = lyr.GetNextFeature()
@@ -2522,7 +2488,7 @@ def test_ogr_csv_46():
     ds = None
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_46.csv",
+        tmp_vsimem / "ogr_csv_46.csv",
         gdal.OF_VECTOR | gdal.OF_UPDATE,
         open_options=[
             "KEEP_GEOM_COLUMNS=NO",
@@ -2538,7 +2504,7 @@ def test_ogr_csv_46():
     f = None
     ds = None
 
-    ds = ogr.Open("/vsimem/ogr_csv_46.csv")
+    ds = ogr.Open(tmp_vsimem / "ogr_csv_46.csv")
     lyr = ds.GetLayer(0)
     assert lyr.GetLayerDefn().GetFieldCount() == 4
     f = lyr.GetNextFeature()
@@ -2547,16 +2513,14 @@ def test_ogr_csv_46():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_46.csv")
-
 
 ###############################################################################
 # Test writing XYZM
 
 
-def test_ogr_csv_47():
+def test_ogr_csv_47(tmp_vsimem):
 
-    ds = ogr.GetDriverByName("CSV").CreateDataSource("/vsimem/ogr_csv_47.csv")
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "ogr_csv_47.csv")
     assert ds.TestCapability(ogr.ODsCMeasuredGeometries) == 1
     lyr = ds.CreateLayer("ogr_csv_47", options=["GEOMETRY=AS_WKT"])
     assert lyr.TestCapability(ogr.OLCMeasuredGeometries) == 1
@@ -2568,7 +2532,7 @@ def test_ogr_csv_47():
     f = None
     ds = None
 
-    ds = ogr.Open("/vsimem/ogr_csv_47.csv")
+    ds = ogr.Open(tmp_vsimem / "ogr_csv_47.csv")
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     if f.GetGeometryRef().ExportToIsoWkt() != "POINT ZM (1 2 3 4)":
@@ -2576,34 +2540,32 @@ def test_ogr_csv_47():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_47.csv")
-
 
 ###############################################################################
 # Test reading/writing StringList, etc..
 
 
-def test_ogr_csv_48():
+def test_ogr_csv_48(tmp_vsimem):
 
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_48.csvt",
+        tmp_vsimem / "ogr_csv_48.csvt",
         "JsonStringList,JsonStringList,JsonIntegerList,JsonInteger64List,JsonRealList\n",
     )
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_48.csv",
+        tmp_vsimem / "ogr_csv_48.csv",
         """stringlist,emptystringlist,intlist,int64list,reallist
 "[""a"",null]",[],"[1]","[1234567890123]","[0.125]"
 """,
     )
 
     gdal.VectorTranslate(
-        "/vsimem/ogr_csv_48_out.csv",
-        "/vsimem/ogr_csv_48.csv",
+        tmp_vsimem / "ogr_csv_48_out.csv",
+        tmp_vsimem / "ogr_csv_48.csv",
         format="CSV",
         layerCreationOptions=["CREATE_CSVT=YES", "LINEFORMAT=LF"],
     )
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_csv_48_out.csv", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_csv_48_out.csv", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
@@ -2611,7 +2573,7 @@ def test_ogr_csv_48():
         'stringlist,emptystringlist,intlist,int64list,reallist\n"[ ""a"", """" ]",[],[ 1 ],[ 1234567890123 ],[ 0.125'
     )
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_csv_48_out.csvt", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_csv_48_out.csvt", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
@@ -2619,26 +2581,21 @@ def test_ogr_csv_48():
         "JSonStringList,JSonStringList,JSonIntegerList,JSonInteger64List,JSonRealList"
     )
 
-    gdal.Unlink("/vsimem/ogr_csv_48.csv")
-    gdal.Unlink("/vsimem/ogr_csv_48.csvt")
-    gdal.Unlink("/vsimem/ogr_csv_48_out.csv")
-    gdal.Unlink("/vsimem/ogr_csv_48_out.csvt")
-
 
 ###############################################################################
 # Test EMPTY_STRING_AS_NULL=ES
 
 
-def test_ogr_csv_49():
+def test_ogr_csv_49(tmp_vsimem):
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_49.csv",
+        tmp_vsimem / "ogr_csv_49.csv",
         """id,str
 1,
 """,
     )
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_49.csv", open_options=["EMPTY_STRING_AS_NULL=YES"]
+        tmp_vsimem / "ogr_csv_49.csv", open_options=["EMPTY_STRING_AS_NULL=YES"]
     )
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
@@ -2647,15 +2604,13 @@ def test_ogr_csv_49():
         pytest.fail()
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_49.csv")
-
 
 ###############################################################################
 
 
 def test_ogr_csv_more_than_100_geom_fields():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = ogr.Open("data/csv/more_than_100_geom_fields.csv")
     lyr = ds.GetLayer(0)
     lyr.GetNextFeature()
@@ -2664,10 +2619,10 @@ def test_ogr_csv_more_than_100_geom_fields():
 ###############################################################################
 
 
-def test_ogr_csv_string_quoting_always():
+def test_ogr_csv_string_quoting_always(tmp_vsimem):
 
     gdal.VectorTranslate(
-        "/vsimem/ogr_csv_string_quoting_always.csv",
+        tmp_vsimem / "ogr_csv_string_quoting_always.csv",
         "data/poly.shp",
         format="CSV",
         where="FID = 0",
@@ -2678,14 +2633,15 @@ def test_ogr_csv_string_quoting_always():
         ],
     )
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_csv_string_quoting_always.csv", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_csv_string_quoting_always.csv", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
-    assert data.startswith('"AREA","EAS_ID","PRFEDEA"\n215229.266,"168","35043411"')
+    assert data.startswith('"AREA","EAS_ID","PRFEDEA"\n215229.266,168,"35043411"')
 
     ds = gdal.OpenEx(
-        "/vsimem/ogr_csv_string_quoting_always.csv", gdal.OF_UPDATE | gdal.OF_VECTOR
+        tmp_vsimem / "ogr_csv_string_quoting_always.csv",
+        gdal.OF_UPDATE | gdal.OF_VECTOR,
     )
     gdal.VectorTranslate(
         ds,
@@ -2696,93 +2652,99 @@ def test_ogr_csv_string_quoting_always():
     )
     ds = None
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_csv_string_quoting_always.csv", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_csv_string_quoting_always.csv", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
     assert data.startswith(
-        '"AREA","EAS_ID","PRFEDEA"\n215229.266,"168","35043411"\n247328.172,"179","35043423"'
+        '"AREA","EAS_ID","PRFEDEA"\n215229.266,168,"35043411"\n247328.172,179,"35043423"'
     )
-
-    gdal.Unlink("/vsimem/ogr_csv_string_quoting_always.csv")
-    gdal.Unlink("/vsimem/ogr_csv_string_quoting_always.csvt")
-    gdal.Unlink("/vsimem/ogr_csv_string_quoting_always.prj")
 
 
 ###############################################################################
 
 
-def test_ogr_csv_string_quoting_if_ambiguous():
+def test_ogr_csv_string_quoting_if_ambiguous(tmp_vsimem):
 
-    src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     lyr = src_ds.CreateLayer("layer")
     lyr.CreateField(ogr.FieldDefn("foo"))
     lyr.CreateField(ogr.FieldDefn("bar"))
     lyr.CreateField(ogr.FieldDefn("baz"))
+    lyr.CreateField(ogr.FieldDefn("intfield", ogr.OFTInteger))
+    lyr.CreateField(ogr.FieldDefn("int64field", ogr.OFTInteger64))
+    lyr.CreateField(ogr.FieldDefn("realfield", ogr.OFTReal))
     f = ogr.Feature(lyr.GetLayerDefn())
     f["foo"] = "00123"
     f["bar"] = "x"
     f["baz"] = "1.25"
+    f["intfield"] = 1
+    f["int64field"] = 1234567890123
+    f["realfield"] = 1.25
     lyr.CreateFeature(f)
 
     gdal.VectorTranslate(
-        "/vsimem/ogr_csv_string_quoting_if_ambiguous.csv", src_ds, format="CSV"
+        tmp_vsimem / "ogr_csv_string_quoting_if_ambiguous.csv", src_ds, format="CSV"
     )
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_csv_string_quoting_if_ambiguous.csv", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_csv_string_quoting_if_ambiguous.csv", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
-    assert '"00123",x,"1.25"' in data
+    assert '"00123",x,"1.25",1,1234567890123,1.25' in data
 
-    gdal.Unlink("/vsimem/ogr_csv_string_quoting_if_ambiguous.csv")
+    gdal.Unlink(tmp_vsimem / "ogr_csv_string_quoting_if_ambiguous.csv")
 
 
 ###############################################################################
 
 
-def test_ogr_csv_string_quoting_if_needed():
+def test_ogr_csv_string_quoting_if_needed(tmp_vsimem):
 
-    src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     lyr = src_ds.CreateLayer("layer")
     lyr.CreateField(ogr.FieldDefn("foo"))
     lyr.CreateField(ogr.FieldDefn("bar"))
     lyr.CreateField(ogr.FieldDefn("baz"))
+    lyr.CreateField(ogr.FieldDefn("intfield", ogr.OFTInteger))
+    lyr.CreateField(ogr.FieldDefn("int64field", ogr.OFTInteger64))
+    lyr.CreateField(ogr.FieldDefn("realfield", ogr.OFTReal))
     f = ogr.Feature(lyr.GetLayerDefn())
     f["foo"] = "00123"
     f["bar"] = "x"
     f["baz"] = "1.25"
+    f["intfield"] = 1
+    f["int64field"] = 1234567890123
+    f["realfield"] = 1.25
     lyr.CreateFeature(f)
 
     gdal.VectorTranslate(
-        "/vsimem/ogr_csv_string_quoting_if_needed.csv",
+        tmp_vsimem / "ogr_csv_string_quoting_if_needed.csv",
         src_ds,
         format="CSV",
         layerCreationOptions=["STRING_QUOTING=IF_NEEDED"],
     )
 
-    f = gdal.VSIFOpenL("/vsimem/ogr_csv_string_quoting_if_needed.csv", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "ogr_csv_string_quoting_if_needed.csv", "rb")
     data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
     gdal.VSIFCloseL(f)
 
-    assert "00123,x,1.25" in data
-
-    gdal.Unlink("/vsimem/ogr_csv_string_quoting_if_needed.csv")
+    assert "00123,x,1.25,1,1234567890123,1.25" in data
 
 
 ###############################################################################
 
 
-def test_ogr_csv_iter_and_set_feature():
+def test_ogr_csv_iter_and_set_feature(tmp_vsimem):
     gdal.FileFromMemBuffer(
-        "/vsimem/ogr_csv_iter_and_set_feature.csv",
+        tmp_vsimem / "ogr_csv_iter_and_set_feature.csv",
         """id,str
 1,
 2,
 """,
     )
 
-    ds = gdal.OpenEx("/vsimem/ogr_csv_iter_and_set_feature.csv", gdal.OF_UPDATE)
+    ds = gdal.OpenEx(tmp_vsimem / "ogr_csv_iter_and_set_feature.csv", gdal.OF_UPDATE)
     lyr = ds.GetLayer(0)
     count = 0
     for f in lyr:
@@ -2790,30 +2752,26 @@ def test_ogr_csv_iter_and_set_feature():
         count += 1
     ds = None
 
-    gdal.Unlink("/vsimem/ogr_csv_iter_and_set_feature.csv")
-
     assert count == 2
 
 
 ###############################################################################
 
 
-def test_ogr_csv_pipe_separated():
+def test_ogr_csv_pipe_separated(tmp_vsimem):
     gdal.FileFromMemBuffer(
-        "/vsimem/test_ogr_csv_pipe_separated.psv",
+        tmp_vsimem / "test_ogr_csv_pipe_separated.psv",
         """id|str
 1|foo
 """,
     )
 
-    ds = gdal.OpenEx("/vsimem/test_ogr_csv_pipe_separated.psv")
+    ds = gdal.OpenEx(tmp_vsimem / "test_ogr_csv_pipe_separated.psv")
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     assert f["id"] == "1"
     assert f["str"] == "foo"
     ds = None
-
-    gdal.Unlink("/vsimem/test_ogr_csv_pipe_separated.psv")
 
 
 ###############################################################################
@@ -2840,3 +2798,786 @@ def test_ogr_csv_double_quotes_in_middle_of_field():
     assert f["id"] == "1"
     assert f["coord"] == """50°46'06.6"N 116°42'04.4"""
     assert f["str"] == "foo"
+
+
+###############################################################################
+# Test bugfix for https://github.com/OSGeo/gdal/issues/11660
+
+
+def test_ogr_csv_double_quotes_in_middle_of_field_bis():
+
+    ds = ogr.Open("data/csv/double_quotes_in_middle_of_field_bis.csv")
+    lyr = ds.GetLayer(0)
+
+    f = lyr.GetNextFeature()
+    assert f["first"] == "1"
+    assert f["second"] == """two"with quote"""
+    assert f["third"] == "3"
+
+    f = lyr.GetNextFeature()
+    assert f["first"] == "10"
+    assert f["second"] == """twenty"with quote"""
+    assert f["third"] == "30"
+
+
+###############################################################################
+
+
+def test_ogr_csv_single_column():
+
+    ds = ogr.Open("data/csv/single_column.csv")
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    assert f["WKT"] == "POINT (1 2)"
+    assert f.GetGeometryRef().ExportToIsoWkt() == "POINT (1 2)"
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize("sep", [",", ";", "\t", "|"])
+def test_ogr_csv_separator_single_occurence_no_space(tmp_vsimem, sep):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.csv", f"foo{sep}bar{sep}baz\n1{sep}2{sep}3\n"
+    )
+
+    gdal.ErrorReset()
+    ds = ogr.Open(tmp_vsimem / "test.csv")
+    assert gdal.GetLastErrorMsg() == ""
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    assert f["foo"] == "1"
+    assert f["bar"] == "2"
+    assert f["baz"] == "3"
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize("sep", [",", ";", "\t", "|"])
+def test_ogr_csv_separator_single_occurence_space(tmp_vsimem, sep):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.csv", f"foo {sep} bar {sep} baz\n1{sep}2{sep}3\n"
+    )
+
+    gdal.ErrorReset()
+    ds = ogr.Open(tmp_vsimem / "test.csv")
+    assert gdal.GetLastErrorMsg() == ""
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    assert f["foo"] == "1"
+    assert f["bar"] == "2"
+    assert f["baz"] == "3"
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "sep,other_sep", [(",", ";"), (";", ","), ("\t", ","), ("|", ",")]
+)
+def test_ogr_csv_separator_with_other_sep_in_string(tmp_vsimem, sep, other_sep):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.csv",
+        f'foo{sep}"bar{other_sep}{other_sep}{other_sep}{other_sep}rr"{sep}baz\n1{sep}2{sep}3\n',
+    )
+
+    gdal.ErrorReset()
+    ds = ogr.Open(tmp_vsimem / "test.csv")
+    assert gdal.GetLastErrorMsg() == ""
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    assert f["foo"] == "1"
+    assert f[f"bar{other_sep}{other_sep}{other_sep}{other_sep}rr"] == "2"
+    assert f["baz"] == "3"
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "sep,other_sep", [(",", ";"), (";", ","), ("\t", ","), ("|", ",")]
+)
+def test_ogr_csv_separator_with_other_sep(tmp_vsimem, sep, other_sep):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.csv", f"foo{sep}bar{other_sep}rr{sep}baz\n1{sep}2{sep}3\n"
+    )
+
+    with gdal.quiet_errors():
+        ds = ogr.Open(tmp_vsimem / "test.csv")
+        assert "other candidate separator" in gdal.GetLastErrorMsg()
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    assert f["foo"] == "1"
+    assert f[f"bar{other_sep}rr"] == "2"
+    assert f["baz"] == "3"
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "sep,sep_opt_value,other_sep",
+    [
+        (",", "COMMA", ";"),
+        (";", "SEMICOLON", ","),
+        ("\t", "TAB", ","),
+        ("|", "PIPE", ","),
+        (" ", "SPACE", ","),
+    ],
+)
+def test_ogr_csv_separator_open_option(tmp_vsimem, sep, sep_opt_value, other_sep):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.csv",
+        f"foo{sep}bar{other_sep}{other_sep}{other_sep}{other_sep}rr{sep}baz\n1{sep}2{sep}3\n",
+    )
+
+    gdal.ErrorReset()
+    ds = gdal.OpenEx(
+        tmp_vsimem / "test.csv",
+        gdal.OF_VECTOR,
+        open_options=["SEPARATOR=" + sep_opt_value],
+    )
+    assert gdal.GetLastErrorMsg() == ""
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    assert f["foo"] == "1"
+    assert f[f"bar{other_sep}{other_sep}{other_sep}{other_sep}rr"] == "2"
+    assert f["baz"] == "3"
+
+
+def test_ogr_csv_getextent3d(tmp_vsimem):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.csv",
+        "id,WKT\n1,POINT Z(1 1 1)\n1,POINT Z(2 2 2)",
+    )
+
+    gdal.ErrorReset()
+    ds = gdal.OpenEx(
+        tmp_vsimem / "test.csv", gdal.OF_VECTOR, open_options=["SEPARATOR=COMMA"]
+    )
+    assert gdal.GetLastErrorMsg() == ""
+    lyr = ds.GetLayer(0)
+    dfn = lyr.GetLayerDefn()
+    assert dfn.GetGeomFieldCount() == 1
+    ext2d = lyr.GetExtent()
+    assert ext2d == (1.0, 2.0, 1.0, 2.0)
+    ext3d = lyr.GetExtent3D()
+    assert ext3d == (1.0, 2.0, 1.0, 2.0, 1.0, 2.0)
+
+    # Test 2D
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.csv",
+        "id,WKT\n1,POINT(1 1)\n2,POINT(2 2)",
+    )
+    gdal.ErrorReset()
+    ds = gdal.OpenEx(
+        tmp_vsimem / "test.csv", gdal.OF_VECTOR, open_options=["SEPARATOR=COMMA"]
+    )
+    assert gdal.GetLastErrorMsg() == ""
+    lyr = ds.GetLayer(0)
+    dfn = lyr.GetLayerDefn()
+    assert dfn.GetGeomFieldCount() == 1
+    ext2d = lyr.GetExtent()
+    assert ext2d == (1.0, 2.0, 1.0, 2.0)
+    ext3d = lyr.GetExtent3D()
+    assert ext3d == (1.0, 2.0, 1.0, 2.0, float("inf"), float("-inf"))
+
+    # Test mixed 2D
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.csv",
+        "id,WKT\n1,POINT Z(1 1 1)\n2,POINT(2 2)",
+    )
+    gdal.ErrorReset()
+    ds = gdal.OpenEx(
+        tmp_vsimem / "test.csv", gdal.OF_VECTOR, open_options=["SEPARATOR=COMMA"]
+    )
+    assert gdal.GetLastErrorMsg() == ""
+    lyr = ds.GetLayer(0)
+    assert not lyr.TestCapability(ogr.OLCFastGetExtent3D)
+    dfn = lyr.GetLayerDefn()
+    assert dfn.GetGeomFieldCount() == 1
+    ext2d = lyr.GetExtent()
+    assert ext2d == (1.0, 2.0, 1.0, 2.0)
+    ext3d = lyr.GetExtent3D()
+    assert ext3d == (1.0, 2.0, 1.0, 2.0, 1.0, 1.0)
+
+
+###############################################################################
+
+
+def test_ogr_csv_read_header_with_line_break():
+
+    ds = ogr.Open("data/csv/header_with_line_break.csv")
+    lyr = ds.GetLayer(0)
+    lyr_defn = lyr.GetLayerDefn()
+    assert [
+        lyr_defn.GetFieldDefn(i).GetName() for i in range(lyr_defn.GetFieldCount())
+    ] == [
+        "Column one",
+        "Column two",
+        "Column with a\nline break",
+        "Column three",
+        "Another\nline break",
+        "Column four",
+        "Column five",
+    ]
+    f = lyr.GetNextFeature()
+    assert [f.GetField(i) for i in range(lyr_defn.GetFieldCount())] == [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+    ]
+
+
+###############################################################################
+# Test geometry coordinate precision support
+
+
+@pytest.mark.parametrize("geometry_format", ["AS_WKT", "AS_XYZ"])
+def test_ogr_csv_geom_coord_precision(tmp_vsimem, geometry_format):
+
+    filename = str(tmp_vsimem / "test.csv")
+    ds = gdal.GetDriverByName("CSV").Create(filename, 0, 0, 0, gdal.GDT_Unknown)
+    geom_fld = ogr.GeomFieldDefn("geometry", ogr.wkbUnknown)
+    prec = ogr.CreateGeomCoordinatePrecision()
+    prec.Set(1e-5, 1e-3, 1e-2)
+    geom_fld.SetCoordinatePrecision(prec)
+    lyr = ds.CreateLayerFromGeomFieldDefn(
+        "test", geom_fld, ["GEOMETRY=" + geometry_format]
+    )
+    geom_fld = lyr.GetLayerDefn().GetGeomFieldDefn(0)
+    prec = geom_fld.GetCoordinatePrecision()
+    assert prec.GetXYResolution() == 1e-5
+    assert prec.GetZResolution() == 1e-3
+    assert prec.GetMResolution() == 1e-2
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(
+        ogr.CreateGeometryFromWkt("POINT(1.23456789 2.34567891 9.87654321 -1.23456789)")
+    )
+    lyr.CreateFeature(f)
+    ds.Close()
+
+    f = gdal.VSIFOpenL(filename, "rb")
+    assert f
+    data = gdal.VSIFReadL(1, 10000, f)
+    gdal.VSIFCloseL(f)
+
+    if geometry_format == "AS_WKT":
+        assert b"POINT ZM (1.23457 2.34568 9.877 -1.23)" in data
+    else:
+        assert b"1.23457,2.34568,9.877" in data
+
+
+###############################################################################
+# Test geometry coordinate precision support
+
+
+@pytest.mark.require_geos
+def test_ogr_csv_geom_coord_precision_OGR_APPLY_GEOM_SET_PRECISION(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "test.csv")
+    ds = gdal.GetDriverByName("CSV").Create(filename, 0, 0, 0, gdal.GDT_Unknown)
+    geom_fld = ogr.GeomFieldDefn("geometry", ogr.wkbUnknown)
+    prec = ogr.CreateGeomCoordinatePrecision()
+    prec.Set(0.5, 0, 0)
+    geom_fld.SetCoordinatePrecision(prec)
+    lyr = ds.CreateLayerFromGeomFieldDefn("test", geom_fld, ["GEOMETRY=AS_WKT"])
+    f = ogr.Feature(lyr.GetLayerDefn())
+    # We create an initial polygon, which is valid if the precision is infinite,
+    # but when rounding coordinates to 0.5 resolution, it would become invalid.
+    f.SetGeometry(
+        ogr.CreateGeometryFromWkt("POLYGON((0 0,0.5 0.4,1 0,1 1,0.5 0.6,0 1,0 0))")
+    )
+    with gdaltest.config_option("OGR_APPLY_GEOM_SET_PRECISION", "YES"):
+        lyr.CreateFeature(f)
+    ds.Close()
+
+    f = gdal.VSIFOpenL(filename, "rb")
+    assert f
+    data = gdal.VSIFReadL(1, 10000, f)
+    gdal.VSIFCloseL(f)
+    # We just check that GEOS did its job by turning the polygon into a
+    # multipolygon made of 2 parts. To avoid being dependent on GEOS version,
+    # we just check for the MULTIPOLYGON keyword.
+    assert b"MULTIPOLYGON" in data
+
+
+###############################################################################
+# Test invalid GEOMETRY option
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_invalid_geometry_option(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "test.csv")
+    ds = gdal.GetDriverByName("CSV").Create(filename, 0, 0, 0, gdal.GDT_Unknown)
+    with pytest.raises(
+        Exception,
+        match="Geometry type 3D Line String is not compatible with GEOMETRY=AS_XYZ",
+    ):
+        ds.CreateLayer(
+            "test", geom_type=ogr.wkbLineString25D, options=["GEOMETRY=AS_XYZ"]
+        )
+
+    filename = str(tmp_vsimem / "test2.csv")
+    ds = gdal.GetDriverByName("CSV").Create(filename, 0, 0, 0, gdal.GDT_Unknown)
+    with gdal.quiet_errors(), pytest.raises(
+        Exception, match="Unsupported value foo for creation option GEOMETRY"
+    ):
+        ds.CreateLayer("test", geom_type=ogr.wkbLineString25D, options=["GEOMETRY=foo"])
+
+
+###############################################################################
+# Test force opening a CSV file
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_force_opening(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "test.bin")
+
+    with gdaltest.vsi_open(filename, "wb") as fdest:
+        fdest.write(b"foo\nbar\n")
+
+    with pytest.raises(Exception):
+        gdal.OpenEx(filename)
+
+    ds = gdal.OpenEx(filename, allowed_drivers=["CSV"])
+    assert ds.GetDriver().GetDescription() == "CSV"
+
+
+###############################################################################
+# Test opening a CSV file with inf/nan numeric values
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_inf_nan():
+
+    ds = gdal.OpenEx("data/csv/inf_nan.csv", open_options=["AUTODETECT_TYPE=YES"])
+    lyr = ds.GetLayer(0)
+    assert lyr.GetLayerDefn().GetFieldDefn(1).GetType() == ogr.OFTReal
+    f = lyr.GetNextFeature()
+    assert f["v"] == 10.0
+    f = lyr.GetNextFeature()
+    assert f["v"] == float("inf")
+    f = lyr.GetNextFeature()
+    assert f["v"] == float("-inf")
+    f = lyr.GetNextFeature()
+    assert math.isnan(f["v"])
+
+
+###############################################################################
+# Test reading invalid WKT
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_invalid_wkt(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "test.csv")
+
+    with gdaltest.vsi_open(filename, "wb") as fdest:
+        fdest.write(b"id,WKT\n")
+        fdest.write(b'1,"POINT (1"\n')
+        fdest.write(b'1,"POINT (1 2)"\n')
+
+    ds = ogr.Open(filename)
+    lyr = ds.GetLayer(0)
+    gdal.ErrorReset()
+    with gdal.quiet_errors():
+        f = lyr.GetNextFeature()
+    assert gdal.GetLastErrorMsg() == "Ignoring invalid WKT: POINT (1"
+    assert f.GetGeometryRef() is None
+    f = lyr.GetNextFeature()
+    assert gdal.GetLastErrorMsg() == ""
+    assert f.GetGeometryRef().ExportToWkt() == "POINT (1 2)"
+
+
+###############################################################################
+# Test schema override open option with GeoJSON driver
+#
+@pytest.mark.parametrize(
+    "open_options, expected_field_types, expected_field_names, expected_warning",
+    [
+        (
+            [],
+            [
+                ogr.OFTString,
+                ogr.OFTInteger,
+                ogr.OFTReal,
+                ogr.OFTInteger,  # bool subType
+                ogr.OFTString,  # int string
+                ogr.OFTString,  # real string
+                (ogr.OFTString, ogr.OFSTNone),  # json subType
+                ogr.OFTString,  # uuid subType
+            ],
+            [],
+            None,
+        ),
+        # Override string field with integer
+        (
+            [
+                r'OGR_SCHEMA={"layers": [{"name": "test_point", "fields": [{ "name": "str", "type": "Integer" }]}]}'
+            ],
+            [
+                ogr.OFTInteger,  # <-- overridden
+                ogr.OFTInteger,
+                ogr.OFTReal,
+                ogr.OFTInteger,  # bool subType
+                ogr.OFTString,  # int string
+                ogr.OFTString,  # real string
+                ogr.OFTString,  # json subType
+                ogr.OFTString,  # uuid subType
+            ],
+            [],
+            None,
+        ),
+        # Override full schema and JSON subtype
+        (
+            [
+                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "schemaType": "Full", "fields": [{ "name": "json_str", "subType": "JSON", "new_name": "json_str" }]}]}'
+            ],
+            [
+                (ogr.OFTString, ogr.OFSTJSON),  # json subType
+            ],
+            ["json_str"],
+            None,
+        ),
+        # Test width and precision override
+        (
+            [
+                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "fields": [{ "name": "real", "width": 7, "precision": 3 }]}]}'
+            ],
+            [
+                ogr.OFTString,
+                ogr.OFTInteger,
+                ogr.OFTReal,
+                ogr.OFTInteger,  # bool subType
+                ogr.OFTString,  # int string
+                ogr.OFTString,  # real string
+                (ogr.OFTString, ogr.OFSTNone),  # json subType
+                ogr.OFTString,  # uuid subType
+            ],
+            [],
+            None,
+        ),
+        # Test boolean and short integer subtype
+        (
+            [
+                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "fields": [{ "name": "int", "subType": "Boolean" }, { "name": "real", "type": "Integer", "subType": "Int16" }]}]}'
+            ],
+            [
+                ogr.OFTString,
+                (ogr.OFTInteger, ogr.OFSTBoolean),  # bool overridden subType
+                (ogr.OFTInteger, ogr.OFSTInt16),  # int16 overridden subType
+                ogr.OFTInteger,  # bool subType
+                ogr.OFTString,  # int string
+                ogr.OFTString,  # real string
+                ogr.OFTString,  # json subType
+                ogr.OFTString,  # uuid subType
+            ],
+            [],
+            None,
+        ),
+        # Test invalid schema
+        (
+            [
+                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "fields": [{ "name": "str", "type": "xxxxx" }]}]}'
+            ],
+            [],
+            [],
+            "Unsupported field type: xxxxx for field str",
+        ),
+    ],
+)
+def test_ogr_csv_schema_override(
+    tmp_path, open_options, expected_field_types, expected_field_names, expected_warning
+):
+
+    csv_data = """str,int,real,bool,int_str,real_str,json_str,uuid_str
+"1",2,3.4,1,"2","3.4","{""a"": 1}","12345678-1234-5678-1234-567812345678"
+"""
+
+    csvt_data = r"String,Integer,Real,Integer,String,String,String,String"
+
+    csv_file = tmp_path / "test_point.csv"
+    with open(csv_file, "w") as f:
+        f.write(csv_data)
+
+    csvt_file = tmp_path / "test_point.csvt"
+    with open(csvt_file, "w") as f:
+        f.write(csvt_data)
+
+    gdal.ErrorReset()
+
+    try:
+        schema = open_options[0].split("=")[1]
+        open_options = open_options[1:]
+    except IndexError:
+        schema = None
+
+    with gdal.quiet_errors():
+
+        if schema:
+            open_options.append("OGR_SCHEMA=" + schema)
+        else:
+            open_options = []
+
+        # Validate the JSON schema
+        if not expected_warning and schema:
+            schema = json.loads(schema)
+            gdaltest.validate_json(schema, "ogr_fields_override.schema.json")
+
+        # Check error if expected_field_types is empty
+        if not expected_field_types:
+            ds = gdal.OpenEx(
+                tmp_path / "test_point.csv",
+                gdal.OF_VECTOR | gdal.OF_READONLY,
+                open_options=open_options,
+                allowed_drivers=["CSV"],
+            )
+            assert (
+                gdal.GetLastErrorMsg().find(expected_warning) != -1
+            ), f"Warning {expected_warning} not found, got {gdal.GetLastErrorMsg()} instead"
+            assert ds is None
+        else:
+
+            ds = gdal.OpenEx(
+                tmp_path / "test_point.csv",
+                gdal.OF_VECTOR | gdal.OF_READONLY,
+                open_options=open_options,
+                allowed_drivers=["CSV"],
+            )
+
+            assert ds is not None
+
+            lyr = ds.GetLayer(0)
+
+            assert lyr.GetFeatureCount() == 1
+
+            lyr_defn = lyr.GetLayerDefn()
+
+            assert lyr_defn.GetFieldCount() == len(expected_field_types)
+
+            if len(expected_field_names) == 0:
+                expected_field_names = [
+                    "str",
+                    "int",
+                    "real",
+                    "bool",
+                    "int_str",
+                    "real_str",
+                    "json_str",
+                    "uuid_str",
+                ]
+
+            feat = lyr.GetNextFeature()
+
+            # Check field types
+            for i in range(len(expected_field_names)):
+                try:
+                    expected_type, expected_subtype = expected_field_types[i]
+                    assert feat.GetFieldDefnRef(i).GetType() == expected_type
+                    assert feat.GetFieldDefnRef(i).GetSubType() == expected_subtype
+                except TypeError:
+                    expected_type = expected_field_types[i]
+                    assert feat.GetFieldDefnRef(i).GetType() == expected_type
+                assert feat.GetFieldDefnRef(i).GetName() == expected_field_names[i]
+
+            # Test width and precision override
+            if len(open_options) > 0 and "precision" in open_options[0]:
+                assert feat.GetFieldDefnRef(2).GetWidth() == 7
+                assert feat.GetFieldDefnRef(2).GetPrecision() == 3
+
+            # Check feature content
+            if len(expected_field_names) > 0:
+                if "int" in expected_field_names:
+                    int_sub_type = feat.GetFieldDefnRef("int").GetSubType()
+                    assert (
+                        feat.GetFieldAsInteger("int") == 1
+                        if int_sub_type == ogr.OFSTBoolean
+                        else 2
+                    )
+                if "str" in expected_field_names:
+                    assert feat.GetFieldAsString("str") == "1"
+                if "new_str" in expected_field_names:
+                    assert feat.GetFieldAsString("new_str") == "1"
+            else:
+                assert feat.GetFieldAsInteger("int") == 2
+                assert feat.GetFieldAsString("str") == "1"
+
+            if expected_warning:
+                assert (
+                    gdal.GetLastErrorMsg().find(expected_warning) != -1
+                ), f"Warning {expected_warning} not found, got {gdal.GetLastErrorMsg()} instead"
+
+
+def test_ogr_schema_override_wkt(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "test.csv")
+    with gdaltest.vsi_open(filename, "wb") as fdest:
+        fdest.write(b"id,WKT,foo\n")
+        fdest.write(b'1,"POINT (1 2)",bar\n')
+
+    with gdal.quiet_errors():
+
+        ds = gdal.OpenEx(filename)
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f["WKT"] == "POINT (1 2)"
+        assert f["foo"] == "bar"
+        assert f.GetGeometryRef().ExportToWkt() == "POINT (1 2)"
+
+        ds = gdal.OpenEx(
+            filename,
+            open_options=[
+                r'OGR_SCHEMA={"layers": [{"name": "test", "fields": [{ "name": "WKT", "type": "Integer" }]}]}'
+            ],
+        )
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f["WKT"] == None
+        assert f["foo"] == "bar"
+        assert (
+            gdal.GetLastErrorMsg().find(
+                "Invalid value type found in record 1 for field WKT"
+            )
+            != -1
+        )
+
+        ds = gdal.OpenEx(
+            filename,
+            open_options=[
+                r'OGR_SCHEMA={"layers": [{"name": "test", "schemaType": "Full", "fields": [{ "name": "foo" }]}]}'
+            ],
+        )
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        try:
+            assert f["WKT"] == None
+        except KeyError as ex:
+            assert str(ex).find("Illegal field requested in GetField()") != -1
+        assert f["foo"] == "bar"
+
+        ds = gdal.OpenEx(
+            filename,
+            open_options=[
+                r'OGR_SCHEMA={"layers": [{"name": "test", "schemaType": "Full", "fields": [{ "name": "foo" }, { "name": "WKT" }]}]}'
+            ],
+        )
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f["WKT"] == "POINT (1 2)"
+        assert f["foo"] == "bar"
+        assert f.GetGeometryRef().ExportToWkt() == "POINT (1 2)"
+
+
+###############################################################################
+# Test reading CSV with unbalanced double-quotes
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_unbalanced_double_quotes():
+
+    with ogr.Open("data/csv/unbalanced_double_quotes.csv") as ds:
+        lyr = ds.GetLayer(0)
+        with pytest.raises(
+            Exception,
+            match="CSV file has unbalanced number of double-quotes. Corrupted data will likely be returned",
+        ):
+            lyr.GetNextFeature()
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_64_bit_integer(tmp_vsimem):
+
+    filename = tmp_vsimem / "test.csv"
+    gdal.FileFromMemBuffer(filename, "field\n9223372036854775807\n")
+    gdal.FileFromMemBuffer(str(filename) + "t", "Integer64\n")
+    with ogr.Open(filename) as ds:
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f["field"] == 9223372036854775807
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_64_bit_integer_invalid_value(tmp_vsimem):
+
+    filename = tmp_vsimem / "test.csv"
+    gdal.FileFromMemBuffer(filename, "field\n9223372036854775807.5\n")
+    gdal.FileFromMemBuffer(str(filename) + "t", "Integer64\n")
+    with ogr.Open(filename) as ds:
+        lyr = ds.GetLayer(0)
+        with gdal.quiet_errors():
+            f = lyr.GetNextFeature()
+            assert (
+                gdal.GetLastErrorMsg()
+                == "Invalid value type found in record 1 for field field. This warning will no longer be emitted"
+            )
+        assert f["field"] is None
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_32_bit_integer_invalid_value(tmp_vsimem):
+
+    filename = tmp_vsimem / "test.csv"
+    gdal.FileFromMemBuffer(filename, "field\n9223372036854775807\n")
+    gdal.FileFromMemBuffer(str(filename) + "t", "Integer\n")
+    with ogr.Open(filename) as ds:
+        lyr = ds.GetLayer(0)
+        with gdal.quiet_errors():
+            f = lyr.GetNextFeature()
+            assert (
+                gdal.GetLastErrorMsg()
+                == "Field test.field: integer overflow occurred when trying to set 9223372036854775807 as 32 bit integer."
+            )
+        assert f["field"] == 2147483647
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_do_not_write_header(tmp_vsimem):
+
+    filename = tmp_vsimem / "test.csv"
+    gdal.VectorTranslate(filename, "data/poly.shp", layerCreationOptions=["HEADER=NO"])
+    with ogr.Open(filename) as ds:
+        lyr = ds.GetLayer(0)
+        assert lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "field_1"
+        assert lyr.GetFeatureCount() == 10
+
+
+###############################################################################
+
+
+if __name__ == "__main__":
+    gdal.UseExceptions()
+    if len(sys.argv) != 2:
+        print("python ogr_csv.py name_of_test")
+        sys.exit(1)
+    if sys.argv[1] == "ogr_csv_write_to_stdout":
+        ogr_csv_write_to_stdout()
+        sys.exit(0)
+
+    print("Unknown test name")
+    sys.exit(1)

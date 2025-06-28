@@ -10,23 +10,7 @@
  * Copyright (c) 2002, Andrey Kiselev <dron@ak4719.spb.edu>
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_multiproc.h"
@@ -41,6 +25,9 @@
 
 #include "hdf4compat.h"
 #include "hdf4dataset.h"
+#include <cctype>
+
+#include "hdf4drivercore.h"
 
 extern const char *const pszGDALSignature;
 
@@ -678,22 +665,6 @@ CPLErr HDF4Dataset::ReadGlobalAttributes(int32 iHandler)
 }
 
 /************************************************************************/
-/*                              Identify()                              */
-/************************************************************************/
-
-int HDF4Dataset::Identify(GDALOpenInfo *poOpenInfo)
-
-{
-    if (poOpenInfo->nHeaderBytes < 4)
-        return FALSE;
-
-    if (memcmp(poOpenInfo->pabyHeader, "\016\003\023\001", 4) != 0)
-        return FALSE;
-
-    return TRUE;
-}
-
-/************************************************************************/
 /*                            QuoteIfNeeded()                           */
 /************************************************************************/
 
@@ -728,7 +699,7 @@ GDALDataset *HDF4Dataset::Open(GDALOpenInfo *poOpenInfo)
 {
 #ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
     // During fuzzing, do not use Identify to reject crazy content.
-    if (!Identify(poOpenInfo))
+    if (!HDF4DatasetIdentify(poOpenInfo))
         return nullptr;
 #endif
 
@@ -1303,9 +1274,7 @@ GDALDataset *HDF4Dataset::Open(GDALOpenInfo *poOpenInfo)
             delete poDS;
             CPLAcquireMutex(hHDF4Mutex, 1000.0);
 
-            CPLError(CE_Failure, CPLE_NotSupported,
-                     "The HDF4 driver does not support update access to "
-                     "existing datasets.");
+            ReportUpdateNotSupportedByDriver(HDF4_DRIVER_NAME);
             return nullptr;
         }
     }
@@ -1334,34 +1303,12 @@ void GDALRegister_HDF4()
     if (!GDAL_CHECK_VERSION("HDF4 driver"))
         return;
 
-    if (GDALGetDriverByName("HDF4") != nullptr)
+    if (GDALGetDriverByName(HDF4_DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
-
-    poDriver->SetDescription("HDF4");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                              "Hierarchical Data Format Release 4");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/hdf4.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "hdf");
-    poDriver->SetMetadataItem(GDAL_DMD_SUBDATASETS, "YES");
-
-    poDriver->SetMetadataItem(GDAL_DCAP_MULTIDIM_RASTER, "YES");
-
-    poDriver->SetMetadataItem(
-        GDAL_DMD_OPENOPTIONLIST,
-        "<OpenOptionList>"
-        "  <Option name='LIST_SDS' type='string-select' "
-        "description='Whether to report Scientific Data Sets' default='AUTO'>"
-        "       <Value>AUTO</Value>"
-        "       <Value>YES</Value>"
-        "       <Value>NO</Value>"
-        "  </Option>"
-        "</OpenOptionList>");
-
+    HDF4DriverSetCommonMetadata(poDriver);
     poDriver->pfnOpen = HDF4Dataset::Open;
-    poDriver->pfnIdentify = HDF4Dataset::Identify;
     poDriver->pfnUnloadDriver = HDF4UnloadDriver;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);

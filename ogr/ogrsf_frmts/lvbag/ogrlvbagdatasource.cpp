@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2020, Laixer B.V. <info at laixer dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_lvbag.h"
@@ -43,7 +27,9 @@ OGRLVBAGDataSource::OGRLVBAGDataSource()
     const int nMaxSimultaneouslyOpened =
         std::max(atoi(CPLGetConfigOption("OGR_LVBAG_MAX_OPENED", "100")), 1);
     if (poPool->GetMaxSimultaneouslyOpened() != nMaxSimultaneouslyOpened)
+    {
         poPool.reset(new OGRLayerPool(nMaxSimultaneouslyOpened));
+    }
 }
 
 /************************************************************************/
@@ -55,7 +41,9 @@ int OGRLVBAGDataSource::Open(const char *pszFilename, char **papszOpenOptionsIn)
     auto poLayer = std::unique_ptr<OGRLVBAGLayer>{
         new OGRLVBAGLayer{pszFilename, poPool.get(), papszOpenOptionsIn}};
     if (poLayer && !poLayer->TouchLayer())
+    {
         return FALSE;
+    }
 
     papoLayers.push_back({OGRLVBAG::LayerType::LYR_RAW, std::move(poLayer)});
 
@@ -63,7 +51,9 @@ int OGRLVBAGDataSource::Open(const char *pszFilename, char **papszOpenOptionsIn)
                 poPool->GetMaxSimultaneouslyOpened() ==
             0 &&
         poPool->GetSize() > 0)
+    {
         TryCoalesceLayers();
+    }
 
     return TRUE;
 }
@@ -87,7 +77,9 @@ void OGRLVBAGDataSource::TryCoalesceLayers()
         {
             if (std::find(paGroup.cbegin(), paGroup.cend(),
                           static_cast<int>(j)) != paGroup.cend())
+            {
                 continue;
+            }
 
             OGRLayer *poLayerLHS = papoLayers[i].second.get();
             OGRLayer *poLayerRHS = papoLayers[j].second.get();
@@ -104,11 +96,15 @@ void OGRLVBAGDataSource::TryCoalesceLayers()
             }
         }
         if (!paVector.empty())
+        {
             paMergeVector.insert({static_cast<int>(i), paVector});
+        }
     }
 
     if (paMergeVector.empty())
+    {
         return;
+    }
 
     for (const auto &mergeLayer : paMergeVector)
     {
@@ -124,7 +120,9 @@ void OGRLVBAGDataSource::TryCoalesceLayers()
         int idx = 0;
         papoSrcLayers[idx++] = papoLayers[baseLayerIdx].second.release();
         for (const auto &poLayerIdx : papoLayersIdx)
+        {
             papoSrcLayers[idx++] = papoLayers[poLayerIdx].second.release();
+        }
 
         OGRLayer *poBaseLayer = papoSrcLayers[0];
 
@@ -137,21 +135,27 @@ void OGRLVBAGDataSource::TryCoalesceLayers()
         OGRFieldDefn **papoFields = static_cast<OGRFieldDefn **>(
             CPLRealloc(nullptr, sizeof(OGRFieldDefn *) * nFields));
         for (int i = 0; i < nFields; ++i)
+        {
             papoFields[i] = poBaseLayerDefn->GetFieldDefn(i);
+        }
 
         const int nGeomFields = poBaseLayerDefn->GetGeomFieldCount();
         OGRUnionLayerGeomFieldDefn **papoGeomFields =
             static_cast<OGRUnionLayerGeomFieldDefn **>(CPLRealloc(
                 nullptr, sizeof(OGRUnionLayerGeomFieldDefn *) * nGeomFields));
         for (int i = 0; i < nGeomFields; ++i)
+        {
             papoGeomFields[i] = new OGRUnionLayerGeomFieldDefn(
                 poBaseLayerDefn->GetGeomFieldDefn(i));
+        }
 
         poLayer->SetFields(FIELD_FROM_FIRST_LAYER, nFields, papoFields,
                            nGeomFields, papoGeomFields);
 
         for (int i = 0; i < nGeomFields; ++i)
+        {
             delete papoGeomFields[i];
+        }
         CPLFree(papoGeomFields);
         CPLFree(papoFields);
 
@@ -164,9 +168,13 @@ void OGRLVBAGDataSource::TryCoalesceLayers()
     while (it != papoLayers.end())
     {
         if (!it->second)
+        {
             it = papoLayers.erase(it);
+        }
         else
+        {
             ++it;
+        }
     }
 }
 
@@ -177,7 +185,9 @@ void OGRLVBAGDataSource::TryCoalesceLayers()
 OGRLayer *OGRLVBAGDataSource::GetLayer(int iLayer)
 {
     if (iLayer < 0 || iLayer >= GetLayerCount())
+    {
         return nullptr;
+    }
     return papoLayers[iLayer].second.get();
 }
 

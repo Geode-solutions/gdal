@@ -8,28 +8,11 @@
 ###############################################################################
 # Copyright (c) 2023, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import struct
 
-import gdaltest
 import pytest
 
 from osgeo import gdal
@@ -56,8 +39,8 @@ def test_openfilegb_raster_subdatasets():
     )
     assert ds
 
-    ds = gdal.OpenEx("data/filegdb/gdal_test_data.gdb.zip", gdal.OF_VECTOR)
-    assert ds is None
+    with pytest.raises(Exception):
+        gdal.OpenEx("data/filegdb/gdal_test_data.gdb.zip", gdal.OF_VECTOR)
 
 
 ###############################################################################
@@ -186,7 +169,7 @@ def test_openfilegb_raster_jpeg():
 def test_openfilegb_raster_jpeg_driver_not_available():
 
     ds = gdal.Open("OpenFileGDB:data/filegdb/gdal_test_data.gdb.zip:small_world_jpeg")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.GetRasterBand(1).Checksum() == -1
 
 
@@ -355,8 +338,8 @@ def test_openfilegb_raster_rat():
     assert rat.GetTypeOfCol(3) == gdal.GFT_Integer  # just testing it doesn't crash
 
     assert rat.GetValueAsString(-1, 0) == ""
-    with gdaltest.error_handler():
-        assert rat.GetValueAsString(0, -1) == ""
+    with pytest.raises(Exception):
+        rat.GetValueAsString(0, -1)
     assert rat.GetValueAsString(0, 0) == "-124"
     assert rat.GetValueAsString(1, 0) == "-116"
     assert rat.GetValueAsString(0, 1) == "72"
@@ -364,8 +347,8 @@ def test_openfilegb_raster_rat():
     assert rat.GetValueAsString(0, 3) == ""
 
     assert rat.GetValueAsInt(-1, 0) == 0
-    with gdaltest.error_handler():
-        assert rat.GetValueAsInt(0, -1) == 0
+    with pytest.raises(Exception):
+        rat.GetValueAsInt(0, -1)
     assert rat.GetValueAsInt(0, 0) == -124
     assert rat.GetValueAsInt(1, 0) == -116
     assert rat.GetValueAsInt(0, 1) == 72
@@ -373,16 +356,74 @@ def test_openfilegb_raster_rat():
     assert rat.GetValueAsInt(0, 3) == 0
 
     assert rat.GetValueAsDouble(-1, 0) == 0
-    with gdaltest.error_handler():
-        assert rat.GetValueAsDouble(0, -1) == 0
+    with pytest.raises(Exception):
+        rat.GetValueAsDouble(0, -1)
     assert rat.GetValueAsDouble(0, 0) == -124
     assert rat.GetValueAsDouble(1, 0) == -116
     assert rat.GetValueAsDouble(0, 1) == 72
     assert rat.GetValueAsDouble(0, 2) == 0
     assert rat.GetValueAsDouble(0, 3) == 0
 
-    with gdaltest.error_handler():
+    with pytest.raises(Exception):
         rat.SetValueAsString(0, 0, "foo")
+    with pytest.raises(Exception):
         rat.SetValueAsInt(0, 1, 1)
+    with pytest.raises(Exception):
         rat.SetValueAsDouble(0, 2, 1.5)
+    with pytest.raises(Exception):
         rat.SetTableType(gdal.GRTT_THEMATIC)
+
+
+###############################################################################
+# Open dataset with block_origin_x != eminx and block_origin_y != emaxy
+
+
+def test_openfilegb_shifted_origin():
+
+    # https://gisdata.mn.gov/dataset/water-lake-bathy-shaded-relief with
+    # all data removed
+    ds = gdal.Open("data/filegdb/water_lake_bathy_shaded_relief_only_metadata.gdb")
+    assert ds
+    assert ds.RasterXSize == 98478
+    assert ds.RasterYSize == 117334
+    assert ds.GetGeoTransform() == (229052.5, 5.0, 0.0, 5404027.5, 0.0, -5.0)
+    assert ds.GetSpatialRef() is None
+
+
+###############################################################################
+# Test opening a FileGDB v9 raster
+
+
+@pytest.mark.require_curl()
+def test_openfilegb_v9():
+
+    filename = "/vsicurl/https://resources.gisdata.mn.gov/pub/data/elevation/lidar/county/washington/geodatabase/3542-23-32.gdb.zip"
+    if gdal.VSIStatL(filename) is None:
+        pytest.skip(f"cannot access {filename}")
+
+    filename = "/vsizip/" + filename
+    gdal.ErrorReset()
+    ds = gdal.Open(filename)
+    assert ds
+    assert gdal.GetLastErrorMsg() == ""
+    assert ds.RasterXSize == 2552
+    assert ds.RasterYSize == 3612
+    assert ds.GetGeoTransform() == (497481, 1, 0, 5017752, 0, -1)
+    srs = ds.GetSpatialRef()
+    assert "NAD83 / UTM zone 15N" in srs.GetName()
+
+    ds = gdal.Open(f'OpenFileGDB:"{filename}":dem_1m_m')
+    assert ds.RasterXSize == 2552
+    assert ds.RasterYSize == 3612
+
+    ds = gdal.OpenEx(filename, gdal.OF_VECTOR)
+    assert set([ds.GetLayer(i).GetName() for i in range(ds.GetLayerCount())]) == set(
+        [
+            "contour_10f_3m",
+            "building_loc_py",
+            "bare_earth_pt",
+            "contour_50f_3m",
+            "contour_2f_3m",
+            "brkln_hydro_py",
+        ]
+    )

@@ -11,23 +11,7 @@
  * Copyright (c) 1999-2001, Daniel Morissette
  * Copyright (c) 2014, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 
 #include "cpl_port.h"
@@ -599,8 +583,8 @@ GByte *TABINDFile::BuildKey(int nIndexNumber, const char *pszStr)
     int i = 0;
     for (i = 0; i < nKeyLength && pszStr[i] != '\0'; i++)
     {
-        m_papbyKeyBuffers[nIndexNumber - 1][i] =
-            static_cast<GByte>(toupper(pszStr[i]));
+        m_papbyKeyBuffers[nIndexNumber - 1][i] = static_cast<GByte>(
+            CPLToupper(static_cast<unsigned char>(pszStr[i])));
     }
 
     /* Pad the end of the buffer with '\0' */
@@ -1597,7 +1581,8 @@ int TABINDNode::InsertEntry(GByte *pKeyValue, GInt32 nRecordNo,
 
         memmove(m_poDataBlock->GetCurDataPtr() + (m_nKeyLength + 4),
                 m_poDataBlock->GetCurDataPtr(),
-                (m_numEntriesInNode - iInsertAt) * (m_nKeyLength + 4));
+                static_cast<size_t>(m_numEntriesInNode - iInsertAt) *
+                    (m_nKeyLength + 4));
     }
 
     /*-----------------------------------------------------------------
@@ -1648,17 +1633,19 @@ int TABINDNode::UpdateCurChildEntry(GByte *pKeyValue, GInt32 nRecordNo)
      *----------------------------------------------------------------*/
     m_poDataBlock->GotoByteInBlock(12 + m_nCurIndexEntry * (m_nKeyLength + 4));
 
+    int ret;
     if (m_nCurIndexEntry == 0 && m_nSubTreeDepth > 1 && m_nPrevNodePtr == 0)
     {
-        m_poDataBlock->WriteZeros(m_nKeyLength);
+        ret = m_poDataBlock->WriteZeros(m_nKeyLength);
     }
     else
     {
-        m_poDataBlock->WriteBytes(m_nKeyLength, pKeyValue);
+        ret = m_poDataBlock->WriteBytes(m_nKeyLength, pKeyValue);
     }
-    m_poDataBlock->WriteInt32(nRecordNo);
+    if (ret == 0)
+        ret = m_poDataBlock->WriteInt32(nRecordNo);
 
-    return 0;
+    return ret;
 }
 
 /**********************************************************************
@@ -1785,7 +1772,7 @@ int TABINDNode::SplitNode()
 #ifdef DEBUG
         // Just in case, reset space previously used by moved entries
         memset(m_poDataBlock->GetCurDataPtr(), 0,
-               numInNode2 * (m_nKeyLength + 4));
+               static_cast<size_t>(numInNode2) * (m_nKeyLength + 4));
 #endif
         // And update current node members
         m_numEntriesInNode = numInNode1;
@@ -1851,12 +1838,13 @@ int TABINDNode::SplitNode()
         memmove(m_poDataBlock->GetCurDataPtr(),
                 m_poDataBlock->GetCurDataPtr() +
                     numInNode1 * (m_nKeyLength + 4),
-                numInNode2 * (m_nKeyLength + 4));
+                static_cast<size_t>(numInNode2) * (m_nKeyLength + 4));
 
 #ifdef DEBUG
         // Just in case, reset space previously used by moved entries
-        memset(m_poDataBlock->GetCurDataPtr() + numInNode2 * (m_nKeyLength + 4),
-               0, numInNode1 * (m_nKeyLength + 4));
+        memset(m_poDataBlock->GetCurDataPtr() +
+                   static_cast<size_t>(numInNode2) * (m_nKeyLength + 4),
+               0, static_cast<size_t>(numInNode1) * (m_nKeyLength + 4));
 #endif
 
         // And update current node members
@@ -1939,7 +1927,7 @@ int TABINDNode::SplitRootNode()
 #ifdef DEBUG
     // Just in case, reset space previously used by moved entries
     memset(m_poDataBlock->GetCurDataPtr(), 0,
-           m_numEntriesInNode * (m_nKeyLength + 4));
+           static_cast<size_t>(m_numEntriesInNode) * (m_nKeyLength + 4));
 #endif
 
     /*-----------------------------------------------------------------

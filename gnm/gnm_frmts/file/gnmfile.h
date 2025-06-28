@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL/OGR Geography Network support (Geographic Network Model)
  * Purpose:  GNM file based generic driver.
@@ -29,6 +28,9 @@
  * DEALINGS IN THE SOFTWARE.
  ****************************************************************************/
 
+#ifndef GNMFILE_H_INCLUDED
+#define GNMFILE_H_INCLUDED
+
 #include "gnm.h"
 
 #define GNM_MD_DEFAULT_FILE_FORMAT "ESRI Shapefile"
@@ -46,10 +48,10 @@ class GNMFileNetwork : public GNMGenericNetwork
                           char **papszOptions) override;
 
   protected:
-    virtual OGRLayer *ICreateLayer(const char *pszName,
-                                   OGRSpatialReference *poSpatialRef = nullptr,
-                                   OGRwkbGeometryType eGType = wkbUnknown,
-                                   char **papszOptions = nullptr) override;
+    OGRLayer *ICreateLayer(const char *pszName,
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
+
     virtual int CheckNetworkExist(const char *pszFilename,
                                   char **papszOptions) override;
 
@@ -80,3 +82,5 @@ class GNMFileNetwork : public GNMGenericNetwork
     GDALDataset *m_pFeaturesDS;
     std::map<OGRLayer *, GDALDataset *> m_mpLayerDatasetMap;
 };
+
+#endif

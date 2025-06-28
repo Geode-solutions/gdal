@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2023, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -37,6 +21,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <limits>
 #include <new>
 #include <utility>
@@ -67,9 +52,9 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
 
     FileGDBTable oTable;
 
-    const CPLString osBndFilename(CPLFormFilename(
+    const std::string osBndFilename(CPLFormFilenameSafe(
         m_osDirName, CPLSPrintf("a%08x.gdbtable", nBndIdx), nullptr));
-    if (!oTable.Open(osBndFilename, false))
+    if (!oTable.Open(osBndFilename.c_str(), false))
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Cannot open table %s",
                  osBndTableName.c_str());
@@ -117,10 +102,14 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
         return false;
     }
 
-    int iRow = 0;
+    int64_t iRow = 0;
     while (iRow < oTable.GetTotalRecordCount() &&
            (iRow = oTable.GetAndSelectNextNonEmptyRow(iRow)) >= 0)
     {
+        if (iRow >= INT32_MAX)
+        {
+            return false;
+        }
         auto psField = oTable.GetFieldValue(i_raster_id);
         if (!psField)
         {
@@ -137,7 +126,7 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
             continue;
         }
 
-        const int nGDBRasterBandId = iRow + 1;
+        const int nGDBRasterBandId = static_cast<int>(iRow) + 1;
 
         psField = oTable.GetFieldValue(i_sequence_nbr);
         if (!psField)
@@ -373,8 +362,9 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
 
     if (!(dfMaxX > dfMinX && dfMaxY > dfMinY))
     {
-        CPLError(CE_Warning, CPLE_AppDefined,
+        CPLError(CE_Failure, CPLE_AppDefined,
                  "!(dfMaxX > dfMinX && dfMaxY > dfMinY)");
+        return false;
     }
     else if (nWidth == 1 || nHeight == 1)
     {
@@ -388,34 +378,109 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
         const double dfResX = (dfMaxX - dfMinX) / (nWidth - 1);
         const double dfResY = (dfMaxY - dfMinY) / (nHeight - 1);
         m_bHasGeoTransform = true;
-        m_adfGeoTransform[0] = dfBlockOriginX - dfResX / 2;
-        m_adfGeoTransform[1] = dfResX;
-        m_adfGeoTransform[2] = 0.0;
-        m_adfGeoTransform[3] = dfBlockOriginY + dfResY / 2;
-        m_adfGeoTransform[4] = 0.0;
-        m_adfGeoTransform[5] = -dfResY;
-
-        // If the block origin is within the full raster extent, reduce the
-        // advertized raster width/height
-        if (dfBlockOriginX > dfMinX && dfBlockOriginX < dfMaxX)
+        const double dfBlockGeorefWidth = dfResX * nBlockWidth;
+        if (dfMinX != dfBlockOriginX)
         {
-            const int nWidthDiff = static_cast<int>(
-                std::round((dfMinX - dfBlockOriginX) / dfResX));
-            if (nWidthDiff < nWidth)
-                nWidth -= nWidthDiff;
+            // Take into account MinX by making sure the raster origin is
+            // close to it, while being shifted from an integer number of blocks
+            // from BlockOriginX
+            const double dfTmp =
+                std::floor((dfMinX - dfBlockOriginX) / dfBlockGeorefWidth);
+            if (std::fabs(dfTmp) > std::numeric_limits<int>::max())
+            {
+                CPLError(CE_Warning, CPLE_AppDefined,
+                         "Inconsistent eminx=%g and block_origin_x=%g", dfMinX,
+                         dfBlockOriginX);
+                return false;
+            }
+            m_nShiftBlockX = static_cast<int>(dfTmp);
+            CPLDebug("OpenFileGDB", "m_nShiftBlockX = %d", m_nShiftBlockX);
+            const double dfMinXAdjusted =
+                dfBlockOriginX + m_nShiftBlockX * dfBlockGeorefWidth;
+            nWidth = 1 + static_cast<int>(
+                             std::round((dfMaxX - dfMinXAdjusted) / dfResX));
         }
-        if (dfBlockOriginY < dfMaxY && dfBlockOriginY > dfMinY)
+        m_gt[0] =
+            (dfBlockOriginX + m_nShiftBlockX * dfBlockGeorefWidth) - dfResX / 2;
+        m_gt[1] = dfResX;
+        m_gt[2] = 0.0;
+        const double dfBlockGeorefHeight = dfResY * nBlockHeight;
+        if (dfMaxY != dfBlockOriginY)
         {
-            const int nHeightDiff = static_cast<int>(
-                std::round((dfMaxY - dfBlockOriginY) / dfResY));
-            if (nHeightDiff < nHeight)
-                nHeight -= nHeightDiff;
+            // Take into account MaxY by making sure the raster origin is
+            // close to it, while being shifted from an integer number of blocks
+            // from BlockOriginY
+            const double dfTmp =
+                std::floor((dfBlockOriginY - dfMaxY) / dfBlockGeorefHeight);
+            if (std::fabs(dfTmp) > std::numeric_limits<int>::max())
+            {
+                CPLError(CE_Warning, CPLE_AppDefined,
+                         "Inconsistent emaxy=%g and block_origin_y=%g", dfMaxY,
+                         dfBlockOriginY);
+                return false;
+            }
+            m_nShiftBlockY = static_cast<int>(dfTmp);
+            CPLDebug("OpenFileGDB", "m_nShiftBlockY = %d", m_nShiftBlockY);
+            const double dfMaxYAdjusted =
+                dfBlockOriginY - m_nShiftBlockY * dfBlockGeorefHeight;
+            nHeight = 1 + static_cast<int>(
+                              std::round((dfMaxYAdjusted - dfMinY) / dfResY));
         }
+        m_gt[3] = (dfBlockOriginY - m_nShiftBlockY * dfBlockGeorefHeight) +
+                  dfResY / 2;
+        m_gt[4] = 0.0;
+        m_gt[5] = -dfResY;
     }
 
-    // Get SRID, and fetch WKT from GDBSpatialRefs table
+    // Two cases:
+    // - osDefinition is empty (that is FileGDB v9): find the SRS by looking
+    //   at the SRS attached to the RASTER field definition of the .gdbtable
+    //   file of the main table of the raster (that is the one without fras_XXX
+    //   prefixes)
+    // - or osDefinition is not empty (that is FileGDB v10): get SRID from the
+    //   "srid" field of the _fras_bnd table, and use that has the key to
+    //   lookup the corresponding WKT from the GDBSpatialRefs table.
+    //   In some cases srid might be 0 (invalid), then we try to get it from
+    //   Definition column of the GDB_Items table, stored in osDefinition
     psField = oTable.GetFieldValue(i_srid);
-    if (!psField)
+    if (osDefinition.empty())
+    {
+        // osDefinition empty for FileGDB v9
+        const auto oIter2 = m_osMapNameToIdx.find(osLayerName);
+        if (oIter2 != m_osMapNameToIdx.end())
+        {
+            const int nTableIdx = oIter2->second;
+
+            FileGDBTable oTableMain;
+
+            const std::string osTableMain(CPLFormFilenameSafe(
+                m_osDirName, CPLSPrintf("a%08x.gdbtable", nTableIdx), nullptr));
+            if (oTableMain.Open(osTableMain.c_str(), false))
+            {
+                const int iRasterFieldIdx = oTableMain.GetFieldIdx("RASTER");
+                if (iRasterFieldIdx >= 0)
+                {
+                    const auto poField = oTableMain.GetField(iRasterFieldIdx);
+                    if (poField->GetType() == FGFT_RASTER)
+                    {
+                        const auto poFieldRaster =
+                            static_cast<FileGDBRasterField *>(poField);
+                        const auto &osWKT = poFieldRaster->GetWKT();
+                        if (!osWKT.empty() && osWKT[0] != '{')
+                        {
+                            auto poSRS = BuildSRS(osWKT.c_str());
+                            if (poSRS)
+                            {
+                                m_oRasterSRS = *poSRS;
+                                poSRS->Release();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    else if (!psField)
     {
         CPLError(CE_Warning, CPLE_AppDefined,
                  "Cannot read field %s in %s table", "srid",
@@ -427,6 +492,7 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
     }
     else
     {
+        // FileGDB v10 case
         const int nSRID = psField->Integer;
         FileGDBTable oTableSRS;
         if (oTableSRS.Open(m_osGDBSpatialRefsFilename.c_str(), false))
@@ -481,9 +547,15 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
                 const auto psSRTEXT = oTableSRS.GetFieldValue(iSRTEXT);
                 if (psSRTEXT && psSRTEXT->String)
                 {
-                    auto poSRS = BuildSRS(psSRTEXT->String);
-                    if (poSRS)
-                        m_oRasterSRS = *poSRS;
+                    if (psSRTEXT->String[0] != '{')
+                    {
+                        auto poSRS = BuildSRS(psSRTEXT->String);
+                        if (poSRS)
+                        {
+                            m_oRasterSRS = *poSRS;
+                            poSRS->Release();
+                        }
+                    }
                 }
                 else
                 {
@@ -538,7 +610,10 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
         if (poFeat)
         {
             const char *pszMaxKey = poFeat->GetFieldAsString(0);
-            if (strlen(pszMaxKey) == strlen("0000BANDOVYYYYXXXX    "))
+            if (strlen(pszMaxKey) == strlen("0000BANDOVYYYYXXXX    ") ||
+                strlen(pszMaxKey) == strlen("0000BANDOV-YYYYXXXX    ") ||
+                strlen(pszMaxKey) == strlen("0000BANDOVYYYY-XXXX    ") ||
+                strlen(pszMaxKey) == strlen("0000BANDOV-YYYY-XXXX    "))
             {
                 char szHex[3] = {0};
                 memcpy(szHex, pszMaxKey + 8, 2);
@@ -607,13 +682,13 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
         }
         else
         {
-            poMaskBand = cpl::make_unique<GDALOpenFileGDBRasterBand>(
+            poMaskBand = std::make_unique<GDALOpenFileGDBRasterBand>(
                 this, 1, GDT_Byte, 8, nBlockWidth, nBlockHeight, 0, true);
         }
     }
     else if (EQUAL(pszNoDataOrMask, "MASK"))
     {
-        poMaskBand = cpl::make_unique<GDALOpenFileGDBRasterBand>(
+        poMaskBand = std::make_unique<GDALOpenFileGDBRasterBand>(
             this, 1, GDT_Byte, 8, nBlockWidth, nBlockHeight, 0, true);
     }
     else if (!EQUAL(pszNoDataOrMask, "NONE"))
@@ -628,7 +703,7 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
             if (std::fabs(dfNoData) > std::numeric_limits<float>::max())
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
-                         "Invalid nodata value %.18g for Float32", dfNoData);
+                         "Invalid nodata value %.17g for Float32", dfNoData);
                 return false;
             }
             bHasNoData = true;
@@ -671,7 +746,7 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
                 dfNoData != static_cast<double>(static_cast<int64_t>(dfNoData)))
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
-                         "Invalid nodata value %.18g for %s", dfNoData,
+                         "Invalid nodata value %.17g for %s", dfNoData,
                          GDALGetDataTypeName(eDT));
                 return false;
             }
@@ -705,7 +780,7 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
         // Create overview bands
         for (int iOvr = 0; iOvr < nOverviewCount; ++iOvr)
         {
-            auto poOvrBand = cpl::make_unique<GDALOpenFileGDBRasterBand>(
+            auto poOvrBand = std::make_unique<GDALOpenFileGDBRasterBand>(
                 this, iBand, eDT, nBitWidth, nBlockWidth, nBlockHeight,
                 iOvr + 1, false);
             if (poBand->m_bHasNoData)
@@ -734,7 +809,7 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
                 {
                     // Make the mask band owned by the first raster band
                     poOvrBand->m_poMaskBandOwned =
-                        cpl::make_unique<GDALOpenFileGDBRasterBand>(
+                        std::make_unique<GDALOpenFileGDBRasterBand>(
                             this, 1, GDT_Byte, 8, nBlockWidth, nBlockHeight,
                             iOvr + 1, true);
                     poMaskBandRef = poOvrBand->m_poMaskBandOwned.get();
@@ -746,6 +821,8 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
     }
 
     ReadAuxTable(osLayerName);
+
+    SetMetadataItem("RASTER_DATASET", m_osRasterLayerName.c_str());
 
     if (!osDefinition.empty())
     {
@@ -812,8 +889,8 @@ void OGROpenFileGDBDataSource::GuessJPEGQuality(int nOverviewCount)
                 }
                 if (nJPEGSize)
                 {
-                    CPLString osTmpFilename;
-                    osTmpFilename.Printf("/vsimem/_openfilegdb/%p.jpg", this);
+                    const CPLString osTmpFilename(
+                        VSIMemGenerateHiddenFilename("openfilegdb.jpg"));
                     VSIFCloseL(VSIFileFromMemBuffer(
                         osTmpFilename.c_str(),
                         const_cast<GByte *>(pabyData + nJPEGOffset), nJPEGSize,
@@ -991,10 +1068,9 @@ void OGROpenFileGDBDataSource::ReadAuxTable(const std::string &osLayerName)
 /*                         GetGeoTransform()                            */
 /************************************************************************/
 
-CPLErr OGROpenFileGDBDataSource::GetGeoTransform(double *padfGeoTransform)
+CPLErr OGROpenFileGDBDataSource::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    memcpy(padfGeoTransform, m_adfGeoTransform.data(),
-           sizeof(m_adfGeoTransform));
+    gt = m_gt;
     return m_bHasGeoTransform ? CE_None : CE_Failure;
 }
 
@@ -1204,8 +1280,28 @@ CPLErr GDALOpenFileGDBRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
                     nGDBRasterBandId,
                     m_nOverviewLevel, nBlockYOff, nBlockXOff);
     */
-    osFilter.Printf("block_key = '0000%04X%02X%04X%04X'", nGDBRasterBandId,
-                    m_nOverviewLevel, nBlockYOff, nBlockXOff);
+    const int nColNbr = nBlockXOff + poGDS->m_nShiftBlockX;
+    const int nRowNbr = nBlockYOff + poGDS->m_nShiftBlockY;
+    if (nRowNbr >= 0 && nColNbr >= 0)
+    {
+        osFilter.Printf("block_key = '0000%04X%02X%04X%04X'", nGDBRasterBandId,
+                        m_nOverviewLevel, nRowNbr, nColNbr);
+    }
+    else if (nRowNbr < 0 && nColNbr >= 0)
+    {
+        osFilter.Printf("block_key = '0000%04X%02X-%04X%04X'", nGDBRasterBandId,
+                        m_nOverviewLevel, -nRowNbr, nColNbr);
+    }
+    else if (nRowNbr >= 0 && nColNbr < 0)
+    {
+        osFilter.Printf("block_key = '0000%04X%02X%04X-%04X'", nGDBRasterBandId,
+                        m_nOverviewLevel, nRowNbr, -nColNbr);
+    }
+    else /* if( nRowNbr < 0 && nColNbr < 0 ) */
+    {
+        osFilter.Printf("block_key = '0000%04X%02X-%04X-%04X'",
+                        nGDBRasterBandId, m_nOverviewLevel, -nRowNbr, -nColNbr);
+    }
     // CPLDebug("OpenFileGDB", "Request %s", osFilter.c_str());
     poLyr->SetAttributeFilter(osFilter.c_str());
     auto poFeature = std::unique_ptr<OGRFeature>(poLyr->GetNextFeature());
@@ -1437,12 +1533,8 @@ CPLErr GDALOpenFileGDBRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
                 return CE_Failure;
             }
 
-            VSILFILE *fp = VSIFOpenL("tmp.jpg", "wb");
-            VSIFWriteL(pabyData + nJPEGOffset, nJPEGSize, 1, fp);
-            VSIFCloseL(fp);
-
-            CPLString osTmpFilename;
-            osTmpFilename.Printf("/vsimem/_openfilegdb/%p.jpg", this);
+            const CPLString osTmpFilename(
+                VSIMemGenerateHiddenFilename("openfilegdb.jpg"));
             VSIFCloseL(VSIFileFromMemBuffer(
                 osTmpFilename.c_str(),
                 const_cast<GByte *>(pabyData + nJPEGOffset), nJPEGSize, false));
@@ -1564,8 +1656,8 @@ CPLErr GDALOpenFileGDBRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
                 return CE_Failure;
             }
 
-            CPLString osTmpFilename;
-            osTmpFilename.Printf("/vsimem/_openfilegdb/%p.j2k", this);
+            const CPLString osTmpFilename(
+                VSIMemGenerateHiddenFilename("openfilegdb.j2k"));
             VSIFCloseL(VSIFileFromMemBuffer(
                 osTmpFilename.c_str(),
                 const_cast<GByte *>(pabyData + nJPEGOffset), nJPEGSize, false));
@@ -1791,7 +1883,7 @@ CPLErr GDALOpenFileGDBRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
         {
             for (int x = 0; x < nBlockXSize; ++x)
             {
-                printf("%.18g ", // ok
+                printf("%.17g ", // ok
                        static_cast<double *>(pImage)[y * nBlockXSize + x]);
             }
             printf("\n"); // ok
@@ -1834,15 +1926,34 @@ GDALRasterAttributeTable *GDALOpenFileGDBRasterBand::GetDefaultRAT()
     auto poGDS = cpl::down_cast<OGROpenFileGDBDataSource *>(poDS);
     const std::string osVATTableName(
         std::string("VAT_").append(poGDS->m_osRasterLayerName));
-    // Instanciate a new dataset, os that the RAT is standalone
-    auto poDSNew = cpl::make_unique<OGROpenFileGDBDataSource>();
+    // Instantiate a new dataset, os that the RAT is standalone
+    auto poDSNew = std::make_unique<OGROpenFileGDBDataSource>();
     GDALOpenInfo oOpenInfo(poGDS->m_osDirName.c_str(), GA_ReadOnly);
-    if (!poDSNew->Open(&oOpenInfo))
+    bool bRetryFileGDBUnused = false;
+    if (!poDSNew->Open(&oOpenInfo, bRetryFileGDBUnused))
         return nullptr;
     auto poVatLayer = poDSNew->BuildLayerFromName(osVATTableName.c_str());
     if (!poVatLayer)
         return nullptr;
-    m_poRAT = cpl::make_unique<GDALOpenFileGDBRasterAttributeTable>(
+    m_poRAT = std::make_unique<GDALOpenFileGDBRasterAttributeTable>(
         std::move(poDSNew), osVATTableName, std::move(poVatLayer));
     return m_poRAT.get();
+}
+
+/************************************************************************/
+/*               GDALOpenFileGDBRasterAttributeTable::Clone()           */
+/************************************************************************/
+
+GDALRasterAttributeTable *GDALOpenFileGDBRasterAttributeTable::Clone() const
+{
+    auto poDS = std::make_unique<OGROpenFileGDBDataSource>();
+    GDALOpenInfo oOpenInfo(m_poDS->m_osDirName.c_str(), GA_ReadOnly);
+    bool bRetryFileGDBUnused = false;
+    if (!poDS->Open(&oOpenInfo, bRetryFileGDBUnused))
+        return nullptr;
+    auto poVatLayer = poDS->BuildLayerFromName(m_osVATTableName.c_str());
+    if (!poVatLayer)
+        return nullptr;
+    return new GDALOpenFileGDBRasterAttributeTable(
+        std::move(poDS), m_osVATTableName, std::move(poVatLayer));
 }

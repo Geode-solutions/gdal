@@ -8,23 +8,7 @@
  * Copyright (c) 2013, Paul Ramsey <pramsey@boundlessgeo.com>
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_geopackage.h"
@@ -33,15 +17,14 @@
 #include "ogr_p.h"
 #include "ogr_recordbatch.h"
 #include "ograrrowarrayhelper.h"
+#include "ogrlayerarrow.h"
 
 /************************************************************************/
 /*                      OGRGeoPackageLayer()                            */
 /************************************************************************/
 
 OGRGeoPackageLayer::OGRGeoPackageLayer(GDALGeoPackageDataset *poDS)
-    : m_poDS(poDS), m_poFeatureDefn(nullptr), iNextShapeId(0),
-      m_poQueryStatement(nullptr), bDoStep(true), m_pszFidColumn(nullptr),
-      iFIDCol(-1), iGeomCol(-1), panFieldOrdinals(nullptr)
+    : m_poDS(poDS)
 {
 }
 
@@ -57,8 +40,6 @@ OGRGeoPackageLayer::~OGRGeoPackageLayer()
     if (m_poQueryStatement)
         sqlite3_finalize(m_poQueryStatement);
 
-    CPLFree(panFieldOrdinals);
-
     if (m_poFeatureDefn)
         m_poFeatureDefn->Release();
 }
@@ -71,7 +52,7 @@ void OGRGeoPackageLayer::ResetReading()
 
 {
     ClearStatement();
-    iNextShapeId = 0;
+    m_iNextShapeId = 0;
     m_bEOF = false;
 }
 
@@ -114,7 +95,7 @@ OGRFeature *OGRGeoPackageLayer::GetNextFeature()
         /*      Fetch a record (unless otherwise instructed) */
         /* --------------------------------------------------------------------
          */
-        if (bDoStep)
+        if (m_bDoStep)
         {
             int rc = sqlite3_step(m_poQueryStatement);
             if (rc != SQLITE_ROW)
@@ -135,7 +116,7 @@ OGRFeature *OGRGeoPackageLayer::GetNextFeature()
         }
         else
         {
-            bDoStep = true;
+            m_bDoStep = true;
         }
 
         OGRFeature *poFeature = TranslateFeature(m_poQueryStatement);
@@ -224,7 +205,7 @@ bool OGRGeoPackageLayer::ParseDateField(const char *pszTxt, OGRField *psField,
             bError = true;
         }
     }
-    else if (OGRParseDate(pszTxt, psField, 0))
+    else if (OGRParseDate(pszTxt, psField, OGRPARSEDATE_OPTION_LAX))
     {
         constexpr int line = __LINE__;
         if (!m_poDS->m_oSetGPKGLayerWarnings[line])
@@ -303,13 +284,16 @@ bool OGRGeoPackageLayer::ParseDateTimeField(const char *pszTxt,
         return false;
     }
 
-    const size_t nLen = strlen(pszTxt);
+    std::string_view sInput(pszTxt);
 
-    if (OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(pszTxt, nLen, psField))
+    if (OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(sInput, psField) ||
+        OGRParseDateTimeYYYYMMDDTHHMMSSZ(sInput, psField) ||
+        OGRParseDateTimeYYYYMMDDTHHMMZ(sInput, psField))
     {
-        // nominal format
+        // nominal format is YYYYMMDDTHHMMSSsssZ before GeoPackage 1.4
+        // GeoPackage 1.4 also accepts omission of seconds and milliseconds
     }
-    else if (OGRParseDate(pszTxt, psField, 0))
+    else if (OGRParseDate(pszTxt, psField, OGRPARSEDATE_OPTION_LAX))
     {
         constexpr int line = __LINE__;
         if (!m_poDS->m_oSetGPKGLayerWarnings[line])
@@ -355,37 +339,37 @@ OGRFeature *OGRGeoPackageLayer::TranslateFeature(sqlite3_stmt *hStmt)
     /* -------------------------------------------------------------------- */
     /*      Set FID if we have a column to set it from.                     */
     /* -------------------------------------------------------------------- */
-    if (iFIDCol >= 0)
+    if (m_iFIDCol >= 0)
     {
-        poFeature->SetFID(sqlite3_column_int64(hStmt, iFIDCol));
+        poFeature->SetFID(sqlite3_column_int64(hStmt, m_iFIDCol));
         if (m_pszFidColumn == nullptr && poFeature->GetFID() == 0)
         {
             // Miht be the case for views with joins.
-            poFeature->SetFID(iNextShapeId);
+            poFeature->SetFID(m_iNextShapeId);
         }
     }
     else
-        poFeature->SetFID(iNextShapeId);
+        poFeature->SetFID(m_iNextShapeId);
 
-    iNextShapeId++;
+    m_iNextShapeId++;
 
     m_nFeaturesRead++;
 
     /* -------------------------------------------------------------------- */
     /*      Process Geometry if we have a column.                           */
     /* -------------------------------------------------------------------- */
-    if (iGeomCol >= 0)
+    if (m_iGeomCol >= 0)
     {
         OGRGeomFieldDefn *poGeomFieldDefn =
             m_poFeatureDefn->GetGeomFieldDefn(0);
-        if (sqlite3_column_type(hStmt, iGeomCol) != SQLITE_NULL &&
+        if (sqlite3_column_type(hStmt, m_iGeomCol) != SQLITE_NULL &&
             !poGeomFieldDefn->IsIgnored())
         {
-            OGRSpatialReference *poSrs = poGeomFieldDefn->GetSpatialRef();
-            int iGpkgSize = sqlite3_column_bytes(hStmt, iGeomCol);
+            const OGRSpatialReference *poSrs = poGeomFieldDefn->GetSpatialRef();
+            int iGpkgSize = sqlite3_column_bytes(hStmt, m_iGeomCol);
             // coverity[tainted_data_return]
             const GByte *pabyGpkg = static_cast<const GByte *>(
-                sqlite3_column_blob(hStmt, iGeomCol));
+                sqlite3_column_blob(hStmt, m_iGeomCol));
             OGRGeometry *poGeom =
                 GPkgGeometryToOGR(pabyGpkg, iGpkgSize, nullptr);
             if (poGeom == nullptr)
@@ -398,8 +382,16 @@ OGRFeature *OGRGeoPackageLayer::TranslateFeature(sqlite3_stmt *hStmt)
                              "Unable to read geometry");
                 }
             }
-            if (poGeom != nullptr)
+            if (poGeom)
+            {
+                if (m_bUndoDiscardCoordLSBOnReading)
+                {
+                    poGeom->roundCoordinates(
+                        poGeomFieldDefn->GetCoordinatePrecision());
+                }
                 poGeom->assignSpatialReference(poSrs);
+            }
+
             poFeature->SetGeometryDirectly(poGeom);
         }
     }
@@ -415,7 +407,7 @@ OGRFeature *OGRGeoPackageLayer::TranslateFeature(sqlite3_stmt *hStmt)
         if (poFieldDefn->IsIgnored())
             continue;
 
-        const int iRawField = panFieldOrdinals[iField];
+        const int iRawField = m_anFieldOrdinals[iField];
 
         const int nSqlite3ColType = sqlite3_column_type(hStmt, iRawField);
         if (nSqlite3ColType == SQLITE_NULL)
@@ -505,6 +497,24 @@ OGRFeature *OGRGeoPackageLayer::TranslateFeature(sqlite3_stmt *hStmt)
 }
 
 /************************************************************************/
+/*                          GetArrowStream()                            */
+/************************************************************************/
+
+bool OGRGeoPackageLayer::GetArrowStream(struct ArrowArrayStream *out_stream,
+                                        CSLConstList papszOptions)
+{
+    CPLStringList aosOptions;
+    aosOptions.Assign(CSLDuplicate(papszOptions), true);
+    // GeoPackage are assumed to be in UTC. Even if another timezone is used,
+    // we'll do the conversion to UTC
+    if (aosOptions.FetchNameValue("TIMEZONE") == nullptr)
+    {
+        aosOptions.SetNameValue("TIMEZONE", "UTC");
+    }
+    return OGRLayer::GetArrowStream(out_stream, aosOptions.List());
+}
+
+/************************************************************************/
 /*                      GetNextArrowArray()                             */
 /************************************************************************/
 
@@ -541,15 +551,19 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
     struct tm brokenDown;
     memset(&brokenDown, 0, sizeof(brokenDown));
 
+    const bool bDateTimeAsString = m_aosArrowArrayStreamOptions.FetchBool(
+        GAS_OPT_DATETIME_AS_STRING, false);
+
+    const uint32_t nMemLimit = OGRArrowArrayHelper::GetMemLimit();
     int iFeat = 0;
-    for (; iFeat < sHelper.nMaxBatchSize; iFeat++)
+    while (iFeat < sHelper.m_nMaxBatchSize)
     {
         /* --------------------------------------------------------------------
          */
         /*      Fetch a record (unless otherwise instructed) */
         /* --------------------------------------------------------------------
          */
-        if (bDoStep)
+        if (m_bDoStep)
         {
             int rc = sqlite3_step(hStmt);
             if (rc != SQLITE_ROW)
@@ -570,29 +584,29 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
         }
         else
         {
-            bDoStep = true;
+            m_bDoStep = true;
         }
 
-        iNextShapeId++;
+        m_iNextShapeId++;
 
         m_nFeaturesRead++;
 
         GIntBig nFID;
-        if (iFIDCol >= 0)
+        if (m_iFIDCol >= 0)
         {
-            nFID = sqlite3_column_int64(hStmt, iFIDCol);
+            nFID = sqlite3_column_int64(hStmt, m_iFIDCol);
             if (m_pszFidColumn == nullptr && nFID == 0)
             {
                 // Might be the case for views with joins.
-                nFID = iNextShapeId;
+                nFID = m_iNextShapeId;
             }
         }
         else
-            nFID = iNextShapeId;
+            nFID = m_iNextShapeId;
 
-        if (sHelper.panFIDValues)
+        if (sHelper.m_panFIDValues)
         {
-            sHelper.panFIDValues[iFeat] = nFID;
+            sHelper.m_panFIDValues[iFeat] = nFID;
         }
 
         /* --------------------------------------------------------------------
@@ -600,22 +614,23 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
         /*      Process Geometry if we have a column. */
         /* --------------------------------------------------------------------
          */
-        if (iGeomCol >= 0 && sHelper.mapOGRGeomFieldToArrowField[0] >= 0)
+        if (m_iGeomCol >= 0 && sHelper.m_mapOGRGeomFieldToArrowField[0] >= 0)
         {
-            const int iArrowField = sHelper.mapOGRGeomFieldToArrowField[0];
+            const int iArrowField = sHelper.m_mapOGRGeomFieldToArrowField[0];
             auto psArray = out_array->children[iArrowField];
 
             size_t nWKBSize = 0;
-            if (sqlite3_column_type(hStmt, iGeomCol) != SQLITE_NULL)
+            if (sqlite3_column_type(hStmt, m_iGeomCol) != SQLITE_NULL)
             {
                 std::unique_ptr<OGRGeometry> poGeom;
                 const GByte *pabyWkb = nullptr;
-                const int iGpkgSize = sqlite3_column_bytes(hStmt, iGeomCol);
+                const int iGpkgSize = sqlite3_column_bytes(hStmt, m_iGeomCol);
                 // coverity[tainted_data_return]
                 const GByte *pabyGpkg = static_cast<const GByte *>(
-                    sqlite3_column_blob(hStmt, iGeomCol));
+                    sqlite3_column_blob(hStmt, m_iGeomCol));
                 if (m_poFilterGeom == nullptr && iGpkgSize >= 8 && pabyGpkg &&
-                    pabyGpkg[0] == 'G' && pabyGpkg[1] == 'P')
+                    pabyGpkg[0] == 'G' && pabyGpkg[1] == 'P' &&
+                    !m_bUndoDiscardCoordLSBOnReading)
                 {
                     GPkgHeader oHeader;
 
@@ -645,6 +660,12 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
                         }
                         poGeom.reset(poGeomPtr);
                     }
+                    else if (m_bUndoDiscardCoordLSBOnReading)
+                    {
+                        poGeom->roundCoordinates(
+                            m_poFeatureDefn->GetGeomFieldDefn(0)
+                                ->GetCoordinatePrecision());
+                    }
                     if (poGeom != nullptr)
                     {
                         nWKBSize = poGeom->WkbSize();
@@ -658,6 +679,20 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
 
                 if (nWKBSize != 0)
                 {
+                    if (iFeat > 0)
+                    {
+                        auto panOffsets = static_cast<int32_t *>(
+                            const_cast<void *>(psArray->buffers[1]));
+                        const uint32_t nCurLength =
+                            static_cast<uint32_t>(panOffsets[iFeat]);
+                        if (nWKBSize <= nMemLimit &&
+                            nWKBSize > nMemLimit - nCurLength)
+                        {
+                            m_bDoStep = false;
+                            break;
+                        }
+                    }
+
                     GByte *outPtr = sHelper.GetPtrForStringOrBinary(
                         iArrowField, iFeat, nWKBSize);
                     if (outPtr == nullptr)
@@ -690,16 +725,16 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
             }
         }
 
-        for (int iField = 0; iField < sHelper.nFieldCount; iField++)
+        for (int iField = 0; iField < sHelper.m_nFieldCount; iField++)
         {
-            const int iArrowField = sHelper.mapOGRFieldToArrowField[iField];
+            const int iArrowField = sHelper.m_mapOGRFieldToArrowField[iField];
             if (iArrowField < 0)
                 continue;
             const OGRFieldDefn *poFieldDefn =
                 m_poFeatureDefn->GetFieldDefnUnsafe(iField);
 
             auto psArray = out_array->children[iArrowField];
-            const int iRawField = panFieldOrdinals[iField];
+            const int iRawField = m_anFieldOrdinals[iField];
 
             const int nSqlite3ColType = sqlite3_column_type(hStmt, iRawField);
             if (nSqlite3ColType == SQLITE_NULL)
@@ -768,6 +803,22 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
                         sqlite3_column_blob(hStmt, iRawField);
                     if (pabyData != nullptr || nBytes == 0)
                     {
+                        if (iFeat > 0)
+                        {
+                            auto panOffsets = static_cast<int32_t *>(
+                                const_cast<void *>(psArray->buffers[1]));
+                            const uint32_t nCurLength =
+                                static_cast<uint32_t>(panOffsets[iFeat]);
+                            if (nBytes <= nMemLimit &&
+                                nBytes > nMemLimit - nCurLength)
+                            {
+                                m_bDoStep = false;
+                                m_iNextShapeId--;
+                                m_nFeaturesRead--;
+                                goto after_loop;
+                            }
+                        }
+
                         GByte *outPtr = sHelper.GetPtrForStringOrBinary(
                             iArrowField, iFeat, nBytes);
                         if (outPtr == nullptr)
@@ -798,14 +849,23 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
 
                 case OFTDateTime:
                 {
-                    OGRField ogrField;
-                    if (ParseDateTimeField(hStmt, iRawField, nSqlite3ColType,
-                                           &ogrField, poFieldDefn, nFID))
+                    if (!bDateTimeAsString)
                     {
-                        sHelper.SetDateTime(psArray, iFeat, brokenDown,
-                                            ogrField);
+                        OGRField ogrField;
+                        if (ParseDateTimeField(hStmt, iRawField,
+                                               nSqlite3ColType, &ogrField,
+                                               poFieldDefn, nFID))
+                        {
+                            sHelper.SetDateTime(psArray, iFeat, brokenDown,
+                                                sHelper.m_anTZFlags[iField],
+                                                ogrField);
+                        }
+                        break;
                     }
-                    break;
+                    else
+                    {
+                        [[fallthrough]];
+                    }
                 }
 
                 case OFTString:
@@ -815,6 +875,22 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
                     if (pszTxt != nullptr)
                     {
                         const size_t nBytes = strlen(pszTxt);
+                        if (iFeat > 0)
+                        {
+                            auto panOffsets = static_cast<int32_t *>(
+                                const_cast<void *>(psArray->buffers[1]));
+                            const uint32_t nCurLength =
+                                static_cast<uint32_t>(panOffsets[iFeat]);
+                            if (nBytes <= nMemLimit &&
+                                nBytes > nMemLimit - nCurLength)
+                            {
+                                m_bDoStep = false;
+                                m_iNextShapeId--;
+                                m_nFeaturesRead--;
+                                goto after_loop;
+                            }
+                        }
+
                         GByte *outPtr = sHelper.GetPtrForStringOrBinary(
                             iArrowField, iFeat, nBytes);
                         if (outPtr == nullptr)
@@ -838,9 +914,13 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
                     break;
             }
         }
-    }
 
+        ++iFeat;
+    }
+after_loop:
     sHelper.Shrink(iFeat);
+    if (iFeat == 0)
+        sHelper.ClearArray();
 
     return 0;
 
@@ -897,7 +977,7 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
 
     const int nRawColumns = sqlite3_column_count(hStmt);
 
-    panFieldOrdinals = static_cast<int *>(CPLMalloc(sizeof(int) * nRawColumns));
+    m_anFieldOrdinals.resize(nRawColumns);
 
     const bool bPromoteToInteger64 =
         CPLTestBool(CPLGetConfigOption("OGR_PROMOTE_TO_INTEGER64", "FALSE"));
@@ -925,6 +1005,7 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
     }
 #endif
 
+    bool bGeometryColumnGuessed = false;
     for (int iCol = 0; iCol < nRawColumns; iCol++)
     {
         OGRFieldDefn oField(SQLUnescape(sqlite3_column_name(hStmt, iCol)),
@@ -961,21 +1042,26 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
             OGRLayer *poLayer = m_poDS->GetLayerByName(pszTableName);
             if (poLayer != nullptr)
             {
-                if (m_poFeatureDefn->GetGeomFieldCount() == 0 &&
-                    EQUAL(pszOriginName, poLayer->GetGeometryColumn()))
+                if (EQUAL(pszOriginName, poLayer->GetGeometryColumn()))
                 {
-                    OGRGeomFieldDefn oGeomField(
-                        poLayer->GetLayerDefn()->GetGeomFieldDefn(0));
-                    oGeomField.SetName(oField.GetNameRef());
-                    m_poFeatureDefn->AddGeomFieldDefn(&oGeomField);
-                    iGeomCol = iCol;
+                    if (bGeometryColumnGuessed ||
+                        m_poFeatureDefn->GetGeomFieldCount() == 0)
+                    {
+                        if (bGeometryColumnGuessed)
+                            m_poFeatureDefn->DeleteGeomFieldDefn(0);
+                        OGRGeomFieldDefn oGeomField(
+                            poLayer->GetLayerDefn()->GetGeomFieldDefn(0));
+                        oGeomField.SetName(oField.GetNameRef());
+                        m_poFeatureDefn->AddGeomFieldDefn(&oGeomField);
+                        m_iGeomCol = iCol;
+                    }
                     continue;
                 }
                 else if (EQUAL(pszOriginName, poLayer->GetFIDColumn()) &&
                          m_pszFidColumn == nullptr && nFIDCandidates == 1)
                 {
                     m_pszFidColumn = CPLStrdup(oField.GetNameRef());
-                    iFIDCol = iCol;
+                    m_iFIDCol = iCol;
                     continue;
                 }
                 int nSrcIdx =
@@ -990,7 +1076,7 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
                     oField.SetPrecision(poSrcField->GetPrecision());
                     oField.SetDomainName(poSrcField->GetDomainName());
                     m_poFeatureDefn->AddFieldDefn(&oField);
-                    panFieldOrdinals[m_poFeatureDefn->GetFieldCount() - 1] =
+                    m_anFieldOrdinals[m_poFeatureDefn->GetFieldCount() - 1] =
                         iCol;
                     continue;
                 }
@@ -999,12 +1085,36 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
 #endif
 
         const int nColType = sqlite3_column_type(hStmt, iCol);
-        if (m_pszFidColumn == nullptr && nColType == SQLITE_INTEGER &&
+        if (m_poFeatureDefn->GetGeomFieldCount() == 0 &&
+            m_pszFidColumn == nullptr && nColType == SQLITE_INTEGER &&
             EQUAL(oField.GetNameRef(), "FID"))
         {
             m_pszFidColumn = CPLStrdup(oField.GetNameRef());
-            iFIDCol = iCol;
+            m_iFIDCol = iCol;
             continue;
+        }
+
+        // Heuristics to help for https://github.com/OSGeo/gdal/issues/8587
+        if (nColType == SQLITE_NULL && m_iGeomCol < 0
+#ifdef SQLITE_HAS_COLUMN_METADATA
+            && !pszTableName && !pszOriginName
+#endif
+        )
+        {
+            bool bIsLikelyGeomColName = EQUAL(oField.GetNameRef(), "geom") ||
+                                        EQUAL(oField.GetNameRef(), "geometry");
+            bool bIsGeomFunction = false;
+            if (!bIsLikelyGeomColName)
+                bIsGeomFunction = OGRSQLiteIsSpatialFunctionReturningGeometry(
+                    oField.GetNameRef());
+            if (bIsLikelyGeomColName || bIsGeomFunction)
+            {
+                bGeometryColumnGuessed = bIsLikelyGeomColName;
+                OGRGeomFieldDefn oGeomField(oField.GetNameRef(), wkbUnknown);
+                m_poFeatureDefn->AddGeomFieldDefn(&oGeomField);
+                m_iGeomCol = iCol;
+                continue;
+            }
         }
 
         const char *pszDeclType = sqlite3_column_decltype(hStmt, iCol);
@@ -1046,12 +1156,10 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
                                                 wkbUnknown);
 
                     /* Read the SRS */
-                    OGRSpatialReference *poSRS =
-                        m_poDS->GetSpatialRef(nSRID, true);
+                    auto poSRS = m_poDS->GetSpatialRef(nSRID, true);
                     if (poSRS)
                     {
-                        oGeomField.SetSpatialRef(poSRS);
-                        poSRS->Dereference();
+                        oGeomField.SetSpatialRef(poSRS.get());
                     }
 
                     OGRwkbGeometryType eGeomType = poGeom->getGeometryType();
@@ -1072,7 +1180,7 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
                     poGeom = nullptr;
 
                     m_poFeatureDefn->AddGeomFieldDefn(&oGeomField);
-                    iGeomCol = iCol;
+                    m_iGeomCol = iCol;
                     continue;
                 }
             }
@@ -1109,18 +1217,18 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
         {
             OGRFieldSubType eSubType;
             int nMaxWidth = 0;
-            const OGRFieldType eFieldType =
+            const int nFieldType =
                 GPkgFieldToOGR(pszDeclType, eSubType, nMaxWidth);
-            if (static_cast<int>(eFieldType) <= OFTMaxType)
+            if (nFieldType <= OFTMaxType)
             {
-                oField.SetType(eFieldType);
+                oField.SetType(static_cast<OGRFieldType>(nFieldType));
                 oField.SetSubType(eSubType);
                 oField.SetWidth(nMaxWidth);
             }
         }
 
         m_poFeatureDefn->AddFieldDefn(&oField);
-        panFieldOrdinals[m_poFeatureDefn->GetFieldCount() - 1] = iCol;
+        m_anFieldOrdinals[m_poFeatureDefn->GetFieldCount() - 1] = iCol;
     }
 }
 
@@ -1128,7 +1236,7 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
 /*                          SetIgnoredFields()                          */
 /************************************************************************/
 
-OGRErr OGRGeoPackageLayer::SetIgnoredFields(const char **papszFields)
+OGRErr OGRGeoPackageLayer::SetIgnoredFields(CSLConstList papszFields)
 {
     OGRErr eErr = OGRLayer::SetIgnoredFields(papszFields);
     if (eErr == OGRERR_NONE)

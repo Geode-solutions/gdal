@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Python Library supporting GDAL/OGR Test Suite
@@ -10,29 +9,13 @@
 # Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import contextlib
 import functools
-import inspect
 import io
+import json
 import math
 import os
 import os.path
@@ -52,74 +35,16 @@ import pytest
 
 from osgeo import gdal, osr
 
-cur_name = "default"
-
-success_counter = 0
-failure_counter = 0
-expected_failure_counter = 0
-blow_counter = 0
-skip_counter = 0
-failure_summary = []
-
-reason = None
-start_time = None
-end_time = None
-
 jp2kak_drv = None
 jpeg2000_drv = None
 jp2ecw_drv = None
 jp2mrsid_drv = None
 jp2openjpeg_drv = None
-jp2lura_drv = None
 jp2kak_drv_unregistered = False
 jpeg2000_drv_unregistered = False
 jp2ecw_drv_unregistered = False
 jp2mrsid_drv_unregistered = False
 jp2openjpeg_drv_unregistered = False
-jp2lura_drv_unregistered = False
-
-# Process commandline arguments for stuff like --debug, --locale, --config
-
-argv = gdal.GeneralCmdLineProcessor(sys.argv)
-
-###############################################################################
-
-
-def git_status():
-
-    out, _ = runexternal_out_and_err("git status --porcelain .")
-    return out
-
-
-###############################################################################
-
-
-def get_lineno_2framesback(frames):
-    try:
-        import inspect
-
-        frame = inspect.currentframe()
-        while frames > 0:
-            frame = frame.f_back
-            frames = frames - 1
-
-        return frame.f_lineno
-    except ImportError:
-        return -1
-
-
-###############################################################################
-
-
-def post_reason(msg, frames=2):
-    lineno = get_lineno_2framesback(frames)
-    global reason
-
-    if lineno >= 0:
-        reason = "line %d: %s" % (lineno, msg)
-    else:
-        reason = msg
-
 
 ###############################################################################
 
@@ -147,7 +72,7 @@ def testCreateCopyInterruptCallback(pct, message, user_data):
 ###############################################################################
 
 
-class GDALTest(object):
+class GDALTest:
     def __init__(
         self,
         drivername,
@@ -162,10 +87,15 @@ class GDALTest(object):
         filename_absolute=0,
         chksum_after_reopening=None,
         open_options=None,
+        tmpdir=None,
     ):
         self.driver = None
         self.drivername = drivername
         self.filename = filename
+
+        if isinstance(self.filename, os.PathLike):
+            self.filename = str(self.filename)
+
         self.filename_absolute = filename_absolute
         self.band = band
         self.chksum = chksum
@@ -184,6 +114,11 @@ class GDALTest(object):
         self.ysize = ysize
         self.options = [] if options is None else options
         self.open_options = open_options
+
+        if tmpdir is None:
+            self.tmpdir = "tmp/"
+        else:
+            self.tmpdir = tmpdir
 
     def testDriver(self):
         if self.driver is None:
@@ -284,11 +219,21 @@ class GDALTest(object):
                             drv_name.lower() == "biggif"
                             and self.drivername.lower() == "gif"
                         )
+                        or (
+                            drv_name.lower() == "gtiff"
+                            and self.drivername.lower() == "libertiff"
+                        )
+                        or (
+                            drv_name.lower() == "libertiff"
+                            and self.drivername.lower() == "gtiff"
+                        )
                     ):
                         drivers += [drv_name]
-                other_ds = gdal.OpenEx(
-                    main_virtual_filename, gdal.OF_RASTER, allowed_drivers=drivers
-                )
+                other_ds = None
+                with gdal.ExceptionMgr(useExceptions=False):
+                    other_ds = gdal.OpenEx(
+                        main_virtual_filename, gdal.OF_RASTER, allowed_drivers=drivers
+                    )
                 other_ds_is_None = other_ds is None
                 other_ds_driver_name = None
                 if not other_ds_is_None:
@@ -450,7 +395,9 @@ class GDALTest(object):
             if vsimem:
                 new_filename = "/vsimem/" + os.path.basename(self.filename) + ".tst"
             else:
-                new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+                new_filename = os.path.join(
+                    self.tmpdir, os.path.basename(self.filename) + ".tst"
+                )
 
         if quiet_error_handler:
             gdal.PushErrorHandler("CPLQuietErrorHandler")
@@ -471,9 +418,8 @@ class GDALTest(object):
 
         if interrupt_during_copy:
             if new_ds is None:
-                gdal.PushErrorHandler("CPLQuietErrorHandler")
-                self.driver.Delete(new_filename)
-                gdal.PopErrorHandler()
+                with error_handler():
+                    self.driver.Delete(new_filename)
                 return
             new_ds = None
             self.driver.Delete(new_filename)
@@ -608,6 +554,7 @@ class GDALTest(object):
         out_bands=1,
         check_minmax=1,
         dest_open_options=None,
+        delete_output_file=True,
     ):
         self.testDriver()
 
@@ -632,7 +579,9 @@ class GDALTest(object):
             if vsimem:
                 new_filename = "/vsimem/" + self.filename + ".tst"
             else:
-                new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+                new_filename = os.path.join(
+                    self.tmpdir, os.path.basename(self.filename) + ".tst"
+                )
 
         new_ds = self.driver.Create(
             new_filename,
@@ -696,7 +645,7 @@ class GDALTest(object):
         assert new_ds.FlushCache() == gdal.CE_None
         new_ds = None
 
-        if gdal.GetConfigOption("CPL_DEBUG", "OFF") != "ON":
+        if delete_output_file and gdal.GetConfigOption("CPL_DEBUG", "OFF") != "ON":
             self.driver.Delete(new_filename)
 
     def testSetGeoTransform(self):
@@ -713,7 +662,9 @@ class GDALTest(object):
         xsize = src_ds.RasterXSize
         ysize = src_ds.RasterYSize
 
-        new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+        new_filename = os.path.join(
+            self.tmpdir, os.path.basename(self.filename) + ".tst"
+        )
         new_ds = self.driver.Create(
             new_filename,
             xsize,
@@ -769,7 +720,9 @@ class GDALTest(object):
         xsize = src_ds.RasterXSize
         ysize = src_ds.RasterYSize
 
-        new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+        new_filename = os.path.join(
+            self.tmpdir, os.path.basename(self.filename) + ".tst"
+        )
         new_ds = self.driver.Create(
             new_filename,
             xsize,
@@ -833,7 +786,9 @@ class GDALTest(object):
         xsize = src_ds.RasterXSize
         ysize = src_ds.RasterYSize
 
-        new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+        new_filename = os.path.join(
+            self.tmpdir, os.path.basename(self.filename) + ".tst"
+        )
         new_ds = self.driver.Create(
             new_filename,
             xsize,
@@ -882,7 +837,9 @@ class GDALTest(object):
         xsize = src_ds.RasterXSize
         ysize = src_ds.RasterYSize
 
-        new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+        new_filename = os.path.join(
+            self.tmpdir, os.path.basename(self.filename) + ".tst"
+        )
         dt = src_ds.GetRasterBand(self.band).DataType
         new_ds = self.driver.Create(
             new_filename,
@@ -936,7 +893,7 @@ class GDALTest(object):
             self.driver.Delete(new_filename)
 
     def testSetNoDataValueAndDelete(self):
-        return self.testSetNoDataValue(delete=True)
+        self.testSetNoDataValue(delete=True)
 
     def testSetDescription(self):
         self.testDriver()
@@ -952,7 +909,9 @@ class GDALTest(object):
         xsize = src_ds.RasterXSize
         ysize = src_ds.RasterYSize
 
-        new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+        new_filename = os.path.join(
+            self.tmpdir, os.path.basename(self.filename) + ".tst"
+        )
         new_ds = self.driver.Create(
             new_filename,
             xsize,
@@ -995,7 +954,9 @@ class GDALTest(object):
         xsize = src_ds.RasterXSize
         ysize = src_ds.RasterYSize
 
-        new_filename = "tmp/" + os.path.basename(self.filename) + ".tst"
+        new_filename = os.path.join(
+            self.tmpdir, os.path.basename(self.filename) + ".tst"
+        )
         new_ds = self.driver.Create(
             new_filename,
             xsize,
@@ -1057,12 +1018,12 @@ def equal_srs_from_wkt(expected_wkt, got_wkt, verbose=True):
     got_srs.ImportFromWkt(got_wkt)
 
     if got_srs.IsSame(expected_srs):
-        return 1
+        return True
     if verbose:
         print("Expected:\n%s" % expected_wkt)
         print("Got:     \n%s" % got_wkt)
-        post_reason("SRS differs from expected.")
-    return 0
+        print("SRS differs from expected.")
+    return False
 
 
 ###############################################################################
@@ -1070,7 +1031,8 @@ def equal_srs_from_wkt(expected_wkt, got_wkt, verbose=True):
 # equivalent or not.
 
 
-def rpcs_equal(md1, md2):
+def check_rpcs_equal(md1, md2):
+    __tracebackhide__ = True
 
     simple_fields = [
         "LINE_OFF",
@@ -1093,47 +1055,23 @@ def rpcs_equal(md1, md2):
 
     for sf in simple_fields:
 
-        try:
-            if not approx_equal(float(md1[sf]), float(md2[sf])):
-                post_reason("%s values differ." % sf)
-                print(md1[sf])
-                print(md2[sf])
-                return 0
-        except Exception:
-            post_reason("%s value missing or corrupt." % sf)
-            print(md1)
-            print(md2)
-            return 0
+        assert sf in md1
+        assert sf in md2
+        assert approx_equal(float(md1[sf]), float(md2[sf]))
 
     for cf in coef_fields:
 
-        try:
-            list1 = md1[cf].split()
-            list2 = md2[cf].split()
+        list1 = md1[cf].split()
+        list2 = md2[cf].split()
 
-        except Exception:
-            post_reason("%s value missing or corrupt." % cf)
-            print(md1[cf])
-            print(md2[cf])
-            return 0
+        assert len(list1) == 20, "%s value list length wrong(1)" % cf
 
-        if len(list1) != 20:
-            post_reason("%s value list length wrong(1)" % cf)
-            print(list1)
-            return 0
-
-        if len(list2) != 20:
-            post_reason("%s value list length wrong(2)" % cf)
-            print(list2)
-            return 0
+        assert len(list2) == 20, "%s value list length wrong(2)" % cf
 
         for i in range(20):
-            if not approx_equal(float(list1[i]), float(list2[i])):
-                post_reason("%s[%d] values differ." % (cf, i))
-                print(list1[i], list2[i])
-                return 0
-
-    return 1
+            assert approx_equal(
+                float(list1[i]), float(list2[i])
+            ), "%s[%d] values differ." % (cf, i)
 
 
 ###############################################################################
@@ -1141,15 +1079,9 @@ def rpcs_equal(md1, md2):
 #
 
 
-def geotransform_equals(gt1, gt2, gt_epsilon):
-    for i in range(6):
-        if gt1[i] != pytest.approx(gt2[i], abs=gt_epsilon):
-            print("")
-            print("gt1 = ", gt1)
-            print("gt2 = ", gt2)
-            post_reason("Geotransform differs.")
-            return False
-    return True
+def check_geotransform(gt1, gt2, gt_epsilon):
+    __tracebackhide__ = True
+    assert gt1 == pytest.approx(gt2, abs=gt_epsilon), "Geotransform differs."
 
 
 ###############################################################################
@@ -1167,6 +1099,7 @@ def download_file(
     force_download=False,
     max_download_duration=None,
     base_dir="tmp/cache",
+    chunk_size=1024,
 ):
 
     if filename is None:
@@ -1174,105 +1107,96 @@ def download_file(
     elif filename.startswith(base_dir + "/"):
         filename = filename[len(base_dir + "/") :]
 
-    try:
-        os.stat(base_dir + "/" + filename)
+    if os.path.exists(os.path.join(base_dir, filename)):
         return True
-    except OSError:
-        if force_download or download_test_data():
-            val = None
-            start_time = time.time()
-            try:
-                handle = gdalurlopen(url)
-                if handle is None:
-                    return False
-                if download_size == -1:
-                    try:
-                        handle_info = handle.info()
-                        download_size = int(handle_info["content-length"])
-                        print(
-                            "Downloading %s (length = %d bytes)..."
-                            % (url, download_size)
-                        )
-                    except Exception:
-                        print("Downloading %s..." % (url))
-                else:
-                    print("Downloading %d bytes from %s..." % (download_size, url))
-            except Exception:
-                return False
 
-            if download_size >= 0:
-                sys.stdout.write("Progress: ")
-            nLastTick = -1
-            val = "".encode("ascii")
-            while len(val) < download_size or download_size < 0:
-                chunk_size = 1024
-                if download_size >= 0 and len(val) + chunk_size > download_size:
-                    chunk_size = download_size - len(val)
-                try:
-                    chunk = handle.read(chunk_size)
-                except Exception:
-                    print("Did not get expected data length.")
-                    return False
-                if len(chunk) < chunk_size:
-                    if download_size < 0:
-                        break
-                    print("Did not get expected data length.")
-                    return False
-                val = val + chunk
-                if download_size >= 0:
-                    nThisTick = int(40 * len(val) / download_size)
-                    while nThisTick > nLastTick:
-                        nLastTick = nLastTick + 1
-                        if nLastTick % 4 == 0:
-                            sys.stdout.write("%d" % int((nLastTick / 4) * 10))
-                        else:
-                            sys.stdout.write(".")
-                    nLastTick = nThisTick
-                    if nThisTick == 40:
-                        sys.stdout.write(" - done.\n")
+    if not (force_download or download_test_data()):
+        return False
 
-                current_time = time.time()
-                if (
-                    max_download_duration is not None
-                    and current_time - start_time > max_download_duration
-                ):
-                    print("Download aborted due to timeout.")
-                    return False
-
-            try:
-                os.stat(base_dir)
-            except OSError:
-                os.mkdir(base_dir)
-
-            try:
-                open(base_dir + "/" + filename, "wb").write(val)
-                return True
-            except IOError:
-                print("Cannot write %s" % (filename))
-                return False
-        else:
+    val = None
+    start_time = time.time()
+    try:
+        handle = gdalurlopen(url)
+        if handle is None:
             return False
+        if download_size == -1:
+            try:
+                handle_info = handle.info()
+                download_size = int(handle_info["content-length"])
+                print("Downloading %s (length = %d bytes)..." % (url, download_size))
+            except Exception:
+                print("Downloading %s..." % (url))
+        else:
+            print("Downloading %d bytes from %s..." % (download_size, url))
+    except Exception:
+        return False
+
+    if download_size >= 0:
+        sys.stdout.write("Progress: ")
+    nLastTick = -1
+    val = b""
+    while len(val) < download_size or download_size < 0:
+        to_read = chunk_size
+        if download_size >= 0 and len(val) + to_read > download_size:
+            to_read = download_size - len(val)
+        try:
+            chunk = handle.read(to_read)
+        except Exception:
+            print("Did not get expected data length.")
+            return False
+        val += chunk
+        if len(chunk) < to_read:
+            if download_size < 0:
+                break
+            print("Did not get expected data length.")
+            return False
+        if download_size >= 0:
+            nThisTick = int(40 * len(val) / download_size)
+            while nThisTick > nLastTick:
+                nLastTick = nLastTick + 1
+                if nLastTick % 4 == 0:
+                    sys.stdout.write("%d" % int((nLastTick / 4) * 10))
+                else:
+                    sys.stdout.write(".")
+            sys.stdout.flush()
+            nLastTick = nThisTick
+            if nThisTick == 40:
+                sys.stdout.write(" - done.\n")
+
+        current_time = time.time()
+        if (
+            max_download_duration is not None
+            and current_time - start_time > max_download_duration
+        ):
+            print("Download aborted due to timeout.")
+            return False
+
+    try:
+        os.stat(base_dir)
+    except OSError:
+        os.mkdir(base_dir)
+
+    try:
+        open(base_dir + "/" + filename, "wb").write(val)
+        return True
+    except IOError:
+        print("Cannot write %s" % (filename))
+        return False
 
 
 # Attempt to download file using `download_file`; skip test in case of failure
 def download_or_skip(url, *args, **kwargs):
+    __tracebackhide__ = True
+
     msg = io.StringIO()
     with contextlib.redirect_stdout(msg):
         success = download_file(url, *args, **kwargs)
 
     if not success:
-        testfn = inspect.stack()[1]
-
-        call_site = (
-            f"{testfn.function} ({os.path.basename(testfn.filename)}:{testfn.lineno})"
-        )
-
         if download_test_data():
-            problem = f"Failed to download {url} : {msg.getvalue()}"
+            pytest.skip(f"Failed to download {url} : {msg.getvalue()}")
         else:
-            problem = "GDAL_DOWNLOAD_TEST_DATA is not set to YES"
-
-        pytest.skip(f"{call_site} {problem}")
+            pytest.skip("GDAL_DOWNLOAD_TEST_DATA is not set to YES")
 
 
 ###############################################################################
@@ -1346,8 +1270,8 @@ def compare_ds(ds1, ds2, xoff=0, yoff=0, width=0, height=0, verbose=1):
 
 
 def deregister_all_jpeg2000_drivers_but(name_of_driver_to_keep):
-    global jp2kak_drv, jpeg2000_drv, jp2ecw_drv, jp2mrsid_drv, jp2openjpeg_drv, jp2lura_drv
-    global jp2kak_drv_unregistered, jpeg2000_drv_unregistered, jp2ecw_drv_unregistered, jp2mrsid_drv_unregistered, jp2openjpeg_drv_unregistered, jp2lura_drv_unregistered
+    global jp2kak_drv, jpeg2000_drv, jp2ecw_drv, jp2mrsid_drv, jp2openjpeg_drv
+    global jp2kak_drv_unregistered, jpeg2000_drv_unregistered, jp2ecw_drv_unregistered, jp2mrsid_drv_unregistered, jp2openjpeg_drv_unregistered
 
     # Deregister other potential conflicting JPEG2000 drivers that will
     # be re-registered in the cleanup
@@ -1381,12 +1305,6 @@ def deregister_all_jpeg2000_drivers_but(name_of_driver_to_keep):
         jp2openjpeg_drv.Deregister()
         jp2openjpeg_drv_unregistered = True
 
-    jp2lura_drv = gdal.GetDriverByName("JP2Lura")
-    if name_of_driver_to_keep != "JP2Lura" and jp2lura_drv:
-        gdal.Debug("gdaltest.", "Deregistering JP2Lura")
-        jp2lura_drv.Deregister()
-        jp2lura_drv_unregistered = True
-
     return True
 
 
@@ -1396,8 +1314,8 @@ def deregister_all_jpeg2000_drivers_but(name_of_driver_to_keep):
 
 
 def reregister_all_jpeg2000_drivers():
-    global jp2kak_drv, jpeg2000_drv, jp2ecw_drv, jp2mrsid_drv, jp2openjpeg_drv, jp2lura_drv
-    global jp2kak_drv_unregistered, jpeg2000_drv_unregistered, jp2ecw_drv_unregistered, jp2mrsid_drv_unregistered, jp2openjpeg_drv_unregistered, jp2lura_drv_unregistered
+    global jp2kak_drv, jpeg2000_drv, jp2ecw_drv, jp2mrsid_drv, jp2openjpeg_drv
+    global jp2kak_drv_unregistered, jpeg2000_drv_unregistered, jp2ecw_drv_unregistered, jp2mrsid_drv_unregistered, jp2openjpeg_drv_unregistered
 
     if jp2kak_drv_unregistered:
         jp2kak_drv.Register()
@@ -1424,11 +1342,6 @@ def reregister_all_jpeg2000_drivers():
         jp2openjpeg_drv_unregistered = False
         gdal.Debug("gdaltest", "Registering JP2OpenJPEG")
 
-    if jp2lura_drv_unregistered:
-        jp2lura_drv.Register()
-        jp2lura_drv_unregistered = False
-        gdal.Debug("gdaltest", "Registering JP2Lura")
-
     return True
 
 
@@ -1440,26 +1353,25 @@ def reregister_all_jpeg2000_drivers():
 
 def filesystem_supports_sparse_files(path):
 
-    if skip_on_travis():
+    if gdal.GetConfigOption("TRAVIS", None):
         return False
 
     try:
-        (ret, err) = runexternal_out_and_err('stat -f -c "%T" ' + path)
+        (ret, err) = runexternal_out_and_err(f'stat -f -c "%T" {path}')
     except OSError:
         return False
 
     if err != "":
-        post_reason("Cannot determine if filesystem supports sparse files")
+        print("Cannot determine if filesystem supports sparse files")
         return False
 
-    if ret.find("fat32") != -1:
-        post_reason("File system does not support sparse files")
+    if "fat32" in ret:
+        print("File system does not support sparse files")
         return False
 
-    if (
-        ret.find("wslfs") != -1 or ret.find("0x53464846") != -1
-    ):  # wslfs for older stat versions
-        post_reason(
+    if "wslfs" in ret or "0x53464846" in ret:
+        # wslfs for older stat versions
+        print(
             "Windows Subsystem for Linux FS is at the time of "
             + "writing not known to support sparse files"
         )
@@ -1467,19 +1379,22 @@ def filesystem_supports_sparse_files(path):
 
     # Add here any missing filesystem supporting sparse files
     # See http://en.wikipedia.org/wiki/Comparison_of_file_systems
-    if (
-        ret.find("ext3") == -1
-        and ret.find("ext4") == -1
-        and ret.find("reiser") == -1
-        and ret.find("xfs") == -1
-        and ret.find("jfs") == -1
-        and ret.find("zfs") == -1
-        and ret.find("ntfs") == -1
-    ):
-        post_reason("Filesystem %s is not believed to support sparse files" % ret)
-        return False
+    filesystems_supporting_sparse_files = {
+        "ext3",
+        "ext4",
+        "reiser",
+        "xfs",
+        "jfs",
+        "zfs",
+        "ntfs",
+    }
 
-    return True
+    for fs in filesystems_supporting_sparse_files:
+        if fs in ret:
+            return True
+
+    print("Filesystem %s is not believed to support sparse files" % ret)
+    return False
 
 
 ###############################################################################
@@ -1576,63 +1491,10 @@ def support_symlink():
 
 
 def skip_on_travis():
+    __tracebackhide__ = True
     val = gdal.GetConfigOption("TRAVIS", None)
     if val is not None:
-        post_reason("Test skipped on Travis")
-        return True
-    return False
-
-
-###############################################################################
-# Decorator to skip a test if specified creation option is not available
-
-
-def require_creation_option(driver, option):
-
-    drv = gdal.GetDriverByName(driver)
-
-    def decorator(func):
-        @pytest.mark.skipif(
-            drv is None or option not in drv.GetMetadata()["DMD_CREATIONOPTIONLIST"],
-            reason=f"{driver} creation option {option} not supported in this build",
-        )
-        @pytest.mark.skipif(
-            drv is None, reason=f"{driver} driver is not included in this build"
-        )
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
-###############################################################################
-# Decorator to skip a test if PROJ version < (major, minor, micro)
-
-
-def require_proj_version(major, minor=0, micro=0):
-
-    from osgeo import osr
-
-    def decorator(func):
-        @pytest.mark.skipif(
-            (
-                osr.GetPROJVersionMajor(),
-                osr.GetPROJVersionMinor(),
-                osr.GetPROJVersionMicro(),
-            )
-            < (major, minor, micro),
-            reason=f"PROJ version < {major}.{minor}.{micro}",
-        )
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
+        pytest.skip("Test skipped on Travis")
 
 
 ###############################################################################
@@ -1923,6 +1785,34 @@ def SetCacheMax(val):
 
 
 ###############################################################################
+# Temporarily enable exceptions for gdal, ogr and osr modules
+
+
+@contextlib.contextmanager
+def enable_exceptions():
+    from osgeo import ogr, osr
+
+    with gdal.ExceptionMgr(useExceptions=True), osr.ExceptionMgr(
+        useExceptions=True
+    ), ogr.ExceptionMgr(useExceptions=True):
+        yield
+
+
+###############################################################################
+# Temporarily disable exceptions for gdal, ogr and osr modules
+
+
+@contextlib.contextmanager
+def disable_exceptions():
+    from osgeo import ogr, osr
+
+    with gdal.ExceptionMgr(useExceptions=False), osr.ExceptionMgr(
+        useExceptions=False
+    ), ogr.ExceptionMgr(useExceptions=False):
+        yield
+
+
+###############################################################################
 # Temporarily define a configuration option
 
 
@@ -1972,13 +1862,6 @@ def tempfile(filename, content):
 
 
 ###############################################################################
-# Temporarily enable exceptions
-
-
-enable_exceptions = gdal.enable_exceptions
-
-
-###############################################################################
 
 
 def gdalurlopen(url, timeout=10):
@@ -2010,6 +1893,8 @@ def gdalurlopen(url, timeout=10):
 
         urllib.request.install_opener(opener)
 
+    import http.client
+
     try:
         handle = urllib.request.urlopen(url)
         socket.setdefaulttimeout(old_timeout)
@@ -2026,6 +1911,14 @@ def gdalurlopen(url, timeout=10):
         print(f"HTTP service for {url} is down (URL Error: {e.reason})")
         socket.setdefaulttimeout(old_timeout)
         return None
+    except socket.timeout:
+        print(f"HTTP service for {url} timed out")
+        socket.setdefaulttimeout(old_timeout)
+        return None
+    except http.client.RemoteDisconnected as e:
+        print(f"HTTP service for {url} is not available: RemoteDisconnected : {e}")
+        socket.setdefaulttimeout(old_timeout)
+        return None
 
 
 def runexternal(
@@ -2036,7 +1929,10 @@ def runexternal(
     encoding="latin1",
 ):
     # pylint: disable=unused-argument
-    command = shlex.split(cmd)
+    if sys.platform == "win32":
+        command = cmd
+    else:
+        command = shlex.split(cmd)
     if strin is None:
         p = subprocess.Popen(command, stdout=subprocess.PIPE)
     else:
@@ -2071,10 +1967,20 @@ def _read_in_thread(f, q):
     f.close()
 
 
-def runexternal_out_and_err(cmd, check_memleak=True, encoding="ascii"):
+def runexternal_out_and_err(
+    cmd, check_memleak=True, encoding="ascii", stdin=None, close_stdin=False
+):
     # pylint: disable=unused-argument
-    command = shlex.split(cmd)
-    p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if sys.platform == "win32":
+        command = cmd
+    else:
+        command = shlex.split(cmd)
+    p = subprocess.Popen(
+        command, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+
+    if close_stdin:
+        p.stdin.close()
 
     if p.stdout is not None:
         q_stdout = Queue()
@@ -2102,3 +2008,153 @@ def runexternal_out_and_err(cmd, check_memleak=True, encoding="ascii"):
         ret_stderr = f"{ret_stderr}\nERROR ret code = {waitcode}"
 
     return (ret_stdout, ret_stderr)
+
+
+###############################################################################
+# Validate JSON according to a JSON schema
+#
+# "jsn" should be a string or a json object
+# "schema" should be a path to file containing a JSON schema. If the
+# file is not found relative to the current working directory or GDAL_DATA,
+# the test will fail.
+def validate_json(jsn, schema):
+    __tracebackhide__ = True
+
+    try:
+        import jsonschema
+    except ImportError:
+        pytest.skip("jsonschema module not available")
+
+    if not os.path.exists(schema):
+        gdal_data = gdal.GetConfigOption("GDAL_DATA")
+
+        if gdal_data and os.path.exists(os.path.join(gdal_data, schema)):
+            schema = os.path.join(gdal_data, schema)
+        else:
+            pytest.fail(f"Could not find schema {schema}")
+
+    if isinstance(jsn, str):
+        jsn = json.loads(jsn)
+
+    schema = json.loads(open(schema, "rb").read())
+
+    if sys.version_info >= (3, 8):
+        from importlib.metadata import version
+
+        jsonschema_version = version("jsonschema")
+    else:
+        from pkg_resources import get_distribution
+
+        jsonschema_version = get_distribution("jsonschema").version
+
+    def versiontuple(v):
+        return tuple(map(int, (v.split("."))))
+
+    # jsonschema 4.18 deprecates automatic resolution of "$ref" for security
+    # reason. Use a custom retrieve method.
+    # Cf https://python-jsonschema.readthedocs.io/en/latest/referencing/#automatically-retrieving-resources-over-http
+    if versiontuple(jsonschema_version) >= (4, 18):
+        from referencing import Registry, Resource
+
+        def retrieve_remote_file(uri: str):
+            if not uri.startswith("http://") and not uri.startswith("https://"):
+                raise Exception(f"Cannot retrieve {uri}")
+            os.makedirs("tmp/cache", exist_ok=True)
+            filename = "tmp/cache/" + os.path.basename(uri)
+            if not download_file(uri, filename=filename, force_download=True):
+                raise Exception(f"Cannot download {uri}")
+            response = open(filename, "rb").read()
+            return Resource.from_contents(json.loads(response))
+
+        registry = Registry(retrieve=retrieve_remote_file)
+        validator_cls = jsonschema.validators.validator_for(schema)
+        validator_cls(schema, registry=registry).validate(jsn)
+
+    else:
+        # jsonschema < 4.18
+        try:
+            jsonschema.validate(instance=jsn, schema=schema)
+        except jsonschema.exceptions.RefResolutionError:
+            pytest.skip("Failed to resolve remote reference in JSON schema")
+
+
+###############################################################################
+# Close and reopen a dataset
+
+
+def reopen(ds, update=False, open_options=None):
+
+    ds_loc = ds.GetDescription()
+    ds_drv = ds.GetDriver()
+
+    ds.Close()
+
+    flags = 0
+    if update:
+        flags = gdal.OF_UPDATE
+
+    if open_options is None:
+        open_options = {}
+
+    return gdal.OpenEx(
+        ds_loc,
+        flags,
+        allowed_drivers=[ds_drv.GetDescription()],
+        open_options=open_options,
+    )
+
+
+def vsi_open(path, mode="r"):
+    return gdal.VSIFile(path, mode)
+
+
+def vrt_has_open_support():
+    drv = gdal.GetDriverByName("VRT")
+    return drv is not None and drv.GetMetadataItem(gdal.DMD_OPENOPTIONLIST) is not None
+
+
+###############################################################################
+# Check that an error or warning is raised
+
+
+@contextlib.contextmanager
+def error_raised(type, match=""):
+
+    err_levels = {
+        gdal.CE_Debug: "CE_Debug",
+        gdal.CE_Failure: "CE_Failure",
+        gdal.CE_Fatal: "CE_Fatal",
+        gdal.CE_None: "CE_None",
+        gdal.CE_Warning: "CE_Warning",
+    }
+
+    errors = []
+
+    def handler(lvl, no, msg):
+        errors.append({"level": lvl, "number": no, "message": msg})
+
+    with error_handler(handler):
+        yield
+
+    assert any(
+        [err["level"] == type and match in err["message"] for err in errors]
+    ), f'Did not receive an error of type {err_levels[type]} matching "{match}". Received: {[(err["level"], err["message"]) for err in errors]}'
+
+
+###############################################################################
+# Check VRT capabilities
+
+
+@functools.lru_cache()
+def gdal_has_vrt_expression_dialect(dialect):
+    return dialect in gdal.GetDriverByName("VRT").GetMetadataItem("ExpressionDialects")
+
+
+###############################################################################
+
+
+def importorskip_gdal_array():
+    pytest_version = [int(x) for x in pytest.__version__.split(".")]
+    if pytest_version >= [8, 2, 0]:
+        return pytest.importorskip("osgeo.gdal_array", exc_type=ImportError)
+    return pytest.importorskip("osgeo.gdal_array")

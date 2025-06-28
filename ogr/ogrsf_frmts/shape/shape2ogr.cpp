@@ -9,23 +9,7 @@
  * Copyright (c) 1999,  Les Technologies SoftMap Inc.
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -112,7 +96,8 @@ static OGRLinearRing *CreateLinearRing(SHPObject *psShape, int ring, bool bHasZ,
 /*      representation.                                                 */
 /************************************************************************/
 
-OGRGeometry *SHPReadOGRObject(SHPHandle hSHP, int iShape, SHPObject *psShape)
+OGRGeometry *SHPReadOGRObject(SHPHandle hSHP, int iShape, SHPObject *psShape,
+                              bool &bHasWarnedWrongWindingOrder)
 {
 #if DEBUG_VERBOSE
     CPLDebug("Shape", "SHPReadOGRObject( iShape=%d )", iShape);
@@ -319,15 +304,121 @@ OGRGeometry *SHPReadOGRObject(SHPHandle hSHP, int iShape, SHPObject *psShape)
         else
         {
             OGRPolygon **tabPolygons = new OGRPolygon *[psShape->nParts];
-            for (int iRing = 0; iRing < psShape->nParts; iRing++)
+            tabPolygons[0] = new OGRPolygon();
+            auto poExteriorRing = CreateLinearRing(psShape, 0, bHasZ, bHasM);
+            tabPolygons[0]->addRingDirectly(poExteriorRing);
+            for (int iRing = 1; iRing < psShape->nParts; iRing++)
             {
                 tabPolygons[iRing] = new OGRPolygon();
                 tabPolygons[iRing]->addRingDirectly(
                     CreateLinearRing(psShape, iRing, bHasZ, bHasM));
             }
 
+            // Tries to detect bad geometries where a multi-part multipolygon is
+            // written as a single-part multipolygon with its parts as inner
+            // rings, like done by QGIS <= 3.28.11 with GDAL >= 3.7
+            // Cf https://github.com/qgis/QGIS/issues/54537
+            bool bUseSlowMethod = false;
+            if (!bHasZ && !bHasM)
+            {
+                bool bFoundCW = false;
+                for (int iRing = 1; iRing < psShape->nParts; iRing++)
+                {
+                    if (tabPolygons[iRing]->getExteriorRing()->isClockwise())
+                    {
+                        bFoundCW = true;
+                        break;
+                    }
+                }
+                if (!bFoundCW)
+                {
+                    // Only inner rings
+                    OGREnvelope sFirstEnvelope;
+                    OGREnvelope sCurEnvelope;
+                    poExteriorRing->getEnvelope(&sFirstEnvelope);
+                    for (int iRing = 1; iRing < psShape->nParts; iRing++)
+                    {
+                        tabPolygons[iRing]->getEnvelope(&sCurEnvelope);
+                        if (!sFirstEnvelope.Intersects(sCurEnvelope))
+                        {
+                            // If the envelopes of the rings don't intersect,
+                            // then it is clearly a multi-part polygon
+                            bUseSlowMethod = true;
+                            break;
+                        }
+                        else
+                        {
+                            // Otherwise take 4 points at each extremity of
+                            // the inner rings and check if there are in the
+                            // outer ring. If none are within it, then it is
+                            // very likely a outer ring (or an invalid ring
+                            // which is neither a outer nor a inner ring)
+                            auto poRing = tabPolygons[iRing]->getExteriorRing();
+                            const auto nNumPoints = poRing->getNumPoints();
+                            OGRPoint p;
+                            OGRPoint leftPoint(
+                                std::numeric_limits<double>::infinity(), 0);
+                            OGRPoint rightPoint(
+                                -std::numeric_limits<double>::infinity(), 0);
+                            OGRPoint bottomPoint(
+                                0, std::numeric_limits<double>::infinity());
+                            OGRPoint topPoint(
+                                0, -std::numeric_limits<double>::infinity());
+                            for (int iPoint = 0; iPoint < nNumPoints - 1;
+                                 ++iPoint)
+                            {
+                                poRing->getPoint(iPoint, &p);
+                                if (p.getX() < leftPoint.getX() ||
+                                    (p.getX() == leftPoint.getX() &&
+                                     p.getY() < leftPoint.getY()))
+                                {
+                                    leftPoint = p;
+                                }
+                                if (p.getX() > rightPoint.getX() ||
+                                    (p.getX() == rightPoint.getX() &&
+                                     p.getY() > rightPoint.getY()))
+                                {
+                                    rightPoint = p;
+                                }
+                                if (p.getY() < bottomPoint.getY() ||
+                                    (p.getY() == bottomPoint.getY() &&
+                                     p.getX() > bottomPoint.getX()))
+                                {
+                                    bottomPoint = p;
+                                }
+                                if (p.getY() > topPoint.getY() ||
+                                    (p.getY() == topPoint.getY() &&
+                                     p.getX() < topPoint.getX()))
+                                {
+                                    topPoint = p;
+                                }
+                            }
+                            if (!poExteriorRing->isPointInRing(&leftPoint) &&
+                                !poExteriorRing->isPointInRing(&rightPoint) &&
+                                !poExteriorRing->isPointInRing(&bottomPoint) &&
+                                !poExteriorRing->isPointInRing(&topPoint))
+                            {
+                                bUseSlowMethod = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (bUseSlowMethod && !bHasWarnedWrongWindingOrder)
+                    {
+                        bHasWarnedWrongWindingOrder = true;
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "%s contains polygon(s) with rings with "
+                                 "invalid winding order. Autocorrecting them, "
+                                 "but that shapefile should be corrected using "
+                                 "ogr2ogr for example.",
+                                 VSI_SHP_GetFilename(hSHP->fpSHP));
+                    }
+                }
+            }
+
             int isValidGeometry = FALSE;
-            const char *papszOptions[] = {"METHOD=ONLY_CCW", nullptr};
+            const char *papszOptions[] = {
+                bUseSlowMethod ? "METHOD=DEFAULT" : "METHOD=ONLY_CCW", nullptr};
             OGRGeometry **tabGeom =
                 reinterpret_cast<OGRGeometry **>(tabPolygons);
             poOGR = OGRGeometryFactory::organizePolygons(
@@ -945,54 +1036,41 @@ static OGRErr SHPWriteOGRObject(SHPHandle hSHP, int iShape,
     else if (hSHP->nShapeType == SHPT_MULTIPATCH)
     {
         int nParts = 0;
-        int *panPartStart = nullptr;
-        int *panPartType = nullptr;
+        std::vector<int> anPartStart;
+        std::vector<int> anPartType;
         int nPoints = 0;
-        OGRRawPoint *poPoints = nullptr;
-        double *padfZ = nullptr;
+        std::vector<OGRRawPoint> aoPoints;
+        std::vector<double> adfZ;
         OGRErr eErr = OGRCreateMultiPatch(poGeom,
                                           FALSE,  // no SHPP_TRIANGLES
-                                          nParts, panPartStart, panPartType,
-                                          nPoints, poPoints, padfZ);
+                                          nParts, anPartStart, anPartType,
+                                          nPoints, aoPoints, adfZ);
         if (eErr != OGRERR_NONE)
             return OGRERR_UNSUPPORTED_GEOMETRY_TYPE;
 
-        double *padfX =
-            static_cast<double *>(CPLMalloc(sizeof(double) * nPoints));
-        double *padfY =
-            static_cast<double *>(CPLMalloc(sizeof(double) * nPoints));
+        std::vector<double> adfX(nPoints);
+        std::vector<double> adfY(nPoints);
         for (int i = 0; i < nPoints; ++i)
         {
-            padfX[i] = poPoints[i].x;
-            padfY[i] = poPoints[i].y;
+            adfX[i] = aoPoints[i].x;
+            adfY[i] = aoPoints[i].y;
         }
-        CPLFree(poPoints);
 
-        if (!CheckNonFiniteCoordinates(padfX, nPoints) ||
-            !CheckNonFiniteCoordinates(padfY, nPoints) ||
-            !CheckNonFiniteCoordinates(padfZ, nPoints))
+        if (!CheckNonFiniteCoordinates(adfX.data(), nPoints) ||
+            !CheckNonFiniteCoordinates(adfY.data(), nPoints) ||
+            !CheckNonFiniteCoordinates(adfZ.data(), nPoints))
         {
-            CPLFree(panPartStart);
-            CPLFree(panPartType);
-            CPLFree(padfX);
-            CPLFree(padfY);
-            CPLFree(padfZ);
             return OGRERR_FAILURE;
         }
 
         SHPObject *psShape =
-            SHPCreateObject(hSHP->nShapeType, iShape, nParts, panPartStart,
-                            panPartType, nPoints, padfX, padfY, padfZ, nullptr);
+            SHPCreateObject(hSHP->nShapeType, iShape, nParts,
+                            anPartStart.data(), anPartType.data(), nPoints,
+                            adfX.data(), adfY.data(), adfZ.data(), nullptr);
         if (bRewind)
             SHPRewindObject(hSHP, psShape);
         const int nReturnedShapeID = SHPWriteObject(hSHP, iShape, psShape);
         SHPDestroyObject(psShape);
-
-        CPLFree(panPartStart);
-        CPLFree(panPartType);
-        CPLFree(padfX);
-        CPLFree(padfY);
-        CPLFree(padfZ);
 
         if (nReturnedShapeID == -1)
             return OGRERR_FAILURE;
@@ -1067,6 +1145,11 @@ OGRFeatureDefn *SHPReadOGRFeatureDefn(const char *pszName, SHPHandle hSHP,
         }
         else if (eDBFType == FTInteger)
             oField.SetType(OFTInteger);
+        else if (eDBFType == FTLogical)
+        {
+            oField.SetType(OFTInteger);
+            oField.SetSubType(OFSTBoolean);
+        }
         else
             oField.SetType(OFTString);
 
@@ -1199,7 +1282,8 @@ OGRFeatureDefn *SHPReadOGRFeatureDefn(const char *pszName, SHPHandle hSHP,
 
 OGRFeature *SHPReadOGRFeature(SHPHandle hSHP, DBFHandle hDBF,
                               OGRFeatureDefn *poDefn, int iShape,
-                              SHPObject *psShape, const char *pszSHPEncoding)
+                              SHPObject *psShape, const char *pszSHPEncoding,
+                              bool &bHasWarnedWrongWindingOrder)
 
 {
     if (iShape < 0 || (hSHP != nullptr && iShape >= hSHP->nRecords) ||
@@ -1232,7 +1316,8 @@ OGRFeature *SHPReadOGRFeature(SHPHandle hSHP, DBFHandle hDBF,
     {
         if (!poDefn->IsGeometryIgnored())
         {
-            OGRGeometry *poGeometry = SHPReadOGRObject(hSHP, iShape, psShape);
+            OGRGeometry *poGeometry = SHPReadOGRObject(
+                hSHP, iShape, psShape, bHasWarnedWrongWindingOrder);
 
             // Two possibilities are expected here (both are tested by
             // GDAL Autotests):
@@ -1324,8 +1409,22 @@ OGRFeature *SHPReadOGRFeature(SHPHandle hSHP, DBFHandle hDBF,
                 }
                 else
                 {
-                    poFeature->SetField(
-                        iField, DBFReadStringAttribute(hDBF, iShape, iField));
+                    if (poFieldDefn->GetSubType() == OFSTBoolean)
+                    {
+                        const char *pszVal =
+                            DBFReadLogicalAttribute(hDBF, iShape, iField);
+                        poFeature->SetField(
+                            iField, pszVal[0] == 'T' || pszVal[0] == 't' ||
+                                            pszVal[0] == 'Y' || pszVal[0] == 'y'
+                                        ? 1
+                                        : 0);
+                    }
+                    else
+                    {
+                        const char *pszVal =
+                            DBFReadStringAttribute(hDBF, iShape, iField);
+                        poFeature->SetField(iField, pszVal);
+                    }
                 }
                 break;
             }
@@ -1339,12 +1438,6 @@ OGRFeature *SHPReadOGRFeature(SHPHandle hSHP, DBFHandle hDBF,
 
                 const char *const pszDateValue =
                     DBFReadStringAttribute(hDBF, iShape, iField);
-
-                // Some DBF files have fields filled with spaces
-                // (trimmed by DBFReadStringAttribute) to indicate null
-                // values for dates (#4265).
-                if (pszDateValue[0] == '\0')
-                    continue;
 
                 OGRField sFld;
                 memset(&sFld, 0, sizeof(sFld));
@@ -1407,6 +1500,7 @@ static OGRErr GrowField(DBFHandle hDBF, int iField, OGRFieldDefn *poFieldDefn,
         return OGRERR_FAILURE;
     }
 
+    auto oTemporaryUnsealer(poFieldDefn->GetTemporaryUnsealer());
     poFieldDefn->SetWidth(nNewSize);
     return OGRERR_NONE;
 }
@@ -1580,27 +1674,36 @@ OGRErr SHPWriteOGRFeature(SHPHandle hSHP, DBFHandle hDBF,
             case OFTInteger:
             case OFTInteger64:
             {
-                char szValue[32] = {};
-                const int nFieldWidth = poFieldDefn->GetWidth();
-                snprintf(szValue, sizeof(szValue),
-                         "%*" CPL_FRMT_GB_WITHOUT_PREFIX "d",
-                         std::min(nFieldWidth,
-                                  static_cast<int>(sizeof(szValue)) - 1),
-                         poFeature->GetFieldAsInteger64(iField));
-
-                const int nStrLen = static_cast<int>(strlen(szValue));
-                if (nStrLen > nFieldWidth)
+                if (poFieldDefn->GetSubType() == OFSTBoolean)
                 {
-                    if (GrowField(hDBF, iField, poFieldDefn, nStrLen) !=
-                        OGRERR_NONE)
-                    {
-                        return OGRERR_FAILURE;
-                    }
+                    DBFWriteAttributeDirectly(
+                        hDBF, static_cast<int>(poFeature->GetFID()), iField,
+                        poFeature->GetFieldAsInteger(iField) ? "T" : "F");
                 }
+                else
+                {
+                    char szValue[32] = {};
+                    const int nFieldWidth = poFieldDefn->GetWidth();
+                    snprintf(szValue, sizeof(szValue),
+                             "%*" CPL_FRMT_GB_WITHOUT_PREFIX "d",
+                             std::min(nFieldWidth,
+                                      static_cast<int>(sizeof(szValue)) - 1),
+                             poFeature->GetFieldAsInteger64(iField));
 
-                DBFWriteAttributeDirectly(hDBF,
-                                          static_cast<int>(poFeature->GetFID()),
-                                          iField, szValue);
+                    const int nStrLen = static_cast<int>(strlen(szValue));
+                    if (nStrLen > nFieldWidth)
+                    {
+                        if (GrowField(hDBF, iField, poFieldDefn, nStrLen) !=
+                            OGRERR_NONE)
+                        {
+                            return OGRERR_FAILURE;
+                        }
+                    }
+
+                    DBFWriteAttributeDirectly(
+                        hDBF, static_cast<int>(poFeature->GetFID()), iField,
+                        szValue);
+                }
 
                 break;
             }
@@ -1617,7 +1720,7 @@ OGRErr SHPWriteOGRFeature(SHPHandle hSHP, DBFHandle hDBF,
                     if (nCounter <= 10)
                     {
                         CPLError(CE_Warning, CPLE_AppDefined,
-                                 "Value %.18g of field %s with 0 decimal of "
+                                 "Value %.17g of field %s with 0 decimal of "
                                  "feature " CPL_FRMT_GIB
                                  " is bigger than 2^53. "
                                  "Precision loss likely occurred or going to "
@@ -1635,7 +1738,7 @@ OGRErr SHPWriteOGRFeature(SHPHandle hSHP, DBFHandle hDBF,
                 if (!ret)
                 {
                     CPLError(CE_Warning, CPLE_AppDefined,
-                             "Value %.18g of field %s of feature " CPL_FRMT_GIB
+                             "Value %.17g of field %s of feature " CPL_FRMT_GIB
                              " not "
                              "successfully written. Possibly due to too larger "
                              "number "
@@ -1655,6 +1758,12 @@ OGRErr SHPWriteOGRFeature(SHPHandle hSHP, DBFHandle hDBF,
                     CPLError(
                         CE_Warning, CPLE_NotSupported,
                         "Year < 0 or > 9999 is not a valid date for shapefile");
+                }
+                else if (psField->Date.Year == 0 && psField->Date.Month == 0 &&
+                         psField->Date.Day == 0)
+                {
+                    DBFWriteNULLAttribute(
+                        hDBF, static_cast<int>(poFeature->GetFID()), iField);
                 }
                 else
                 {

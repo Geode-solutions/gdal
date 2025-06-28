@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018-2019, Björn Harrtell <bjorn at wololo dot org>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef FLATGEOBUF_GEOMETRYWRITER_H_INCLUDED
@@ -32,7 +16,14 @@
 #include "ogrsf_frmts.h"
 #include "ogr_p.h"
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
 #include "feature_generated.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 namespace ogr_flatgeobuf
 {
@@ -72,6 +63,7 @@ class GeometryWriter
     {
         return GeometryWriter(m_fbb, part, m_hasZ, m_hasM).write(depth);
     }
+
     const flatbuffers::Offset<FlatGeobuf::Geometry>
     writePart(const OGRGeometry *part,
               const FlatGeobuf::GeometryType geometryType, int depth)
@@ -89,6 +81,7 @@ class GeometryWriter
           m_hasZ(hasZ), m_hasM(hasM)
     {
     }
+
     GeometryWriter(flatbuffers::FlatBufferBuilder &fbb,
                    const OGRGeometry *ogrGeometry, const bool hasZ,
                    const bool hasM)
@@ -98,6 +91,7 @@ class GeometryWriter
           m_hasZ(hasZ), m_hasM(hasM)
     {
     }
+
     const flatbuffers::Offset<FlatGeobuf::Geometry> write(int depth);
     static FlatGeobuf::GeometryType
     translateOGRwkbGeometryType(const OGRwkbGeometryType eGType);

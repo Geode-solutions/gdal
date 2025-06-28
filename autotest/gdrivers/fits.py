@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for FITS driver.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2008,2020, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -36,6 +19,13 @@ import pytest
 from osgeo import gdal, ogr
 
 pytestmark = pytest.mark.require_driver("FITS")
+
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 @pytest.mark.parametrize(
@@ -154,7 +144,7 @@ def test_fits_read_empty_primary_hdu():
 
     filename = "data/fits/empty_primary_hdu.fits"
     assert os.path.exists(filename)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.Open(filename) is None
 
 
@@ -188,7 +178,7 @@ def test_fits_read_image_in_first_and_second_hdu():
     assert sub_ds[1][0] == 'FITS:"data/fits/image_in_first_and_second_hdu.fits":2'
     assert sub_ds[1][1] == "HDU 2 (1x3, 1 band)"
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.Open("FITS:") is None
         assert gdal.Open('FITS:"data/fits/image_in_first_and_second_hdu.fits"') is None
         assert (
@@ -241,18 +231,18 @@ def test_fits_open_raster_only_in_vector_mode():
 
     filename = "data/fits/empty_primary_hdu.fits"
     assert os.path.exists(filename)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ogr.Open(filename) is None
 
     filename = "data/fits/byte_merc.fits"
     assert os.path.exists(filename)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ogr.Open(filename) is None
     assert "but contains image" in gdal.GetLastErrorMsg()
 
     filename = "data/fits/image_in_first_and_second_hdu.fits"
     assert os.path.exists(filename)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ogr.Open(filename) is None
 
     ds = gdal.OpenEx(
@@ -266,7 +256,7 @@ def test_fits_open_vector_only_in_raster_mode():
 
     filename = "data/fits/binary_table.fits"
     assert os.path.exists(filename)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.Open(filename) is None
     assert "but contains binary table" in gdal.GetLastErrorMsg()
 
@@ -498,9 +488,9 @@ def test_fits_vector():
         "1.25 + 2.25j",
         ["1.25 + 2.25j", "2.25 + 1.25j"],
         ["1.25 + 2.25j", "2.25 + 1.25j"],
-        "1.25340000000000007 + 2.25j",
-        ["1.25340000000000007 + 2.25j", "2.25 + 1.25j"],
-        ["1.25340000000000007 + 2.25j", "2.25 + 1.25j"],
+        "1.2534000000000001 + 2.25j",
+        ["1.2534000000000001 + 2.25j", "2.25 + 1.25j"],
+        ["1.2534000000000001 + 2.25j", "2.25 + 1.25j"],
     ]
 
     f = lyr.GetNextFeature()
@@ -713,7 +703,7 @@ def _check_lyr_defn_after_write(lyr_defn):
 def test_fits_vector_write_with_source_fits_metadata():
 
     filename = "tmp/out.fits"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.VectorTranslate(filename, "data/fits/binary_table.fits", options="-f FITS")
     try:
         ds = ogr.Open(filename)
@@ -810,9 +800,9 @@ def test_fits_vector_write_with_source_fits_metadata():
             "1.25 + 2.25j",
             # ['1.25 + 2.25j', '2.25 + 1.25j'],
             # ['1.25 + 2.25j', '2.25 + 1.25j'],
-            "1.25340000000000007 + 2.25j",
-            # ['1.25340000000000007 + 2.25j', '2.25 + 1.25j'],
-            # ['1.25340000000000007 + 2.25j', '2.25 + 1.25j']
+            "1.2534000000000001 + 2.25j",
+            # ['1.2534000000000001 + 2.25j', '2.25 + 1.25j'],
+            # ['1.2534000000000001 + 2.25j', '2.25 + 1.25j']
         ]
 
         f = lyr.GetNextFeature()
@@ -828,7 +818,7 @@ def test_fits_vector_write_with_source_fits_metadata():
 def test_fits_vector_write_without_source_fits_metadata():
 
     filename = "tmp/out.fits"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.VectorTranslate(
             filename, "data/fits/binary_table.fits", options="-f FITS -nomd"
         )
@@ -928,9 +918,9 @@ def test_fits_vector_write_without_source_fits_metadata():
             "1.25 + 2.25j",
             # ['1.25 + 2.25j', '2.25 + 1.25j'],
             # ['1.25 + 2.25j', '2.25 + 1.25j'],
-            "1.25340000000000007 + 2.25j",
-            # ['1.25340000000000007 + 2.25j', '2.25 + 1.25j'],
-            # ['1.25340000000000007 + 2.25j', '2.25 + 1.25j']
+            "1.2534000000000001 + 2.25j",
+            # ['1.2534000000000001 + 2.25j', '2.25 + 1.25j'],
+            # ['1.2534000000000001 + 2.25j', '2.25 + 1.25j']
         ]
 
         f = lyr.GetNextFeature()
@@ -946,7 +936,7 @@ def test_fits_vector_write_without_source_fits_metadata():
 def test_fits_vector_write_without_source_fits_metadata_compute_repeat():
 
     filename = "tmp/out.fits"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.VectorTranslate(
             filename,
             "data/fits/binary_table.fits",
@@ -1049,9 +1039,9 @@ def test_fits_vector_write_without_source_fits_metadata_compute_repeat():
             "1.25 + 2.25j",
             # ['1.25 + 2.25j', '2.25 + 1.25j'],
             # ['1.25 + 2.25j', '2.25 + 1.25j'],
-            "1.25340000000000007 + 2.25j",
-            # ['1.25340000000000007 + 2.25j', '2.25 + 1.25j'],
-            # ['1.25340000000000007 + 2.25j', '2.25 + 1.25j']
+            "1.2534000000000001 + 2.25j",
+            # ['1.2534000000000001 + 2.25j', '2.25 + 1.25j'],
+            # ['1.2534000000000001 + 2.25j', '2.25 + 1.25j']
         ]
 
         f = lyr.GetNextFeature()
@@ -1067,7 +1057,7 @@ def test_fits_vector_write_without_source_fits_metadata_compute_repeat():
 def test_fits_vector_editing():
 
     filename = "tmp/out.fits"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.VectorTranslate(
             filename, "data/fits/binary_table.fits", options="-f FITS -nomd"
         )

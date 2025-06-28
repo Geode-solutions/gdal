@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -50,7 +34,7 @@
 /************************************************************************/
 
 OGRGeoRSSDataSource::OGRGeoRSSDataSource()
-    : pszName(nullptr), papoLayers(nullptr), nLayers(0), fpOutput(nullptr),
+    : papoLayers(nullptr), nLayers(0), fpOutput(nullptr),
 #ifdef HAVE_EXPAT
       validity(GEORSS_VALIDITY_UNKNOWN),
 #endif
@@ -90,7 +74,6 @@ OGRGeoRSSDataSource::~OGRGeoRSSDataSource()
     for (int i = 0; i < nLayers; i++)
         delete papoLayers[i];
     CPLFree(papoLayers);
-    CPLFree(pszName);
 }
 
 /************************************************************************/
@@ -127,14 +110,16 @@ OGRLayer *OGRGeoRSSDataSource::GetLayer(int iLayer)
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *OGRGeoRSSDataSource::ICreateLayer(const char *pszLayerName,
-                                            OGRSpatialReference *poSRS,
-                                            OGRwkbGeometryType /* eType */,
-                                            char ** /* papszOptions */)
+OGRLayer *
+OGRGeoRSSDataSource::ICreateLayer(const char *pszLayerName,
+                                  const OGRGeomFieldDefn *poGeomFieldDefn,
+                                  CSLConstList /*papszOptions*/)
 {
     if (fpOutput == nullptr)
         return nullptr;
 
+    const auto poSRS =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
     if (poSRS != nullptr && eGeomDialect != GEORSS_GML)
     {
         OGRSpatialReference oSRS;
@@ -153,14 +138,14 @@ OGRLayer *OGRGeoRSSDataSource::ICreateLayer(const char *pszLayerName,
     nLayers++;
     papoLayers = static_cast<OGRGeoRSSLayer **>(
         CPLRealloc(papoLayers, nLayers * sizeof(OGRGeoRSSLayer *)));
-    auto poSRSClone = poSRS;
-    if (poSRSClone)
+    OGRSpatialReference *poSRSClone = nullptr;
+    if (poSRS)
     {
-        poSRSClone = poSRSClone->Clone();
+        poSRSClone = poSRS->Clone();
         poSRSClone->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     }
-    papoLayers[nLayers - 1] =
-        new OGRGeoRSSLayer(pszName, pszLayerName, this, poSRSClone, TRUE);
+    papoLayers[nLayers - 1] = new OGRGeoRSSLayer(GetDescription(), pszLayerName,
+                                                 this, poSRSClone, TRUE);
     if (poSRSClone)
         poSRSClone->Release();
 
@@ -216,7 +201,7 @@ void OGRGeoRSSDataSource::dataHandlerValidateCbk(const char * /* data */,
                                                  int /* nLen */)
 {
     nDataHandlerCounter++;
-    if (nDataHandlerCounter >= BUFSIZ)
+    if (nDataHandlerCounter >= PARSER_BUF_SIZE)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "File probably corrupted (million laugh pattern)");
@@ -255,7 +240,6 @@ int OGRGeoRSSDataSource::Open(const char *pszFilename, int bUpdateIn)
         return FALSE;
     }
 #ifdef HAVE_EXPAT
-    pszName = CPLStrdup(pszFilename);
 
     // Try to open the file.
     VSILFILE *fp = VSIFOpenL(pszFilename, "r");
@@ -270,7 +254,7 @@ int OGRGeoRSSDataSource::Open(const char *pszFilename, int bUpdateIn)
     XML_SetCharacterDataHandler(oParser, ::dataHandlerValidateCbk);
     oCurrentParser = oParser;
 
-    char aBuf[BUFSIZ];
+    std::vector<char> aBuf(PARSER_BUF_SIZE);
     int nDone = 0;
     unsigned int nLen = 0;
     int nCount = 0;
@@ -282,18 +266,19 @@ int OGRGeoRSSDataSource::Open(const char *pszFilename, int bUpdateIn)
     do
     {
         nDataHandlerCounter = 0;
-        nLen = static_cast<unsigned int>(VSIFReadL(aBuf, 1, sizeof(aBuf), fp));
-        nDone = VSIFEofL(fp);
-        if (XML_Parse(oParser, aBuf, nLen, nDone) == XML_STATUS_ERROR)
+        nLen = static_cast<unsigned int>(
+            VSIFReadL(aBuf.data(), 1, aBuf.size(), fp));
+        nDone = nLen < aBuf.size();
+        if (XML_Parse(oParser, aBuf.data(), nLen, nDone) == XML_STATUS_ERROR)
         {
-            if (nLen <= BUFSIZ - 1)
+            if (nLen <= PARSER_BUF_SIZE - 1)
                 aBuf[nLen] = 0;
             else
-                aBuf[BUFSIZ - 1] = 0;
+                aBuf[PARSER_BUF_SIZE - 1] = 0;
 
-            if (strstr(aBuf, "<?xml") &&
-                (strstr(aBuf, "<rss") || strstr(aBuf, "<feed") ||
-                 strstr(aBuf, "<atom:feed")))
+            if (strstr(aBuf.data(), "<?xml") &&
+                (strstr(aBuf.data(), "<rss") || strstr(aBuf.data(), "<feed") ||
+                 strstr(aBuf.data(), "<atom:feed")))
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "XML parsing of GeoRSS file failed: "
@@ -315,7 +300,7 @@ int OGRGeoRSSDataSource::Open(const char *pszFilename, int bUpdateIn)
         }
         else
         {
-            // After reading 50 * BUFSIZ bytes, and not finding whether the file
+            // After reading 50 * PARSER_BUF_SIZE bytes, and not finding whether the file
             // is GeoRSS or not, we give up and fail silently.
             nCount++;
             if (nCount == 50)
@@ -335,7 +320,7 @@ int OGRGeoRSSDataSource::Open(const char *pszFilename, int bUpdateIn)
         papoLayers = static_cast<OGRGeoRSSLayer **>(
             CPLRealloc(papoLayers, nLayers * sizeof(OGRGeoRSSLayer *)));
         papoLayers[0] =
-            new OGRGeoRSSLayer(pszName, "georss", this, nullptr, FALSE);
+            new OGRGeoRSSLayer(pszFilename, "georss", this, nullptr, FALSE);
     }
 
     return validity == GEORSS_VALIDITY_VALID;
@@ -393,8 +378,6 @@ int OGRGeoRSSDataSource::Create(const char *pszFilename, char **papszOptions)
     /* -------------------------------------------------------------------- */
     /*      Create the output file.                                         */
     /* -------------------------------------------------------------------- */
-    pszName = CPLStrdup(pszFilename);
-
     fpOutput = VSIFOpenL(pszFilename, "w");
     if (fpOutput == nullptr)
     {

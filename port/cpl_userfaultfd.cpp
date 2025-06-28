@@ -8,27 +8,12 @@
  ******************************************************************************
  * Copyright (c) 2018, Dr. James McClain <james.mcclain@gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifdef ENABLE_UFFD
 
+#include <algorithm>
 #include <cstdlib>
 #include <cinttypes>
 #include <cstring>
@@ -143,7 +128,7 @@ static int64_t get_page_limit()
     int64_t retval;
     const char *variable = CPLGetConfigOption(GDAL_UFFD_LIMIT, nullptr);
 
-    if (variable && sscanf(variable, "%" PRId64, &retval))
+    if (variable && sscanf(variable, "%" PRId64, &retval) == 1)
         return retval;
     else
         return -1;
@@ -308,8 +293,10 @@ static void cpl_uffd_fault_handler(void *ptr)
                 // any such threads have been handled by them, so sleep for
                 // 1/100th of a second.
                 // Coverity complains about sleeping under a mutex
+#ifndef __COVERITY__
                 // coverity[sleep]
                 usleep(10000);
+#endif
                 if (sigaction(SIGSEGV, &old_segv, nullptr) == -1)
                 {
                     CPLError(
@@ -473,7 +460,7 @@ cpl_uffd_context *CPLCreateUserFaultMapping(const char *pszFilename,
     ctx->page_limit = get_page_limit();
     ctx->pages_used = 0;
     ctx->file_size = static_cast<size_t>(statbuf.st_size);
-    ctx->page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    ctx->page_size = static_cast<size_t>(std::max(1L, sysconf(_SC_PAGESIZE)));
     ctx->vma_size = static_cast<size_t>(
         ((static_cast<vsi_l_offset>(statbuf.st_size) / ctx->page_size) + 1) *
         ctx->page_size);

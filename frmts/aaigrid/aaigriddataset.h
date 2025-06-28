@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL
  * Purpose:  Implements Arc/Info ASCII Grid Format.
@@ -10,23 +9,7 @@
  * Copyright (c) 2007-2012, Even Rouault <even dot rouault at spatialys.com>
  * Copyright (c) 2014, Kyle Shannon <kyle at pobox dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDAL_FRMTS_AAIGRID_AAIGRIDDATASET_H_INCLUDED
@@ -85,7 +68,7 @@ class AAIGDataset CPL_NON_FINAL : public GDALPamDataset
     VSILFILE *fp;
 
     char **papszPrj;
-    CPLString osPrjFilename;
+    CPLString osPrjFilename{};
     OGRSpatialReference m_oSRS{};
 
     unsigned char achReadBuf[256];
@@ -96,9 +79,11 @@ class AAIGDataset CPL_NON_FINAL : public GDALPamDataset
     GUIntBig Tell() const;
     int Seek(GUIntBig nOffset);
 
+    CPL_DISALLOW_COPY_ASSIGN(AAIGDataset)
+
   protected:
     GDALDataType eDataType;
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     bool bNoDataSet;
     double dfNoDataValue;
     CPLString osUnits{};
@@ -124,7 +109,7 @@ class AAIGDataset CPL_NON_FINAL : public GDALPamDataset
                                    GDALProgressFunc pfnProgress,
                                    void *pProgressData);
 
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 };
 
@@ -142,6 +127,7 @@ class GRASSASCIIDataset final : public AAIGDataset
     GRASSASCIIDataset() : AAIGDataset()
     {
     }
+
     ~GRASSASCIIDataset() override
     {
     }
@@ -180,6 +166,8 @@ class AAIGRasterBand final : public GDALPamRasterBand
     friend class AAIGDataset;
 
     GUIntBig *panLineOffset;
+
+    CPL_DISALLOW_COPY_ASSIGN(AAIGRasterBand)
 
   public:
     AAIGRasterBand(AAIGDataset *, int);

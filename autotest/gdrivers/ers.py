@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test ERS format driver.
@@ -11,23 +10,7 @@
 # Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -63,7 +46,7 @@ def test_ers_1():
 def test_ers_2():
 
     tst = gdaltest.GDALTest("ERS", "ehdr/float32.bil", 1, 27)
-    return tst.testCreateCopy(new_filename="tmp/float32.ers", check_gt=1, vsimem=1)
+    tst.testCreateCopy(new_filename="tmp/float32.ers", check_gt=1, vsimem=1)
 
 
 ###############################################################################
@@ -73,7 +56,7 @@ def test_ers_2():
 def test_ers_3():
 
     tst = gdaltest.GDALTest("ERS", "rgbsmall.tif", 2, 21053)
-    return tst.testCreate(new_filename="tmp/rgbsmall.ers")
+    tst.testCreate(new_filename="tmp/rgbsmall.ers")
 
 
 ###############################################################################
@@ -90,7 +73,7 @@ def test_ers_4():
     UNIT["degree",0.0174532925199433]]"""
 
     tst = gdaltest.GDALTest("ERS", "ers/ers_dem.ers", 1, 56588)
-    return tst.testOpen(check_prj=srs, check_gt=gt)
+    tst.testOpen(check_prj=srs, check_gt=gt)
 
 
 ###############################################################################
@@ -140,6 +123,10 @@ def test_ers_7():
 # Test GCP support
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_ers_8():
 
     src_ds = gdal.Open("../gcore/data/gcps.vrt")
@@ -147,7 +134,8 @@ def test_ers_8():
     ds = drv.CreateCopy("/vsimem/ers_8.ers", src_ds)
     ds = None
 
-    gdal.Unlink("/vsimem/ers_8.ers.aux.xml")
+    if gdal.VSIStatL("/vsimem/ers_8.ers.aux.xml") is not None:
+        gdal.Unlink("/vsimem/ers_8.ers.aux.xml")
 
     ds = gdal.Open("/vsimem/ers_8.ers")
     expected_gcps = src_ds.GetGCPs()
@@ -314,7 +302,18 @@ def test_ers_10():
 
 def test_ers_recursive_opening():
     ds = gdal.Open("/vsitar/data/ers/test_ers_recursive.tar/test.ers")
-    ds.GetFileList()
+    with pytest.raises(Exception):
+        ds.GetFileList()
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/9352
+
+
+@pytest.mark.require_driver("ECW")
+def test_ers_open_data_file_ecw():
+
+    assert gdal.Open("data/ers/references_ecw.ers")
 
 
 ###############################################################################

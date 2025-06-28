@@ -6,23 +6,7 @@
  * Copyright (c) 2011
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "blockdir/binarytiledir.h"
@@ -223,7 +207,7 @@ BinaryTileDir::BinaryTileDir(BlockFile * poFile, uint16 nSegment)
     }
 
     PCIDSKBuffer oBlockDirAutoPtr;
-    oBlockDirAutoPtr.buffer = (char *) pabyBlockDir;
+    oBlockDirAutoPtr.buffer = reinterpret_cast<char *>(pabyBlockDir);
 
     uint8 * pabyBlockDirIter = pabyBlockDir;
 
@@ -235,7 +219,7 @@ BinaryTileDir::BinaryTileDir(BlockFile * poFile, uint16 nSegment)
     for (uint32 iLayer = 0; iLayer < msBlockDir.nLayerCount; iLayer++)
     {
         nSize = sizeof(BlockLayerInfo);
-        SwapBlockLayer((BlockLayerInfo *) pabyBlockDirIter);
+        SwapBlockLayer(reinterpret_cast<BlockLayerInfo *>(pabyBlockDirIter));
         memcpy(moLayerInfoList[iLayer], pabyBlockDirIter, nSize);
         pabyBlockDirIter += nSize;
     }
@@ -244,14 +228,14 @@ BinaryTileDir::BinaryTileDir(BlockFile * poFile, uint16 nSegment)
     for (uint32 iLayer = 0; iLayer < msBlockDir.nLayerCount; iLayer++)
     {
         nSize = sizeof(TileLayerInfo);
-        SwapTileLayer((TileLayerInfo *) pabyBlockDirIter);
+        SwapTileLayer(reinterpret_cast<TileLayerInfo *>(pabyBlockDirIter));
         memcpy(moTileLayerInfoList[iLayer], pabyBlockDirIter, nSize);
         pabyBlockDirIter += nSize;
     }
 
     // Read the free block layer.
     nSize = sizeof(BlockLayerInfo);
-    SwapBlockLayer((BlockLayerInfo *) pabyBlockDirIter);
+    SwapBlockLayer(reinterpret_cast<BlockLayerInfo *>(pabyBlockDirIter));
     memcpy(&msFreeBlockLayer, pabyBlockDirIter, nSize);
 
     // Check if any of the tile layers are corrupted.
@@ -411,7 +395,7 @@ void BinaryTileDir::InitBlockList(BinaryTileLayer * poLayer)
         return ThrowPCIDSKException("Out of memory in BinaryTileDir::InitBlockList().");
 
     PCIDSKBuffer oBlockDirAutoPtr;
-    oBlockDirAutoPtr.buffer = (char *) pabyBlockDir;
+    oBlockDirAutoPtr.buffer = reinterpret_cast<char *>(pabyBlockDir);
 
     mpoFile->ReadFromSegment(mnSegment, pabyBlockDir, 512 + nOffset, nReadSize);
 
@@ -425,7 +409,7 @@ void BinaryTileDir::InitBlockList(BinaryTileLayer * poLayer)
         return ThrowPCIDSKException("Out of memory in BinaryTileDir::InitBlockList(): %s", ex.what());
     }
 
-    SwapBlock((BlockInfo *) pabyBlockDir, psLayer->nBlockCount);
+    SwapBlock(reinterpret_cast<BlockInfo *>(pabyBlockDir), psLayer->nBlockCount);
 
     memcpy(&poLayer->moBlockList.front(), pabyBlockDir,
            psLayer->nBlockCount * sizeof(BlockInfo));
@@ -447,7 +431,7 @@ void BinaryTileDir::ReadFreeBlockLayer(void)
     mpoFreeBlockLayer = new BinaryTileLayer(this, INVALID_LAYER,
                                             &msFreeBlockLayer, nullptr);
 
-    InitBlockList((BinaryTileLayer *) mpoFreeBlockLayer);
+    InitBlockList(static_cast<BinaryTileLayer *>(mpoFreeBlockLayer));
 }
 
 /************************************************************************/
@@ -498,7 +482,7 @@ void BinaryTileDir::WriteDir(void)
 
     size_t nSize = sizeof(BlockDirInfo);
     memcpy(pabyBlockDirIter, &msBlockDir, nSize);
-    SwapBlockDir((BlockDirInfo *) pabyBlockDirIter);
+    SwapBlockDir(reinterpret_cast<BlockDirInfo *>(pabyBlockDirIter));
 
     // The third last byte is for the endianness.
     pabyBlockDir[512 - 3] = mchEndianness;
@@ -528,7 +512,7 @@ void BinaryTileDir::WriteDir(void)
     {
         nSize = sizeof(BlockLayerInfo);
         memcpy(pabyBlockDirIter, moLayerInfoList[iLayer], nSize);
-        SwapBlockLayer((BlockLayerInfo *) pabyBlockDirIter);
+        SwapBlockLayer(reinterpret_cast<BlockLayerInfo *>(pabyBlockDirIter));
         pabyBlockDirIter += nSize;
     }
 
@@ -537,7 +521,7 @@ void BinaryTileDir::WriteDir(void)
     {
         nSize = sizeof(TileLayerInfo);
         memcpy(pabyBlockDirIter, moTileLayerInfoList[iLayer], nSize);
-        SwapTileLayer((TileLayerInfo *) pabyBlockDirIter);
+        SwapTileLayer(reinterpret_cast<TileLayerInfo *>(pabyBlockDirIter));
         pabyBlockDirIter += nSize;
     }
 
@@ -547,7 +531,7 @@ void BinaryTileDir::WriteDir(void)
     // Write the free block layer.
     nSize = sizeof(BlockLayerInfo);
     memcpy(pabyBlockDirIter, &msFreeBlockLayer, nSize);
-    SwapBlockLayer((BlockLayerInfo *) pabyBlockDirIter);
+    SwapBlockLayer(reinterpret_cast<BlockLayerInfo *>(pabyBlockDirIter));
     pabyBlockDirIter += nSize;
 
     // Write the block info list.
@@ -562,18 +546,18 @@ void BinaryTileDir::WriteDir(void)
 
         nSize = psLayer->nBlockCount * sizeof(BlockInfo);
         memcpy(pabyBlockDirIter, poLayer->GetBlockInfo(0), nSize);
-        SwapBlock((BlockInfo *) pabyBlockDirIter, psLayer->nBlockCount);
+        SwapBlock(reinterpret_cast<BlockInfo *>(pabyBlockDirIter), psLayer->nBlockCount);
         pabyBlockDirIter += nSize;
     }
 
     // Write the free block info list.
     if (msFreeBlockLayer.nBlockCount != 0)
     {
-        BinaryTileLayer * poLayer = (BinaryTileLayer *) mpoFreeBlockLayer;
+        BinaryTileLayer * poLayer = static_cast<BinaryTileLayer *>(mpoFreeBlockLayer);
 
         nSize = msFreeBlockLayer.nBlockCount * sizeof(BlockInfo);
         memcpy(pabyBlockDirIter, poLayer->GetBlockInfo(0), nSize);
-        SwapBlock((BlockInfo *) pabyBlockDirIter, msFreeBlockLayer.nBlockCount);
+        SwapBlock(reinterpret_cast<BlockInfo *>(pabyBlockDirIter), msFreeBlockLayer.nBlockCount);
         pabyBlockDirIter += nSize;
     }
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test ENVI format driver.
@@ -13,25 +12,10 @@
 # Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009-2012, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import os
 import struct
 
 import gdaltest
@@ -64,7 +48,7 @@ def test_envi_1():
     PARAMETER["false_northing",0],
     UNIT["Meter",1]]"""
 
-    return tst.testOpen(
+    tst.testOpen(
         check_prj=prj, check_gt=(-936408.178, 28.5, 0.0, 2423902.344, 0.0, -28.5)
     )
 
@@ -76,7 +60,7 @@ def test_envi_1():
 def test_envi_2():
 
     tst = gdaltest.GDALTest("envi", "envi/aea.dat", 1, 14823)
-    return tst.testCreateCopy(check_gt=1)
+    tst.testCreateCopy(check_gt=1)
 
 
 ###############################################################################
@@ -86,7 +70,7 @@ def test_envi_2():
 def test_envi_3():
 
     tst = gdaltest.GDALTest("envi", "rgbsmall.tif", 2, 21053)
-    return tst.testCreate()
+    tst.testCreate()
 
 
 ###############################################################################
@@ -113,7 +97,7 @@ def test_envi_4():
     PARAMETER["false_northing",30000],
     UNIT["Meter",1]]"""
 
-    return tst.testSetProjection(prj=prj)
+    tst.testSetProjection(prj=prj)
 
 
 ###############################################################################
@@ -141,7 +125,7 @@ def test_envi_5():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
 
-    return tst.testSetProjection(prj=prj)
+    tst.testSetProjection(prj=prj)
 
 
 ###############################################################################
@@ -168,7 +152,7 @@ def test_envi_6():
     AXIS["Easting",EAST],
     AXIS["Northing",NORTH]]"""
 
-    return gdaltest.envi_tst.testSetProjection(prj=prj)
+    gdaltest.envi_tst.testSetProjection(prj=prj)
 
 
 ###############################################################################
@@ -178,7 +162,7 @@ def test_envi_6():
 def test_envi_7():
 
     tst = gdaltest.GDALTest("envi", "envi/aea.dat", 1, 14823)
-    return tst.testCreateCopy(check_gt=1, vsimem=1)
+    tst.testCreateCopy(check_gt=1, vsimem=1)
 
 
 ###############################################################################
@@ -204,7 +188,7 @@ def test_envi_8():
 def test_envi_9():
 
     tst = gdaltest.GDALTest("envi", "envi/aea_compressed.dat", 1, 14823)
-    return tst.testCreateCopy(check_gt=1)
+    tst.testCreateCopy(check_gt=1)
 
 
 ###############################################################################
@@ -300,7 +284,8 @@ def test_envi_14():
 
     gdal.GetDriverByName("ENVI").Create("/vsimem/envi_14.dat", 3, 4, 5, gdal.GDT_Int16)
 
-    gdal.Unlink("/vsimem/envi_14.dat.aux.xml")
+    if os.path.exists("/vsimem/envi_14.dat.aux.xml"):
+        gdal.Unlink("/vsimem/envi_14.dat.aux.xml")
 
     assert gdal.VSIStatL("/vsimem/envi_14.dat").size == 3 * 4 * 5 * 2
 
@@ -473,7 +458,8 @@ def test_envi_rotation_180():
     ds.SetGeoTransform([0, 10, 0, 0, 0, 10])
     ds = None
 
-    gdal.Unlink(filename + ".aux.xml")
+    if os.path.exists(filename + ".aux.xml"):
+        gdal.Unlink(filename + ".aux.xml")
 
     ds = gdal.Open(filename)
     got_gt = ds.GetGeoTransform()
@@ -1000,3 +986,173 @@ def test_envi_read_direct_access_update_scenario():
     ds = None
 
     gdal.GetDriverByName("ENVI").Delete(filename)
+
+
+###############################################################################
+# Test setting different nodata values
+
+
+@pytest.mark.parametrize(
+    "nd1,nd2,expected_warning",
+    [
+        (1, 1, False),
+        (float("nan"), float("nan"), False),
+        (float("nan"), 1, True),
+        (1, float("nan"), True),
+    ],
+)
+def test_envi_write_warn_different_nodata(tmp_vsimem, nd1, nd2, expected_warning):
+    filename = str(tmp_vsimem / "test_envi_write_warn_different_nodata.img")
+    ds = gdal.GetDriverByName("ENVI").Create(filename, 1, 1, 2)
+    assert ds.GetRasterBand(1).SetNoDataValue(nd1) == gdal.CE_None
+    gdal.ErrorReset()
+    with gdal.quiet_errors():
+        assert ds.GetRasterBand(2).SetNoDataValue(nd2) == gdal.CE_None
+        assert gdal.GetLastErrorType() == (
+            gdal.CE_Warning if expected_warning else gdal.CE_None
+        )
+
+
+###############################################################################
+# Test reading "default bands" in RGB mode
+
+
+def test_envi_read_metadata_with_leading_space():
+
+    gdal.FileFromMemBuffer(
+        "/vsimem/test.hdr",
+        """ENVI
+samples = 1
+lines = 1
+bands = 3
+header offset = 0
+file type = ENVI Standard
+data type = 1
+interleave = bip
+sensor type = Unknown
+byte order = 0
+ wavelength = {3, 2, 1}""",
+    )
+    gdal.FileFromMemBuffer("/vsimem/test.bin", "xyz")
+
+    ds = gdal.Open("/vsimem/test.bin")
+    assert ds.GetRasterBand(1).GetMetadataItem("wavelength") == "3"
+    ds = None
+    gdal.GetDriverByName("ENVI").Delete("/vsimem/test.bin")
+
+
+###############################################################################
+# Test wavelength / fwhm
+
+
+def test_envi_read_wavelength_fwhm_um():
+
+    gdal.FileFromMemBuffer(
+        "/vsimem/test.hdr",
+        """ENVI
+samples = 1
+lines = 1
+bands = 3
+header offset = 0
+file type = ENVI Standard
+data type = 1
+interleave = bip
+sensor type = Unknown
+byte order = 0
+wavelength units = um
+wavelength = {3, 2, 1}
+fwhm = {.3, .2, .1}""",
+    )
+    gdal.FileFromMemBuffer("/vsimem/test.bin", "xyz")
+
+    ds = gdal.Open("/vsimem/test.bin")
+    assert (
+        ds.GetRasterBand(1).GetMetadataItem("CENTRAL_WAVELENGTH_UM", "IMAGERY")
+        == "3.000"
+    )
+    assert ds.GetRasterBand(1).GetMetadataItem("FWHM_UM", "IMAGERY") == "0.300"
+    assert (
+        ds.GetRasterBand(2).GetMetadataItem("CENTRAL_WAVELENGTH_UM", "IMAGERY")
+        == "2.000"
+    )
+    assert ds.GetRasterBand(2).GetMetadataItem("FWHM_UM", "IMAGERY") == "0.200"
+    ds = None
+    gdal.GetDriverByName("ENVI").Delete("/vsimem/test.bin")
+
+
+###############################################################################
+# Test wavelength / fwhm
+
+
+def test_envi_read_wavelength_fwhm_nm():
+
+    gdal.FileFromMemBuffer(
+        "/vsimem/test.hdr",
+        """ENVI
+samples = 1
+lines = 1
+bands = 3
+header offset = 0
+file type = ENVI Standard
+data type = 1
+interleave = bip
+sensor type = Unknown
+byte order = 0
+wavelength units = nm
+wavelength = {3000, 2000, 1000}
+fwhm = {300, 200, 100}""",
+    )
+    gdal.FileFromMemBuffer("/vsimem/test.bin", "xyz")
+
+    ds = gdal.Open("/vsimem/test.bin")
+    assert (
+        ds.GetRasterBand(1).GetMetadataItem("CENTRAL_WAVELENGTH_UM", "IMAGERY")
+        == "3.000"
+    )
+    assert ds.GetRasterBand(1).GetMetadataItem("FWHM_UM", "IMAGERY") == "0.300"
+    assert (
+        ds.GetRasterBand(2).GetMetadataItem("CENTRAL_WAVELENGTH_UM", "IMAGERY")
+        == "2.000"
+    )
+    assert ds.GetRasterBand(2).GetMetadataItem("FWHM_UM", "IMAGERY") == "0.200"
+    ds = None
+    gdal.GetDriverByName("ENVI").Delete("/vsimem/test.bin")
+
+
+###############################################################################
+# Test wavelength / fwhm
+
+
+def test_envi_read_wavelength_fwhm_mm():
+
+    gdal.FileFromMemBuffer(
+        "/vsimem/test.hdr",
+        """ENVI
+samples = 1
+lines = 1
+bands = 3
+header offset = 0
+file type = ENVI Standard
+data type = 1
+interleave = bip
+sensor type = Unknown
+byte order = 0
+wavelength units = mm
+wavelength = {0.003, 0.002, 0.001}
+fwhm = {0.0003, 0.0002, 0.0001}""",
+    )
+    gdal.FileFromMemBuffer("/vsimem/test.bin", "xyz")
+
+    ds = gdal.Open("/vsimem/test.bin")
+    assert (
+        ds.GetRasterBand(1).GetMetadataItem("CENTRAL_WAVELENGTH_UM", "IMAGERY")
+        == "3.000"
+    )
+    assert ds.GetRasterBand(1).GetMetadataItem("FWHM_UM", "IMAGERY") == "0.300"
+    assert (
+        ds.GetRasterBand(2).GetMetadataItem("CENTRAL_WAVELENGTH_UM", "IMAGERY")
+        == "2.000"
+    )
+    assert ds.GetRasterBand(2).GetMetadataItem("FWHM_UM", "IMAGERY") == "0.200"
+    ds = None
+    gdal.GetDriverByName("ENVI").Delete("/vsimem/test.bin")

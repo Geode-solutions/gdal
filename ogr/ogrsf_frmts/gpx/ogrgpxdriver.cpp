@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2007-2008, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -39,22 +23,32 @@
 #include "ogr_core.h"
 
 /************************************************************************/
+/*                               Identify()                             */
+/************************************************************************/
+
+static int OGRGPXDriverIdentify(GDALOpenInfo *poOpenInfo)
+
+{
+    if (poOpenInfo->eAccess == GA_Update || poOpenInfo->fpL == nullptr)
+        return false;
+
+    return strstr(reinterpret_cast<const char *>(poOpenInfo->pabyHeader),
+                  "<gpx") != nullptr;
+}
+
+/************************************************************************/
 /*                                Open()                                */
 /************************************************************************/
 
 static GDALDataset *OGRGPXDriverOpen(GDALOpenInfo *poOpenInfo)
 
 {
-    if (poOpenInfo->eAccess == GA_Update || poOpenInfo->fpL == nullptr)
-        return nullptr;
-
-    if (strstr(reinterpret_cast<const char *>(poOpenInfo->pabyHeader),
-               "<gpx") == nullptr)
+    if (poOpenInfo->eAccess == GA_Update || !OGRGPXDriverIdentify(poOpenInfo))
         return nullptr;
 
     OGRGPXDataSource *poDS = new OGRGPXDataSource();
 
-    if (!poDS->Open(poOpenInfo->pszFilename, FALSE))
+    if (!poDS->Open(poOpenInfo))
     {
         delete poDS;
         poDS = nullptr;
@@ -123,9 +117,22 @@ void RegisterOGRGPX()
     poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
 
     poDriver->SetMetadataItem(
+        GDAL_DMD_OPENOPTIONLIST,
+        "<OpenOptionList>"
+        "  <Option name='N_MAX_LINKS' type='integer' default='2' "
+        "description='Maximum number of links attributes'/>"
+        "  <Option name='ELE_AS_25D' type='boolean' default='NO' "
+        "description='Whether to use the value of the ele element as the Z "
+        "ordinate of geometries'/>"
+        "  <Option name='SHORT_NAMES' type='boolean' default='NO' "
+        "description='Whether to use short field names (typically for "
+        "shapefile compatibility'/>"
+        "</OpenOptionList>");
+
+    poDriver->SetMetadataItem(
         GDAL_DMD_CREATIONOPTIONLIST,
         "<CreationOptionList>"
-#ifdef WIN32
+#ifdef _WIN32
         "  <Option name='LINEFORMAT' type='string-select' "
         "description='end-of-line sequence' default='CRLF'>"
 #else
@@ -157,6 +164,7 @@ void RegisterOGRGPX()
         "  <Option name='METADATA_LINK_*_TYPE' type='string'/>"
         "  <Option name='METADATA_NAME' type='string'/>"
         "  <Option name='METADATA_TIME' type='string'/>"
+        "  <Option name='CREATOR' type='string'/>"
         "</CreationOptionList>");
 
     poDriver->SetMetadataItem(
@@ -173,6 +181,7 @@ void RegisterOGRGPX()
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_MULTIPLE_VECTOR_LAYERS, "YES");
 
+    poDriver->pfnIdentify = OGRGPXDriverIdentify;
     poDriver->pfnOpen = OGRGPXDriverOpen;
     poDriver->pfnCreate = OGRGPXDriverCreate;
     poDriver->pfnDelete = OGRGPXDriverDelete;

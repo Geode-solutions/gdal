@@ -1,6 +1,4 @@
 /******************************************************************************
- * $Id$
- *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Documentation for ogrsf_frmts.h classes.
  * Author:   Frank Warmerdam, warmerda@home.com
@@ -8,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 1999,  Les Technologies SoftMap Inc.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************/
 
 /************************************************************************/
@@ -65,9 +47,9 @@
   otherwise a handle to a GDALDataset.  This GDALDataset should be
   closed by deleting the object when it is no longer needed.
 
-  <b>Example:</b>
+  Example:
 
-  <pre>
+  \code{.cpp}
     OGRDataSourceH	hDS;
     OGRSFDriverH        *pahDriver;
 
@@ -80,7 +62,7 @@
     ... use the data source ...
 
     OGRReleaseDataSource( hDS );
-  </pre>
+  \endcode
 
 */
 
@@ -117,9 +99,9 @@
   otherwise a handle to a GDALDataset.  This GDALDataset should be
   closed by deleting the object when it is no longer needed.
 
-  <b>Example:</b>
+  Example:
 
-  <pre>
+  \code{.cpp}
     OGRDataSourceH  hDS;
     OGRSFDriverH        *pahDriver;
 
@@ -132,7 +114,7 @@
     ... use the data source ...
 
     OGRReleaseDataSource( hDS );
-  </pre>
+  \endcode
 
 */
 
@@ -880,426 +862,6 @@ by the OGRSFDriverManager.
 */
 
 /**
-
- \fn OGRErr OGRLayer::GetExtent( OGREnvelope *psExtent, int bForce = TRUE );
-
- \brief Fetch the extent of this layer.
-
- Returns the extent (MBR) of the data in the layer.  If bForce is FALSE,
- and it would be expensive to establish the extent then OGRERR_FAILURE
- will be returned indicating that the extent isn't know.  If bForce is
- TRUE then some implementations will actually scan the entire layer once
- to compute the MBR of all the features in the layer.
-
- Depending on the drivers, the returned extent may or may not take the
- spatial filter into account.  So it is safer to call GetExtent() without
- setting a spatial filter.
-
- Layers without any geometry may return OGRERR_FAILURE just indicating that
- no meaningful extents could be collected.
-
- Note that some implementations of this method may alter the read cursor
- of the layer.
-
- This method is the same as the C function OGR_L_GetExtent().
-
- @param psExtent the structure in which the extent value will be returned.
- @param bForce Flag indicating whether the extent should be computed even
- if it is expensive.
-
- @return OGRERR_NONE on success, OGRERR_FAILURE if extent not known.
-
-*/
-
-
-/**
-
- \fn OGRErr OGR_L_GetExtent( OGRLayerH hLayer, OGREnvelope *psExtent, int bForce);
-
- \brief Fetch the extent of this layer.
-
- Returns the extent (MBR) of the data in the layer.  If bForce is FALSE,
- and it would be expensive to establish the extent then OGRERR_FAILURE
- will be returned indicating that the extent isn't know.  If bForce is
- TRUE then some implementations will actually scan the entire layer once
- to compute the MBR of all the features in the layer.
-
- Depending on the drivers, the returned extent may or may not take the
- spatial filter into account.  So it is safer to call OGR_L_GetExtent() without
- setting a spatial filter.
-
- Layers without any geometry may return OGRERR_FAILURE just indicating that
- no meaningful extents could be collected.
-
- Note that some implementations of this method may alter the read cursor
- of the layer.
-
- This function is the same as the C++ method OGRLayer::GetExtent().
-
- @param hLayer handle to the layer from which to get extent.
- @param psExtent the structure in which the extent value will be returned.
- @param bForce Flag indicating whether the extent should be computed even
- if it is expensive.
-
- @return OGRERR_NONE on success, OGRERR_FAILURE if extent not known.
-
-*/
-
-/**
-
- \fn OGRErr OGRLayer::GetExtent( int iGeomField,OGREnvelope *psExtent, int bForce = TRUE );
-
- \brief Fetch the extent of this layer, on the specified geometry field.
-
- Returns the extent (MBR) of the data in the layer.  If bForce is FALSE,
- and it would be expensive to establish the extent then OGRERR_FAILURE
- will be returned indicating that the extent isn't know.  If bForce is
- TRUE then some implementations will actually scan the entire layer once
- to compute the MBR of all the features in the layer.
-
- Depending on the drivers, the returned extent may or may not take the
- spatial filter into account.  So it is safer to call GetExtent() without
- setting a spatial filter.
-
- Layers without any geometry may return OGRERR_FAILURE just indicating that
- no meaningful extents could be collected.
-
- Note that some implementations of this method may alter the read cursor
- of the layer.
-
- Note to driver implementer: if you implement GetExtent(int,OGREnvelope*,int),
- you must also implement GetExtent(OGREnvelope*, int) to make it call
- GetExtent(0,OGREnvelope*,int).
-
- This method is the same as the C function OGR_L_GetExtentEx().
-
- @param iGeomField the index of the geometry field on which to compute the extent.
- @param psExtent the structure in which the extent value will be returned.
- @param bForce Flag indicating whether the extent should be computed even
- if it is expensive.
-
- @return OGRERR_NONE on success, OGRERR_FAILURE if extent not known.
-
-*/
-
-
-/**
-
- \fn OGRErr OGR_L_GetExtentEx( OGRLayerH hLayer, int iGeomField, OGREnvelope *psExtent, int bForce);
-
- \brief Fetch the extent of this layer, on the specified geometry field.
-
- Returns the extent (MBR) of the data in the layer.  If bForce is FALSE,
- and it would be expensive to establish the extent then OGRERR_FAILURE
- will be returned indicating that the extent isn't know.  If bForce is
- TRUE then some implementations will actually scan the entire layer once
- to compute the MBR of all the features in the layer.
-
- Depending on the drivers, the returned extent may or may not take the
- spatial filter into account.  So it is safer to call OGR_L_GetExtent() without
- setting a spatial filter.
-
- Layers without any geometry may return OGRERR_FAILURE just indicating that
- no meaningful extents could be collected.
-
- Note that some implementations of this method may alter the read cursor
- of the layer.
-
- This function is the same as the C++ method OGRLayer::GetExtent().
-
- @param hLayer handle to the layer from which to get extent.
- @param iGeomField the index of the geometry field on which to compute the extent.
- @param psExtent the structure in which the extent value will be returned.
- @param bForce Flag indicating whether the extent should be computed even
- if it is expensive.
-
- @return OGRERR_NONE on success, OGRERR_FAILURE if extent not known.
-
-*/
-
-/**
- \fn void OGRLayer::SetSpatialFilter( OGRGeometry * poFilter );
-
- \brief Set a new spatial filter.
-
- This method set the geometry to be used as a spatial filter when
- fetching features via the GetNextFeature() method.  Only features that
- geometrically intersect the filter geometry will be returned.
-
- Currently this test is may be inaccurately implemented, but it is
- guaranteed that all features whose envelope (as returned by
- OGRGeometry::getEnvelope()) overlaps the envelope of the spatial filter
- will be returned.  This can result in more shapes being returned that
- should strictly be the case.
-
- Starting with GDAL 2.3, features with null or empty geometries will never
- be considered as matching a spatial filter.
-
- This method makes an internal copy of the passed geometry.  The
- passed geometry remains the responsibility of the caller, and may
- be safely destroyed.
-
- For the time being the passed filter geometry should be in the same
- SRS as the layer (as returned by OGRLayer::GetSpatialRef()).  In the
- future this may be generalized.
-
- This method is the same as the C function OGR_L_SetSpatialFilter().
-
- @param poFilter the geometry to use as a filtering region.  NULL may
- be passed indicating that the current spatial filter should be cleared,
- but no new one instituted.
-
- */
-
-/**
- \fn void OGR_L_SetSpatialFilter( OGRLayerH hLayer, OGRGeometryH hGeom );
-
- \brief Set a new spatial filter.
-
- This function set the geometry to be used as a spatial filter when
- fetching features via the OGR_L_GetNextFeature() function.  Only
- features that geometrically intersect the filter geometry will be
- returned.
-
- Currently this test is may be inaccurately implemented, but it is
- guaranteed that all features whose envelope (as returned by
- OGR_G_GetEnvelope()) overlaps the envelope of the spatial filter
- will be returned.  This can result in more shapes being returned that
- should strictly be the case.
-
- Starting with GDAL 2.3, features with null or empty geometries will never
- be considered as matching a spatial filter.
-
- This function makes an internal copy of the passed geometry.  The
- passed geometry remains the responsibility of the caller, and may
- be safely destroyed.
-
- For the time being the passed filter geometry should be in the same
- SRS as the layer (as returned by OGR_L_GetSpatialRef()).  In the
- future this may be generalized.
-
- This function is the same as the C++ method OGRLayer::SetSpatialFilter.
-
- @param hLayer handle to the layer on which to set the spatial filter.
- @param hGeom handle to the geometry to use as a filtering region.  NULL may
- be passed indicating that the current spatial filter should be cleared,
- but no new one instituted.
-
- */
-
-/**
- \fn void OGRLayer::SetSpatialFilterRect( double dfMinX, double dfMinY,
-                                          double dfMaxX, double dfMaxY );
-
- \brief Set a new rectangular spatial filter.
-
- This method set rectangle to be used as a spatial filter when
- fetching features via the GetNextFeature() method.  Only features that
- geometrically intersect the given rectangle will be returned.
-
- The x/y values should be in the same coordinate system as the layer as
- a whole (as returned by OGRLayer::GetSpatialRef()).   Internally this
- method is normally implemented as creating a 5 vertex closed rectangular
- polygon and passing it to OGRLayer::SetSpatialFilter().  It exists as
- a convenience.
-
- The only way to clear a spatial filter set with this method is to
- call OGRLayer::SetSpatialFilter(NULL).
-
- This method is the same as the C function OGR_L_SetSpatialFilterRect().
-
- @param dfMinX the minimum X coordinate for the rectangular region.
- @param dfMinY the minimum Y coordinate for the rectangular region.
- @param dfMaxX the maximum X coordinate for the rectangular region.
- @param dfMaxY the maximum Y coordinate for the rectangular region.
-
- */
-
-/**
- \fn void OGR_L_SetSpatialFilterRect( OGRLayerH hLayer,
-                                      double dfMinX, double dfMinY,
-                                      double dfMaxX, double dfMaxY );
-
- \brief Set a new rectangular spatial filter.
-
- This method set rectangle to be used as a spatial filter when
- fetching features via the OGR_L_GetNextFeature() method.  Only features that
- geometrically intersect the given rectangle will be returned.
-
- The x/y values should be in the same coordinate system as the layer as
- a whole (as returned by OGRLayer::GetSpatialRef()).   Internally this
- method is normally implemented as creating a 5 vertex closed rectangular
- polygon and passing it to OGRLayer::SetSpatialFilter().  It exists as
- a convenience.
-
- The only way to clear a spatial filter set with this method is to
- call OGRLayer::SetSpatialFilter(NULL).
-
- This method is the same as the C++ method OGRLayer::SetSpatialFilterRect().
-
- @param hLayer handle to the layer on which to set the spatial filter.
- @param dfMinX the minimum X coordinate for the rectangular region.
- @param dfMinY the minimum Y coordinate for the rectangular region.
- @param dfMaxX the maximum X coordinate for the rectangular region.
- @param dfMaxY the maximum Y coordinate for the rectangular region.
-
- */
-
-
-/**
- \fn void OGRLayer::SetSpatialFilter( int iGeomField, OGRGeometry * poFilter );
-
- \brief Set a new spatial filter.
-
- This method set the geometry to be used as a spatial filter when
- fetching features via the GetNextFeature() method.  Only features that
- geometrically intersect the filter geometry will be returned.
-
- Currently this test is may be inaccurately implemented, but it is
- guaranteed that all features who's envelope (as returned by
- OGRGeometry::getEnvelope()) overlaps the envelope of the spatial filter
- will be returned.  This can result in more shapes being returned that
- should strictly be the case.
-
- This method makes an internal copy of the passed geometry.  The
- passed geometry remains the responsibility of the caller, and may
- be safely destroyed.
-
- For the time being the passed filter geometry should be in the same
- SRS as the geometry field definition it corresponds to (as returned by
- GetLayerDefn()->OGRFeatureDefn::GetGeomFieldDefn(iGeomField)->GetSpatialRef()).  In the
- future this may be generalized.
-
- Note that only the last spatial filter set is applied, even if several
- successive calls are done with different iGeomField values.
-
- Note to driver implementer: if you implement SetSpatialFilter(int,OGRGeometry*),
- you must also implement SetSpatialFilter(OGRGeometry*) to make it call
- SetSpatialFilter(0,OGRGeometry*).
-
- This method is the same as the C function OGR_L_SetSpatialFilterEx().
-
- @param iGeomField index of the geometry field on which the spatial filter
- operates.
- @param poFilter the geometry to use as a filtering region.  NULL may
- be passed indicating that the current spatial filter should be cleared,
- but no new one instituted.
-
- @since GDAL 1.11
-
- */
-
-/**
- \fn void OGR_L_SetSpatialFilterEx( OGRLayerH hLayer, int iGeomField, OGRGeometryH hGeom );
-
- \brief Set a new spatial filter.
-
- This function set the geometry to be used as a spatial filter when
- fetching features via the OGR_L_GetNextFeature() function.  Only
- features that geometrically intersect the filter geometry will be
- returned.
-
- Currently this test is may be inaccurately implemented, but it is
- guaranteed that all features who's envelope (as returned by
- OGR_G_GetEnvelope()) overlaps the envelope of the spatial filter
- will be returned.  This can result in more shapes being returned that
- should strictly be the case.
-
- This function makes an internal copy of the passed geometry.  The
- passed geometry remains the responsibility of the caller, and may
- be safely destroyed.
-
- For the time being the passed filter geometry should be in the same
- SRS as the geometry field definition it corresponds to (as returned by
- GetLayerDefn()->OGRFeatureDefn::GetGeomFieldDefn(iGeomField)->GetSpatialRef()).  In the
- future this may be generalized.
-
- Note that only the last spatial filter set is applied, even if several
- successive calls are done with different iGeomField values.
-
- This function is the same as the C++ method OGRLayer::SetSpatialFilter.
-
- @param hLayer handle to the layer on which to set the spatial filter.
- @param iGeomField index of the geometry field on which the spatial filter
- operates.
- @param hGeom handle to the geometry to use as a filtering region.  NULL may
- be passed indicating that the current spatial filter should be cleared,
- but no new one instituted.
-
- @since GDAL 1.11
-
- */
-
-/**
- \fn void OGRLayer::SetSpatialFilterRect( int iGeomField,
-                                          double dfMinX, double dfMinY,
-                                          double dfMaxX, double dfMaxY );
-
- \brief Set a new rectangular spatial filter.
-
- This method set rectangle to be used as a spatial filter when
- fetching features via the GetNextFeature() method.  Only features that
- geometrically intersect the given rectangle will be returned.
-
- The x/y values should be in the same coordinate system as as the geometry
- field definition it corresponds to (as returned by
- GetLayerDefn()->OGRFeatureDefn::GetGeomFieldDefn(iGeomField)->GetSpatialRef()). Internally this
- method is normally implemented as creating a 5 vertex closed rectangular
- polygon and passing it to OGRLayer::SetSpatialFilter().  It exists as
- a convenience.
-
- The only way to clear a spatial filter set with this method is to
- call OGRLayer::SetSpatialFilter(NULL).
-
- This method is the same as the C function OGR_L_SetSpatialFilterRectEx().
-
- @param iGeomField index of the geometry field on which the spatial filter
- operates.
- @param dfMinX the minimum X coordinate for the rectangular region.
- @param dfMinY the minimum Y coordinate for the rectangular region.
- @param dfMaxX the maximum X coordinate for the rectangular region.
- @param dfMaxY the maximum Y coordinate for the rectangular region.
-
- @since GDAL 1.11
- */
-
-/**
- \fn void OGR_L_SetSpatialFilterRectEx( OGRLayerH hLayer,
-                                        int iGeomField,
-                                        double dfMinX, double dfMinY,
-                                        double dfMaxX, double dfMaxY );
-
- \brief Set a new rectangular spatial filter.
-
- This method set rectangle to be used as a spatial filter when
- fetching features via the OGR_L_GetNextFeature() method.  Only features that
- geometrically intersect the given rectangle will be returned.
-
- The x/y values should be in the same coordinate system as as the geometry
- field definition it corresponds to (as returned by
- GetLayerDefn()->OGRFeatureDefn::GetGeomFieldDefn(iGeomField)->GetSpatialRef()). Internally this
- method is normally implemented as creating a 5 vertex closed rectangular
- polygon and passing it to OGRLayer::SetSpatialFilter().  It exists as
- a convenience.
-
- The only way to clear a spatial filter set with this method is to
- call OGRLayer::SetSpatialFilter(NULL).
-
- This method is the same as the C++ method OGRLayer::SetSpatialFilterRect().
-
- @param hLayer handle to the layer on which to set the spatial filter.
- @param iGeomField index of the geometry field on which the spatial filter
- operates.
- @param dfMinX the minimum X coordinate for the rectangular region.
- @param dfMinY the minimum Y coordinate for the rectangular region.
- @param dfMaxX the maximum X coordinate for the rectangular region.
- @param dfMaxY the maximum Y coordinate for the rectangular region.
-
- @since GDAL 1.11
- */
-
-
-/**
  \fn OGRGeometry *OGRLayer::GetSpatialFilter();
 
  \brief This method returns the current spatial filter for this layer.
@@ -1340,12 +902,13 @@ by the OGRSFDriverManager.
 
  The query string should be in the format of an SQL WHERE clause.  For
  instance "population > 1000000 and population < 5000000" where population
- is an attribute in the layer.  The query format is normally a restricted
- form of SQL  WHERE clause as described in the "WHERE" section of the
- <a href="https://gdal.org/user/ogr_sql_dialect.html">OGR SQL</a> tutorial.  In some cases (RDBMS
- backed drivers) the native capabilities of the database may be used to
- interpret the WHERE clause in which case the capabilities will be broader
- than those of OGR SQL.
+ is an attribute in the layer. The query format is normally a SQL WHERE clause
+ as described in the
+ <a href="https://gdal.org/user/ogr_sql_dialect.html#where">"WHERE"</a> section
+ of the OGR SQL dialect documentation.
+ In some cases (RDBMS backed drivers, SQLite, GeoPackage) the native
+ capabilities of the database may be used to to interpret the WHERE clause, in
+ which case the capabilities will be broader than those of OGR SQL.
 
  Note that installing a query string will generally result in resetting
  the current reading position (ala ResetReading()).
@@ -1371,11 +934,13 @@ by the OGRSFDriverManager.
 
  The query string should be in the format of an SQL WHERE clause.  For
  instance "population > 1000000 and population < 5000000" where population
- is an attribute in the layer.  The query format is a restricted form of SQL
- WHERE clause as defined "eq_format=restricted_where" about half way through
- this document:
-
-   http://ogdi.sourceforge.net/prop/6.2.CapabilitiesMetadata.html
+ is an attribute in the layer. The query format is normally a SQL WHERE clause
+ as described in the
+ <a href="https://gdal.org/user/ogr_sql_dialect.html#where">"WHERE"</a> section
+ of the OGR SQL dialect documentation.
+ In some cases (RDBMS backed drivers, SQLite, GeoPackage) the native
+ capabilities of the database may be used to to interpret the WHERE clause, in
+ which case the capabilities will be broader than those of OGR SQL.
 
  Note that installing a query string will generally result in resetting
  the current reading position (ala OGR_L_ResetReading()).
@@ -2462,6 +2027,10 @@ used by a layer directly.
 This method should not be called while there are feature objects in existence that
 were obtained or created with the previous layer definition.
 
+If a OGRFieldDefn* object corresponding to the deleted field has been retrieved
+from the layer definition before the call to DeleteField(), it must no longer be
+used after the call to DeleteField(), which will have destroyed it.
+
 Not all drivers support this method. You can query a layer to check if it supports it
 with the OLCDeleteField capability. Some drivers may only support this method while
 there are still no features in the layer. When it is supported, the existing features of the
@@ -2489,6 +2058,10 @@ used by a layer directly.
 
 This function should not be called while there are feature objects in existence that
 were obtained or created with the previous layer definition.
+
+If a OGRFieldDefnH object corresponding to the deleted field has been retrieved
+from the layer definition before the call to DeleteField(), it must no longer be
+used after the call to DeleteField(), which will have destroyed it.
 
 Not all drivers support this function. You can query a layer to check if it supports it
 with the OLCDeleteField capability. Some drivers may only support this method while
@@ -2989,6 +2562,31 @@ form depending on the limitations of the format driver.
 
  This function is the same as the C function OGR_L_RollbackTransaction().
 
+
+ OGRFeature* instances acquired or created between the StartTransaction() and RollbackTransaction() should
+ be destroyed before RollbackTransaction() if the field structure has been modified during the transaction.
+
+ In particular, the following is invalid:
+
+ \code
+ lyr->StartTransaction();
+ lyr->DeleteField(...);
+ f = new OGRFeature(lyr->GetLayerDefn());
+ lyr->RollbackTransaction();
+ // f is in a inconsistent state at this point, given its array of fields doesn't match
+ // the updated layer definition, and thus it cannot even be safely deleted !
+ \endcode
+
+ Instead, the feature should be destroyed before the rollback:
+
+ \code
+ lyr->StartTransaction();
+ lyr->DeleteField(...);
+ f = new OGRFeature(lyr->GetLayerDefn());
+ ...
+ delete f;
+ \endcode
+
  @return OGRERR_NONE on success.
 
 */
@@ -3077,6 +2675,10 @@ form depending on the limitations of the format driver.
 
  By default, no fields are ignored.
 
+ Note that fields that are used in an attribute filter should generally not be set as
+ ignored fields, as most drivers (such as those relying on the OGR SQL engine)
+ will be unable to correctly evaluate the attribute filter.
+
  This method is the same as the C function OGR_L_SetIgnoredFields()
 
  @param papszFields an array of field names terminated by NULL item. If NULL is passed, the ignored list is cleared.
@@ -3096,6 +2698,10 @@ form depending on the limitations of the format driver.
  "OGR_STYLE" to ignore layer style.
 
  By default, no fields are ignored.
+
+ Note that fields that are used in an attribute filter should generally not be set as
+ ignored fields, as most drivers (such as those relying on the OGR SQL engine)
+ will be unable to correctly evaluate the attribute filter.
 
  This method is the same as the C++ method OGRLayer::SetIgnoredFields()
 

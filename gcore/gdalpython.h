@@ -8,23 +8,7 @@
  * Copyright (c) 2017-2019, Even Rouault, <even dot rouault at spatialys dot
  *com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDALPYTHON_H_INCLUDED
@@ -77,6 +61,8 @@ extern void (*PyObject_Print)(PyObject *, FILE *, int);
 
 extern Py_ssize_t (*PyBytes_Size)(PyObject *);
 extern const char *(*PyBytes_AsString)(PyObject *);
+extern int *(*PyBytes_AsStringAndSize)(PyObject *, char **, Py_ssize_t *);
+extern PyObject *(*PyBytes_FromObject)(PyObject *);
 extern PyObject *(*PyBytes_FromStringAndSize)(const void *, size_t);
 
 extern PyObject *(*PyUnicode_FromString)(const char *);
@@ -105,6 +91,7 @@ typedef struct
     // cppcheck-suppress unusedStructMember
     char big_enough[256];
 } Py_buffer;
+
 extern int (*PyBuffer_FillInfo)(Py_buffer *view, PyObject *obj, void *buf,
                                 size_t len, int readonly, int infoflags);
 extern PyObject *(*PyMemoryView_FromBuffer)(Py_buffer *view);
@@ -112,6 +99,7 @@ extern PyObject *(*PyMemoryView_FromBuffer)(Py_buffer *view);
 typedef PyObject *(*PyCFunction)(PyObject *, PyObject *, PyObject *);
 
 typedef struct PyMethodDef PyMethodDef;
+
 struct PyMethodDef
 {
     const char *name;
@@ -119,6 +107,7 @@ struct PyMethodDef
     int flags;
     const char *help;
 };
+
 extern PyObject *(*PyModule_Create2)(struct PyModuleDef *, int);
 
 #define PYTHON_API_VERSION 1013
@@ -175,6 +164,7 @@ typedef struct PyModuleDef
 #define Py_file_input 257
 
 typedef int PyGILState_STATE;
+
 class GIL_Holder
 {
     bool m_bExclusiveLock;

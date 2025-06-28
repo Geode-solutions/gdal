@@ -11,23 +11,7 @@
  * Copyright (c) 1999-2008, Daniel Morissette
  * Copyright (c) 2014, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 
 #include "cpl_port.h"
@@ -58,9 +42,9 @@
  *
  * Constructor.
  **********************************************************************/
-IMapInfoFile::IMapInfoFile()
-    : m_nCurFeatureId(0), m_poCurFeature(nullptr), m_bBoundsSet(FALSE),
-      m_pszCharset(nullptr)
+IMapInfoFile::IMapInfoFile(GDALDataset *poDS)
+    : m_poDS(poDS), m_nCurFeatureId(0), m_poCurFeature(nullptr),
+      m_bBoundsSet(FALSE), m_pszCharset(nullptr)
 {
 }
 
@@ -116,7 +100,8 @@ int IMapInfoFile::Open(const char *pszFname, const char *pszAccess,
  *
  * Returns the new object ptr. , or NULL if the open failed.
  **********************************************************************/
-IMapInfoFile *IMapInfoFile::SmartOpen(const char *pszFname, GBool bUpdate,
+IMapInfoFile *IMapInfoFile::SmartOpen(GDALDataset *poDS, const char *pszFname,
+                                      GBool bUpdate,
                                       GBool bTestOpenNoError /*=FALSE*/)
 {
     IMapInfoFile *poFile = nullptr;
@@ -131,7 +116,7 @@ IMapInfoFile *IMapInfoFile::SmartOpen(const char *pszFname, GBool bUpdate,
         /*-------------------------------------------------------------
          * MIF/MID file
          *------------------------------------------------------------*/
-        poFile = new MIFFile;
+        poFile = new MIFFile(poDS);
     }
     else if (nLen > 4 && EQUAL(pszFname + nLen - 4, ".TAB"))
     {
@@ -160,11 +145,11 @@ IMapInfoFile *IMapInfoFile::SmartOpen(const char *pszFname, GBool bUpdate,
         }
 
         if (bFoundView)
-            poFile = new TABView;
+            poFile = new TABView(poDS);
         else if (bFoundFields && bFoundSeamless)
-            poFile = new TABSeamless;
+            poFile = new TABSeamless(poDS);
         else if (bFoundFields)
-            poFile = new TABFile;
+            poFile = new TABFile(poDS);
 
         if (fp)
             VSIFCloseL(fp);
@@ -312,6 +297,7 @@ TABFeature *IMapInfoFile::CreateTABFeature(OGRFeature *poFeature)
          *------------------------------------------------------------*/
         case wkbPolygon:
         case wkbMultiPolygon:
+        {
             poTABFeature = new TABRegion(poFeature->GetDefnRef());
             if (poFeature->GetStyleString())
             {
@@ -323,11 +309,13 @@ TABFeature *IMapInfoFile::CreateTABFeature(OGRFeature *poFeature)
                     poFeature->GetStyleString());
             }
             break;
+        }
         /*-------------------------------------------------------------
          * LINE/PLINE/MULTIPLINE
          *------------------------------------------------------------*/
         case wkbLineString:
         case wkbMultiLineString:
+        {
             poTABFeature = new TABPolyline(poFeature->GetDefnRef());
             if (poFeature->GetStyleString())
             {
@@ -337,6 +325,7 @@ TABFeature *IMapInfoFile::CreateTABFeature(OGRFeature *poFeature)
                     poFeature->GetStyleString());
             }
             break;
+        }
         /*-------------------------------------------------------------
          * Collection types that are not directly supported... convert
          * to multiple features in output file through recursive calls.
@@ -347,7 +336,7 @@ TABFeature *IMapInfoFile::CreateTABFeature(OGRFeature *poFeature)
             OGRErr eStatus = OGRERR_NONE;
             assert(poGeom);  // for clang static analyzer
             OGRGeometryCollection *poColl = poGeom->toGeometryCollection();
-            OGRFeature *poTmpFeature = poFeature->Clone();
+            auto poTmpFeature = std::unique_ptr<OGRFeature>(poFeature->Clone());
 
             for (int i = 0; eStatus == OGRERR_NONE && poColl != nullptr &&
                             i < poColl->getNumGeometries();
@@ -355,30 +344,33 @@ TABFeature *IMapInfoFile::CreateTABFeature(OGRFeature *poFeature)
             {
                 poTmpFeature->SetFID(OGRNullFID);
                 poTmpFeature->SetGeometry(poColl->getGeometryRef(i));
-                eStatus = ICreateFeature(poTmpFeature);
+                eStatus = ICreateFeature(poTmpFeature.get());
             }
-            delete poTmpFeature;
-            return nullptr;
+            break;
         }
-        break;
+
         /*-------------------------------------------------------------
          * Unsupported type.... convert to MapInfo geometry NONE
          *------------------------------------------------------------*/
-        case wkbUnknown:
         default:
+        {
             poTABFeature = new TABFeature(poFeature->GetDefnRef());
             break;
+        }
     }
 
-    if (poGeom != nullptr)
-        poTABFeature->SetGeometryDirectly(poGeom->clone());
-
-    for (int i = 0; i < poFeature->GetDefnRef()->GetFieldCount(); i++)
+    if (poTABFeature)
     {
-        poTABFeature->SetField(i, poFeature->GetRawFieldRef(i));
-    }
+        if (poGeom != nullptr)
+            poTABFeature->SetGeometryDirectly(poGeom->clone());
 
-    poTABFeature->SetFID(poFeature->GetFID());
+        for (int i = 0; i < poFeature->GetDefnRef()->GetFieldCount(); i++)
+        {
+            poTABFeature->SetField(i, poFeature->GetRawFieldRef(i));
+        }
+
+        poTABFeature->SetFID(poFeature->GetFID());
+    }
 
     return poTABFeature;
 }
@@ -434,18 +426,28 @@ OGRFeature *IMapInfoFile::GetFeature(GIntBig nFeatureId)
 /*      Create a native field based on a generic OGR definition.        */
 /************************************************************************/
 
-int IMapInfoFile::GetTABType(OGRFieldDefn *poField, TABFieldType *peTABType,
-                             int *pnWidth, int *pnPrecision)
+int IMapInfoFile::GetTABType(const OGRFieldDefn *poField,
+                             TABFieldType *peTABType, int *pnWidth,
+                             int *pnPrecision)
 {
     TABFieldType eTABType;
     int nWidth = poField->GetWidth();
-    int nPrecision = poField->GetPrecision();
+    int nPrecision =
+        poField->GetType() == OFTReal ? poField->GetPrecision() : 0;
 
     if (poField->GetType() == OFTInteger)
     {
-        eTABType = TABFInteger;
-        if (nWidth == 0)
-            nWidth = 12;
+        if (poField->GetSubType() == OFSTBoolean)
+        {
+            eTABType = TABFLogical;
+            nWidth = 1;
+        }
+        else
+        {
+            eTABType = TABFInteger;
+            if (nWidth == 0)
+                nWidth = 12;
+        }
     }
     else if (poField->GetType() == OFTInteger64)
     {
@@ -517,9 +519,12 @@ int IMapInfoFile::GetTABType(OGRFieldDefn *poField, TABFieldType *peTABType,
         return -1;
     }
 
-    *peTABType = eTABType;
-    *pnWidth = nWidth;
-    *pnPrecision = nPrecision;
+    if (peTABType)
+        *peTABType = eTABType;
+    if (pnWidth)
+        *pnWidth = nWidth;
+    if (pnPrecision)
+        *pnPrecision = nPrecision;
 
     return 0;
 }
@@ -530,7 +535,7 @@ int IMapInfoFile::GetTABType(OGRFieldDefn *poField, TABFieldType *peTABType,
 /*      Create a native field based on a generic OGR definition.        */
 /************************************************************************/
 
-OGRErr IMapInfoFile::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr IMapInfoFile::CreateField(const OGRFieldDefn *poField, int bApproxOK)
 
 {
     TABFieldType eTABType;
@@ -577,6 +582,7 @@ const char *IMapInfoFile::GetCharset() const
 
 // Table is adopted from
 // http://www.i-signum.com/Formation/download/MB_ReferenceGuide.pdf pp. 127-128
+// NOTE: if modifying this table, please keep doc/source/drivers/vector/mapinfo_encodings.csv in sync
 static const char *const apszCharsets[][2] = {
     {"Neutral", ""},                 // No character conversions performed.
     {"ISO8859_1", "ISO-8859-1"},     // ISO 8859-1 (UNIX)
@@ -614,6 +620,7 @@ static const char *const apszCharsets[][2] = {
     {"CodePage869", "CP869"},  // DOS Code Page 869 = Modern Greek
     {"LICS", ""},              // Lotus worksheet release 1,2 character set
     {"LMBCS", ""},             // Lotus worksheet release 3,4 character set
+    {"UTF-8", "UTF-8"},
     {nullptr, nullptr}};
 
 const char *IMapInfoFile::CharsetToEncoding(const char *pszCharset)
@@ -666,6 +673,11 @@ const char *IMapInfoFile::GetEncoding() const
 void IMapInfoFile::SetEncoding(const char *pszEncoding)
 {
     SetCharset(EncodingToCharset(pszEncoding));
+}
+
+void IMapInfoFile::SetStrictLaundering(bool bStrictLaundering)
+{
+    m_bStrictLaundering = bStrictLaundering;
 }
 
 int IMapInfoFile::TestUtf8Capability() const

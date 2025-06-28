@@ -17,18 +17,19 @@ Synopsis
 
 .. code-block::
 
-    sozip [--quiet|--verbose]
+    sozip [--help] [--help-general]
+          [--quiet|--verbose]
           [[-g|--grow] | [--overwrite]]
           [-r|--recurse-paths]
           [-j|--junk-paths]
           [-l|--list]
           [--optimize-from=<input.zip>]
           [--validate]
-          [--enable-sozip=auto/yes/no]
-          [--sozip-chunk-size=value]
-          [--sozip-min-file-size=value]
-          [--content-type=value]
-          zip_filename [filename]*
+          [--enable-sozip={auto|yes|no}]
+          [--sozip-chunk-size=<value>]
+          [--sozip-min-file-size=<value>]
+          [--content-type=<value>]
+          <zip_filename> [<filename>]...
 
 
 Description
@@ -44,6 +45,8 @@ The :program:`sozip` utility can be used to:
 
 
 .. program:: sozip
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: --quiet
 
@@ -76,7 +79,12 @@ The :program:`sozip` utility can be used to:
     Validates a SOZip file. Baseline ZIP validation is done in a light way,
     limited to being able to browse through ZIP records with the InfoZIP-based
     ZIP reader used by GDAL. But validation of the SOZip-specific aspects is
-    done in a more thoroughful way.
+    done in a more thorougful way.
+
+.. option:: -r
+.. option:: --recurse-paths
+
+    Travels the directory structure of the specified directory/directories recursively.
 
 .. option:: -j
 .. option:: --junk-paths
@@ -91,20 +99,20 @@ The :program:`sozip` utility can be used to:
     :option:`--enable-sozip`, :option:`--sozip-chunk-size` and
     :option:`--sozip-min-file-size` may be used in that mode.
 
-.. option:: --enable-sozip=auto/yes/no
+.. option:: --enable-sozip={auto|yes|no}
 
     In ``auto`` mode, a file is seek-optimized only if its size is above the
-    value of :option:`--sozip-chunk-size`.
+    value of :option:`--sozip-min-file-size`.
     In ``yes`` mode, all input files will be seek-optimized.
     In ``no`` mode, no input files will be seek-optimized.
 
-.. option:: --sozip-chunk-size
+.. option:: --sozip-chunk-size=<value>
 
     Chunk size for a seek-optimized file. Defaults to 32768 bytes. The value
     is specified in bytes, or K and M suffix can be respectively used to
     specify a value in kilo-bytes or mega-bytes.
 
-.. option:: --sozip-min-file-size
+.. option:: --sozip-min-file-size=<value>
 
     Minimum file size to decide if a file should be seek-optimized, in
     --enable-sozip=auto mode. Defaults to 1 MB byte. The value
@@ -128,7 +136,7 @@ The :program:`sozip` utility can be used to:
 Multithreading
 --------------
 
-The :decl_configoption:`GDAL_NUM_THREADS` configuration option can be set to
+The :config:`GDAL_NUM_THREADS` configuration option can be set to
 ``ALL_CPUS`` or a integer value to specify the number of threads to use for
 SOZip-compressed files. Defaults to ``ALL_CPUS``.
 

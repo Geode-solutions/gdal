@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  NITF Read/Write Translator
  * Purpose:  GDALDataset/GDALRasterBand declarations.
@@ -12,29 +11,18 @@
  * Portions Copyright (c) Her majesty the Queen in right of Canada as
  * represented by the Minister of National Defence, 2006.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
+
+#ifndef NITF_DATASET_H_INCLUDED
+#define NITF_DATASET_H_INCLUDED
 
 #include "gdal_pam.h"
 #include "nitflib.h"
 #include "ogr_spatialref.h"
 #include "gdal_proxy.h"
+
+#include <array>
 #include <map>
 
 CPLErr NITFSetColorInterpretation(NITFImage *psImage, int nBand,
@@ -65,29 +53,31 @@ class NITFDataset final : public GDALPamDataset
 {
     friend class NITFRasterBand;
     friend class NITFWrapperRasterBand;
+    friend class NITFComplexRasterBand;
 
-    NITFFile *psFile;
-    NITFImage *psImage;
+    NITFFile *psFile = nullptr;
+    NITFImage *psImage = nullptr;
 
-    GDALDataset *poJ2KDataset;
-    int bJP2Writing;
+    std::unique_ptr<GDALDataset> poJ2KDataset{};
+    int bJP2Writing = false;
     vsi_l_offset m_nImageOffset = 0;
     int m_nIMIndex = 0;
     int m_nImageCount = 0;
     vsi_l_offset m_nICOffset = 0;
+    bool m_bHasComplexRasterBand = false;
 
-    GDALDataset *poJPEGDataset;
+    std::unique_ptr<GDALDataset> poJPEGDataset{};
 
-    int bGotGeoTransform;
-    double adfGeoTransform[6];
+    int bGotGeoTransform = false;
+    GDALGeoTransform m_gt{};
 
     OGRSpatialReference m_oSRS{};
 
-    int nGCPCount;
-    GDAL_GCP *pasGCPList;
+    int nGCPCount = 0;
+    GDAL_GCP *pasGCPList = nullptr;
     OGRSpatialReference m_oGCPSRS{};
 
-    GDALMultiDomainMetadata oSpecialMD;
+    GDALMultiDomainMetadata oSpecialMD{};
 
 #ifdef ESRI_BUILD
     void InitializeNITFDESMetadata();
@@ -100,9 +90,9 @@ class NITFDataset final : public GDALPamDataset
     bool InitializeTREMetadata(bool bValidate);
     void InitializeImageStructureMetadata();
 
-    GIntBig *panJPEGBlockOffset;
-    GByte *pabyJPEGBlock;
-    int nQLevel;
+    GIntBig *panJPEGBlockOffset = nullptr;
+    GByte *pabyJPEGBlock = nullptr;
+    int nQLevel = 0;
 
     int ScanJPEGQLevel(GUIntBig *pnDataStart, bool *pbError);
     CPLErr ScanJPEGBlocks();
@@ -111,27 +101,30 @@ class NITFDataset final : public GDALPamDataset
     char **AddFile(char **papszFileList, const char *EXTENSION,
                    const char *extension);
 
-    int nIMIndex;
-    CPLString osNITFFilename;
+    int nIMIndex = 0;
+    CPLString osNITFFilename{};
 
-    CPLString osRSetVRT;
+    CPLString osRSetVRT{};
     int CheckForRSets(const char *pszFilename, char **papszSiblingFiles);
 
-    char **papszTextMDToWrite;
-    char **papszCgmMDToWrite;
-    CPLStringList aosCreationOptions;
+    char **papszTextMDToWrite = nullptr;
+    char **papszCgmMDToWrite = nullptr;
+    CPLStringList aosCreationOptions{};
 
-    int bInLoadXML;
+    int bInLoadXML = false;
 
-    CPLString m_osRPCTXTFilename;
+    CPLString m_osRPCTXTFilename{};
 
-    int bExposeUnderlyingJPEGDatasetOverviews;
+    int bExposeUnderlyingJPEGDatasetOverviews = false;
+
     int ExposeUnderlyingJPEGDatasetOverviews() const
     {
         return bExposeUnderlyingJPEGDatasetOverviews;
     }
 
     bool Validate();
+
+    CPL_DISALLOW_COPY_ASSIGN(NITFDataset)
 
   protected:
     virtual int CloseDependentDatasets() override;
@@ -146,15 +139,16 @@ class NITFDataset final : public GDALPamDataset
                               char **papszOptions) override;
 
     virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, int, int *, GSpacing nPixelSpace,
-                             GSpacing nLineSpace, GSpacing nBandSpace,
+                             GDALDataType, int, BANDMAP_TYPE,
+                             GSpacing nPixelSpace, GSpacing nLineSpace,
+                             GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
-    virtual CPLErr GetGeoTransform(double *) override;
-    virtual CPLErr SetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    virtual CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     CPLErr SetGCPs(int nGCPCountIn, const GDAL_GCP *pasGCPListIn,
                    const OGRSpatialReference *poSRS) override;
 
@@ -172,7 +166,6 @@ class NITFDataset final : public GDALPamDataset
                                    const int *, GDALProgressFunc, void *,
                                    CSLConstList papszOptions) override;
 
-    static int Identify(GDALOpenInfo *);
     static NITFDataset *OpenInternal(GDALOpenInfo *,
                                      GDALDataset *poWritableJ2KDataset,
                                      bool bOpenForCreate, int nIMIndex);
@@ -194,17 +187,19 @@ class NITFDataset final : public GDALPamDataset
 /* ==================================================================== */
 /************************************************************************/
 
-class NITFRasterBand final : public GDALPamRasterBand
+class NITFRasterBand CPL_NON_FINAL : public GDALPamRasterBand
 {
     friend class NITFDataset;
 
-    NITFImage *psImage;
+    NITFImage *psImage = nullptr;
 
-    GDALColorTable *poColorTable;
+    GDALColorTable *poColorTable = nullptr;
 
-    GByte *pUnpackData;
+    GByte *pUnpackData = nullptr;
 
-    int bScanlineAccess;
+    int bScanlineAccess = false;
+
+    CPL_DISALLOW_COPY_ASSIGN(NITFRasterBand)
 
   public:
     NITFRasterBand(NITFDataset *, int);
@@ -238,7 +233,7 @@ class NITFRasterBand final : public GDALPamRasterBand
 class NITFProxyPamRasterBand CPL_NON_FINAL : public GDALPamRasterBand
 {
   private:
-    std::map<CPLString, char **> oMDMap;
+    std::map<CPLString, char **> oMDMap{};
 
   protected:
     virtual GDALRasterBand *RefUnderlyingRasterBand() = 0;
@@ -344,10 +339,12 @@ class NITFProxyPamRasterBand CPL_NON_FINAL : public GDALPamRasterBand
 
 class NITFWrapperRasterBand final : public NITFProxyPamRasterBand
 {
-    GDALRasterBand *poBaseBand;
-    GDALColorTable *poColorTable;
-    GDALColorInterp eInterp;
-    int bIsJPEG;
+    GDALRasterBand *const poBaseBand;
+    GDALColorTable *poColorTable = nullptr;
+    GDALColorInterp eInterp = GCI_Undefined;
+    const bool bIsJPEG;
+
+    CPL_DISALLOW_COPY_ASSIGN(NITFWrapperRasterBand)
 
   protected:
     /* Pure virtual method of the NITFProxyPamRasterBand */
@@ -370,3 +367,32 @@ class NITFWrapperRasterBand final : public NITFProxyPamRasterBand
     /* Specific method */
     void SetColorTableFromNITFBandInfo();
 };
+
+/************************************************************************/
+/* ==================================================================== */
+/*                        NITFComplexRasterBand                         */
+/* ==================================================================== */
+/************************************************************************/
+
+/* This class is used to wrap 2 bands (I and Q) as a complex raster band */
+class NITFComplexRasterBand final : public NITFRasterBand
+{
+    std::unique_ptr<NITFDataset> poIntermediateDS{};
+    std::array<int, 2> anBandMap = {0, 0};
+    GDALDataType underlyingDataType = GDT_Unknown;
+    int complexDataTypeSize = 0;
+    int underlyingDataTypeSize = 0;
+
+  private:
+    CPLErr IBlockIO(int nBlockXOff, int nBlockYOff, void *pImage,
+                    GDALRWFlag rwFlag);
+
+  public:
+    NITFComplexRasterBand(NITFDataset *poDSIn, GDALRasterBand *poBandI,
+                          GDALRasterBand *poBandQ, int nIBand, int nQBand);
+
+    CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IWriteBlock(int, int, void *) override;
+};
+
+#endif /* NITF_DATASET_H_INCLUDED */

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for BAG driver.
@@ -11,23 +10,7 @@
 # Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
 #                     Frank Warmerdam <warmerdam@pobox.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -43,6 +26,13 @@ from osgeo import gdal, ogr
 pytestmark = pytest.mark.require_driver("BAG")
 
 
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
 @pytest.fixture(autouse=True, scope="module")
 def check_no_file_leaks():
     num_files = len(gdaltest.get_opened_files())
@@ -50,17 +40,10 @@ def check_no_file_leaks():
     yield
 
     diff = len(gdaltest.get_opened_files()) - num_files
-
-    if diff != 0 and (
-        gdaltest.is_travis_branch("ubuntu_1804")
-        or gdaltest.is_travis_branch("ubuntu_1804_32bit")
-        or gdaltest.is_travis_branch("fedora")
-        or gdaltest.is_travis_branch("alpine")
-    ):
-        print("Mysterious leak of file handle on some CI setups")
-        return
-
-    assert diff == 0, "Leak of file handles: %d leaked" % diff
+    if diff != 0 and "CI" in os.environ:
+        print("Leak of file handles: %d leaked. Flaky on CI, so ignored" % diff)
+    else:
+        assert diff == 0, "Leak of file handles: %d leaked" % diff
 
 
 ###############################################################################
@@ -226,7 +209,7 @@ def test_bag_vr_normal():
             pp.pprint(got_md)
             pytest.fail(key)
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "data/bag/test_vr.bag", open_options=["MODE=LOW_RES_GRID", "MINX=0"]
         )
@@ -249,7 +232,7 @@ def test_bag_vr_list_supergrids():
 
     assert sub_ds[0][0] == 'BAG:"data/bag/test_vr.bag":supergrid:0:0'
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         # Bounding box filter ignored since only part of MINX, MINY, MAXX and
         # MAXY has been specified
         ds = gdal.OpenEx(
@@ -297,7 +280,7 @@ def test_bag_vr_list_supergrids():
 
     # Test invalid values for SUPERGRIDS_INDICES
     for invalid_val in ["", "x", "(", "(1", "(1,", "(1,)", "(1,2),", "(x,2)", "(2,x)"]:
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ds = gdal.OpenEx(
                 "data/bag/test_vr.bag",
                 open_options=["SUPERGRIDS_INDICES=" + invalid_val],
@@ -371,19 +354,19 @@ def test_bag_vr_open_supergrids():
             pp.pprint(got_md)
             pytest.fail(key)
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open('BAG:"/vsimem/unexisting.bag":supergrid:0:0')
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open('BAG:"data/bag/test_vr.bag":supergrid:4:0')
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open('BAG:"data/bag/test_vr.bag":supergrid:0:6')
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             'BAG:"data/bag/test_vr.bag":supergrid:0:0', open_options=["MINX=0"]
         )
@@ -415,6 +398,11 @@ def test_bag_vr_resampled():
                 "metadata": {},
                 "min": -10.0,
                 "noDataValue": 1000000.0,
+                "overviews": [
+                    {"checksum": 681, "size": [18, 12]},
+                    {"checksum": 340, "size": [9, 6]},
+                    {"checksum": 65529, "size": [6, 4]},
+                ],
                 "type": "Float32",
             },
             {
@@ -427,6 +415,11 @@ def test_bag_vr_resampled():
                 "metadata": {},
                 "min": 0.0,
                 "noDataValue": 1000000.0,
+                "overviews": [
+                    {"checksum": 1344, "size": [18, 12]},
+                    {"checksum": 420, "size": [9, 6]},
+                    {"checksum": 60, "size": [6, 4]},
+                ],
                 "type": "Float32",
             },
         ],
@@ -477,9 +470,9 @@ def test_bag_vr_resampled():
     # Test overviews
     with gdaltest.config_option("GDAL_BAG_MIN_OVR_SIZE", "4"):
         ds = gdal.OpenEx("data/bag/test_vr.bag", open_options=["MODE=RESAMPLED_GRID"])
-    assert ds.GetRasterBand(1).GetOverviewCount() == 2
+    assert ds.GetRasterBand(1).GetOverviewCount() == 3
     assert ds.GetRasterBand(1).GetOverview(-1) is None
-    assert ds.GetRasterBand(1).GetOverview(2) is None
+    assert ds.GetRasterBand(1).GetOverview(3) is None
 
     ovr = ds.GetRasterBand(1).GetOverview(0)
     cs = ovr.Checksum()
@@ -589,7 +582,7 @@ def test_bag_vr_resampled():
     assert got == (165, 205)
 
     # Too big RES_FILTER_MIN
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "data/bag/test_vr.bag",
             open_options=["MODE=RESAMPLED_GRID", "RES_FILTER_MIN=32"],
@@ -597,7 +590,7 @@ def test_bag_vr_resampled():
     assert ds is None
 
     # Too small RES_FILTER_MAX
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "data/bag/test_vr.bag",
             open_options=["MODE=RESAMPLED_GRID", "RES_FILTER_MAX=4"],
@@ -605,7 +598,7 @@ def test_bag_vr_resampled():
     assert ds is None
 
     # RES_FILTER_MIN >= RES_FILTER_MAX
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "data/bag/test_vr.bag",
             open_options=[
@@ -704,11 +697,96 @@ def test_bag_vr_resampled_mask():
 #
 
 
+def test_bag_vr_interpolated():
+
+    ds = gdal.OpenEx(
+        "data/bag/test_interpolated.bag",
+        open_options=["MODE=INTERPOLATED", "REPORT_VERTCRS=NO"],
+    )
+
+    got_md = gdal.Info(ds, computeChecksum=True, format="json", wktFormat="WKT1")
+    expected_md = {
+        "bands": [
+            {
+                "band": 1,
+                "block": [180, 128],
+                # "checksum": 9896,
+                "colorInterpretation": "Undefined",
+                "description": "elevation",
+                "metadata": {},
+                "noDataValue": 1000000.0,
+                "overviews": [
+                    {"checksum": 51693, "size": [90, 64]},
+                    {"checksum": 12949, "size": [45, 32]},
+                    {"checksum": 3168, "size": [22, 16]},
+                    {"checksum": 792, "size": [11, 8]},
+                    {"checksum": 165, "size": [6, 4]},
+                ],
+                "type": "Float32",
+            },
+            {
+                "band": 2,
+                "block": [180, 128],
+                # "checksum": 9896,
+                "colorInterpretation": "Undefined",
+                "description": "uncertainty",
+                "metadata": {},
+                "noDataValue": 1000000.0,
+                "overviews": [
+                    {"checksum": 51693, "size": [90, 64]},
+                    {"checksum": 12949, "size": [45, 32]},
+                    {"checksum": 3168, "size": [22, 16]},
+                    {"checksum": 792, "size": [11, 8]},
+                    {"checksum": 0, "size": [6, 4]},
+                ],
+                "type": "Float32",
+            },
+        ],
+        "coordinateSystem": {
+            "dataAxisToSRSAxisMapping": [1, 2],
+            "wkt": 'PROJCS["NAD83 / UTM zone 10N",\n    GEOGCS["NAD83",\n        DATUM["North_American_Datum_1983",\n            SPHEROID["GRS 1980",6378137,298.257222101004,\n                AUTHORITY["EPSG","7019"]],\n            TOWGS84[0,0,0,0,0,0,0],\n            AUTHORITY["EPSG","6269"]],\n        PRIMEM["Greenwich",0,\n            AUTHORITY["EPSG","8901"]],\n        UNIT["degree",0.0174532925199433,\n            AUTHORITY["EPSG","9122"]],\n        AUTHORITY["EPSG","4269"]],\n    PROJECTION["Transverse_Mercator"],\n    PARAMETER["latitude_of_origin",0],\n    PARAMETER["central_meridian",-123],\n    PARAMETER["scale_factor",0.9996],\n    PARAMETER["false_easting",500000],\n    PARAMETER["false_northing",0],\n    UNIT["metre",1,\n        AUTHORITY["EPSG","9001"]],\n    AXIS["Easting",EAST],\n    AXIS["Northing",NORTH],\n    AUTHORITY["EPSG","26910"]]',
+        },
+        "cornerCoordinates": {
+            "center": [175.0, 500048.0],
+            "lowerLeft": [85.0, 499984.0],
+            "lowerRight": [265.0, 499984.0],
+            "upperLeft": [85.0, 500112.0],
+            "upperRight": [265.0, 500112.0],
+        },
+        "geoTransform": [85.0, 1.0, 0.0, 500112.0, 0.0, -1.0],
+        "metadata": {
+            "": {
+                "AREA_OR_POINT": "Point",
+                "BAG_DATETIME": "2018-08-08T12:34:56",
+                "BagVersion": "2.0.0",
+            },
+            "IMAGE_STRUCTURE": {"INTERLEAVE": "PIXEL"},
+        },
+        "size": [180, 128],
+    }
+
+    del got_md["bands"][0]["checksum"]
+    del got_md["bands"][1]["checksum"]
+
+    for key in expected_md:
+        if key not in got_md or got_md[key] != expected_md[key]:
+            import pprint
+
+            pp = pprint.PrettyPrinter()
+            pp.pprint(got_md)
+            pytest.fail(key)
+
+    assert ds.GetRasterBand(1).Checksum() in (9896, 9899)
+
+
+###############################################################################
+#
+
+
 def test_bag_write_single_band():
 
     tst = gdaltest.GDALTest("BAG", "byte.tif", 1, 4672)
-    ret = tst.testCreateCopy(quiet_error_handler=False, new_filename="/vsimem/out.bag")
-    return ret
+    tst.testCreateCopy(quiet_error_handler=False, new_filename="/vsimem/out.bag")
 
 
 ###############################################################################
@@ -808,16 +886,24 @@ def test_bag_read_georef_metadata():
     ds = gdal.Open("data/bag/test_georef_metadata.bag")
     assert ds is not None
     sub_ds = ds.GetSubDatasets()
-    assert len(sub_ds) == 2
+    assert len(sub_ds) == 3
 
+    assert sub_ds[0][0] == 'BAG:"data/bag/test_georef_metadata.bag":bathymetry_coverage'
     assert (
-        sub_ds[0][0]
+        sub_ds[1][0]
         == 'BAG:"data/bag/test_georef_metadata.bag":georef_metadata:layer_with_keys_values'
     )
     assert (
-        sub_ds[1][0]
+        sub_ds[2][0]
         == 'BAG:"data/bag/test_georef_metadata.bag":georef_metadata:layer_with_values_only'
     )
+
+    ds = gdal.Open('BAG:"data/bag/test_georef_metadata.bag":bathymetry_coverage')
+    assert ds is not None
+    assert len(ds.GetSubDatasets()) == 0
+    assert ds.RasterXSize == 6
+    assert ds.RasterYSize == 4
+    assert ds.RasterCount == 2
 
     ds = gdal.OpenEx(
         "data/bag/test_georef_metadata.bag", open_options=["MODE=LIST_SUPERGRIDS"]
@@ -830,7 +916,7 @@ def test_bag_read_georef_metadata():
         == 'BAG:"data/bag/test_georef_metadata.bag":georef_metadata:layer_with_keys_values:0:0'
     )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             gdal.Open(
                 'BAG:"data/bag/test_georef_metadata.bag":georef_metadata:not_existing'
@@ -842,6 +928,7 @@ def test_bag_read_georef_metadata():
         'BAG:"data/bag/test_georef_metadata.bag":georef_metadata:layer_with_keys_values'
     )
     assert ds is not None
+    assert len(ds.GetSubDatasets()) == 0
     assert ds.RasterXSize == 6
     assert ds.RasterYSize == 4
     assert ds.RasterCount == 1
@@ -1089,3 +1176,31 @@ def test_bag_write_values_at_nodata():
     ds = None
 
     gdal.Unlink(tmpfilename)
+
+
+###############################################################################
+# Test force opening
+
+
+def test_bag_force_opening():
+
+    drv = gdal.IdentifyDriverEx("data/netcdf/trmm-nc4.nc", allowed_drivers=["BAG"])
+    assert drv.GetDescription() == "BAG"
+
+
+###############################################################################
+# Test force opening, but provided file is still not recognized (for good reasons)
+
+
+def test_bag_force_opening_no_match():
+
+    drv = gdal.IdentifyDriverEx("data/byte.tif", allowed_drivers=["BAG"])
+    assert drv is None
+
+
+###############################################################################
+@gdaltest.enable_exceptions()
+def test_bag_open_larger_than_INT_MAX_pixels():
+
+    with pytest.raises(Exception, match="At least one dimension size exceeds INT_MAX"):
+        gdal.Open("data/bag/larger_than_INT_MAX_pixels.bag")

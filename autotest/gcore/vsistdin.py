@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test /vsistdin/
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -61,6 +44,7 @@ def test_vsistdin_1():
     ds = gdal.Open("tmp/vsistdin_1_out.tif")
     assert ds is not None
     assert ds.GetRasterBand(1).Checksum() == cs
+    ds = None
 
     gdal.Unlink("tmp/vsistdin_1_out.tif")
 
@@ -95,11 +79,11 @@ def test_vsistdin_2():
 # Test opening /vsistdin/ in write mode (failure expected)
 
 
+@gdaltest.disable_exceptions()
 def test_vsistdin_3():
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    f = gdal.VSIFOpenL("/vsistdin/", "wb")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        f = gdal.VSIFOpenL("/vsistdin/", "wb")
     assert f is None
 
 
@@ -107,6 +91,10 @@ def test_vsistdin_3():
 # Test fix for #6061
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_vsistdin_4():
     if test_cli_utilities.get_gdal_translate_path() is None:
         pytest.skip()
@@ -147,6 +135,7 @@ def test_vsistdin_4():
 ###############################################################################
 
 
+@gdaltest.disable_exceptions()
 def test_vsistdin_5():
 
     f = open("tmp/test_vsistdin_5.bin", "wb")
@@ -228,7 +217,7 @@ def test_vsistdin_5():
         assert gdal.VSIFSeekL(f, 0, 0) == 0
         assert gdal.VSIFReadL(5, 1, f) == b"01234"
         assert gdal.VSIFReadL(3, 1, f) == b"567"
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             assert gdal.VSIFReadL(3, 1, f) == b""
         gdal.VSIFCloseL(f)
 

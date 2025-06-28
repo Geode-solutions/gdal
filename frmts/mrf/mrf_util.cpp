@@ -51,6 +51,7 @@
 #include <zlib.h>
 #include <algorithm>
 #include <limits>
+#include "mrfdrivercore.h"
 
 // LERC and QB3 only work on little endian machines
 #if defined(WORDS_BIGENDIAN)
@@ -89,8 +90,7 @@ static const char *const ILC_N[] = {
 
 static const char *const ILC_E[] = {
 #ifdef HAVE_PNG
-    ".ppg",
-    ".ppg",
+    ".ppg", ".ppg",
 #endif
 #ifdef HAVE_JPEG
     ".pjg",
@@ -98,9 +98,7 @@ static const char *const ILC_E[] = {
 #if defined(HAVE_PNG) && defined(HAVE_JPEG)
     ".pjp",
 #endif
-    ".til",
-    ".pzp",
-    ".ptf",
+    ".til", ".pzp", ".ptf",
 #if defined(LERC)
     ".lrc",
 #endif
@@ -108,7 +106,7 @@ static const char *const ILC_E[] = {
     ".pzs",
 #endif
 #if defined(QB3_SUPPORT)
-    ".pq3"
+    ".pq3",
 #endif
     ""};
 
@@ -341,11 +339,11 @@ GIntBig IdxOffset(const ILSize &pos, const ILImage &img)
 }
 
 // Is compression type endianness dependent?
-bool is_Endianess_Dependent(GDALDataType dt, ILCompression comp)
+bool is_Endianness_Dependent(GDALDataType dt, ILCompression comp)
 {
     // Add here all endianness dependent compressions
     if (IL_ZLIB == comp || IL_NONE == comp)
-        if (GDALGetDataTypeSize(dt) > 8)
+        if (GDALGetDataTypeSizeBytes(dt) > 1)
             return true;
     return false;
 }
@@ -539,7 +537,7 @@ void XMLSetAttributeVal(CPLXMLNode *parent, const char *pszName,
             single_val = false;
         value.append(PrintDouble(values[i]) + " ");
     }
-    value.resize(value.size() - 1);  // Cut the last space
+    value.pop_back();  // Cut the last space
     if (single_val)
         value = PrintDouble(values[0]);
     CPLCreateXMLNode(parent, CXT_Attribute, pszName);
@@ -585,20 +583,11 @@ USING_NAMESPACE_MRF
 
 void GDALRegister_mrf()
 {
-    if (GDALGetDriverByName("MRF") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *driver = new GDALDriver();
-    driver->SetDescription("MRF");
-    driver->SetMetadataItem(GDAL_DMD_LONGNAME, "Meta Raster Format");
-    driver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/marfa.html");
-    driver->SetMetadataItem(GDAL_DMD_EXTENSION, "mrf");
-    driver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-    driver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-
-    // These will need to be revisited, do we support complex data types too?
-    driver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES,
-                            "Byte UInt16 Int16 Int32 UInt32 Float32 Float64");
+    MRFDriverSetCommonMetadata(driver);
 
     driver->SetMetadataItem(
         GDAL_DMD_CREATIONOPTIONLIST,
@@ -697,19 +686,16 @@ void GDALRegister_mrf()
         "'/>"
         "</CreationOptionList>\n");
 
-    driver->SetMetadataItem(
-        GDAL_DMD_OPENOPTIONLIST,
-        "<OpenOptionList>"
-        "    <Option name='NOERRORS' type='boolean' description='Ignore "
-        "decompression errors' default='FALSE'/>"
-        "    <Option name='ZSLICE' type='int' description='For a third "
-        "dimension MRF, pick a slice' default='0'/>"
-        "</OpenOptionList>");
-
     driver->pfnOpen = MRFDataset::Open;
-    driver->pfnIdentify = MRFDataset::Identify;
     driver->pfnCreateCopy = MRFDataset::CreateCopy;
     driver->pfnCreate = MRFDataset::Create;
     driver->pfnDelete = MRFDataset::Delete;
     GetGDALDriverManager()->RegisterDriver(driver);
+}
+
+extern "C" void CPL_DLL GDALRegister_MRF(void);
+
+void GDALRegister_MRF()
+{
+    GDALRegister_mrf();
 }

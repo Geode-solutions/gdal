@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test PDS4 format
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2017, Hobu Inc
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import contextlib
@@ -38,6 +21,13 @@ import pytest
 from osgeo import gdal, ogr, osr
 
 pytestmark = pytest.mark.require_driver("PDS4")
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 ###############################################################################
 # Validate XML file against schemas
@@ -175,7 +165,7 @@ def test_pds4_read_cart_versions(filename):
     gt = (-59280.0, 60.0, 0.0, 3751320.0, 0.0, -60.0)
 
     tst = gdaltest.GDALTest("PDS4", filename, 1, 4672)
-    return tst.testOpen(check_prj=srs, check_gt=gt)
+    tst.testOpen(check_prj=srs, check_gt=gt)
 
 
 ###############################################################################
@@ -205,15 +195,14 @@ def test_pds4_2():
 
     tst = gdaltest.GDALTest("PDS4", "rgbsmall.tif", 2, 21053)
     with hide_substitution_warnings_error_handler():
-        ret = tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
-    return ret
+        tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
 
 
 ###############################################################################
 def test_pds4_write_utm():
 
     src_ds = gdal.Open("data/byte.tif")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("PDS4").CreateCopy("/vsimem/temp.xml", src_ds)
     ds = gdal.Open("/vsimem/temp.xml")
     assert ds.GetRasterBand(1).Checksum() == 4672
@@ -239,8 +228,7 @@ def test_pds4_3():
         "PDS4", "rgbsmall.tif", 2, 21053, options=["INTERLEAVE=BSQ"]
     )
     with hide_substitution_warnings_error_handler():
-        ret = tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
-    return ret
+        tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
 
 
 ###############################################################################
@@ -253,8 +241,7 @@ def test_pds4_4():
         "PDS4", "rgbsmall.tif", 2, 21053, options=["INTERLEAVE=BIP"]
     )
     with hide_substitution_warnings_error_handler():
-        ret = tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
-    return ret
+        tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
 
 
 ###############################################################################
@@ -267,8 +254,7 @@ def test_pds4_5():
         "PDS4", "rgbsmall.tif", 2, 21053, options=["INTERLEAVE=BIL"]
     )
     with hide_substitution_warnings_error_handler():
-        ret = tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
-    return ret
+        tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
 
 
 ###############################################################################
@@ -285,8 +271,7 @@ def test_pds4_6():
         options=["INTERLEAVE=BSQ", "IMAGE_FORMAT=GEOTIFF"],
     )
     with hide_substitution_warnings_error_handler():
-        ret = tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
-    return ret
+        tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
 
 
 ###############################################################################
@@ -303,22 +288,21 @@ def test_pds4_7():
         options=["INTERLEAVE=BIP", "IMAGE_FORMAT=GEOTIFF"],
     )
     with hide_substitution_warnings_error_handler():
-        ret = tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
-    return ret
+        tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
 
 
 ###############################################################################
 # Test CreateCopy() from BIL to IMAGE_FORMAT=GEOTIFF doesn't result in error
 
 
+@pytest.mark.require_driver("ENVI")
 def test_pds4_from_bil_to_geotiff():
 
     tst = gdaltest.GDALTest(
         "PDS4", "envi/envi_rgbsmall_bil.img", 2, 20669, options=["IMAGE_FORMAT=GEOTIFF"]
     )
     with hide_substitution_warnings_error_handler():
-        ret = tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
-    return ret
+        tst.testCreateCopy(vsimem=1, strict_in=1, quiet_error_handler=False)
 
 
 ###############################################################################
@@ -358,7 +342,7 @@ def test_pds4_projected_srs(proj4str):
     sr.ImportFromProj4(proj4str)
     ds.SetProjection(sr.ExportToWkt())
     ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = None
 
     validate_xml(filename)
@@ -389,7 +373,7 @@ def test_pds4_longlat_srs():
     sr.ImportFromProj4("+proj=longlat +R=2439400 +no_defs")
     ds.SetProjection(sr.ExportToWkt())
     ds.SetGeoTransform([2, 1, 0, 49, 0, -2])
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = None
 
     validate_xml(filename)
@@ -848,23 +832,23 @@ def test_pds4_13():
     ds = gdal.Open(subds_name)
     assert ds is not None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(r"PDS4:c:\do_not\exist.xml:1:1")
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("PDS4:i_do_not_exist.xml")
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("PDS4:i_do_not_exist.xml:1:1")
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("PDS4:data/pds4/byte_pds4_cart_1700_multi_sds.xml:3:1")
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("PDS4:data/pds4/byte_pds4_cart_1700_multi_sds.xml:1:3")
     assert ds is None
 
@@ -880,7 +864,7 @@ def test_pds4_14():
     gdal.FileFromMemBuffer(
         filename, "Product_Observational http://pds.nasa.gov/pds4/pds/v1"
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(filename)
     assert ds is None
 
@@ -955,7 +939,7 @@ def test_pds4_14():
     </File_Area_Observational>
 </Product_Observational>""",
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(filename)
     assert ds is None
 
@@ -992,7 +976,7 @@ def test_pds4_14():
     </File_Area_Observational>
 </Product_Observational>""",
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(filename)
     assert ds is None
 
@@ -1024,7 +1008,7 @@ def test_pds4_14():
     </File_Area_Observational>
 </Product_Observational>""",
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(filename)
     assert ds is None
 
@@ -1056,7 +1040,7 @@ def test_pds4_14():
     </File_Area_Observational>
 </Product_Observational>""",
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(filename)
     assert ds is None
 
@@ -1088,28 +1072,28 @@ def test_pds4_14():
     </File_Area_Observational>
 </Product_Observational>""",
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(filename)
     assert ds is None
 
     gdal.Unlink(filename)
 
     # Invalid value for INTERLEAVE
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.GetDriverByName("PDS4").Create(
             "/vsimem/out.xml", 1, 1, options=["INTERLEAVE=INVALID"]
         )
     assert ds is None
 
     # INTERLEAVE=BIL not supported for GeoTIFF in PDS4
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.GetDriverByName("PDS4").Create(
             "/vsimem/out.xml", 1, 1, options=["INTERLEAVE=BIL", "IMAGE_FORMAT=GEOTIFF"]
         )
     assert ds is None
 
     # Cannot create GeoTIFF file
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.GetDriverByName("PDS4").Create(
             "/i/do_not/exist.xml", 1, 1, options=["IMAGE_FORMAT=GEOTIFF"]
         )
@@ -1117,7 +1101,7 @@ def test_pds4_14():
 
     gdal.Translate("/vsimem/test.tif", "data/byte.tif")
     # Output file has same name as input file
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Translate(
             "/vsimem/test.xml",
             "/vsimem/test.tif",
@@ -1135,7 +1119,7 @@ def test_pds4_14():
         filename, 1, 1, options=["TEMPLATE=" + template]
     )
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = None
     assert (
         gdal.GetLastErrorMsg()
@@ -1159,7 +1143,7 @@ def test_pds4_14():
     ds.SetProjection(sr.ExportToWkt())
     ds.SetGeoTransform([2, 1, 0, 49, 0, -2])
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = None
     assert (
         gdal.GetLastErrorMsg()
@@ -1179,7 +1163,7 @@ def test_pds4_14():
         filename, 1, 1, options=["TEMPLATE=" + template]
     )
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = None
     assert gdal.GetLastErrorMsg() == "Cannot find Observation_Area in template"
 
@@ -1199,7 +1183,7 @@ def test_pds4_14():
         filename, 1, 1, options=["TEMPLATE=" + template]
     )
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = None
     assert (
         gdal.GetLastErrorMsg()
@@ -1331,7 +1315,7 @@ def test_pds4_17():
 
     filename = "/vsimem/out.xml"
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("PDS4").Create(
             filename, 1, 1, 1, options=["ARRAY_TYPE=Array_2D"] + options
         )
@@ -1352,14 +1336,14 @@ def test_pds4_17():
     gdal.GetDriverByName("PDS4").Delete(filename)
 
     # Test multi-band creation with Array_2D
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.GetDriverByName("PDS4").Create(
             filename, 1, 1, 2, options=["ARRAY_TYPE=Array_2D"] + options
         )
     assert ds is None, "expected failure"
 
     # Test multi-band creation with Array_3D_Spectrum
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("PDS4").Create(
             filename, 1, 1, 2, options=["ARRAY_TYPE=Array_3D_Spectrum"] + options
         )
@@ -1388,7 +1372,7 @@ def test_pds4_18():
     sr.ImportFromProj4("+proj=longlat +R=2439400 +no_defs")
     ds.SetProjection(sr.ExportToWkt())
     ds.SetGeoTransform([2, 1, 0, 49, 0, -2])
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = None
 
     f = gdal.VSIFOpenL(filename, "rb")
@@ -1523,11 +1507,11 @@ def _test_createlabelonly(
     src_ds_name = src_ds.GetDescription()
     src_driver_name = src_ds.GetDriver().GetDescription()
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.GetDriverByName("PDS4").CreateCopy(
             filename, src_ds, options=["CREATE_LABEL_ONLY=YES"] + creation_options
         )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(filename)
     assert ds
     found_src_ds_name = False
@@ -1538,7 +1522,7 @@ def _test_createlabelonly(
     assert ds.RasterCount == src_ds.RasterCount
     assert ds.RasterXSize == src_ds.RasterXSize
     assert ds.RasterYSize == src_ds.RasterYSize
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         for i in range(ds.RasterCount):
             assert (
                 ds.GetRasterBand(i + 1).Checksum()
@@ -1571,6 +1555,7 @@ def _test_createlabelonly(
 # Test CREATE_LABEL_ONLY=YES with ENVI
 
 
+@pytest.mark.require_driver("ENVI")
 def test_pds4_createlabelonly_envi():
 
     gdal.FileFromMemBuffer(
@@ -1620,7 +1605,7 @@ def test_pds4_createlabelonly_gtiff_error():
         "/vsimem/byte.tif", gdal.Open("data/byte.tif"), options=["TILED=YES"]
     )
     src_ds = gdal.Open("/vsimem/byte.tif")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not gdal.GetDriverByName("PDS4").CreateCopy(
             "/vsimem/out.xml", src_ds, options=["CREATE_LABEL_ONLY=YES"]
         )
@@ -1798,3 +1783,24 @@ def test_pds4_oblique_cylindrical_write():
     check_pds4_oblique_cylindrical(filename)
 
     gdal.GetDriverByName("PDS4").Delete(filename)
+
+
+###############################################################################
+
+
+def test_pds4_read_right_to_left(tmp_path):
+
+    numpy = pytest.importorskip("numpy")
+    gdaltest.importorskip_gdal_array()
+
+    tmp_filename = str(tmp_path / "tmp.xml")
+    ref_ds = gdal.Open("data/byte.tif")
+    gdal.Translate(tmp_filename, ref_ds, format="PDS4")
+    xml_content = open(tmp_filename, "rt").read()
+    # Generate a fake Right to Left oriented image
+    open(tmp_filename, "wt").write(
+        xml_content.replace("Left to Right", "Right to Left")
+    )
+    ds = gdal.Open(tmp_filename)
+    # Test that we flip the image along the horizontal axis
+    assert numpy.all(ds.ReadAsArray()[::, ::-1] == ref_ds.ReadAsArray())

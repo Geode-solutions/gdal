@@ -9,23 +9,7 @@
  * Copyright (c) 2004, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -39,11 +23,10 @@
 OGRMySQLTableLayer::OGRMySQLTableLayer(OGRMySQLDataSource *poDSIn,
                                        CPL_UNUSED const char *pszTableName,
                                        int bUpdate, int nSRSIdIn)
-    : bUpdateAccess(bUpdate), pszQuery(nullptr), pszWHERE(CPLStrdup("")),
-      bLaunderColumnNames(TRUE), bPreservePrecision(FALSE)
+    : OGRMySQLLayer(poDSIn), bUpdateAccess(bUpdate), pszQuery(nullptr),
+      pszWHERE(CPLStrdup("")), bLaunderColumnNames(TRUE),
+      bPreservePrecision(FALSE)
 {
-    poDS = poDSIn;
-
     pszQueryStatement = nullptr;
 
     iNextShapeId = 0;
@@ -373,9 +356,8 @@ OGRFeatureDefn *OGRMySQLTableLayer::ReadTableDefinition(const char *pszTable)
     {
         char *pszType = nullptr;
 
-        // set to unknown first
-        poDefn->SetGeomType(wkbUnknown);
-        poDefn->GetGeomFieldDefn(0)->SetName(pszGeomColumn);
+        auto poGeomFieldDefn =
+            std::make_unique<OGRMySQLGeomFieldDefn>(poDS, pszGeomColumn);
 
         if (poDS->GetMajorVersion() < 8 || poDS->IsMariaDB())
             osCommand.Printf("SELECT type, coord_dimension FROM "
@@ -406,13 +388,19 @@ OGRFeatureDefn *OGRMySQLTableLayer::ReadTableDefinition(const char *pszTable)
                 if (papszRow[1] != nullptr && atoi(papszRow[1]) == 3)
                     l_nGeomType = wkbSetZ(l_nGeomType);
 
-            poDefn->SetGeomType(l_nGeomType);
+            poGeomFieldDefn->SetType(l_nGeomType);
         }
         else if (eForcedGeomType != wkbUnknown)
-            poDefn->SetGeomType(eForcedGeomType);
+            poGeomFieldDefn->SetType(eForcedGeomType);
 
         if (bGeomColumnNotNullable)
-            poDefn->GetGeomFieldDefn(0)->SetNullable(FALSE);
+            poGeomFieldDefn->SetNullable(FALSE);
+
+        // Fetch the SRID for this table now
+        nSRSId = FetchSRSId();
+
+        poGeomFieldDefn->nSRSId = nSRSId;
+        poDefn->AddGeomFieldDefn(std::move(poGeomFieldDefn));
 
         if (hResult != nullptr)
             mysql_free_result(
@@ -420,24 +408,22 @@ OGRFeatureDefn *OGRMySQLTableLayer::ReadTableDefinition(const char *pszTable)
         hResult = nullptr;
     }
 
-    // Fetch the SRID for this table now
-    nSRSId = FetchSRSId();
     return poDefn;
 }
 
 /************************************************************************/
-/*                          SetSpatialFilter()                          */
+/*                          ISetSpatialFilter()                         */
 /************************************************************************/
 
-void OGRMySQLTableLayer::SetSpatialFilter(OGRGeometry *poGeomIn)
+OGRErr OGRMySQLTableLayer::ISetSpatialFilter(int, const OGRGeometry *poGeomIn)
 
 {
-    if (!InstallFilter(poGeomIn))
-        return;
-
-    BuildWhere();
-
-    ResetReading();
+    if (InstallFilter(poGeomIn))
+    {
+        BuildWhere();
+        ResetReading();
+    }
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
@@ -464,26 +450,41 @@ void OGRMySQLTableLayer::BuildWhere()
         // POLYGON((MINX MINY, MAXX MINY, MAXX MAXY, MINX MAXY, MINX MINY))
         m_poFilterGeom->getEnvelope(&sEnvelope);
 
+        const OGRSpatialReference *l_poSRS = GetSpatialRef();
+        const bool bIsGeography =
+            (poDS->GetMajorVersion() >= 8 && !poDS->IsMariaDB() && l_poSRS &&
+             l_poSRS->IsGeographic());
+
+        const double dfMinX = sEnvelope.MinX;
+        const double dfMinY = sEnvelope.MinY;
+        const double dfMaxX = sEnvelope.MaxX;
+        const double dfMaxY = sEnvelope.MaxY;
+
         CPLsnprintf(szEnvelope, sizeof(szEnvelope),
-                    "POLYGON((%.18g %.18g, %.18g %.18g, %.18g %.18g, %.18g "
-                    "%.18g, %.18g %.18g))",
-                    sEnvelope.MinX, sEnvelope.MinY, sEnvelope.MaxX,
-                    sEnvelope.MinY, sEnvelope.MaxX, sEnvelope.MaxY,
-                    sEnvelope.MinX, sEnvelope.MaxY, sEnvelope.MinX,
-                    sEnvelope.MinY);
+                    "POLYGON((%.17g %.17g, %.17g %.17g, %.17g %.17g, %.17g "
+                    "%.17g, %.17g %.17g))",
+                    dfMinX, dfMinY, dfMaxX, dfMinY, dfMaxX, dfMaxY, dfMinX,
+                    dfMaxY, dfMinX, dfMinY);
 
-        const char *pszAxisOrder = "";
-        OGRSpatialReference *l_poSRS = GetSpatialRef();
-        if (poDS->GetMajorVersion() >= 8 && !poDS->IsMariaDB() && l_poSRS &&
-            l_poSRS->IsGeographic())
+        if (bIsGeography)
         {
-            pszAxisOrder = ", 'axis-order=long-lat'";
+            // Force a "random" projected CRS so that the spatial filter works as
+            // we expect.
+            // This is due to the following returning false
+            // select MBRIntersects(ST_GeomFromText('POLYGON((-179 -89, 179 -89, 179 89, -179 89, -179 -89))', 4326, 'axis-order=long-lat'), ST_GeomFromText('POINT(0 0)', 4326));
+            snprintf(pszWHERE, nWHERELen,
+                     "WHERE MBRIntersects(ST_GeomFromText('%s', 32631), "
+                     "ST_SRID(`%s`,32631))",
+                     szEnvelope, pszGeomColumn);
         }
-
-        snprintf(
-            pszWHERE, nWHERELen, "WHERE MBRIntersects(%s('%s', %d%s), `%s`)",
-            poDS->GetMajorVersion() >= 8 ? "ST_GeomFromText" : "GeomFromText",
-            szEnvelope, nSRSId, pszAxisOrder, pszGeomColumn);
+        else
+        {
+            snprintf(pszWHERE, nWHERELen,
+                     "WHERE MBRIntersects(%s('%s', %d), `%s`)",
+                     poDS->GetMajorVersion() >= 8 ? "ST_GeomFromText"
+                                                  : "GeomFromText",
+                     szEnvelope, nSRSId, pszGeomColumn);
+        }
     }
 
     if (pszQuery != nullptr)
@@ -494,6 +495,9 @@ void OGRMySQLTableLayer::BuildWhere()
             snprintf(pszWHERE + strlen(pszWHERE), nWHERELen - strlen(pszWHERE),
                      "&& (%s) ", pszQuery);
     }
+
+    if (pszWHERE[0])
+        CPLDebug("MYSQL", "Filter: %s", pszWHERE);
 }
 
 /************************************************************************/
@@ -967,7 +971,8 @@ OGRErr OGRMySQLTableLayer::ICreateFeature(OGRFeature *poFeature)
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRMySQLTableLayer::CreateField(OGRFieldDefn *poFieldIn, int bApproxOK)
+OGRErr OGRMySQLTableLayer::CreateField(const OGRFieldDefn *poFieldIn,
+                                       int bApproxOK)
 
 {
 
@@ -1231,15 +1236,15 @@ GIntBig OGRMySQLTableLayer::GetFeatureCount(CPL_UNUSED int bForce)
 }
 
 /************************************************************************/
-/*                          GetExtent()                                 */
+/*                          IGetExtent()                                */
 /*                                                                      */
 /*      Retrieve the MBR of the MySQL table.  This should be made more  */
 /*      in the future when MySQL adds support for a single MBR query    */
 /*      like PostgreSQL.                                                */
 /************************************************************************/
 
-OGRErr OGRMySQLTableLayer::GetExtent(OGREnvelope *psExtent,
-                                     CPL_UNUSED int bForce)
+OGRErr OGRMySQLTableLayer::IGetExtent(int /*iGeomField */,
+                                      OGREnvelope *psExtent, bool /* bForce */)
 {
     if (GetLayerDefn()->GetGeomType() == wkbNone)
     {

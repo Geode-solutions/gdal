@@ -9,23 +9,7 @@
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  * Copyright (c) 2013, Kyle Shannon <kyle at pobox dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -262,7 +246,8 @@ static CPLString OSR_GDS(char **papszNV, const char *pszField,
  * importFromESRI() by an automatic call to morphFromESRI().
  *
  * Currently only GEOGRAPHIC, UTM, STATEPLANE, GREATBRITIAN_GRID, ALBERS,
- * EQUIDISTANT_CONIC, TRANSVERSE (mercator), POLAR, MERCATOR and POLYCONIC
+ * EQUIDISTANT_CONIC, TRANSVERSE (mercator), POLAR, LAMBERT (Conic Conformal),
+ * LAMBERT_AZIMUTHAL, MERCATOR and POLYCONIC
  * projections are supported from old style files.
  *
  * At this time there is no equivalent exportToESRI() method.  Writing old
@@ -310,6 +295,8 @@ OGRErr OGRSpatialReference::importFromESRI(char **papszPrj)
     /* -------------------------------------------------------------------- */
     CPLString osProj = OSR_GDS(papszPrj, "Projection", "");
     bool bDatumApplied = false;
+    bool bHasRadiusOfSphereOfReference = false;
+    double dfRadiusOfSphereOfReference = 0.0;
 
     if (EQUAL(osProj, ""))
     {
@@ -346,7 +333,7 @@ OGRErr OGRSpatialReference::importFromESRI(char **papszPrj)
         const double dfZone = OSR_GDV(papszPrj, "zone", 0.0);
 
         if (dfZone < std::numeric_limits<int>::min() ||
-            dfZone > std::numeric_limits<int>::max() || CPLIsNan(dfZone))
+            dfZone > std::numeric_limits<int>::max() || std::isnan(dfZone))
         {
             CPLError(CE_Failure, CPLE_AppDefined, "zone out of range: %f",
                      dfZone);
@@ -363,7 +350,7 @@ OGRErr OGRSpatialReference::importFromESRI(char **papszPrj)
 
             if (dfFipszone < std::numeric_limits<int>::min() ||
                 dfFipszone > std::numeric_limits<int>::max() ||
-                CPLIsNan(dfFipszone))
+                std::isnan(dfFipszone))
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
                          "fipszone out of range: %f", dfFipszone);
@@ -420,17 +407,52 @@ OGRErr OGRSpatialReference::importFromESRI(char **papszPrj)
     }
     else if (EQUAL(osProj, "LAMBERT_AZIMUTHAL"))
     {
-        SetLAEA(OSR_GDV(papszPrj, "PARAM_2", 0.0),
-                OSR_GDV(papszPrj, "PARAM_1", 0.0),
-                OSR_GDV(papszPrj, "PARAM_3", 0.0),
-                OSR_GDV(papszPrj, "PARAM_4", 0.0));
+        for (int iLine = 0; papszPrj[iLine] != nullptr; iLine++)
+        {
+            if (strstr(papszPrj[iLine], "radius of the sphere of reference"))
+            {
+                bHasRadiusOfSphereOfReference = true;
+                break;
+            }
+        }
+        if (bHasRadiusOfSphereOfReference)
+        {
+            // Cf "Workstation" variation of
+            // https://webhelp.esri.com/arcgisdesktop/9.3/index.cfm?TopicName=Lambert_Azimuthal_Equal_Area
+            // that is supposed to be applied to spheres only.
+            // It is also documented at page 71 of
+            // https://kartoweb.itc.nl/geometrics/Map%20projections/Understanding%20Map%20Projections.pdf
+            // ("Understanding Map Projections", Melita Kennedy, ArcInfo 8)
+            // We don't particularly enforce the restriction to spheres, so if
+            // the "Parameters" line had non-spherical axis dimensions, they
+            // would be used.
+            // EPSG has a EPSG:1027 projection method "Lambert Azimuthal Equal Area (Spherical)"
+            // that uses the radius of the authalic sphere, for non-spherical
+            // ellipsoids, but it is not obvious that it would be appropriate here.
+            // Examples:
+            // - https://community.esri.com/t5/data-management-questions/problem-when-projecting-a-raster-file/td-p/400814/page/2
+            // - https://lists.osgeo.org/pipermail/gdal-dev/2024-May/058990.html
+            dfRadiusOfSphereOfReference = OSR_GDV(papszPrj, "PARAM_1", 0.0);
+            SetLAEA(OSR_GDV(papszPrj, "PARAM_3", 0.0),
+                    OSR_GDV(papszPrj, "PARAM_2", 0.0),
+                    OSR_GDV(papszPrj, "PARAM_4", 0.0),
+                    OSR_GDV(papszPrj, "PARAM_5", 0.0));
+        }
+        else
+        {
+            // Example: https://trac.osgeo.org/gdal/ticket/4302
+            SetLAEA(OSR_GDV(papszPrj, "PARAM_2", 0.0),
+                    OSR_GDV(papszPrj, "PARAM_1", 0.0),
+                    OSR_GDV(papszPrj, "PARAM_3", 0.0),
+                    OSR_GDV(papszPrj, "PARAM_4", 0.0));
+        }
     }
     else if (EQUAL(osProj, "EQUIDISTANT_CONIC"))
     {
         const double dfStdPCount = OSR_GDV(papszPrj, "PARAM_1", 0.0);
         // TODO(schwehr): What is a reasonable range for StdPCount?
         if (dfStdPCount < 0 || dfStdPCount > std::numeric_limits<int>::max() ||
-            CPLIsNan(dfStdPCount))
+            std::isnan(dfStdPCount))
         {
             CPLError(CE_Failure, CPLE_AppDefined, "StdPCount out of range: %lf",
                      dfStdPCount);
@@ -589,8 +611,18 @@ OGRErr OGRSpatialReference::importFromESRI(char **papszPrj)
                 }
                 if (!bFoundParameters)
                 {
-                    // If unknown, default to WGS84 so there is something there.
-                    SetWellKnownGeogCS("WGS84");
+                    if (bHasRadiusOfSphereOfReference)
+                    {
+                        OGRSpatialReference oGCS;
+                        oGCS.SetGeogCS("unknown", "unknown", "unknown",
+                                       dfRadiusOfSphereOfReference, 0);
+                        CopyGeogCSFrom(&oGCS);
+                    }
+                    else
+                    {
+                        // If unknown, default to WGS84 so there is something there.
+                        SetWellKnownGeogCS("WGS84");
+                    }
                 }
             }
         }

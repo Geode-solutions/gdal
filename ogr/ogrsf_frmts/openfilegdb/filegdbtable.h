@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Implements reading of FileGDB tables
@@ -8,29 +7,14 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef FILEGDBTABLE_H_INCLUDED
 #define FILEGDBTABLE_H_INCLUDED
 
 #include "ogr_core.h"
+#include "cpl_progress.h"
 #include "cpl_vsi.h"
 #include "ogr_geometry.h"
 
@@ -78,7 +62,11 @@ typedef enum
     FGFT_RASTER = 9,
     FGFT_GUID = 10,
     FGFT_GLOBALID = 11,
-    FGFT_XML = 12
+    FGFT_XML = 12,
+    FGFT_INT64 = 13,                 // added in ArcGIS Pro 3.2
+    FGFT_DATE = 14,                  // added in ArcGIS Pro 3.2
+    FGFT_TIME = 15,                  // added in ArcGIS Pro 3.2
+    FGFT_DATETIME_WITH_OFFSET = 16,  // added in ArcGIS Pro 3.2
 } FileGDBFieldType;
 
 /************************************************************************/
@@ -98,7 +86,13 @@ class FileGDBField
     std::string m_osAlias{};
     FileGDBFieldType m_eType = FGFT_UNDEFINED;
 
-    bool m_bNullable = false;
+    bool m_bNullable = false;  // Bit 1 of flag field
+    bool m_bRequired =
+        false;  // Bit 2 of flag field. Set for ObjectID, geometry field and Shape_Area/Shape_Length
+    bool m_bEditable = false;       // Bit 3 of flag field.
+    bool m_bHighPrecision = false;  // for FGFT_DATETIME
+    bool m_bReadAsDouble =
+        false;           // used by FileGDBTable::CreateAttributeIndex()
     int m_nMaxWidth = 0; /* for string */
 
     OGRField m_sDefault{};
@@ -110,11 +104,17 @@ class FileGDBField
 
   public:
     static const OGRField UNSET_FIELD;
+    static constexpr int BIT_NULLABLE = 0;
+    static constexpr int BIT_REQUIRED = 1;
+    static constexpr int BIT_EDITABLE = 2;
+    static constexpr int MASK_NULLABLE = 1 << BIT_NULLABLE;
+    static constexpr int MASK_REQUIRED = 1 << BIT_REQUIRED;
+    static constexpr int MASK_EDITABLE = 1 << BIT_EDITABLE;
 
     explicit FileGDBField(FileGDBTable *m_poParent);
     FileGDBField(const std::string &osName, const std::string &osAlias,
-                 FileGDBFieldType eType, bool bNullable, int nMaxWidth,
-                 const OGRField &sDefault);
+                 FileGDBFieldType eType, bool bNullable, bool bRequired,
+                 bool bEditable, int nMaxWidth, const OGRField &sDefault);
     virtual ~FileGDBField();
 
     void SetParent(FileGDBTable *poParent)
@@ -126,25 +126,50 @@ class FileGDBField
     {
         return m_osName;
     }
+
     const std::string &GetAlias() const
     {
         return m_osAlias;
     }
+
     FileGDBFieldType GetType() const
     {
         return m_eType;
     }
+
     bool IsNullable() const
     {
         return m_bNullable;
     }
+
+    bool IsRequired() const
+    {
+        return m_bRequired;
+    }
+
+    bool IsEditable() const
+    {
+        return m_bEditable;
+    }
+
     int GetMaxWidth() const
     {
         return m_nMaxWidth;
     }
+
     const OGRField *GetDefault() const
     {
         return &m_sDefault;
+    }
+
+    void SetHighPrecision()
+    {
+        m_bHighPrecision = true;
+    }
+
+    bool IsHighPrecision() const
+    {
+        return m_bHighPrecision;
     }
 
     int HasIndex();
@@ -190,9 +215,8 @@ class FileGDBGeomField : public FileGDBField
                      bool bNullable, const std::string &osWKT, double dfXOrigin,
                      double dfYOrigin, double dfXYScale, double dfXYTolerance,
                      const std::vector<double> &adfSpatialIndexGridResolution);
-    virtual ~FileGDBGeomField()
-    {
-    }
+
+    virtual ~FileGDBGeomField();
 
     const std::string &GetWKT() const
     {
@@ -203,30 +227,37 @@ class FileGDBGeomField : public FileGDBField
     {
         return m_dfXMin;
     }
+
     double GetYMin() const
     {
         return m_dfYMin;
     }
+
     double GetZMin() const
     {
         return m_dfZMin;
     }  // only valid for m_bGeomTypeHasZ
+
     double GetMMin() const
     {
         return m_dfMMin;
     }  // only valid for m_bGeomTypeHasM
+
     double GetXMax() const
     {
         return m_dfXMax;
     }
+
     double GetYMax() const
     {
         return m_dfYMax;
     }
+
     double GetZMax() const
     {
         return m_dfZMax;
     }  // only valid for m_bGeomTypeHasZ
+
     double GetMMax() const
     {
         return m_dfMMax;
@@ -241,6 +272,7 @@ class FileGDBGeomField : public FileGDBField
     {
         return m_bHasZOriginScaleTolerance;
     }
+
     int HasMOriginScaleTolerance() const
     {
         return m_bHasMOriginScaleTolerance;
@@ -250,14 +282,17 @@ class FileGDBGeomField : public FileGDBField
     {
         return m_dfXOrigin;
     }
+
     double GetYOrigin() const
     {
         return m_dfYOrigin;
     }
+
     double GetXYScale() const
     {
         return m_dfXYScale;
     }
+
     double GetXYTolerance() const
     {
         return m_dfXYTolerance;
@@ -267,14 +302,17 @@ class FileGDBGeomField : public FileGDBField
     {
         return m_dfZOrigin;
     }
+
     double GetZScale() const
     {
         return m_dfZScale;
     }
+
     double GetZTolerance() const
     {
         return m_dfZTolerance;
     }
+
     void SetZOriginScaleTolerance(double dfZOrigin, double dfZScale,
                                   double dfZTolerance);
 
@@ -282,14 +320,17 @@ class FileGDBGeomField : public FileGDBField
     {
         return m_dfMOrigin;
     }
+
     double GetMScale() const
     {
         return m_dfMScale;
     }
+
     double GetMTolerance() const
     {
         return m_dfMTolerance;
     }
+
     void SetMOriginScaleTolerance(double dfMOrigin, double dfMScale,
                                   double dfMTolerance);
 
@@ -328,14 +369,14 @@ class FileGDBRasterField : public FileGDBGeomField
         : FileGDBGeomField(poParentIn)
     {
     }
-    virtual ~FileGDBRasterField()
-    {
-    }
+
+    virtual ~FileGDBRasterField();
 
     const std::string &GetRasterColumnName() const
     {
         return m_osRasterColumnName;
     }
+
     Type GetRasterType() const
     {
         return m_eRasterType;
@@ -353,21 +394,20 @@ class FileGDBIndex
     std::string m_osExpression{};
 
   public:
-    FileGDBIndex()
-    {
-    }
-    virtual ~FileGDBIndex()
-    {
-    }
+    FileGDBIndex() = default;
+
+    ~FileGDBIndex();
 
     const std::string &GetIndexName() const
     {
         return m_osIndexName;
     }
+
     const std::string &GetExpression() const
     {
         return m_osExpression;
     }
+
     std::string GetFieldName() const;
     int GetMaxWidthInBytes(const FileGDBTable *poTable) const;
 
@@ -383,10 +423,25 @@ class FileGDBTable
 {
     VSILFILE *m_fpTable = nullptr;
     VSILFILE *m_fpTableX = nullptr;
+
+    enum class GDBTableVersion
+    {
+        V3 = 3,  // 32-bit object id
+        V4 = 4,  // 64-bit object id (ince ArcGIS Pro 3.2)
+    };
+    GDBTableVersion m_eGDBTableVersion = GDBTableVersion::V3;
     vsi_l_offset m_nFileSize = 0; /* only read when needed */
     bool m_bUpdate = false;
+    bool m_bReliableObjectID = true;  // can be set to false on some V4 files
+
+    //! This flag is set when we detect that a corruption of m_nHeaderBufferMaxSize
+    // prior to fix needs to  fdf39012788b1110b3bf0ae6b8422a528f0ae8b6 to be
+    // repaired
+    bool m_bHasWarnedAboutHeaderRepair = false;
 
     std::string m_osFilename{};
+    std::string m_osFilenameWithLayerName{};
+    bool m_bIsV9 = false;
     std::vector<std::unique_ptr<FileGDBField>> m_apoFields{};
     int m_iObjectIdField = -1;
 
@@ -419,7 +474,7 @@ class FileGDBTable
                                  no .gdbtablx file */
 
     uint64_t m_nOffsetTableXTrailer = 0;
-    uint32_t m_n1024BlocksPresent = 0;
+    uint64_t m_n1024BlocksPresent = 0;
     std::vector<GByte> m_abyTablXBlockMap{};
     int m_nCountBlocksBeforeIBlockIdx = 0;   /* optimization */
     int m_nCountBlocksBeforeIBlockValue = 0; /* optimization */
@@ -433,9 +488,9 @@ class FileGDBTable
     int m_nChSaved = -1;
 
     int m_bError = FALSE;
-    int m_nCurRow = -1;
+    int64_t m_nCurRow = -1;
     int m_bHasDeletedFeaturesListed = FALSE;
-    int m_bIsDeleted = FALSE;
+    bool m_bIsDeleted = false;
     int m_nLastCol = -1;
     GByte *m_pabyIterVals = nullptr;
     int m_iAccNullable = 0;
@@ -448,11 +503,11 @@ class FileGDBTable
     bool m_bStringsAreUTF8 = true;  // if false, UTF16
     std::string m_osTempString{};   // used as a temporary to store strings
                                     // recoded from UTF16 to UTF8
-    int m_nValidRecordCount = 0;
-    int m_nTotalRecordCount = 0;
+    int64_t m_nValidRecordCount = 0;
+    int64_t m_nTotalRecordCount = 0;
     int m_iGeomField = -1;
     int m_nCountNullableFields = 0;
-    int m_nNullableFieldsSizeInBytes = 0;
+    unsigned m_nNullableFieldsSizeInBytes = 0;
 
     std::vector<double> m_adfSpatialIndexGridResolution{};
 
@@ -499,6 +554,7 @@ class FileGDBTable
         explicit WholeFileRewriter(FileGDBTable &oTable) : m_oTable(oTable)
         {
         }
+
         ~WholeFileRewriter();
 
         bool Begin();
@@ -509,7 +565,8 @@ class FileGDBTable
     bool WriteHeader(VSILFILE *fpTable);
     bool WriteHeaderX(VSILFILE *fpTableX);
 
-    int ReadTableXHeader();
+    bool ReadTableXHeaderV3();
+    bool ReadTableXHeaderV4();
     int IsLikelyFeatureAtOffset(vsi_l_offset nOffset, GUInt32 *pnSize,
                                 int *pbDeletedRecord);
     bool GuessFeatureLocations();
@@ -546,54 +603,69 @@ class FileGDBTable
     bool SetTextUTF16();
 
     bool Sync(VSILFILE *fpTable = nullptr, VSILFILE *fpTableX = nullptr);
-    bool Repack();
+    bool Repack(GDALProgressFunc pfnProgress, void *pProgressData);
     void RecomputeExtent();
 
     //! Object should no longer be used after Close()
     void Close();
 
+    bool IsFileGDBV9() const
+    {
+        return m_bIsV9;
+    }
+
     const std::string &GetFilename() const
     {
         return m_osFilename;
     }
+
     FileGDBTableGeometryType GetGeometryType() const
     {
         return m_eTableGeomType;
     }
+
     bool GetGeomTypeHasZ() const
     {
         return m_bGeomTypeHasZ;
     }
+
     bool GetGeomTypeHasM() const
     {
         return m_bGeomTypeHasM;
     }
-    int GetValidRecordCount() const
+
+    int64_t GetValidRecordCount() const
     {
         return m_nValidRecordCount;
     }
-    int GetTotalRecordCount() const
+
+    int64_t GetTotalRecordCount() const
     {
         return m_nTotalRecordCount;
     }
+
     int GetFieldCount() const
     {
         return static_cast<int>(m_apoFields.size());
     }
+
     FileGDBField *GetField(int i) const
     {
         return m_apoFields[i].get();
     }
+
     int GetGeomFieldIdx() const
     {
         return m_iGeomField;
     }
+
     const FileGDBGeomField *GetGeomField() const
     {
         return (m_iGeomField >= 0) ? cpl::down_cast<FileGDBGeomField *>(
                                          m_apoFields[m_iGeomField].get())
                                    : nullptr;
     }
+
     int GetObjectIdFieldIdx() const
     {
         return m_iObjectIdField;
@@ -602,10 +674,21 @@ class FileGDBTable
     int GetFieldIdx(const std::string &osName) const;
 
     int GetIndexCount();
+
     const FileGDBIndex *GetIndex(int i) const
     {
         return m_apoIndexes[i].get();
     }
+
+    /** Return if we can use attribute or spatial indices.
+     * This can be false for some sparse tables with 64-bit ObjectID since
+     * the format of the sparse bitmap isn't fully understood yet.
+     */
+    bool CanUseIndices() const
+    {
+        return m_bReliableObjectID;
+    }
+
     bool HasSpatialIndex();
     bool CreateIndex(const std::string &osIndexName,
                      const std::string &osExpression);
@@ -613,7 +696,8 @@ class FileGDBTable
     bool CreateSpatialIndex();
 
     vsi_l_offset
-    GetOffsetInTableForRow(int iRow, vsi_l_offset *pnOffsetInTableX = nullptr);
+    GetOffsetInTableForRow(int64_t iRow,
+                           vsi_l_offset *pnOffsetInTableX = nullptr);
 
     int HasDeletedFeaturesListed() const
     {
@@ -622,20 +706,24 @@ class FileGDBTable
 
     /* Next call to SelectRow() or GetFieldValue() invalidates previously
      * returned values */
-    int SelectRow(int iRow);
-    int GetAndSelectNextNonEmptyRow(int iRow);
+    bool SelectRow(int64_t iRow);
+    int64_t GetAndSelectNextNonEmptyRow(int64_t iRow);
+
     int HasGotError() const
     {
         return m_bError;
     }
-    int GetCurRow() const
+
+    int64_t GetCurRow() const
     {
         return m_nCurRow;
     }
-    int IsCurRowDeleted() const
+
+    bool IsCurRowDeleted() const
     {
         return m_bIsDeleted;
     }
+
     const OGRField *GetFieldValue(int iCol);
     std::vector<OGRField> GetAllFieldValues();
     void FreeAllFieldValues(std::vector<OGRField> &asFields);
@@ -647,6 +735,7 @@ class FileGDBTable
     {
         return m_adfSpatialIndexGridResolution;
     }
+
     void InstallFilterEnvelope(const OGREnvelope *psFilterEnvelope);
     int DoesGeometryIntersectsFilterEnvelope(const OGRField *psGeomField);
 
@@ -662,9 +751,9 @@ class FileGDBTable
 
     bool CreateFeature(const std::vector<OGRField> &asRawFields,
                        const OGRGeometry *poGeom, int *pnFID = nullptr);
-    bool UpdateFeature(int nFID, const std::vector<OGRField> &asRawFields,
+    bool UpdateFeature(int64_t nFID, const std::vector<OGRField> &asRawFields,
                        const OGRGeometry *poGeom);
-    bool DeleteFeature(int nFID);
+    bool DeleteFeature(int64_t nFID);
 
     bool CheckFreeListConsistency();
     void DeleteFreeList();
@@ -681,7 +770,8 @@ typedef enum
     FGSO_LE,
     FGSO_EQ,
     FGSO_GE,
-    FGSO_GT
+    FGSO_GT,
+    FGSO_ILIKE
 } FileGDBSQLOp;
 
 /************************************************************************/
@@ -697,18 +787,18 @@ class FileGDBIterator
 
     virtual FileGDBTable *GetTable() = 0;
     virtual void Reset() = 0;
-    virtual int GetNextRowSortedByFID() = 0;
-    virtual int GetRowCount();
+    virtual int64_t GetNextRowSortedByFID() = 0;
+    virtual int64_t GetRowCount();
 
     /* Only available on a BuildIsNotNull() iterator */
     virtual const OGRField *GetMinValue(int &eOutOGRFieldType);
     virtual const OGRField *GetMaxValue(int &eOutOGRFieldType);
     /* will reset the iterator */
-    virtual int GetMinMaxSumCount(double &dfMin, double &dfMax, double &dfSum,
-                                  int &nCount);
+    virtual bool GetMinMaxSumCount(double &dfMin, double &dfMax, double &dfSum,
+                                   int &nCount);
 
     /* Only available on a BuildIsNotNull() or Build() iterator */
-    virtual int GetNextRowSortedByValue();
+    virtual int64_t GetNextRowSortedByValue();
 
     static FileGDBIterator *Build(FileGDBTable *poParent, int nFieldIdx,
                                   int bAscending, FileGDBSQLOp op,
@@ -734,6 +824,8 @@ class FileGDBSpatialIndexIterator : virtual public FileGDBIterator
   public:
     virtual bool SetEnvelope(const OGREnvelope &sFilterEnvelope) = 0;
 
+    ~FileGDBSpatialIndexIterator() override;
+
     static FileGDBSpatialIndexIterator *
     Build(FileGDBTable *poParent, const OGREnvelope &sFilterEnvelope);
 };
@@ -745,9 +837,7 @@ class FileGDBSpatialIndexIterator : virtual public FileGDBIterator
 class FileGDBOGRGeometryConverter
 {
   public:
-    virtual ~FileGDBOGRGeometryConverter()
-    {
-    }
+    virtual ~FileGDBOGRGeometryConverter();
 
     virtual OGRGeometry *GetAsGeometry(const OGRField *psField) = 0;
 
@@ -757,7 +847,11 @@ class FileGDBOGRGeometryConverter
     GetGeometryTypeFromESRI(const char *pszESRIGeometryType);
 };
 
-int FileGDBDoubleDateToOGRDate(double dfVal, OGRField *psField);
+int FileGDBDoubleDateToOGRDate(double dfVal, bool bHighPrecision,
+                               OGRField *psField);
+int FileGDBDoubleTimeToOGRTime(double dfVal, OGRField *psField);
+int FileGDBDateTimeWithOffsetToOGRDate(double dfVal, int16_t nUTCOffset,
+                                       OGRField *psField);
 
 } /* namespace OpenFileGDB */
 

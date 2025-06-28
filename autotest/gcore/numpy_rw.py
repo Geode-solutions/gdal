@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test basic integration with numpy.
@@ -10,23 +9,7 @@
 # Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009-2010, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -36,7 +19,14 @@ from osgeo import gdal
 
 # All tests will be skipped if numpy or gdal_array are unavailable.
 numpy = pytest.importorskip("numpy")
-gdal_array = pytest.importorskip("osgeo.gdal_array")
+gdal_array = gdaltest.importorskip_gdal_array()
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 ###############################################################################
 # verify that we can load the deprecated gdalnumeric module
@@ -267,9 +257,9 @@ def test_numpy_rw_10_bis(options):
 # Test all datatypes
 
 
-def test_numpy_rw_11():
-
-    type_tuples = [
+@pytest.mark.parametrize(
+    "name,in_dt,np_dt,val",
+    [
         ("uint8", gdal.GDT_Byte, numpy.uint8, 255),
         ("uint16", gdal.GDT_UInt16, numpy.uint16, 65535),
         ("int16", gdal.GDT_Int16, numpy.int16, -32767),
@@ -288,53 +278,56 @@ def test_numpy_rw_11():
             numpy.complex128,
             -32768.123456 + 32767.123456j,
         ),
-    ]
+    ],
+)
+def test_numpy_rw_11(name, in_dt, np_dt, val):
 
-    for type_tuple in type_tuples:
-        ds = gdal.GetDriverByName("GTiff").Create(
-            "/vsimem/" + type_tuple[0], 1, 1, 1, type_tuple[1]
-        )
-        tmp = ds.ReadAsArray()
-        assert tmp.dtype == type_tuple[2], "did not get expected numpy type"
+    type_tuple = (name, in_dt, np_dt, val)
 
-        ar = numpy.empty([1, 1], dtype=type_tuple[2])
+    ds = gdal.GetDriverByName("GTiff").Create(
+        "/vsimem/" + type_tuple[0], 1, 1, 1, type_tuple[1]
+    )
+    tmp = ds.ReadAsArray()
+    assert tmp.dtype == type_tuple[2], "did not get expected numpy type"
 
-        ar_ds = gdal_array.OpenArray(ar)
-        got_dt = ar_ds.GetRasterBand(1).DataType
-        ar_ds = None
-        expected_dt = type_tuple[1]
-        if expected_dt == gdal.GDT_CInt16 or expected_dt == gdal.GDT_CInt32:
-            expected_dt = gdal.GDT_CFloat32
-        if got_dt != expected_dt:
-            print(type_tuple[1])
-            pytest.fail("did not get expected result (0)")
+    ar = numpy.empty([1, 1], dtype=type_tuple[2])
 
-        ar[0][0] = type_tuple[3]
-        ds.GetRasterBand(1).WriteArray(ar)
-        ds = None
+    ar_ds = gdal_array.OpenArray(ar)
+    got_dt = ar_ds.GetRasterBand(1).DataType
+    ar_ds = None
+    expected_dt = type_tuple[1]
+    if expected_dt == gdal.GDT_CInt16 or expected_dt == gdal.GDT_CInt32:
+        expected_dt = gdal.GDT_CFloat32
+    if got_dt != expected_dt:
+        print(type_tuple[1])
+        pytest.fail("did not get expected result (0)")
 
-        ds = gdal.Open("/vsimem/" + type_tuple[0])
-        assert ds.GetRasterBand(1).DataType == type_tuple[1]
-        ar2 = ds.ReadAsArray()
-        ar3 = numpy.empty_like(ar2)
-        ds.GetRasterBand(1).ReadAsArray(buf_obj=ar3)
-        ds = None
+    ar[0][0] = type_tuple[3]
+    ds.GetRasterBand(1).WriteArray(ar)
+    ds = None
 
-        gdal.Unlink("/vsimem/" + type_tuple[0])
+    ds = gdal.Open("/vsimem/" + type_tuple[0])
+    assert ds.GetRasterBand(1).DataType == type_tuple[1]
+    ar2 = ds.ReadAsArray()
+    ar3 = numpy.empty_like(ar2)
+    ds.GetRasterBand(1).ReadAsArray(buf_obj=ar3)
+    ds = None
 
-        assert not (
-            type_tuple[0] == "float32"
-            and ar2[0][0] != pytest.approx(type_tuple[3], abs=1e-6)
-        ) or (
-            type_tuple[0] != "float32" and ar2[0][0] != type_tuple[3]
-        ), "did not get expected result (1)"
+    gdal.Unlink("/vsimem/" + type_tuple[0])
 
-        assert not (
-            type_tuple[0] == "float32"
-            and ar3[0][0] != pytest.approx(type_tuple[3], abs=1e-6)
-        ) or (
-            type_tuple[0] != "float32" and ar3[0][0] != type_tuple[3]
-        ), "did not get expected result (2)"
+    assert not (
+        type_tuple[0] == "float32"
+        and ar2[0][0] != pytest.approx(type_tuple[3], abs=1e-6)
+    ) or (
+        type_tuple[0] != "float32" and ar2[0][0] != type_tuple[3]
+    ), "did not get expected result (1)"
+
+    assert not (
+        type_tuple[0] == "float32"
+        and ar3[0][0] != pytest.approx(type_tuple[3], abs=1e-6)
+    ) or (
+        type_tuple[0] != "float32" and ar3[0][0] != type_tuple[3]
+    ), "did not get expected result (2)"
 
 
 ###############################################################################
@@ -376,7 +369,7 @@ def test_numpy_rw_13():
     ds.GetRasterBand(1).WriteArray(ar)
 
     # Try reading into unsupported array type
-    ar = numpy.empty([1, 2], dtype=numpy.bool_)
+    ar = numpy.empty([1, 2], dtype=numpy.dtype("S1"))
     with pytest.raises(
         Exception, match="array does not have " "corresponding GDAL data type"
     ):
@@ -444,7 +437,7 @@ def test_numpy_rw_13():
     for i in range(3):
         ds.GetRasterBand(i + 1).WriteArray(ar[i])
 
-    ar = numpy.empty([3, 1, 2], dtype=numpy.bool_)
+    ar = numpy.empty([3, 1, 2], dtype=numpy.dtype("S1"))
     with pytest.raises(
         Exception, match="array does not have " "corresponding GDAL data type"
     ):
@@ -652,19 +645,24 @@ def test_numpy_rw_16():
 
     # 1D
     array = numpy.empty([1], numpy.uint8)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal_array.OpenArray(array)
     assert ds is None
 
+    with gdaltest.enable_exceptions(), pytest.raises(
+        Exception, match="Illegal numpy array rank 1"
+    ):
+        gdal_array.OpenArray(array)
+
     # 4D
     array = numpy.empty([1, 1, 1, 1], numpy.uint8)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal_array.OpenArray(array)
     assert ds is None
 
     # Unsupported data type
-    array = numpy.empty([1, 1], numpy.float16)
-    with gdaltest.error_handler():
+    array = numpy.empty([1, 1], numpy.dtype("S1"))
+    with gdal.quiet_errors():
         ds = gdal_array.OpenArray(array)
     assert ds is None
 
@@ -677,17 +675,16 @@ def test_numpy_rw_17():
 
     # Disabled by default
     array = numpy.empty([1, 1], numpy.uint8)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(gdal_array.GetArrayFilename(array))
     assert ds is None
 
-    gdal.SetConfigOption("GDAL_ARRAY_OPEN_BY_FILENAME", "TRUE")
-    ds = gdal.Open(gdal_array.GetArrayFilename(array))
-    gdal.SetConfigOption("GDAL_ARRAY_OPEN_BY_FILENAME", None)
+    with gdal.config_option("GDAL_ARRAY_OPEN_BY_FILENAME", "TRUE"):
+        ds = gdal.Open(gdal_array.GetArrayFilename(array))
     assert ds is not None
 
     # Invalid value
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("NUMPY:::invalid")
     assert ds is None
 
@@ -721,13 +718,17 @@ def test_numpy_rw_18():
 # The VRT references a non existing TIF file, but using the proxy pool dataset API (#2837)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_numpy_rw_failure_in_readasarray():
 
     ds = gdal.Open("data/idontexist2.vrt")
     assert ds is not None
 
     exception_raised = False
-    with gdaltest.enable_exceptions():
+    with gdal.ExceptionMgr():
         try:
             ds.ReadAsArray()
         except RuntimeError:
@@ -735,7 +736,7 @@ def test_numpy_rw_failure_in_readasarray():
     assert exception_raised
 
     exception_raised = False
-    with gdaltest.enable_exceptions():
+    with gdal.ExceptionMgr():
         try:
             ds.GetRasterBand(1).ReadAsArray()
         except RuntimeError:
@@ -759,12 +760,12 @@ def test_numpy_rw_gdal_array_openarray_permissions():
     ar = numpy.zeros([1, 1], dtype=numpy.uint8)
     ar.setflags(write=False)
     ds = gdal_array.OpenArray(ar)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.GetRasterBand(1).Fill(1) != 0
     assert ds.GetRasterBand(1).Checksum() == 0
 
     # Cannot read in non-writeable array
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.ReadAsArray(buf_obj=ar) is None
         assert ds.GetRasterBand(1).ReadAsArray(buf_obj=ar) is None
 
@@ -953,6 +954,10 @@ def test_numpy_rw_band_read_as_array_error_cases():
 # Test that we can get an error (#5374)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_numpy_rw_band_read_as_array_getlasterrormsg():
 
     ds = gdal.Open(
@@ -969,6 +974,150 @@ def test_numpy_rw_band_read_as_array_getlasterrormsg():
 </VRTDataset>"""
     )
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert ds.GetRasterBand(1).ReadAsArray() is None
     assert gdal.GetLastErrorMsg() != ""
+
+
+###############################################################################
+# Test a band read into a masked array
+
+
+def test_numpy_rw_masked_array_1():
+
+    ds = gdal.Open("data/byte.tif")
+    band = ds.GetRasterBand(1)
+
+    masked_arr = band.ReadAsMaskedArray()
+    assert not numpy.any(masked_arr.mask)
+
+    ds_masked_arr = ds.ReadAsMaskedArray()
+    assert not numpy.any(ds_masked_arr.mask)
+    assert numpy.all(masked_arr == ds_masked_arr)
+
+
+def test_numpy_rw_masked_array_2():
+
+    ds = gdal.Open("data/test3_with_mask_8bit.tif")
+
+    band = ds.GetRasterBand(1)
+
+    arr = band.ReadAsArray()
+    mask = band.GetMaskBand().ReadAsArray()
+
+    masked_arr = band.ReadAsMaskedArray()
+
+    assert not numpy.any(masked_arr.mask[mask == 255])
+    assert numpy.all(masked_arr.mask[mask != 255])
+
+    assert masked_arr.sum() == arr[mask == 255].sum()
+
+    ds_masked_arr = ds.ReadAsMaskedArray()
+    assert numpy.all(ds_masked_arr.mask == masked_arr.mask)
+    assert numpy.all(ds_masked_arr.data == masked_arr.data)
+
+
+###############################################################################
+# Test dataset read into a masked array
+
+
+def test_numpy_rw_masked_array_3():
+
+    nx = 6
+    ny = 4
+    nz = 3
+    nodata = -999
+
+    ds = gdal.GetDriverByName("MEM").Create("", nx, ny, nz, eType=gdal.GDT_Int16)
+    for i in range(nz):
+        ds.GetRasterBand(i + 1).SetNoDataValue(nodata)
+
+    data = numpy.arange(nx * ny * nz).reshape(nz, ny, nx).astype(numpy.int16)
+    data[:, 1, 1] = nodata
+    ds.WriteArray(data)
+
+    masked_data = numpy.ma.masked_array(data, mask=data == nodata)
+
+    assert numpy.ma.allequal(masked_data, ds.ReadAsMaskedArray())
+
+    # read a single band
+    assert numpy.ma.allequal(masked_data[1, :, :], ds.ReadAsMaskedArray(band_list=[2]))
+
+    # read multiple bands
+    assert numpy.ma.allequal(
+        numpy.ma.stack((masked_data[2, :, :], masked_data[0, :, :])),
+        ds.ReadAsMaskedArray(band_list=[3, 1]),
+    )
+
+    # read a sub-window (square)
+    assert numpy.ma.allequal(
+        numpy.ma.stack((masked_data[2, 0:2, 1:3], masked_data[0, 0:2, 1:3])),
+        ds.ReadAsMaskedArray(band_list=[3, 1], xsize=2, ysize=2, xoff=1, yoff=0),
+    )
+
+    # read a sub-window (single pixel)
+    assert numpy.ma.allequal(
+        numpy.ma.stack((masked_data[2, 1:2, 1:2], masked_data[0, 1:2, 1:2])),
+        ds.ReadAsMaskedArray(band_list=[3, 1], xsize=1, ysize=1, xoff=1, yoff=1),
+    )
+
+    # read a sub-window (read 2x2 square into 4x4 square)
+    assert numpy.ma.allequal(
+        numpy.ma.repeat(
+            numpy.ma.repeat(
+                numpy.ma.stack((masked_data[2, 0:2, 1:3], masked_data[0, 0:2, 1:3])),
+                2,
+                axis=2,
+            ),
+            2,
+            axis=1,
+        ),
+        ds.ReadAsMaskedArray(
+            band_list=[3, 1], xsize=2, ysize=2, xoff=1, yoff=0, buf_xsize=4, buf_ysize=4
+        ),
+    )
+
+    # read a sub-window (read 2x2 square into single pixel)
+    assert numpy.ma.allequal(
+        numpy.ma.mean(
+            numpy.ma.stack((masked_data[2, 0:2, 1:3], masked_data[0, 0:2, 1:3])),
+            axis=(1, 2),
+            keepdims=True,
+        ).round(),
+        ds.ReadAsMaskedArray(
+            band_list=[3, 1],
+            xsize=2,
+            ysize=2,
+            xoff=1,
+            yoff=0,
+            buf_xsize=1,
+            buf_ysize=1,
+            resample_alg=gdal.GRIORA_Average,
+        ),
+    )
+
+
+###############################################################################
+# Test type code mapping
+
+
+def test_gdal_type_code_to_numeric_type_code():
+
+    assert gdal_array.GDALTypeCodeToNumericTypeCode(gdal.GDT_Float32) == numpy.float32
+
+    # invalid type code
+    assert gdal_array.GDALTypeCodeToNumericTypeCode(802) is None
+
+
+def test_numeric_type_code_to_gdal_type_code():
+
+    assert gdal_array.NumericTypeCodeToGDALTypeCode(numpy.float32) == gdal.GDT_Float32
+    assert (
+        gdal_array.NumericTypeCodeToGDALTypeCode(numpy.dtype("int16")) == gdal.GDT_Int16
+    )
+
+
+def test_flip_code():
+
+    assert gdal_array.flip_code(numpy.float32) == gdal.GDT_Float32
+    assert gdal_array.flip_code(gdal.GDT_Int16) == numpy.int16

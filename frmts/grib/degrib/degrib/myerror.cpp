@@ -29,17 +29,6 @@
 #include "memwatch.h"
 #endif
 
-#if __cplusplus >= 201500
-#  define CPL_FALLTHROUGH [[fallthrough]];
-#elif ((defined(__clang__) && (__clang_major__ > 3 || (__clang_major__ == 3 && __clang_minor__ >=7))) || __GNUC__ >= 7)
-/** Macro for fallthrough in a switch case construct */
-#  define CPL_FALLTHROUGH [[clang::fallthrough]];
-#else
-/** Macro for fallthrough in a switch case construct */
-#  define CPL_FALLTHROUGH
-#endif
-
-
 /*****************************************************************************
  * AllocSprintf() -- Arthur Taylor / MDL (Review 12/2002)
  *
@@ -242,7 +231,7 @@ static void AllocSprintf (char **Ptr, size_t *LenBuff, const char *fmt,
                   ipos = lenBuff - 1;
                   break;
                }
-               CPL_FALLTHROUGH
+               [[fallthrough]];
             case 'S':
                if ((p1 - p) == 1) {
                   f_inLoop = 0;
@@ -262,7 +251,7 @@ static void AllocSprintf (char **Ptr, size_t *LenBuff, const char *fmt,
                   }
                   break;
                }
-               CPL_FALLTHROUGH
+               [[fallthrough]];
             default:
                lenBuff += p1 - p;
                buffer = (char *) realloc ((void *) buffer, lenBuff);

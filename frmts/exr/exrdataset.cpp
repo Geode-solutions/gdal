@@ -6,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2020, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_pam.h"
@@ -33,6 +17,7 @@
 #include <mutex>
 
 #include "openexr_headers.h"
+#include "exrdrivercore.h"
 
 using namespace OPENEXR_IMF_NAMESPACE;
 using namespace IMATH_NAMESPACE;
@@ -71,17 +56,24 @@ class GDALEXRDataset final : public GDALPamDataset
     int m_iLevel = 0;
     std::vector<std::unique_ptr<GDALEXRDataset>> m_apoOvrDS{};
     OGRSpatialReference m_oSRS{};
-    double m_adfGT[6] = {0, 1, 0, 0, 0, 1};
+    GDALGeoTransform m_gt{};
     bool m_bHasGT = false;
+
+    void AddOverview(std::unique_ptr<GDALEXRDataset> poOvrDS)
+    {
+        m_apoOvrDS.push_back(std::move(poOvrDS));
+        m_apoOvrDS.back()->m_poParent = this;
+    }
+
+    CPL_DISALLOW_COPY_ASSIGN(GDALEXRDataset)
 
   public:
     GDALEXRDataset() = default;
     ~GDALEXRDataset();
 
     const OGRSpatialReference *GetSpatialRef() const override;
-    CPLErr GetGeoTransform(double *adfGT) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
-    static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Create(const char *pszFilename, int nXSize, int nYSize,
                                int nBandsIn, GDALDataType eType,
@@ -102,7 +94,7 @@ class GDALEXRRasterBand final : public GDALPamRasterBand
     friend class GDALEXRDataset;
 
     GDALColorInterp m_eInterp = GCI_Undefined;
-    std::string m_osChannelName;
+    std::string m_osChannelName{};
 
   protected:
     CPLErr IReadBlock(int, int, void *) override;
@@ -116,6 +108,7 @@ class GDALEXRRasterBand final : public GDALPamRasterBand
     {
         return m_eInterp;
     }
+
     int GetOverviewCount() override;
     GDALRasterBand *GetOverview(int) override;
 };
@@ -224,10 +217,9 @@ class GDALEXRPreviewRasterBand final : public GDALPamRasterBand
 {
     friend class GDALEXRDataset;
 
-    std::string m_osChannelName;
-
   protected:
     CPLErr IReadBlock(int, int, void *) override;
+
     GDALColorInterp GetColorInterpretation() override
     {
         return static_cast<GDALColorInterp>(GCI_RedBand + nBand - 1);
@@ -286,10 +278,9 @@ class GDALEXRRGBARasterBand final : public GDALPamRasterBand
 {
     friend class GDALEXRDataset;
 
-    std::string m_osChannelName;
-
   protected:
     CPLErr IReadBlock(int, int, void *) override;
+
     GDALColorInterp GetColorInterpretation() override
     {
         return static_cast<GDALColorInterp>(GCI_RedBand + nBand - 1);
@@ -406,31 +397,14 @@ const OGRSpatialReference *GDALEXRDataset::GetSpatialRef() const
 /*                         GetGeoTransform()                            */
 /************************************************************************/
 
-CPLErr GDALEXRDataset::GetGeoTransform(double *adfGT)
+CPLErr GDALEXRDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    if (GDALPamDataset::GetGeoTransform(adfGT) == CE_None)
+    if (GDALPamDataset::GetGeoTransform(gt) == CE_None)
     {
         return CE_None;
     }
-    memcpy(adfGT, m_adfGT, 6 * sizeof(double));
+    gt = m_gt;
     return m_bHasGT ? CE_None : CE_Failure;
-}
-
-/************************************************************************/
-/*                            Identify()                                */
-/************************************************************************/
-
-int GDALEXRDataset::Identify(GDALOpenInfo *poOpenInfo)
-{
-    if (STARTS_WITH_CI(poOpenInfo->pszFilename, "EXR:"))
-        return true;
-
-    // Check magic number
-    return poOpenInfo->fpL != nullptr && poOpenInfo->nHeaderBytes >= 4 &&
-           poOpenInfo->pabyHeader[0] == 0x76 &&
-           poOpenInfo->pabyHeader[1] == 0x2f &&
-           poOpenInfo->pabyHeader[2] == 0x31 &&
-           poOpenInfo->pabyHeader[3] == 0x01;
 }
 
 /************************************************************************/
@@ -445,11 +419,14 @@ class GDALEXRIOStreamException final : public std::exception
     explicit GDALEXRIOStreamException(const std::string &msg) : m_msg(msg)
     {
     }
-    const char *what() const noexcept override
-    {
-        return m_msg.c_str();
-    }
+
+    const char *what() const noexcept override;
 };
+
+const char *GDALEXRIOStreamException::what() const noexcept
+{
+    return m_msg.c_str();
+}
 
 #if OPENEXR_VERSION_MAJOR < 3
 typedef Int64 IoInt64Type;
@@ -464,6 +441,7 @@ class GDALEXRIOStream final : public IStream, public OStream
         : IStream(filename), OStream(filename), m_fp(fp)
     {
     }
+
     ~GDALEXRIOStream()
     {
         VSIFCloseL(m_fp);
@@ -472,11 +450,14 @@ class GDALEXRIOStream final : public IStream, public OStream
     virtual bool read(char c[/*n*/], int n) override;
     virtual void write(const char c[/*n*/], int n) override;
     virtual IoInt64Type tellg() override;
+
     virtual IoInt64Type tellp() override
     {
         return tellg();
     }
+
     virtual void seekg(IoInt64Type pos) override;
+
     virtual void seekp(IoInt64Type pos) override
     {
         return seekg(pos);
@@ -484,6 +465,8 @@ class GDALEXRIOStream final : public IStream, public OStream
 
   private:
     VSILFILE *m_fp;
+
+    CPL_DISALLOW_COPY_ASSIGN(GDALEXRIOStream)
 };
 
 bool GDALEXRIOStream::read(char c[/*n*/], int n)
@@ -544,7 +527,7 @@ static void setNumThreads()
 
 GDALDataset *GDALEXRDataset::Open(GDALOpenInfo *poOpenInfo)
 {
-    if (!Identify(poOpenInfo))
+    if (!EXRDriverIdentify(poOpenInfo))
         return nullptr;
     if (poOpenInfo->eAccess == GA_Update)
     {
@@ -582,7 +565,7 @@ GDALDataset *GDALEXRDataset::Open(GDALOpenInfo *poOpenInfo)
 
     try
     {
-        auto poDS = cpl::make_unique<GDALEXRDataset>();
+        auto poDS = std::make_unique<GDALEXRDataset>();
         poDS->m_pIStream.reset(new GDALEXRIOStream(fp, osFilename));
         poDS->m_pMPIF.reset(new MultiPartInputFile(*poDS->m_pIStream));
         if (iPart > 0 && iPart > poDS->m_pMPIF->parts())
@@ -746,23 +729,21 @@ GDALDataset *GDALEXRDataset::Open(GDALOpenInfo *poOpenInfo)
                     {
                         break;
                     }
-                    auto poOvrDS = cpl::make_unique<GDALEXRDataset>();
-                    // coverity[escape]
-                    poOvrDS->m_poParent = poDS.get();
+                    auto poOvrDS = std::make_unique<GDALEXRDataset>();
                     poOvrDS->m_iLevel = iLevel;
                     poOvrDS->nRasterXSize = nOvrWidth;
                     poOvrDS->nRasterYSize = nOvrHeight;
-                    poDS->m_apoOvrDS.push_back(std::move(poOvrDS));
                     i = 0;
                     for (auto iter = channels.begin(); iter != channels.end();
                          ++iter, ++i)
                     {
                         const Channel &channel = iter.channel();
-                        auto poBand = new GDALEXRRasterBand(
-                            poDS->m_apoOvrDS.back().get(), i + 1, iter.name(),
-                            channel.type, nBlockXSize, nBlockYSize);
-                        poDS->m_apoOvrDS.back()->SetBand(i + 1, poBand);
+                        auto poBand = std::make_unique<GDALEXRRasterBand>(
+                            poOvrDS.get(), i + 1, iter.name(), channel.type,
+                            nBlockXSize, nBlockYSize);
+                        poOvrDS->SetBand(i + 1, std::move(poBand));
                     }
+                    poDS->AddOverview(std::move(poOvrDS));
                 }
             }
 
@@ -783,12 +764,12 @@ GDALDataset *GDALEXRDataset::Open(GDALOpenInfo *poOpenInfo)
                          strcmp(iter.name(), "gdal:geoTransform") == 0)
                 {
                     poDS->m_bHasGT = true;
-                    poDS->m_adfGT[0] = m33DAttr->value()[0][2];
-                    poDS->m_adfGT[1] = m33DAttr->value()[0][0];
-                    poDS->m_adfGT[2] = m33DAttr->value()[0][1];
-                    poDS->m_adfGT[3] = m33DAttr->value()[1][2];
-                    poDS->m_adfGT[4] = m33DAttr->value()[1][0];
-                    poDS->m_adfGT[5] = m33DAttr->value()[1][1];
+                    poDS->m_gt[0] = m33DAttr->value()[0][2];
+                    poDS->m_gt[1] = m33DAttr->value()[0][0];
+                    poDS->m_gt[2] = m33DAttr->value()[0][1];
+                    poDS->m_gt[3] = m33DAttr->value()[1][2];
+                    poDS->m_gt[4] = m33DAttr->value()[1][0];
+                    poDS->m_gt[5] = m33DAttr->value()[1][1];
                 }
                 else if (stringAttr && STARTS_WITH(iter.name(), "gdal:"))
                 {
@@ -843,7 +824,7 @@ GDALDataset *GDALEXRDataset::Open(GDALOpenInfo *poOpenInfo)
             poDS->SetMetadata(aosSubDS.List(), "SUBDATASETS");
         }
 
-        poDS->SetPamFlags(0);
+        poDS->SetPamFlags(poDS->GetPamFlags() & ~GPF_DIRTY);
 
         // Initialize any PAM information.
         poDS->SetDescription(poOpenInfo->pszFilename);
@@ -892,15 +873,16 @@ static void WriteSRSInHeader(Header &header, const OGRSpatialReference *poSRS)
     }
 }
 
-static void WriteGeoTransformInHeader(Header &header, const double *padfGT)
+static void WriteGeoTransformInHeader(Header &header,
+                                      const GDALGeoTransform &gtIn)
 {
     M33d gt;
-    gt[0][0] = padfGT[1];
-    gt[0][1] = padfGT[2];
-    gt[0][2] = padfGT[0];
-    gt[1][0] = padfGT[4];
-    gt[1][1] = padfGT[5];
-    gt[1][2] = padfGT[3];
+    gt[0][0] = gtIn[1];
+    gt[0][1] = gtIn[2];
+    gt[0][2] = gtIn[0];
+    gt[1][0] = gtIn[4];
+    gt[1][1] = gtIn[5];
+    gt[1][2] = gtIn[3];
     gt[2][0] = 0;
     gt[2][1] = 0;
     gt[2][2] = 1;
@@ -930,10 +912,10 @@ static void FillHeaderFromDataset(Header &header, GDALDataset *poDS)
         WriteSRSInHeader(header, poSRS);
     }
 
-    double adfGT[6];
-    if (poDS->GetGeoTransform(adfGT) == CE_None)
+    GDALGeoTransform gt;
+    if (poDS->GetGeoTransform(gt) == CE_None)
     {
-        WriteGeoTransformInHeader(header, adfGT);
+        WriteGeoTransformInHeader(header, gt);
     }
 
     WriteMetadataInHeader(header, poDS->GetMetadata());
@@ -1133,15 +1115,18 @@ GDALDataset *GDALEXRDataset::CreateCopy(const char *pszFilename,
         char *sliceBuffer;
         if (pixelType == UINT)
         {
-            bufferUInt.resize(nBands * nChunkXSize * nChunkYSize);
+            bufferUInt.resize(static_cast<size_t>(nBands) * nChunkXSize *
+                              nChunkYSize);
             sliceBuffer = reinterpret_cast<char *>(bufferUInt.data());
         }
         else
         {
-            bufferFloat.resize(nBands * nChunkXSize * nChunkYSize);
+            bufferFloat.resize(static_cast<size_t>(nBands) * nChunkXSize *
+                               nChunkYSize);
             if (pixelType == HALF)
             {
-                bufferHalf.resize(nBands * nChunkXSize * nChunkYSize);
+                bufferHalf.resize(static_cast<size_t>(nBands) * nChunkXSize *
+                                  nChunkYSize);
                 sliceBuffer = reinterpret_cast<char *>(bufferHalf.data());
             }
             else
@@ -1453,7 +1438,7 @@ class GDALEXRWritableDataset final : public GDALPamDataset
     char *m_pSliceBuffer = nullptr;
 
     OGRSpatialReference m_oSRS{};
-    double m_adfGT[6] = {0, 1, 0, 0, 0, 1};
+    GDALGeoTransform m_gt{};
     bool m_bHasGT = false;
 
     CPLStringList m_aosMetadata{};
@@ -1467,19 +1452,22 @@ class GDALEXRWritableDataset final : public GDALPamDataset
 
     void WriteHeader();
 
+    CPL_DISALLOW_COPY_ASSIGN(GDALEXRWritableDataset)
+
   public:
     GDALEXRWritableDataset(int nXSize, int nYSize) : m_header(nXSize, nYSize)
     {
         nRasterXSize = nXSize;
         nRasterYSize = nYSize;
     }
+
     ~GDALEXRWritableDataset() override;
 
-    CPLErr SetGeoTransform(double *adfGT) override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
-    CPLErr GetGeoTransform(double *adfGT) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     CPLErr SetMetadata(char **, const char * = "") override;
     CPLErr SetMetadataItem(const char *, const char *,
@@ -1504,17 +1492,17 @@ GDALEXRWritableDataset::~GDALEXRWritableDataset()
 /*                            SetGeoTransform()                         */
 /************************************************************************/
 
-CPLErr GDALEXRWritableDataset::SetGeoTransform(double *adfGT)
+CPLErr GDALEXRWritableDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
     if (m_bTriedWritingHeader)
     {
         CPLError(
             CE_Warning, CPLE_AppDefined,
             "SetGeoTransform() called after writing pixels. Will go to PAM");
-        return GDALPamDataset::SetGeoTransform(adfGT);
+        return GDALPamDataset::SetGeoTransform(gt);
     }
     m_bHasGT = true;
-    memcpy(m_adfGT, adfGT, 6 * sizeof(double));
+    m_gt = gt;
     return CE_None;
 }
 
@@ -1629,13 +1617,13 @@ const OGRSpatialReference *GDALEXRWritableDataset::GetSpatialRef() const
 /*                         GetGeoTransform()                            */
 /************************************************************************/
 
-CPLErr GDALEXRWritableDataset::GetGeoTransform(double *adfGT)
+CPLErr GDALEXRWritableDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    if (GDALPamDataset::GetGeoTransform(adfGT) == CE_None)
+    if (GDALPamDataset::GetGeoTransform(gt) == CE_None)
     {
         return CE_None;
     }
-    memcpy(adfGT, m_adfGT, 6 * sizeof(double));
+    gt = m_gt;
     return m_bHasGT ? CE_None : CE_Failure;
 }
 
@@ -1744,6 +1732,7 @@ class GDALEXRWritableRasterBand final : public GDALPamRasterBand
         m_eInterp = eInterp;
         return CE_None;
     }
+
     GDALColorInterp GetColorInterpretation() override
     {
         return m_eInterp;
@@ -2053,61 +2042,17 @@ void GDALRegister_EXR()
     if (!GDAL_CHECK_VERSION("EXR driver"))
         return;
 
-    if (GDALGetDriverByName("EXR") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
-
-    poDriver->SetDescription("EXR");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                              "Extended Dynamic Range Image File Format");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/exr.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "exr");
-    poDriver->SetMetadataItem(
-        GDAL_DMD_CREATIONOPTIONLIST,
-        "<CreationOptionList>"
-        "   <Option name='COMPRESS' type='string-select' default='ZIP'>"
-        "     <Value>NONE</Value>"
-        "     <Value>RLE</Value>"
-        "     <Value>ZIPS</Value>"
-        "     <Value>ZIP</Value>"
-        "     <Value>PIZ</Value>"
-        "     <Value>PXR24</Value>"
-        "     <Value>B44</Value>"
-        "     <Value>B44A</Value>"
-        "     <Value>DWAA</Value>"
-        "     <Value>DWAB</Value>"
-        "   </Option>"
-        "   <Option name='PIXEL_TYPE' type='string-select'>"
-        "     <Value>HALF</Value>"
-        "     <Value>FLOAT</Value>"
-        "     <Value>UINT</Value>"
-        "   </Option>"
-        "   <Option name='TILED' type='boolean' description='Use tiling' "
-        "default='YES'/>"
-        "   <Option name='BLOCKXSIZE' type='int' description='Tile width' "
-        "default='256'/>"
-        "   <Option name='BLOCKYSIZE' type='int' description='Tile height' "
-        "default='256'/>"
-        "   <Option name='OVERVIEWS' type='boolean' description='Whether to "
-        "create overviews' default='NO'/>"
-        "   <Option name='OVERVIEW_RESAMPLING' type='string' "
-        "description='Resampling method' default='CUBIC'/>"
-        "   <Option name='PREVIEW' type='boolean' description='Create a "
-        "preview' default='NO'/>"
-        "   <Option name='AUTO_RESCALE' type='boolean' description='Whether to "
-        "rescale Byte RGB(A) values to 0-1' default='YES'/>"
-        "   <Option name='DWA_COMPRESSION_LEVEL' type='int' description='DWA "
-        "compression level'/>"
-        "</CreationOptionList>");
-    poDriver->SetMetadataItem(GDAL_DMD_SUBDATASETS, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
+    EXRDriverSetCommonMetadata(poDriver);
 
     poDriver->pfnOpen = GDALEXRDataset::Open;
-    poDriver->pfnIdentify = GDALEXRDataset::Identify;
     poDriver->pfnCreateCopy = GDALEXRDataset::CreateCopy;
     poDriver->pfnCreate = GDALEXRDataset::Create;
+
+    poDriver->SetMetadataItem("OPENEXR_VERSION", OPENEXR_VERSION_STRING, "EXR");
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
 }

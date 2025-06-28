@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2017, Alan Thomas <alant@outlook.com.au>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_dxf.h"
@@ -39,6 +23,8 @@ OGRDXFFeature::OGRDXFFeature(OGRFeatureDefn *poFeatureDefn)
       oOriginalCoords(0.0, 0.0, 0.0)
 {
 }
+
+OGRDXFFeature::~OGRDXFFeature() = default;
 
 /************************************************************************/
 /*                          CloneDXFFeature()                           */
@@ -71,6 +57,13 @@ OGRDXFFeature *OGRDXFFeature::CloneDXFFeature()
     {
         poNew->poASMTransform = std::unique_ptr<OGRDXFAffineTransform>(
             new OGRDXFAffineTransform(*poASMTransform));
+    }
+
+    for (const std::unique_ptr<OGRDXFFeature> &poAttribFeature :
+         apoAttribFeatures)
+    {
+        poNew->apoAttribFeatures.emplace_back(
+            poAttribFeature->CloneDXFFeature());
     }
 
     return poNew;
@@ -155,9 +148,9 @@ OGRDXFFeature::GetColor(OGRDXFDataSource *const poDS,
         (poBlockFeature &&
          poBlockFeature->oStyleProperties.count("Hidden") > 0))
     {
-        // Hidden objects should never be shown no matter what happens,
-        // so they can be treated as if they are on a frozen layer
-        iHidden = 2;
+        // Hidden objects should never be shown no matter what happens
+        iHidden = 1;
+        oStyleProperties["Hidden"] = "1";
     }
     else
     {
@@ -175,18 +168,20 @@ OGRDXFFeature::GetColor(OGRDXFDataSource *const poDS,
             if (pszBlockHidden && atoi(pszBlockHidden) == 2)
                 iHidden = 2;
         }
-    }
 
-    // If this feature is on a frozen layer, make the object totally
-    // hidden so it won't reappear if we regenerate the style string again
-    // during block insertion
-    if (iHidden == 2)
-        oStyleProperties["Hidden"] = "1";
+        // If this feature is on a frozen layer (other than layer 0), make the
+        // object totally hidden so it won't reappear if we regenerate the style
+        // string again during block insertion
+        if (iHidden == 2 && !EQUAL(GetFieldAsString("Layer"), "0"))
+            oStyleProperties["Hidden"] = "1";
+    }
 
     // Helpful constants
     const int C_BYLAYER = 256;
     const int C_BYBLOCK = 0;
     const int C_TRUECOLOR = -100;  // not used in DXF - for our purposes only
+    const int C_BYLAYER_FORCE0 =
+        -101;  // not used in DXF - for our purposes only
 
     /* -------------------------------------------------------------------- */
     /*      MULTILEADER entities store colors by directly outputting        */
@@ -261,20 +256,41 @@ OGRDXFFeature::GetColor(OGRDXFDataSource *const poDS,
         }
         else
         {
-            // If the owning block has no explicit color, assume ByLayer
+            // If the owning block has no explicit color, assume ByLayer,
+            // but take the color from the owning block's layer
             nColor = C_BYLAYER;
+            osLayer = poBlockFeature->GetFieldAsString("Layer");
+
+            // If we regenerate the style string again during
+            // block insertion, treat as ByLayer, but when
+            // not in block insertion, treat as layer 0
+            oStyleProperties["Color"] = std::to_string(C_BYLAYER_FORCE0);
         }
+    }
+
+    // Strange special case: consider the following scenario:
+    //
+    //                             Block  Color    Layer
+    //                             -----  -------  -------
+    //  Drawing contains:  INSERT  BLK1   ByBlock  MYLAYER
+    //     BLK1 contains:  INSERT  BLK2   ByLayer  0
+    //     BLK2 contains:  LINE           ByBlock  0
+    //
+    // When viewing the drawing, the line is displayed in
+    // MYLAYER's layer colour, not black as might be expected.
+    if (nColor == C_BYLAYER_FORCE0)
+    {
+        if (poBlockFeature)
+            osLayer = poBlockFeature->GetFieldAsString("Layer");
+        else
+            osLayer = "0";
+
+        nColor = C_BYLAYER;
     }
 
     // Use layer color?
     if (nColor == C_BYLAYER)
     {
-        if (poBlockFeature)
-        {
-            // Use the block feature's layer instead
-            osLayer = poBlockFeature->GetFieldAsString("Layer");
-        }
-
         const char *pszTrueColor =
             poDS->LookupLayerProperty(osLayer, "TrueColor");
         if (pszTrueColor != nullptr && *pszTrueColor)
@@ -282,10 +298,11 @@ OGRDXFFeature::GetColor(OGRDXFDataSource *const poDS,
             nTrueColor = atoi(pszTrueColor);
             nColor = C_TRUECOLOR;
 
-            if (poBlockFeature)
+            if (poBlockFeature && osLayer != "0")
             {
                 // Use the inherited color if we regenerate the style string
-                // again during block insertion
+                // again during block insertion (except when the entity is
+                // on layer 0)
                 oStyleProperties["TrueColor"] = pszTrueColor;
             }
         }
@@ -296,10 +313,11 @@ OGRDXFFeature::GetColor(OGRDXFDataSource *const poDS,
             {
                 nColor = atoi(pszColor);
 
-                if (poBlockFeature)
+                if (poBlockFeature && osLayer != "0")
                 {
                     // Use the inherited color if we regenerate the style string
-                    // again during block insertion
+                    // again during block insertion (except when the entity is
+                    // on layer 0)
                     oStyleProperties["Color"] = pszColor;
                 }
             }

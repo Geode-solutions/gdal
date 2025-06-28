@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL Core
  * Purpose:  GDALRasterAttributeTable class declarations.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDAL_RAT_H_INCLUDED
@@ -190,8 +173,9 @@ class CPL_DLL GDALRasterAttributeTable
      * @param iRow row to fetch (zero based).
      * @param iField column to fetch (zero based).
      * @param pszValue the value to assign.
+     * @return (since 3.12) CE_None in case of success, error code otherwise
      */
-    virtual void SetValue(int iRow, int iField, const char *pszValue) = 0;
+    virtual CPLErr SetValue(int iRow, int iField, const char *pszValue) = 0;
 
     /**
      * \brief Set field value from integer.
@@ -205,8 +189,9 @@ class CPL_DLL GDALRasterAttributeTable
      * @param iRow row to fetch (zero based).
      * @param iField column to fetch (zero based).
      * @param nValue the value to assign.
+     * @return (since 3.12) CE_None in case of success, error code otherwise
      */
-    virtual void SetValue(int iRow, int iField, int nValue) = 0;
+    virtual CPLErr SetValue(int iRow, int iField, int nValue) = 0;
 
     /**
      * \brief Set field value from double.
@@ -220,8 +205,9 @@ class CPL_DLL GDALRasterAttributeTable
      * @param iRow row to fetch (zero based).
      * @param iField column to fetch (zero based).
      * @param dfValue the value to assign.
+     * @return (since 3.12) CE_None in case of success, error code otherwise
      */
-    virtual void SetValue(int iRow, int iField, double dfValue) = 0;
+    virtual CPLErr SetValue(int iRow, int iField, double dfValue) = 0;
 
     /**
      * \brief Determine whether changes made to this RAT are reflected directly
@@ -281,7 +267,7 @@ class CPL_DLL GDALRasterAttributeTable
      */
     virtual CPLXMLNode *Serialize() const;
     virtual void *SerializeJSON() const;
-    virtual CPLErr XMLInit(CPLXMLNode *, const char *);
+    virtual CPLErr XMLInit(const CPLXMLNode *, const char *);
 
     virtual CPLErr InitializeFromColorTable(const GDALColorTable *);
     virtual GDALColorTable *TranslateToColorTable(int nEntryCount = -1);
@@ -312,28 +298,17 @@ class CPL_DLL GDALRasterAttributeTable
      * @since GDAL 2.4
      */
     virtual void RemoveStatistics() = 0;
+
+  protected:
+    //! @cond Doxygen_Suppress
+    GDALRasterAttributeTable() = default;
+    GDALRasterAttributeTable(const GDALRasterAttributeTable &) = default;
+    GDALRasterAttributeTable &
+    operator=(const GDALRasterAttributeTable &) = default;
+    GDALRasterAttributeTable(GDALRasterAttributeTable &&) = default;
+    GDALRasterAttributeTable &operator=(GDALRasterAttributeTable &&) = default;
+    //! @endcond
 };
-
-/************************************************************************/
-/*                       GDALRasterAttributeField                       */
-/*                                                                      */
-/*      (private)                                                       */
-/************************************************************************/
-//! @cond Doxygen_Suppress
-class GDALRasterAttributeField
-{
-  public:
-    CPLString sName{};
-
-    GDALRATFieldType eType = GFT_Integer;
-
-    GDALRATFieldUsage eUsage = GFU_Generic;
-
-    std::vector<GInt32> anValues{};
-    std::vector<double> adfValues{};
-    std::vector<CPLString> aosValues{};
-};
-//! @endcond
 
 /************************************************************************/
 /*                    GDALDefaultRasterAttributeTable                   */
@@ -344,13 +319,26 @@ class GDALRasterAttributeField
 class CPL_DLL GDALDefaultRasterAttributeTable : public GDALRasterAttributeTable
 {
   private:
+    struct GDALRasterAttributeField
+    {
+        CPLString sName{};
+
+        GDALRATFieldType eType = GFT_Integer;
+
+        GDALRATFieldUsage eUsage = GFU_Generic;
+
+        std::vector<GInt32> anValues{};
+        std::vector<double> adfValues{};
+        std::vector<CPLString> aosValues{};
+    };
+
     std::vector<GDALRasterAttributeField> aoFields{};
 
     int bLinearBinning = false;  // TODO(schwehr): Can this be a bool?
     double dfRow0Min = -0.5;
     double dfBinSize = 1.0;
 
-    GDALRATTableType eTableType;
+    GDALRATTableType eTableType = GRTT_THEMATIC;
 
     void AnalyseColumns();
     int bColumnsAnalysed = false;  // TODO(schwehr): Can this be a bool?
@@ -364,6 +352,17 @@ class CPL_DLL GDALDefaultRasterAttributeTable : public GDALRasterAttributeTable
   public:
     GDALDefaultRasterAttributeTable();
     ~GDALDefaultRasterAttributeTable() override;
+
+    //! @cond Doxygen_Suppress
+    GDALDefaultRasterAttributeTable(const GDALDefaultRasterAttributeTable &) =
+        default;
+    GDALDefaultRasterAttributeTable &
+    operator=(const GDALDefaultRasterAttributeTable &) = default;
+    GDALDefaultRasterAttributeTable(GDALDefaultRasterAttributeTable &&) =
+        default;
+    GDALDefaultRasterAttributeTable &
+    operator=(GDALDefaultRasterAttributeTable &&) = default;
+    //! @endcond
 
     GDALDefaultRasterAttributeTable *Clone() const override;
 
@@ -381,9 +380,9 @@ class CPL_DLL GDALDefaultRasterAttributeTable : public GDALRasterAttributeTable
     int GetValueAsInt(int iRow, int iField) const override;
     double GetValueAsDouble(int iRow, int iField) const override;
 
-    void SetValue(int iRow, int iField, const char *pszValue) override;
-    void SetValue(int iRow, int iField, double dfValue) override;
-    void SetValue(int iRow, int iField, int nValue) override;
+    CPLErr SetValue(int iRow, int iField, const char *pszValue) override;
+    CPLErr SetValue(int iRow, int iField, double dfValue) override;
+    CPLErr SetValue(int iRow, int iField, int nValue) override;
 
     int ChangesAreWrittenToFile() override;
     void SetRowCount(int iCount) override;
@@ -401,5 +400,8 @@ class CPL_DLL GDALDefaultRasterAttributeTable : public GDALRasterAttributeTable
 
     void RemoveStatistics() override;
 };
+
+std::unique_ptr<GDALRasterAttributeTable>
+    CPL_DLL GDALLoadVATDBF(const char *pszFilename);
 
 #endif /* ndef GDAL_RAT_H_INCLUDED */

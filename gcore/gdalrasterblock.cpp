@@ -9,23 +9,7 @@
  * Copyright (c) 1998, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -35,6 +19,7 @@
 #include <algorithm>
 #include <climits>
 #include <cstring>
+#include <mutex>
 
 #include "cpl_atomic_ops.h"
 #include "cpl_conv.h"
@@ -43,7 +28,6 @@
 #include "cpl_string.h"
 #include "cpl_vsi.h"
 
-static bool bCacheMaxInitialized = false;
 // Will later be overridden by the default 5% if GDAL_CACHEMAX not defined.
 static GIntBig nCacheMax = 40 * 1024 * 1024;
 static GIntBig nCacheUsed = 0;
@@ -63,6 +47,7 @@ static CPLMutex *hRBLock = nullptr;
 static CPLLock *hRBLock = nullptr;
 static bool bDebugContention = false;
 static bool bSleepsForBockCacheDebug = false;
+
 static CPLLockType GetLockType()
 {
     static int nLockType = -1;
@@ -153,10 +138,8 @@ void CPL_STDCALL GDALSetCacheMax64(GIntBig nNewSizeInBytes)
     }
 #endif
 
-    {
-        INITIALIZE_LOCK;
-    }
-    bCacheMaxInitialized = true;
+    // To force one-time initialization of nCacheMax if not already done
+    GDALGetCacheMax64();
     nCacheMax = nNewSizeInBytes;
 
     /* -------------------------------------------------------------------- */
@@ -201,14 +184,9 @@ int CPL_STDCALL GDALGetCacheMax()
     GIntBig nRes = GDALGetCacheMax64();
     if (nRes > INT_MAX)
     {
-        static bool bHasWarned = false;
-        if (!bHasWarned)
-        {
-            CPLError(CE_Warning, CPLE_AppDefined,
+        CPLErrorOnce(CE_Warning, CPLE_AppDefined,
                      "Cache max value doesn't fit on a 32 bit integer. "
                      "Call GDALGetCacheMax64() instead");
-            bHasWarned = true;
-        }
         nRes = INT_MAX;
     }
     return static_cast<int>(nRes);
@@ -224,11 +202,12 @@ int CPL_STDCALL GDALGetCacheMax()
  * Gets the maximum amount of memory available to the GDALRasterBlock
  * caching system for caching GDAL read/write imagery.
  *
- * The first type this function is called, it will read the GDAL_CACHEMAX
+ * The first time this function is called, it will read the GDAL_CACHEMAX
  * configuration option to initialize the maximum cache memory.
  * Starting with GDAL 2.1, the value can be expressed as x% of the usable
- * physical RAM (which may potentially be used by other processes). Otherwise
- * it is expected to be a value in MB.
+ * physical RAM (which may potentially be used by other processes). Starting
+ * with GDAL 3.11, the value can include units of memory. If not units are
+ * provided the value is assumed to be in MB.
  *
  * @return maximum in bytes.
  *
@@ -237,74 +216,46 @@ int CPL_STDCALL GDALGetCacheMax()
 
 GIntBig CPL_STDCALL GDALGetCacheMax64()
 {
-    if (!bCacheMaxInitialized)
-    {
+    static std::once_flag flagSetupGDALGetCacheMax64;
+    std::call_once(
+        flagSetupGDALGetCacheMax64,
+        []()
         {
-            INITIALIZE_LOCK;
-        }
-        bSleepsForBockCacheDebug =
-            CPLTestBool(CPLGetConfigOption("GDAL_DEBUG_BLOCK_CACHE", "NO"));
-
-        const char *pszCacheMax = CPLGetConfigOption("GDAL_CACHEMAX", "5%");
-
-        GIntBig nNewCacheMax;
-        if (strchr(pszCacheMax, '%') != nullptr)
-        {
-            GIntBig nUsablePhysicalRAM = CPLGetUsablePhysicalRAM();
-            if (nUsablePhysicalRAM > 0)
             {
-                // For some reason, coverity pretends that this will overflow.
-                // "Multiply operation overflows on operands
-                // static_cast<double>( nUsablePhysicalRAM ) and
-                // CPLAtof(pszCacheMax). Example values for operands: CPLAtof(
-                // pszCacheMax ) = 2251799813685248,
-                // static_cast<double>(nUsablePhysicalRAM) =
-                // -9223372036854775808." coverity[overflow,tainted_data]
-                double dfCacheMax = static_cast<double>(nUsablePhysicalRAM) *
-                                    CPLAtof(pszCacheMax) / 100.0;
-                if (dfCacheMax >= 0 && dfCacheMax < 1e15)
-                    nNewCacheMax = static_cast<GIntBig>(dfCacheMax);
-                else
+                INITIALIZE_LOCK;
+            }
+            bSleepsForBockCacheDebug =
+                CPLTestBool(CPLGetConfigOption("GDAL_DEBUG_BLOCK_CACHE", "NO"));
+
+            const char *pszCacheMax = CPLGetConfigOption("GDAL_CACHEMAX", "5%");
+            GIntBig nNewCacheMax;
+            bool bUnitSpecified = false;
+
+            if (CPLParseMemorySize(pszCacheMax, &nNewCacheMax,
+                                   &bUnitSpecified) != CE_None)
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "Invalid value for GDAL_CACHEMAX. "
+                         "Using default value.");
+                if (CPLParseMemorySize("5%", &nNewCacheMax, &bUnitSpecified) !=
+                    CE_None)
+                {
+                    // This means that usable physical RAM could not be determined.
                     nNewCacheMax = nCacheMax;
-            }
-            else
-            {
-                CPLDebug("GDAL", "Cannot determine usable physical RAM.");
-                nNewCacheMax = nCacheMax;
-            }
-        }
-        else
-        {
-            nNewCacheMax = CPLAtoGIntBig(pszCacheMax);
-            if (nNewCacheMax < 100000)
-            {
-                if (nNewCacheMax < 0)
-                {
-                    CPLError(CE_Failure, CPLE_NotSupported,
-                             "Invalid value for GDAL_CACHEMAX. "
-                             "Using default value.");
-                    GIntBig nUsablePhysicalRAM = CPLGetUsablePhysicalRAM();
-                    if (nUsablePhysicalRAM)
-                        nNewCacheMax = nUsablePhysicalRAM / 20;
-                    else
-                    {
-                        CPLDebug("GDAL",
-                                 "Cannot determine usable physical RAM.");
-                        nNewCacheMax = nCacheMax;
-                    }
-                }
-                else
-                {
-                    nNewCacheMax *= 1024 * 1024;
                 }
             }
-        }
-        nCacheMax = nNewCacheMax;
-        CPLDebug("GDAL", "GDAL_CACHEMAX = " CPL_FRMT_GIB " MB",
-                 nCacheMax / (1024 * 1024));
-        bCacheMaxInitialized = true;
-    }
-    // coverity[overflow_sink]
+
+            if (!bUnitSpecified && nNewCacheMax < 100000)
+            {
+                // Assume MB
+                nNewCacheMax *= (1024 * 1024);
+            }
+
+            nCacheMax = nNewCacheMax;
+            CPLDebug("GDAL", "GDAL_CACHEMAX = " CPL_FRMT_GIB " MB",
+                     nCacheMax / (1024 * 1024));
+        });
+
     return nCacheMax;
 }
 
@@ -323,14 +274,9 @@ int CPL_STDCALL GDALGetCacheUsed()
 {
     if (nCacheUsed > INT_MAX)
     {
-        static bool bHasWarned = false;
-        if (!bHasWarned)
-        {
-            CPLError(CE_Warning, CPLE_AppDefined,
+        CPLErrorOnce(CE_Warning, CPLE_AppDefined,
                      "Cache used value doesn't fit on a 32 bit integer. "
                      "Call GDALGetCacheUsed64() instead");
-            bHasWarned = true;
-        }
         return INT_MAX;
     }
     return static_cast<int>(nCacheUsed);
@@ -450,27 +396,33 @@ int GDALRasterBlock::FlushCacheBlock(int bDirtyBlocksOnly)
 
         if (poTarget == nullptr)
             return FALSE;
+#ifndef __COVERITY__
+        // Disabled to avoid complains about sleeping under locks, that
+        // are only true for debug/testing code
         if (bSleepsForBockCacheDebug)
         {
-            // coverity[tainted_data]
             const double dfDelay = CPLAtof(CPLGetConfigOption(
                 "GDAL_RB_FLUSHBLOCK_SLEEP_AFTER_DROP_LOCK", "0"));
             if (dfDelay > 0)
                 CPLSleep(dfDelay);
         }
+#endif
 
         poTarget->Detach_unlocked();
         poTarget->GetBand()->UnreferenceBlock(poTarget);
     }
 
+#ifndef __COVERITY__
+    // Disabled to avoid complains about sleeping under locks, that
+    // are only true for debug/testing code
     if (bSleepsForBockCacheDebug)
     {
-        // coverity[tainted_data]
         const double dfDelay = CPLAtof(
             CPLGetConfigOption("GDAL_RB_FLUSHBLOCK_SLEEP_AFTER_RB_LOCK", "0"));
         if (dfDelay > 0)
             CPLSleep(dfDelay);
     }
+#endif
 
     if (poTarget->GetDirty())
     {
@@ -584,6 +536,13 @@ GDALRasterBlock::GDALRasterBlock(GDALRasterBand *poBandIn, int nXOffIn,
       nXOff(nXOffIn), nYOff(nYOffIn), nXSize(0), nYSize(0), pData(nullptr),
       poBand(poBandIn), poNext(nullptr), poPrevious(nullptr), bMustDetach(true)
 {
+    if (!hRBLock)
+    {
+        // Needed for scenarios where GDALAllRegister() is called after
+        // GDALDestroyDriverManager()
+        INITIALIZE_LOCK;
+    }
+
     CPLAssert(poBandIn != nullptr);
     poBand->GetBlockSize(&nXSize, &nYSize);
 }
@@ -1013,14 +972,17 @@ CPLErr GDALRasterBlock::Internalize()
 
                 if (poTarget != nullptr)
                 {
+#ifndef __COVERITY__
+                    // Disabled to avoid complains about sleeping under locks,
+                    // that are only true for debug/testing code
                     if (bSleepsForBockCacheDebug)
                     {
-                        // coverity[tainted_data]
                         const double dfDelay = CPLAtof(CPLGetConfigOption(
                             "GDAL_RB_INTERNALIZE_SLEEP_AFTER_DROP_LOCK", "0"));
                         if (dfDelay > 0)
                             CPLSleep(dfDelay);
                     }
+#endif
 
                     GDALRasterBlock *_poPrevious = poTarget->poPrevious;
 
@@ -1068,15 +1030,18 @@ CPLErr GDALRasterBlock::Internalize()
 
             if (poBlock->GetDirty())
             {
+#ifndef __COVERITY__
+                // Disabled to avoid complains about sleeping under locks, that
+                // are only true for debug/testing code
                 if (bSleepsForBockCacheDebug)
                 {
-                    // coverity[tainted_data]
                     const double dfDelay = CPLAtof(CPLGetConfigOption(
                         "GDAL_RB_INTERNALIZE_SLEEP_AFTER_DETACH_BEFORE_WRITE",
                         "0"));
                     if (dfDelay > 0)
                         CPLSleep(dfDelay);
                 }
+#endif
 
                 CPLErr eErr = poBlock->Write();
                 if (eErr != CE_None)
@@ -1168,6 +1133,7 @@ void GDALRasterBlock::DestroyRBMutex()
         DESTROY_LOCK;
     hRBLock = nullptr;
 }
+
 /*! @endcond */
 
 /************************************************************************/
@@ -1189,14 +1155,18 @@ int GDALRasterBlock::TakeLock()
 {
     const int nLockVal = AddLock();
     CPLAssert(nLockVal >= 0);
+#ifndef __COVERITY__
+    // Disabled to avoid complains about sleeping under locks, that
+    // are only true for debug/testing code
     if (bSleepsForBockCacheDebug)
     {
-        // coverity[tainted_data]
         const double dfDelay = CPLAtof(
             CPLGetConfigOption("GDAL_RB_TRYGET_SLEEP_AFTER_TAKE_LOCK", "0"));
         if (dfDelay > 0)
             CPLSleep(dfDelay);
     }
+#endif
+
     if (nLockVal == 0)
     {
         // The block is being evicted by GDALRasterBlock::Internalize()

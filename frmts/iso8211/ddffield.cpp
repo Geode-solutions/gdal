@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 1999, Frank Warmerdam
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -72,8 +56,9 @@ void DDFField::Dump(FILE *fp)
 {
     int nMaxRepeat = 8;
 
-    if (getenv("DDF_MAXDUMP") != nullptr)
-        nMaxRepeat = atoi(getenv("DDF_MAXDUMP"));
+    const char *pszDDF_MAXDUMP = getenv("DDF_MAXDUMP");
+    if (pszDDF_MAXDUMP != nullptr)
+        nMaxRepeat = atoi(pszDDF_MAXDUMP);
 
     fprintf(fp, "  DDFField:\n");
     fprintf(fp, "      Tag = `%s'\n", poDefn->GetName());
@@ -146,8 +131,8 @@ void DDFField::Dump(FILE *fp)
  * by the application.
  */
 
-const char *DDFField::GetSubfieldData(DDFSubfieldDefn *poSFDefn,
-                                      int *pnMaxBytes, int iSubfieldIndex)
+const char *DDFField::GetSubfieldData(const DDFSubfieldDefn *poSFDefn,
+                                      int *pnMaxBytes, int iSubfieldIndex) const
 
 {
     if (poSFDefn == nullptr)
@@ -164,7 +149,7 @@ const char *DDFField::GetSubfieldData(DDFSubfieldDefn *poSFDefn,
     {
         for (int iSF = 0; iSF < poDefn->GetSubfieldCount(); iSF++)
         {
-            DDFSubfieldDefn *poThisSFDefn = poDefn->GetSubfield(iSF);
+            const DDFSubfieldDefn *poThisSFDefn = poDefn->GetSubfield(iSF);
 
             if (nDataSize <= iOffset)
             {
@@ -210,7 +195,7 @@ const char *DDFField::GetSubfieldData(DDFSubfieldDefn *poSFDefn,
  * for a demonstration of handling repeated fields properly.
  */
 
-int DDFField::GetRepeatCount()
+int DDFField::GetRepeatCount() const
 
 {
     if (!poDefn->IsRepeating())
@@ -242,7 +227,7 @@ int DDFField::GetRepeatCount()
         const int iOffsetBefore = iOffset;
         for (int iSF = 0; iSF < poDefn->GetSubfieldCount(); iSF++)
         {
-            DDFSubfieldDefn *poThisSFDefn = poDefn->GetSubfield(iSF);
+            const DDFSubfieldDefn *poThisSFDefn = poDefn->GetSubfield(iSF);
 
             int nBytesConsumed = 0;
             if (poThisSFDefn->GetWidth() > nDataSize - iOffset)
@@ -313,7 +298,7 @@ const char *DDFField::GetInstanceData(int nInstance, int *pnInstanceSize)
     /* -------------------------------------------------------------------- */
     int nBytesRemaining1 = 0;
     int nBytesRemaining2 = 0;
-    DDFSubfieldDefn *poFirstSubfield = poDefn->GetSubfield(0);
+    const DDFSubfieldDefn *poFirstSubfield = poDefn->GetSubfield(0);
 
     const char *pachWrkData =
         GetSubfieldData(poFirstSubfield, &nBytesRemaining1, nInstance);
@@ -326,7 +311,7 @@ const char *DDFField::GetInstanceData(int nInstance, int *pnInstanceSize)
     /* -------------------------------------------------------------------- */
     if (pnInstanceSize != nullptr)
     {
-        DDFSubfieldDefn *poLastSubfield =
+        const DDFSubfieldDefn *poLastSubfield =
             poDefn->GetSubfield(poDefn->GetSubfieldCount() - 1);
 
         const char *pachLastData =

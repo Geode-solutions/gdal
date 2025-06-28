@@ -34,12 +34,22 @@ On creation, passing a filename without a .fgb suffix will instruct the driver
 to create a directory of that name, and create layers as .fgb files in that
 directory.
 
+Starting with GDAL 3.9, metadata set at the layer level will be written in the
+FlatGeobuf header, and retrieved on reading as layer metadata.
+
 Open options
 ------------
 
--  **VERIFY_BUFFERS=**\ *YES/NO*: Set to YES to verify buffers when reading.
-   This can provide some protection for invalid/corrupt data with a performance
-   trade off. Defaults to YES.
+|about-open-options|
+The following open options are supported:
+
+-  .. oo:: VERIFY_BUFFERS
+      :choices: YES, NO
+      :default: YES
+
+      Set to YES to verify buffers when reading.
+      This can provide some protection for invalid/corrupt data with a performance
+      trade off.
 
 Dataset Creation Options
 ------------------------
@@ -49,14 +59,46 @@ None
 Layer Creation Options
 ----------------------
 
--  **SPATIAL_INDEX=**\ *YES/NO*: Set to YES to create a
-   spatial index. Defaults to YES.
--  **TEMPORARY_DIR=**\ path: Path to an existing directory where temporary
-   files should be created. Only used if SPATIAL_INDEX=YES. If not specified,
-   the directory of the output file will be used for regular filenames. For
-   other VSI file systems, the temporary directory will be the one decided by
-   the :cpp:func:`CPLGenerateTempFilename` function.
-   "/vsimem/" can be used for in-memory temporary files.
+|about-layer-creation-options|
+The following layer creation options are supported:
+
+-  .. lco:: SPATIAL_INDEX
+      :choices: YES, NO
+      :default: YES
+
+      Set to YES to create a spatial index.
+
+-  .. lco:: TEMPORARY_DIR
+      :choices: <path>
+
+      Path to an existing directory where temporary
+      files should be created. Only used if :lco:`SPATIAL_INDEX=YES`. If not specified,
+      the directory of the output file will be used for regular filenames. For
+      other VSI file systems, the temporary directory will be the one decided by
+      the :cpp:func:`CPLGenerateTempFilename` function.
+      "/vsimem/" can be used for in-memory temporary files.
+
+-  .. lco:: TITLE
+      :choices: <string>
+      :since: 3.9
+
+      Dataset title (should be relatively short)
+
+-  .. lco:: DESCRIPTION
+      :choices: <string>
+      :since: 3.9
+
+      Dataset description (intended for free form long text)
+
+Creation Issues
+---------------
+
+* Currently, NULL geometries are not supported with :lco:`SPATIAL_INDEX=YES`.
+
+  `More background and discussion on this issue at <https://github.com/flatgeobuf/flatgeobuf/discussions/260>`__
+
+* The creation of the packet Hilbert R-Tree requires an amount of RAM which
+  is at least the number of features times 83 bytes.
 
 Examples
 --------

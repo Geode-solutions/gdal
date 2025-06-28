@@ -1,8 +1,8 @@
 # CMake4GDAL project is distributed under MIT license. See accompanying file LICENSE.txt.
-cmake_minimum_required(VERSION 3.9...3.23)
+include(cmake/helpers/GdalCMakeMinimumRequired.cmake)
+cmake_minimum_required(VERSION ${GDAL_CMAKE_VERSION_MIN}...${GDAL_CMAKE_VERSION_MAX})
 
 project(gdal LANGUAGES C CXX)
-include(CTest)
 
 set(GDAL_LIB_TARGET_NAME GDAL)
 
@@ -35,26 +35,16 @@ define_property(
   PROPERTY PLUGIN_OUTPUT_DIR
   BRIEF_DOCS "Plugin modules build directories"
   FULL_DOCS "Plugin modules build directories")
-#
-# check compiler and set preferences.
-if (NOT CMAKE_CXX_STANDARD)
-    set(CMAKE_CXX_STANDARD 11)
-    set(CMAKE_CXX_STANDARD_REQUIRED ON)
-endif()
 
-if (NOT CMAKE_C_STANDARD)
-    set(CMAKE_C_STANDARD 99)
-    set(CMAKE_C_STANDARD_REQUIRED ON)
-endif()
-
-#
-if (MSVC)
-  add_definitions(-D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE)
-  add_definitions(-DNOMINMAX)
-endif ()
-#
+include(GdalCAndCXXStandards)
 include(CheckCompilerMachineOption)
 include(CheckCompilerSIMDFeature)
+
+option(USE_PRECOMPILED_HEADERS "Use precompiled headers (does not work with MSVC)" OFF)
+if (USE_PRECOMPILED_HEADERS AND MSVC)
+  message(FATAL_ERROR "USE_PRECOMPILED_HEADERS=ON does not currently work with Visual Studio C++ compiler")
+endif()
+
 include(Ccache)
 
 #
@@ -110,7 +100,34 @@ if ("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "(x86|AMD64)")
     endif ()
   endif ()
 
+else()
+
+  # Check ability to use Arm Neon optimizations
+  include(CheckCXXSourceCompiles)
+  include(CMakePushCheckState)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/gcore")
+  check_cxx_source_compiles("#include \"include_sse2neon.h\"\nint main() { return 0; }" SSE2NEON_COMPILES)
+  cmake_pop_check_state()
+
 endif ()
+
+# Check whether std::float16_t is available and is working
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles(
+  "
+    #include <cmath>
+    #include <stdfloat>
+    int main() {
+      std::float16_t x = 0;
+      using std::nextafter;
+      std::float16_t y = nextafter(x, x);
+      return y == 0 ? 0 : 1;
+    }
+  "
+  HAVE_STD_FLOAT16_T
+)
+
 #
 option(CLANG_TIDY_ENABLED "Run clang-tidy with the compiler." OFF)
 set(CLANG_TIDY_CHECKS
@@ -159,9 +176,9 @@ endif ()
 #   4. If nothing specified, use default behavior.
 #
 # for example
-#   $ cmake -DPython_LOOKUP_VERSION=3.6.0 ..
+#   $ cmake -DPython_LOOKUP_VERSION=3.8.0 ..
 #   $ cmake -DPython_FIND_VIRTUALENV=ONLY ..
-#   $ cmake -DPython_ROOT=C:\Python36 ..
+#   $ cmake -DPython_ROOT=C:\Python38 ..
 # ~~~
 #
 include(FeatureSummary)
@@ -174,39 +191,25 @@ set_package_properties(
   URL "http://swig.org/"
   TYPE RECOMMENDED)
 
+# Workaround Intel MKL library outputting a message in stdout, which cause
+# incorrect detection of numpy.get_include() and numpy.__version__
+# See https://github.com/numpy/numpy/issues/23775
+# Fix also proposed to upstream CMake FindPython per
+# https://gitlab.kitware.com/cmake/cmake/-/merge_requests/9359/
+if(DEFINED ENV{MKL_ENABLE_INSTRUCTIONS})
+  set(BACKUP_ENV_VAR_MKL_ENABLE_INSTRUCTIONS ENV{MKL_ENABLE_INSTRUCTIONS})
+endif()
+set(ENV{MKL_ENABLE_INSTRUCTIONS} "SSE4_2")
+
 if (Python_LOOKUP_VERSION)
     set(Python_FIND_STRATEGY VERSION)
     find_package(Python ${Python_LOOKUP_VERSION} EXACT COMPONENTS Interpreter Development NumPy)
 else ()
     set(Python_FIND_STRATEGY LOCATION)
-    find_package(Python 3.6 COMPONENTS Interpreter Development NumPy)
+    find_package(Python 3.8 COMPONENTS Interpreter Development NumPy)
 endif ()
 set_package_properties(Python PROPERTIES PURPOSE "SWIG_PYTHON: Python binding")
 
-if (NOT Python_FOUND AND ${CMAKE_VERSION} VERSION_LESS "3.12.0")
-  # On Ubuntu 18.04 with Python 3.6, the backported FindPython package we have in cmake/modules/3.16 doesn't manage to
-  # find automatically Python (we can make it work by manually setting -DPython_LOOKUP_VERSION=3.6.9
-  # -DPython_LIBRARY=/usr/lib/x86_64-linux-gnu/libpython3.6m.so
-  # -DPython_NumPy_INCLUDE_DIR=/usr/lib/python3/dist-packages/numpy/core/include/numpy ) but this is a bit painful. So
-  # use the deprecated method (since CMake 3.12), which works out of the box in that situation.
-  find_package(PythonInterp)
-  find_package(PythonLibs)
-  if (PYTHONINTERP_FOUND AND "${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}" VERSION_LESS "3.6")
-    set(PYTHONINTERP_FOUND FALSE)
-    set(PYTHONLIBS_FOUND FALSE)
-  endif()
-  if (PYTHONINTERP_FOUND)
-    set(Python_Interpreter_FOUND TRUE)
-    set(Python_EXECUTABLE ${PYTHON_EXECUTABLE})
-    set(Python_VERSION_MAJOR ${PYTHON_VERSION_MAJOR})
-    set(Python_VERSION_MINOR ${PYTHON_VERSION_MINOR})
-  endif ()
-  if (PYTHONLIBS_FOUND)
-    set(Python_Development_FOUND TRUE)
-    set(Python_LIBRARIES ${PYTHON_LIBRARIES})
-    set(Python_INCLUDE_DIRS ${PYTHON_INCLUDE_DIRS})
-  endif ()
-endif ()
 if (Python_Interpreter_FOUND)
   file(
     GENERATE
@@ -227,6 +230,14 @@ if (Python_Interpreter_FOUND)
   endif()
 endif()
 
+# Restore previous value of MKL_ENABLE_INSTRUCTIONS
+if(DEFINED BACKUP_ENV_VAR_MKL_ENABLE_INSTRUCTIONS)
+  set(ENV{MKL_ENABLE_INSTRUCTIONS} ${BACKUP_ENV_VAR_MKL_ENABLE_INSTRUCTIONS})
+else()
+  unset(ENV{MKL_ENABLE_INSTRUCTIONS})
+endif()
+
+
 if (SWIG_FOUND AND (Python_Interpreter_FOUND OR Python_FOUND))
   option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 else()
@@ -242,6 +253,13 @@ if (BUILD_PYTHON_BINDINGS)
     endif()
 endif()
 
+option(BUILD_TESTING "Build the testing tree." ON)
+# Make sure enable_testing() is defined before including gdal.cmake for
+# Java and CSharp tests
+if (BUILD_TESTING)
+  enable_testing()
+endif()
+
 #
 include(${CMAKE_CURRENT_SOURCE_DIR}/gdal.cmake)
 
@@ -252,11 +270,14 @@ if (BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/autotest")
       add_subdirectory(autotest)
   endif()
 endif ()
-# Google OSS-Fuzz project utilities
-add_subdirectory(fuzzers)
-if (BUILD_TESTING)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/fuzzers")
+    # Google OSS-Fuzz project utilities
+    add_subdirectory(fuzzers)
+    if (BUILD_TESTING)
+        add_subdirectory(fuzzers/tests)
+    endif()
+endif()
+if (BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/perftests")
   add_subdirectory(perftests)
-  # Google OSS-Fuzz tests
-  add_subdirectory(fuzzers/tests)
 endif ()
 # vim: ts=4 sw=4 sts=4 et

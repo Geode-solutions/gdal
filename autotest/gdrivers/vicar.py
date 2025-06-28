@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for PDS driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2015, Even Rouault <even dot rouault at spatialys dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import json
@@ -38,6 +21,13 @@ import pytest
 from osgeo import gdal, ogr
 
 pytestmark = pytest.mark.require_driver("VICAR")
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 ###############################################################################
 # Read truncated VICAR file
@@ -311,7 +301,7 @@ def test_vicar_create_label_option_as_inline_value():
 def test_vicar_create_label_option_as_inline_value_error():
 
     filename = "/vsimem/test.vic"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not gdal.GetDriverByName("VICAR").Create(
             filename, 1, 1, 1, gdal.GDT_Byte, options=["LABEL={error"]
         )
@@ -341,7 +331,7 @@ def test_vicar_create_label_option_as_filename_error():
     filename = "/vsimem/test.vic"
     json_filename = "/vsimem/test.json"
     gdal.FileFromMemBuffer(json_filename, "error")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not gdal.GetDriverByName("VICAR").Create(
             filename, 1, 1, 1, gdal.GDT_Byte, options=["LABEL=" + json_filename]
         )
@@ -488,7 +478,7 @@ def test_vicar_write_basic2_all_ones():
 
 def test_vicar_write_compression_errors():
     filename = "/vsimem/test.vic"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         # Only single-band supported
         assert not gdal.GetDriverByName("VICAR").Create(
             filename, 1, 1, 2, options=["COMPRESS=BASIC"]
@@ -515,7 +505,7 @@ def test_vicar_write_compression_errors():
     )
     # Non sequential writing of lines
     ds.WriteRaster(0, 1, 1, 1, "x")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds.FlushCache()
     assert gdal.GetLastErrorMsg() != ""
     ds = None
@@ -550,6 +540,11 @@ x
 
     with gdaltest.config_option("GDAL_TRY_PDS3_WITH_VICAR", "YES"):
         ds = gdal.Open("/vsimem/test")
+    assert ds
+    assert ds.GetDriver().ShortName == "VICAR"
+    assert struct.unpack("B", ds.GetRasterBand(1).ReadRaster())[0] == ord("x")
+
+    ds = gdal.OpenEx("/vsimem/test", allowed_drivers=["VICAR"])
     assert ds
     assert ds.GetDriver().ShortName == "VICAR"
     assert struct.unpack("B", ds.GetRasterBand(1).ReadRaster())[0] == ord("x")

@@ -9,23 +9,7 @@
  ******************************************************************************
  * Copyright (c) 2010 Daylon Graphics Ltd.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGRDXF_SMOOTH_POLYLINE_H_INCLUDED
@@ -88,6 +72,11 @@ class DXFSmoothPolylineVertex
     }
 };
 
+// Quiet warning from gcc (possibly https://gcc.gnu.org/bugzilla/show_bug.cgi?id=112370)
+#if defined(__GNUC__) && __GNUC__ >= 13
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfree-nonheap-object"
+#endif
 class DXFSmoothPolyline
 {
     // A DXF polyline that includes vertex bulge information.
@@ -109,7 +98,7 @@ class DXFSmoothPolyline
     {
     }
 
-    OGRGeometry *Tessellate() const;
+    OGRGeometry *Tessellate(bool bAsPolygon) const;
 
     size_t size() const
     {
@@ -151,5 +140,8 @@ class DXFSmoothPolyline
     void EmitLine(const DXFSmoothPolylineVertex &,
                   const DXFSmoothPolylineVertex &, OGRLineString *) const;
 };
+#if defined(__GNUC__) && __GNUC__ >= 13
+#pragma GCC diagnostic pop
+#endif
 
 #endif /* OGRDXF_SMOOTH_POLYLINE_H_INCLUDED */

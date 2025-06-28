@@ -15,34 +15,41 @@ Synopsis
 
 .. code-block::
 
-    gdal_grid [-ot {Byte/Int16/UInt16/UInt32/Int32/Float32/Float64/
+    gdal_grid [--help] [--help-general]
+              [-ot {Byte/Int16/UInt16/UInt32/Int32/Float32/Float64/
               CInt16/CInt32/CFloat32/CFloat64}]
-              [-of format] [-co "NAME=VALUE"]
-              [-zfield field_name] [-z_increase increase_value] [-z_multiply multiply_value]
-              [-a_srs srs_def] [-spat xmin ymin xmax ymax]
-              [-clipsrc <xmin ymin xmax ymax>|WKT|datasource|spat_extent]
-              [-clipsrcsql sql_statement] [-clipsrclayer layer]
-              [-clipsrcwhere expression]
-              [-l layername]* [-where expression] [-sql select_statement]
-              [-txe xmin xmax] [-tye ymin ymax] [-tr xres yres] [-outsize xsize ysize]
-              [-a algorithm[:parameter1=value1]*] [-q]
+              [-oo <NAME>=<VALUE>]...
+              [-of <format>] [-co <NAME>=<VALUE>]...
+              [-zfield <field_name>] [-z_increase <increase_value>] [-z_multiply <multiply_value>]
+              [-a_srs <srs_def>] [-spat <xmin> <ymin> <xmax> <ymax>]
+              [-clipsrc <xmin> <ymin> <xmax> <ymax>|<WKT>|<datasource>|spat_extent]
+              [-clipsrcsql <sql_statement>] [-clipsrclayer <layer>]
+              [-clipsrcwhere <expression>]
+              [-l <layername>]... [-where <expression>] [-sql <select_statement>]
+              [-txe <xmin> <xmax>] [-tye <ymin> <ymax>] [-tr <xres> <yres>] [-outsize <xsize> <ysize>]
+              [-a {<algorithm>[[:<parameter1>=<value1>]...]}] [-q]
               <src_datasource> <dst_filename>
 
 Description
 -----------
 
-This program creates regular grid (raster) from the scattered data read from
+This program creates a regular grid (raster) from the scattered data read from
 the OGR datasource. Input data will be interpolated to fill grid nodes with
 values, you can choose from various interpolation methods.
 
-It is possible to set the :decl_configoption:`GDAL_NUM_THREADS`
+It is possible to set the :config:`GDAL_NUM_THREADS`
 configuration option to parallelize the processing. The value to specify is
 the number of worker threads, or ``ALL_CPUS`` to use all the cores/CPUs of the
 computer.
 
 .. program:: gdal_grid
 
+.. include:: options/help_and_help_general.rst
+
 .. include:: options/ot.rst
+
+If not set then a default type is used, which might not be supported
+by the relevant driver, causing a error.
 
 .. include:: options/of.rst
 
@@ -61,7 +68,7 @@ computer.
 
     .. versionadded:: 3.2
 
-.. option:: -outsize <xsize ysize>
+.. option:: -outsize <xsize> <ysize>
 
     Set the size of the output file in pixels and lines.
     Note that :option:`-outsize` cannot be used with :option:`-tr`
@@ -76,28 +83,28 @@ computer.
 .. option:: -zfield <field_name>
 
     Identifies an attribute field
-    on the features to be used to get a Z value from. This value overrides Z value
-    read from feature geometry record (naturally, if you have a Z value in
-    geometry, otherwise you have no choice and should specify a field name
-    containing Z value).
+    on the features to be used to get a Z value from. This value overrides the Z value
+    read from the feature geometry record (naturally, if you have a Z value in
+    the geometry, otherwise you have no choice and should specify a field name
+    containing a Z value).
 
 .. option:: -z_increase <increase_value>
 
     Addition to the attribute field
     on the features to be used to get a Z value from. The addition should be the same
-    unit as Z value. The result value will be Z value + Z increase value. The default value is 0.
+    unit as the Z value. The result value will be Z value + Z increase value. The default value is 0.
 
 .. option:: -z_multiply <multiply_value>
 
     This is multiplication
-    ratio for Z field. This can be used for shift from e.g. foot to meters or from
-    elevation to deep. The result value will be (Z value + Z increase value) * Z multiply value.
+    ratio for the Z field. This can be used for a shift from e.g. feet to meters or from
+    elevation to depth. The result value will be (Z value + Z increase value) * Z multiply value.
     The default value is 1.
 
-.. option:: -a <[algorithm[:parameter1=value1][:parameter2=value2]...]>
+.. option:: -a {<algorithm>[[:<parameter1>=<value1>]...]}
 
     Set the interpolation algorithm or data metric name and (optionally)
-    its parameters. See `Interpolation algorithms`_ and `Data metrics`_
+    its parameters. See the `Interpolation algorithms`_ and `Data metrics`_
     sections for further discussion of available options.
 
 .. option:: -spat <xmin> <ymin> <xmax> <ymax>
@@ -106,13 +113,13 @@ computer.
     to select only features contained within the bounding box described by
     (xmin, ymin) - (xmax, ymax).
 
-.. option:: -clipsrc [xmin ymin xmax ymax]|WKT|datasource|spat_extent
+.. option:: -clipsrc [<xmin> <ymin> <xmax> <ymax>]|<WKT>|<datasource>|spat_extent
 
     Adds a spatial filter to select only features contained within the
     specified bounding box (expressed in source SRS), WKT geometry (POLYGON or
     MULTIPOLYGON), from a datasource or to the spatial extent of the :option:`-spat`
     option if you use the ``spat_extent`` keyword. When specifying a
-    datasource, you will generally want to use it in combination of the
+    datasource, you will generally want to use it in combination with the
     :option:`-clipsrclayer`, :option:`-clipsrcwhere` or :option:`-clipsrcsql`
     options.
 
@@ -126,7 +133,7 @@ computer.
 
 .. option:: -clipsrcwhere <expression>
 
-    Restrict desired geometries based on attribute query.
+    Restrict desired geometries based on an attribute query.
 
 .. option:: -l <layername>
 
@@ -144,6 +151,12 @@ computer.
 
     An SQL statement to be evaluated against the datasource to produce a
     virtual layer of features to be processed.
+
+.. option:: -oo <NAME>=<VALUE>
+
+    .. versionadded:: 3.7
+
+    Source dataset open option (format specific)
 
 .. include:: options/co.rst
 
@@ -163,7 +176,7 @@ computer.
 Interpolation algorithms
 ------------------------
 
-There are number of interpolation algorithms to choose from.
+There are a number of interpolation algorithms to choose from.
 
 More details about them can also be found in :ref:`gdal_grid_tut`
 
@@ -172,23 +185,23 @@ More details about them can also be found in :ref:`gdal_grid_tut`
 invdist
 +++++++
 
-Inverse distance to a power. This is default algorithm. It has following
+Inverse distance to a power. This is the default algorithm. It has the following
 parameters:
 
 - ``power``: Weighting power (default 2.0).
 - ``smoothing``: Smoothing parameter (default 0.0).
 - ``radius1``: The first radius (X axis if rotation angle is 0)
-  of search ellipse. Set this parameter to zero to use whole point array.
+  of the search ellipse. Set this parameter to zero to use the whole point array.
   Default is 0.0.
 - ``radius2``: The second radius (Y axis if rotation angle is 0)
-  of search ellipse. Set this parameter to zero to use whole point array.
+  of the search ellipse. Set this parameter to zero to use the whole point array.
   Default is 0.0.
 - ``radius``: Set first and second radius (mutually exclusive with radius1 and radius2).
   Default is 0.0. Added in GDAL 3.6
 - ``angle``: Angle of search ellipse rotation in degrees
   (counter clockwise, default 0.0).
 - ``max_points``: Maximum number of data points to use. Do not
-  search for more points than this number. This is only used if search ellipse
+  search for more points than this number. This is only used if the search ellipse
   is set (both radii are non-zero). Zero means that all found points should
   be used. Default is 0.
 - ``min_points``: Minimum number of data points to use. If less
@@ -340,7 +353,7 @@ It has following parameters:
 Data metrics
 ------------
 
-Besides the interpolation functionality \ref gdal_grid can be used to compute
+Besides the interpolation functionality :program:`gdal_grid` can be used to compute
 some data metrics using the specified window and output grid geometry. These
 metrics are:
 
@@ -404,12 +417,12 @@ Reading comma separated values
 ------------------------------
 
 Often you have a text file with a list of comma separated XYZ values to work
-with (so called CSV file). You can easily use that kind of data source in \ref
-gdal_grid. All you need is create a virtual dataset header (VRT) for you CSV
-file and use it as input datasource for \ref gdal_grid. You can find details
-on VRT format at :ref:`vector.vrt` description page.
+with (so called CSV file). You can easily use that kind of data source in
+:program:`gdal_grid`. All you need is to create a virtual dataset header (VRT) for your CSV
+file and use it as an input datasource for :program:`gdal_grid`. You can find details
+on the VRT format on the :ref:`vector.vrt` description page.
 
-Here is a small example. Let we have a CSV file called *dem.csv*
+Here is a small example. Let's say we have a CSV file called *dem.csv*
 containing
 
 ::
@@ -421,7 +434,7 @@ containing
     87077.6,891995,135.01
     ...
 
-For above data we will create *dem.vrt* header with the following
+For the above data we will create a *dem.vrt* header with the following
 content:
 
 .. code-block:: xml
@@ -434,15 +447,27 @@ content:
         </OGRVRTLayer>
     </OGRVRTDataSource>
 
-This description specifies so called 2.5D geometry with three coordinates X, Y
-and Z. Z value will be used for interpolation. Now you can use *dem.vrt*
-with all OGR programs (start with \ref ogrinfo to test that everything works
-fine). The datasource will contain single layer called *"dem"* filled
-with point features constructed from values in CSV file. Using this technique
-you can handle CSV files with more than three columns, switch columns, etc.
+This description specifies so called 2.5D geometry with  three  coordinates
+X,  Y and Z. The Z value will be used for interpolation. Now you can
+use *dem.vrt* with all OGR programs (start  with  :ref:`ogrinfo`  to  test  that
+everything works fine). The datasource will contain a single layer called
+*"dem"*  filled  with point features constructed from values in the CSV file.
+Using this technique you can handle CSV  files  with  more  than  three
+columns, switch columns, etc. OK, now the final step:
 
-If your CSV file does not contain column headers then it can be handled in the
-following way:
+.. code-block::
+
+    gdal_grid dem.vrt demv.tif
+
+Or, if we do not wish to use a VRT file:
+
+.. code-block::
+
+    gdal_grid -l dem -oo X_POSSIBLE_NAMES=Easting \
+    -oo Y_POSSIBLE_NAMES=Northing -zfield Elevation dem.csv dem.tif
+
+If your CSV file does not contain column headers then it can be handled
+in the VRT file in the following way:
 
 .. code-block:: xml
 
@@ -450,6 +475,27 @@ following way:
 
 The :ref:`vector.csv` description page contains
 details on CSV format supported by GDAL/OGR.
+
+Creating multiband files
+------------------------
+
+Creating multiband files is not directly possible with gdal_grid.
+One might use gdal_grid multiple times to create one band per file,
+and then use :ref:`gdalbuildvrt` -separate and then :ref:`gdal_translate`:
+
+.. code-block:: bash
+
+    gdal_grid ... 1.tif; gdal_grid ... 2.tif; gdal_grid ... 3.tif
+    gdalbuildvrt -separate 123.vrt 1.tif 2.tif 3.tif
+    gdal_translate 123.vrt 123.tif
+
+Or just use :ref:`gdal_merge`, to combine the one-band files into a single one:
+
+.. code-block:: bash
+
+    gdal_grid ... a.tif; gdal_grid ... b.tif; gdal_grid ... c.tif
+    gdal_merge -separate a.tif b.tif c.tif -o d.tif
+
 
 C API
 -----
@@ -459,21 +505,29 @@ This utility is also callable from C with :cpp:func:`GDALGrid`.
 Examples
 --------
 
-The following would create raster TIFF file from VRT datasource described in
-`Reading comma separated values`_ section using the inverse distance to a power method.
-Values to interpolate will be read from Z value of geometry record.
+.. example::
+   :title: Create a raster from a VRT datasource using inverse distance to a power
 
-::
+   .. code-block:: bash
 
-    gdal_grid -a invdist:power=2.0:smoothing=1.0 -txe 85000 89000 -tye 894000 890000 -outsize 400 400 -of GTiff -ot Float64 -l dem dem.vrt dem.tiff
+       gdal_grid -a invdist:power=2.0:smoothing=1.0 -txe 85000 89000 -tye 894000 890000 \
+           -outsize 400 400 -of GTiff -ot Float64 -l dem dem.vrt dem.tiff
 
-The next command does the same thing as the previous one, but reads values to
-interpolate from the attribute field specified with **-zfield** option
-instead of geometry record. So in this case X and Y coordinates are being
-taken from geometry and Z is being taken from the *"Elevation"* field.
-The GDAL_NUM_THREADS is also set to parallelize the computation.
+   This example creates a raster TIFF file from the VRT datasource described in
+   `Reading comma separated values`_ section using the inverse distance to a power method.
+   Values to interpolate will be read from Z value of geometry record.
 
-::
+.. example::
+   :title: Read values to interpolate from an attribute field
 
-    gdal_grid -zfield "Elevation" -a invdist:power=2.0:smoothing=1.0 -txe 85000 89000 -tye 894000 890000 -outsize 400 400 -of GTiff -ot Float64 -l dem dem.vrt dem.tiff --config GDAL_NUM_THREADS ALL_CPUS
+   .. code-block:: bash
 
+       gdal_grid -zfield "Elevation" -a invdist:power=2.0:smoothing=1.0 -txe 85000 89000 \
+           -tye 894000 890000 -outsize 400 400 -of GTiff -ot Float64 -l dem dem.vrt \
+           dem.tiff --config GDAL_NUM_THREADS ALL_CPUS
+
+   This command does the same thing as the previous one, but reads values to
+   interpolate from the attribute field specified with **-zfield** option
+   instead of geometry record. So in this case X and Y coordinates are being
+   taken from geometry and Z is being taken from the *"Elevation"* field.
+   The :config:`GDAL_NUM_THREADS` is also set to parallelize the computation.

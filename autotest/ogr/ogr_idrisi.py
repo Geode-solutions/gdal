@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for OGR Idrisi driver.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2011-2012, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import ogrtest
@@ -84,28 +67,18 @@ def test_ogr_idrisi_1():
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat, ogr.CreateGeometryFromWkt("POINT(400000 5000000)")
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat, ogr.CreateGeometryFromWkt("POINT(400000 5000000)")
+    )
 
     feat = lyr.GetNextFeature()
     if feat.GetFieldAsDouble(0) != 2.0:
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat, ogr.CreateGeometryFromWkt("POINT (600000 4000000)")
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat, ogr.CreateGeometryFromWkt("POINT (600000 4000000)")
+    )
 
     lyr.SetSpatialFilterRect(600000 - 1, 4000000 - 1, 600000 + 1, 4000000 + 1)
     lyr.ResetReading()
@@ -147,30 +120,20 @@ def test_ogr_idrisi_2():
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat,
-            ogr.CreateGeometryFromWkt("LINESTRING (400000 5000000,600000 4500000)"),
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat,
+        ogr.CreateGeometryFromWkt("LINESTRING (400000 5000000,600000 4500000)"),
+    )
 
     feat = lyr.GetNextFeature()
     if feat.GetFieldAsDouble(0) != 20.0:
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat,
-            ogr.CreateGeometryFromWkt("LINESTRING (450000 4000000,550000 4500000)"),
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat,
+        ogr.CreateGeometryFromWkt("LINESTRING (450000 4000000,550000 4500000)"),
+    )
 
     lyr.SetSpatialFilterRect(0, 0, 1, 1)
     lyr.ResetReading()
@@ -205,34 +168,20 @@ def test_ogr_idrisi_3():
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat,
-            ogr.CreateGeometryFromWkt(
-                "POLYGON ((400000 4000000,400000 5000000,600000 5000000,600000 4000000,400000 4000000),(450000 4250000,450000 4750000,550000 4750000,550000 4250000,450000 4250000))"
-            ),
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat,
+        "POLYGON ((400000 4000000,400000 5000000,600000 5000000,600000 4000000,400000 4000000),(450000 4250000,450000 4750000,550000 4750000,550000 4250000,450000 4250000))",
+    )
 
     feat = lyr.GetNextFeature()
     if feat.GetFieldAsDouble(0) != 2.0:
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat,
-            ogr.CreateGeometryFromWkt(
-                "POLYGON ((400000 4000000,400000 5000000,600000 5000000,600000 4000000,400000 4000000))"
-            ),
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat,
+        "POLYGON ((400000 4000000,400000 5000000,600000 5000000,600000 4000000,400000 4000000))",
+    )
 
     lyr.SetSpatialFilterRect(0, 0, 1, 1)
     lyr.ResetReading()

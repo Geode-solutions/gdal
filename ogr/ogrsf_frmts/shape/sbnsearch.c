@@ -5,34 +5,12 @@
  * Author:   Even Rouault, even dot rouault at spatialys.com
  *
  ******************************************************************************
- * Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
+ * Copyright (c) 2012-2024, Even Rouault <even dot rouault at spatialys.com>
  *
- * This software is available under the following "MIT Style" license,
- * or at the option of the licensee under the LGPL (see COPYING).  This
- * option is discussed in more detail in shapelib.html.
- *
- * --
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT OR LGPL-2.0-or-later
  ******************************************************************************/
 
-#include "shapefil.h"
+#include "shapefil_private.h"
 
 #include <assert.h>
 #include <math.h>
@@ -41,14 +19,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-SHP_CVSID("$Id$")
-
 #ifndef USE_CPL
 #if defined(_MSC_VER)
 #if _MSC_VER < 1900
 #define snprintf _snprintf
 #endif
-#elif defined(WIN32) || defined(_WIN32)
+#elif defined(_WIN32)
 #ifndef snprintf
 #define snprintf _snprintf
 #endif
@@ -57,33 +33,21 @@ SHP_CVSID("$Id$")
 
 #define CACHED_DEPTH_LIMIT 8
 
-#ifdef __cplusplus
-#define STATIC_CAST(type, x) static_cast<type>(x)
-#define REINTERPRET_CAST(type, x) reinterpret_cast<type>(x)
-#define CONST_CAST(type, x) const_cast<type>(x)
-#define SHPLIB_NULLPTR nullptr
-#else
-#define STATIC_CAST(type, x) ((type)(x))
-#define REINTERPRET_CAST(type, x) ((type)(x))
-#define CONST_CAST(type, x) ((type)(x))
-#define SHPLIB_NULLPTR NULL
-#endif
-
 #define READ_MSB_INT(ptr)                                                      \
     STATIC_CAST(int, (((STATIC_CAST(unsigned, (ptr)[0])) << 24) |              \
                       ((ptr)[1] << 16) | ((ptr)[2] << 8) | (ptr)[3]))
 
-typedef unsigned char uchar;
-
 typedef int coord;
-/*typedef uchar coord;*/
+
+/*typedef unsigned char coord;*/
 
 typedef struct
 {
-    uchar *pabyShapeDesc; /* Cache of (nShapeCount * 8) bytes of the bins. May
+    unsigned char
+        *pabyShapeDesc; /* Cache of (nShapeCount * 8) bytes of the bins. May
                              be NULL. */
-    int nBinStart;        /* Index of first bin for this node. */
-    int nShapeCount;      /* Number of shapes attached to this node. */
+    int nBinStart;      /* Index of first bin for this node. */
+    int nShapeCount;    /* Number of shapes attached to this node. */
     int nBinCount;  /* Number of bins for this node. May be 0 if node is empty.
                      */
     int nBinOffset; /* Offset in file of the start of the first bin. May be 0 if
@@ -127,60 +91,53 @@ typedef struct
     int nShapeAlloc;
     int *panShapeId; /* 0 based */
 
-    uchar abyBinShape[8 * 100];
+    unsigned char abyBinShape[8 * 100];
 
 #ifdef DEBUG_IO
     int nBytesRead;
 #endif
 } SearchStruct;
 
+/* Associates a node id with the index of its first bin */
+typedef struct
+{
+    int nNodeId;
+    int nBinStart;
+} SBNNodeIdBinStartPair;
+
 /************************************************************************/
-/*                              SwapWord()                              */
-/*                                                                      */
-/*      Swap a 2, 4 or 8 byte word.                                     */
+/*                     SBNCompareNodeIdBinStartPairs()                  */
 /************************************************************************/
 
-static void SwapWord(int length, void *wordP)
+/* helper for qsort, to sort SBNNodeIdBinStartPair by increasing nBinStart */
+static int SBNCompareNodeIdBinStartPairs(const void *a, const void *b)
 {
-    for (int i = 0; i < length / 2; i++)
-    {
-        const uchar temp = STATIC_CAST(uchar *, wordP)[i];
-        STATIC_CAST(uchar *, wordP)
-        [i] = STATIC_CAST(uchar *, wordP)[length - i - 1];
-        STATIC_CAST(uchar *, wordP)[length - i - 1] = temp;
-    }
+    return STATIC_CAST(const SBNNodeIdBinStartPair *, a)->nBinStart -
+           STATIC_CAST(const SBNNodeIdBinStartPair *, b)->nBinStart;
 }
 
 /************************************************************************/
 /*                         SBNOpenDiskTree()                            */
 /************************************************************************/
 
-SBNSearchHandle SBNOpenDiskTree(const char *pszSBNFilename, SAHooks *psHooks)
+SBNSearchHandle SBNOpenDiskTree(const char *pszSBNFilename,
+                                const SAHooks *psHooks)
 {
-    /* -------------------------------------------------------------------- */
-    /*  Establish the byte order on this machine.                           */
-    /* -------------------------------------------------------------------- */
-    bool bBigEndian;
-    {
-        int i = 1;
-        if (*REINTERPRET_CAST(unsigned char *, &i) == 1)
-            bBigEndian = false;
-        else
-            bBigEndian = true;
-    }
-
     /* -------------------------------------------------------------------- */
     /*      Initialize the handle structure.                                */
     /* -------------------------------------------------------------------- */
     SBNSearchHandle hSBN =
-        STATIC_CAST(SBNSearchHandle, calloc(sizeof(struct SBNSearchInfo), 1));
+        STATIC_CAST(SBNSearchHandle, calloc(1, sizeof(struct SBNSearchInfo)));
+    if (!hSBN)
+        return SHPLIB_NULLPTR;
 
     if (psHooks == SHPLIB_NULLPTR)
         SASetupDefaultHooks(&(hSBN->sHooks));
     else
         memcpy(&(hSBN->sHooks), psHooks, sizeof(SAHooks));
 
-    hSBN->fpSBN = hSBN->sHooks.FOpen(pszSBNFilename, "rb");
+    hSBN->fpSBN =
+        hSBN->sHooks.FOpen(pszSBNFilename, "rb", hSBN->sHooks.pvUserData);
     if (hSBN->fpSBN == SHPLIB_NULLPTR)
     {
         free(hSBN);
@@ -190,7 +147,7 @@ SBNSearchHandle SBNOpenDiskTree(const char *pszSBNFilename, SAHooks *psHooks)
     /* -------------------------------------------------------------------- */
     /*      Check file header signature.                                    */
     /* -------------------------------------------------------------------- */
-    uchar abyHeader[108];
+    unsigned char abyHeader[108];
     if (hSBN->sHooks.FRead(abyHeader, 108, 1, hSBN->fpSBN) != 1 ||
         abyHeader[0] != 0 || abyHeader[1] != 0 || abyHeader[2] != 0x27 ||
         (abyHeader[3] != 0x0A && abyHeader[3] != 0x0D) ||
@@ -206,18 +163,17 @@ SBNSearchHandle SBNOpenDiskTree(const char *pszSBNFilename, SAHooks *psHooks)
     /*      Read shapes bounding box.                                       */
     /* -------------------------------------------------------------------- */
 
+#if !defined(SHP_BIG_ENDIAN)
+    SHP_SWAPDOUBLE_CPY(&hSBN->dfMinX, abyHeader + 32);
+    SHP_SWAPDOUBLE_CPY(&hSBN->dfMinY, abyHeader + 40);
+    SHP_SWAPDOUBLE_CPY(&hSBN->dfMaxX, abyHeader + 48);
+    SHP_SWAPDOUBLE_CPY(&hSBN->dfMaxY, abyHeader + 56);
+#else
     memcpy(&hSBN->dfMinX, abyHeader + 32, 8);
     memcpy(&hSBN->dfMinY, abyHeader + 40, 8);
     memcpy(&hSBN->dfMaxX, abyHeader + 48, 8);
     memcpy(&hSBN->dfMaxY, abyHeader + 56, 8);
-
-    if (!bBigEndian)
-    {
-        SwapWord(8, &hSBN->dfMinX);
-        SwapWord(8, &hSBN->dfMinY);
-        SwapWord(8, &hSBN->dfMaxX);
-        SwapWord(8, &hSBN->dfMaxY);
-    }
+#endif
 
     if (hSBN->dfMinX > hSBN->dfMaxX || hSBN->dfMinY > hSBN->dfMaxY)
     {
@@ -274,25 +230,27 @@ SBNSearchHandle SBNOpenDiskTree(const char *pszSBNFilename, SAHooks *psHooks)
     /*      There are at most (2^nMaxDepth) - 1, but all are not necessary  */
     /*      described. Non described nodes are empty.                       */
     /* -------------------------------------------------------------------- */
-    int nNodeDescSize = READ_MSB_INT(abyHeader + 104);
-    nNodeDescSize *= 2; /* 16-bit words */
+    const int nNodeDescSize = READ_MSB_INT(abyHeader + 104); /* 16-bit words */
 
     /* each bin descriptor is made of 2 ints */
-    const int nNodeDescCount = nNodeDescSize / 8;
+    const int nNodeDescCount = nNodeDescSize / 4;
 
-    if ((nNodeDescSize % 8) != 0 || nNodeDescCount < 0 ||
+    if ((nNodeDescSize % 4) != 0 || nNodeDescCount < 0 ||
         nNodeDescCount > nMaxNodes)
     {
         char szErrorMsg[64];
         snprintf(szErrorMsg, sizeof(szErrorMsg),
-                 "Invalid node descriptor size in .sbn : %d", nNodeDescSize);
+                 "Invalid node descriptor size in .sbn : %d",
+                 nNodeDescSize * STATIC_CAST(int, sizeof(uint16_t)));
         hSBN->sHooks.Error(szErrorMsg);
         SBNCloseDiskTree(hSBN);
         return SHPLIB_NULLPTR;
     }
 
+    const int nNodeDescSizeBytes = nNodeDescCount * 2 * 4;
     /* coverity[tainted_data] */
-    uchar *pabyData = STATIC_CAST(uchar *, malloc(nNodeDescSize));
+    unsigned char *pabyData =
+        STATIC_CAST(unsigned char *, malloc(nNodeDescSizeBytes));
     SBNNodeDescriptor *pasNodeDescriptor = STATIC_CAST(
         SBNNodeDescriptor *, calloc(nMaxNodes, sizeof(SBNNodeDescriptor)));
     if (pabyData == SHPLIB_NULLPTR || pasNodeDescriptor == SHPLIB_NULLPTR)
@@ -307,7 +265,7 @@ SBNSearchHandle SBNOpenDiskTree(const char *pszSBNFilename, SAHooks *psHooks)
     /* -------------------------------------------------------------------- */
     /*      Read node descriptors.                                          */
     /* -------------------------------------------------------------------- */
-    if (hSBN->sHooks.FRead(pabyData, nNodeDescSize, 1, hSBN->fpSBN) != 1)
+    if (hSBN->sHooks.FRead(pabyData, nNodeDescSizeBytes, 1, hSBN->fpSBN) != 1)
     {
         free(pabyData);
         free(pasNodeDescriptor);
@@ -318,105 +276,217 @@ SBNSearchHandle SBNOpenDiskTree(const char *pszSBNFilename, SAHooks *psHooks)
 
     hSBN->pasNodeDescriptor = pasNodeDescriptor;
 
+    SBNNodeIdBinStartPair *pasNodeIdBinStartPairs =
+        STATIC_CAST(SBNNodeIdBinStartPair *,
+                    malloc(nNodeDescCount * sizeof(SBNNodeIdBinStartPair)));
+    if (pasNodeIdBinStartPairs == SHPLIB_NULLPTR)
+    {
+        free(pabyData);
+        hSBN->sHooks.Error("Out of memory error");
+        SBNCloseDiskTree(hSBN);
+        return SHPLIB_NULLPTR;
+    }
+
+#ifdef ENABLE_SBN_SANITY_CHECKS
+    int nShapeCountAcc = 0;
+#endif
+    int nEntriesInNodeIdBinStartPairs = 0;
     for (int i = 0; i < nNodeDescCount; i++)
     {
-        /* --------------------------------------------------------------------
-         */
-        /*      Each node descriptor contains the index of the first bin that */
-        /*      described it, and the number of shapes in this first bin and */
-        /*      the following bins (in the relevant case). */
-        /* --------------------------------------------------------------------
-         */
-        int nBinStart = READ_MSB_INT(pabyData + 8 * i);
-        int nNodeShapeCount = READ_MSB_INT(pabyData + 8 * i + 4);
+        /* -------------------------------------------------------------------- */
+        /*      Each node descriptor contains the index of the first bin that   */
+        /*      described it, and the number of shapes in this first bin and    */
+        /*      the following bins (in the relevant case).                      */
+        /* -------------------------------------------------------------------- */
+        const int nBinStart = READ_MSB_INT(pabyData + 8 * i);
+        const int nNodeShapeCount = READ_MSB_INT(pabyData + 8 * i + 4);
         pasNodeDescriptor[i].nBinStart = nBinStart > 0 ? nBinStart : 0;
         pasNodeDescriptor[i].nShapeCount = nNodeShapeCount;
+
+#ifdef DEBUG_SBN
+        fprintf(stderr, "node[%d], nBinStart=%d, nShapeCount=%d\n", i,
+                nBinStart, nNodeShapeCount);
+#endif
 
         if ((nBinStart > 0 && nNodeShapeCount == 0) || nNodeShapeCount < 0 ||
             nNodeShapeCount > nShapeCount)
         {
             hSBN->sHooks.Error("Inconsistent shape count in bin");
+            free(pabyData);
+            free(pasNodeIdBinStartPairs);
             SBNCloseDiskTree(hSBN);
             return SHPLIB_NULLPTR;
+        }
+
+#ifdef ENABLE_SBN_SANITY_CHECKS
+        if (nShapeCountAcc > nShapeCount - nNodeShapeCount)
+        {
+            hSBN->sHooks.Error("Inconsistent shape count in bin");
+            free(pabyData);
+            free(pasNodeIdBinStartPairs);
+            SBNCloseDiskTree(hSBN);
+            return SHPLIB_NULLPTR;
+        }
+        nShapeCountAcc += nNodeShapeCount;
+#endif
+
+        if (nBinStart > 0)
+        {
+            pasNodeIdBinStartPairs[nEntriesInNodeIdBinStartPairs].nNodeId = i;
+            pasNodeIdBinStartPairs[nEntriesInNodeIdBinStartPairs].nBinStart =
+                nBinStart;
+            ++nEntriesInNodeIdBinStartPairs;
         }
     }
 
     free(pabyData);
     /* pabyData = SHPLIB_NULLPTR; */
 
-    /* Locate first non-empty node */
-    int nCurNode = 0;
-    while (nCurNode < nMaxNodes && pasNodeDescriptor[nCurNode].nBinStart <= 0)
-        nCurNode++;
-
-    if (nCurNode >= nMaxNodes)
+    if (nEntriesInNodeIdBinStartPairs == 0)
     {
+        free(pasNodeIdBinStartPairs);
         hSBN->sHooks.Error("All nodes are empty");
         SBNCloseDiskTree(hSBN);
         return SHPLIB_NULLPTR;
     }
 
-    pasNodeDescriptor[nCurNode].nBinOffset =
-        STATIC_CAST(int, hSBN->sHooks.FTell(hSBN->fpSBN));
+#ifdef ENABLE_SBN_SANITY_CHECKS
+    if (nShapeCountAcc != nShapeCount)
+    {
+        /* Not totally sure if the above condition is always true */
+        /* Not enabled by default, as non-needed for the good working */
+        /* of our code. */
+        free(pasNodeIdBinStartPairs);
+        char szMessage[128];
+        snprintf(szMessage, sizeof(szMessage),
+                 "Inconsistent shape count read in .sbn header (%d) vs total "
+                 "of shapes over nodes (%d)",
+                 nShapeCount, nShapeCountAcc);
+        hSBN->sHooks.Error(szMessage);
+        SBNCloseDiskTree(hSBN);
+        return SHPLIB_NULLPTR;
+    }
+#endif
 
-    /* Compute the index of the next non empty node. */
-    int nNextNonEmptyNode = nCurNode + 1;
-    while (nNextNonEmptyNode < nMaxNodes &&
-           pasNodeDescriptor[nNextNonEmptyNode].nBinStart <= 0)
-        nNextNonEmptyNode++;
+    /* Sort node descriptors by increasing nBinStart */
+    /* In most cases, the node descriptors have already an increasing nBinStart,
+     * but not for https://github.com/OSGeo/gdal/issues/9430 */
+    qsort(pasNodeIdBinStartPairs, nEntriesInNodeIdBinStartPairs,
+          sizeof(SBNNodeIdBinStartPair), SBNCompareNodeIdBinStartPairs);
+
+    /* Consistency check: the first referenced nBinStart should be 2. */
+    if (pasNodeIdBinStartPairs[0].nBinStart != 2)
+    {
+        char szMessage[128];
+        snprintf(szMessage, sizeof(szMessage),
+                 "First referenced bin (by node %d) should be 2, but %d found",
+                 pasNodeIdBinStartPairs[0].nNodeId,
+                 pasNodeIdBinStartPairs[0].nBinStart);
+        hSBN->sHooks.Error(szMessage);
+        SBNCloseDiskTree(hSBN);
+        free(pasNodeIdBinStartPairs);
+        return SHPLIB_NULLPTR;
+    }
+
+    /* And referenced nBinStart should be all distinct. */
+    for (int i = 1; i < nEntriesInNodeIdBinStartPairs; ++i)
+    {
+        if (pasNodeIdBinStartPairs[i].nBinStart ==
+            pasNodeIdBinStartPairs[i - 1].nBinStart)
+        {
+            char szMessage[128];
+            snprintf(szMessage, sizeof(szMessage),
+                     "Node %d and %d have the same nBinStart=%d",
+                     pasNodeIdBinStartPairs[i - 1].nNodeId,
+                     pasNodeIdBinStartPairs[i].nNodeId,
+                     pasNodeIdBinStartPairs[i].nBinStart);
+            hSBN->sHooks.Error(szMessage);
+            SBNCloseDiskTree(hSBN);
+            free(pasNodeIdBinStartPairs);
+            return SHPLIB_NULLPTR;
+        }
+    }
 
     int nExpectedBinId = 1;
+    int nIdxInNodeBinPair = 0;
+    int nCurNode = pasNodeIdBinStartPairs[nIdxInNodeBinPair].nNodeId;
+
+    pasNodeDescriptor[nCurNode].nBinOffset =
+        STATIC_CAST(int, hSBN->sHooks.FTell(hSBN->fpSBN));
 
     /* -------------------------------------------------------------------- */
     /*      Traverse bins to compute the offset of the first bin of each    */
     /*      node.                                                           */
     /*      Note: we could use the .sbx file to compute the offsets instead.*/
     /* -------------------------------------------------------------------- */
-    uchar abyBinHeader[8];
+    unsigned char abyBinHeader[8];
 
     while (hSBN->sHooks.FRead(abyBinHeader, 8, 1, hSBN->fpSBN) == 1)
     {
         nExpectedBinId++;
 
         const int nBinId = READ_MSB_INT(abyBinHeader);
-        int nBinSize = READ_MSB_INT(abyBinHeader + 4);
-        nBinSize *= 2; /* 16-bit words */
+        const int nBinSize = READ_MSB_INT(abyBinHeader + 4); /* 16-bit words */
+
+#ifdef DEBUG_SBN
+        fprintf(stderr, "bin id=%d, bin size (in features) = %d\n", nBinId,
+                nBinSize / 4);
+#endif
 
         if (nBinId != nExpectedBinId)
         {
-            hSBN->sHooks.Error("Unexpected bin id");
+            char szMessage[128];
+            snprintf(szMessage, sizeof(szMessage),
+                     "Unexpected bin id at bin starting at offset %d. Got %d, "
+                     "expected %d",
+                     STATIC_CAST(int, hSBN->sHooks.FTell(hSBN->fpSBN)) - 8,
+                     nBinId, nExpectedBinId);
+            hSBN->sHooks.Error(szMessage);
             SBNCloseDiskTree(hSBN);
+            free(pasNodeIdBinStartPairs);
             return SHPLIB_NULLPTR;
         }
 
         /* Bins are always limited to 100 features */
         /* If there are more, then they are located in continuous bins */
-        if ((nBinSize % 8) != 0 || nBinSize <= 0 || nBinSize > 100 * 8)
+        if ((nBinSize % 4) != 0 || nBinSize <= 0 || nBinSize > 100 * 4)
         {
-            hSBN->sHooks.Error("Unexpected bin size");
+            char szMessage[128];
+            snprintf(szMessage, sizeof(szMessage),
+                     "Unexpected bin size at bin starting at offset %d. Got %d",
+                     STATIC_CAST(int, hSBN->sHooks.FTell(hSBN->fpSBN)) - 8,
+                     nBinSize);
+            hSBN->sHooks.Error(szMessage);
             SBNCloseDiskTree(hSBN);
+            free(pasNodeIdBinStartPairs);
             return SHPLIB_NULLPTR;
         }
 
-        if (nNextNonEmptyNode < nMaxNodes &&
-            nBinId == pasNodeDescriptor[nNextNonEmptyNode].nBinStart)
+        if (nIdxInNodeBinPair + 1 < nEntriesInNodeIdBinStartPairs &&
+            nBinId == pasNodeIdBinStartPairs[nIdxInNodeBinPair + 1].nBinStart)
         {
-            nCurNode = nNextNonEmptyNode;
+            ++nIdxInNodeBinPair;
+            nCurNode = pasNodeIdBinStartPairs[nIdxInNodeBinPair].nNodeId;
             pasNodeDescriptor[nCurNode].nBinOffset =
                 STATIC_CAST(int, hSBN->sHooks.FTell(hSBN->fpSBN)) - 8;
-
-            /* Compute the index of the next non empty node. */
-            nNextNonEmptyNode = nCurNode + 1;
-            while (nNextNonEmptyNode < nMaxNodes &&
-                   pasNodeDescriptor[nNextNonEmptyNode].nBinStart <= 0)
-                nNextNonEmptyNode++;
         }
 
         pasNodeDescriptor[nCurNode].nBinCount++;
 
         /* Skip shape description */
-        hSBN->sHooks.FSeek(hSBN->fpSBN, nBinSize, SEEK_CUR);
+        hSBN->sHooks.FSeek(hSBN->fpSBN, nBinSize * sizeof(uint16_t), SEEK_CUR);
     }
+
+    if (nIdxInNodeBinPair + 1 != nEntriesInNodeIdBinStartPairs)
+    {
+        hSBN->sHooks.Error("Could not determine nBinOffset / nBinCount for all "
+                           "non-empty nodes.");
+        SBNCloseDiskTree(hSBN);
+        free(pasNodeIdBinStartPairs);
+        return SHPLIB_NULLPTR;
+    }
+
+    free(pasNodeIdBinStartPairs);
 
     return hSBN;
 }
@@ -448,21 +518,6 @@ void SBNCloseDiskTree(SBNSearchHandle hSBN)
 }
 
 /************************************************************************/
-/*                             SfRealloc()                              */
-/*                                                                      */
-/*      A realloc cover function that will access a NULL pointer as     */
-/*      a valid input.                                                  */
-/************************************************************************/
-
-static void *SfRealloc(void *pMem, int nNewSize)
-{
-    if (pMem == SHPLIB_NULLPTR)
-        return malloc(nNewSize);
-    else
-        return realloc(pMem, nNewSize);
-}
-
-/************************************************************************/
 /*                         SBNAddShapeId()                              */
 /************************************************************************/
 
@@ -473,8 +528,8 @@ static bool SBNAddShapeId(SearchStruct *psSearch, int nShapeId)
         psSearch->nShapeAlloc =
             STATIC_CAST(int, ((psSearch->nShapeCount + 100) * 5) / 4);
         int *pNewPtr =
-            STATIC_CAST(int *, SfRealloc(psSearch->panShapeId,
-                                         psSearch->nShapeAlloc * sizeof(int)));
+            STATIC_CAST(int *, realloc(psSearch->panShapeId,
+                                       psSearch->nShapeAlloc * sizeof(int)));
         if (pNewPtr == SHPLIB_NULLPTR)
         {
             psSearch->hSBN->sHooks.Error("Out of memory error");
@@ -534,7 +589,7 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
     /* -------------------------------------------------------------------- */
     else if (psNode->pabyShapeDesc != SHPLIB_NULLPTR)
     {
-        uchar *pabyShapeDesc = psNode->pabyShapeDesc;
+        unsigned char *pabyShapeDesc = psNode->pabyShapeDesc;
 
         /* printf("nNodeId = %d, nDepth = %d\n", nNodeId, nDepth); */
 
@@ -574,9 +629,9 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
 
         if (nDepth < CACHED_DEPTH_LIMIT)
             psNode->pabyShapeDesc =
-                STATIC_CAST(uchar *, malloc(psNode->nShapeCount * 8));
+                STATIC_CAST(unsigned char *, malloc(psNode->nShapeCount * 8));
 
-        uchar abyBinHeader[8];
+        unsigned char abyBinHeader[8];
         int nShapeCountAcc = 0;
 
         for (int i = 0; i < psNode->nBinCount; i++)
@@ -600,13 +655,12 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
                 return false;
             }
 
-            int nBinSize = READ_MSB_INT(abyBinHeader + 4);
-            nBinSize *= 2; /* 16-bit words */
-
-            int nShapes = nBinSize / 8;
+            /* 16-bit words */
+            const int nBinSize = READ_MSB_INT(abyBinHeader + 4);
+            const int nShapes = nBinSize / 4;
 
             /* Bins are always limited to 100 features */
-            if ((nBinSize % 8) != 0 || nShapes <= 0 || nShapes > 100)
+            if ((nBinSize % 4) != 0 || nShapes <= 0 || nShapes > 100)
             {
                 hSBN->sHooks.Error("Unexpected bin size");
                 free(psNode->pabyShapeDesc);
@@ -618,11 +672,17 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
             {
                 free(psNode->pabyShapeDesc);
                 psNode->pabyShapeDesc = SHPLIB_NULLPTR;
-                hSBN->sHooks.Error("Inconsistent shape count for bin");
+                char szMessage[192];
+                snprintf(
+                    szMessage, sizeof(szMessage),
+                    "Inconsistent shape count for bin idx=%d of node %d. "
+                    "nShapeCountAcc=(%d) + nShapes=(%d) > nShapeCount(=%d)",
+                    i, nNodeId, nShapeCountAcc, nShapes, psNode->nShapeCount);
+                hSBN->sHooks.Error(szMessage);
                 return false;
             }
 
-            uchar *pabyBinShape;
+            unsigned char *pabyBinShape;
             if (nDepth < CACHED_DEPTH_LIMIT &&
                 psNode->pabyShapeDesc != SHPLIB_NULLPTR)
             {
@@ -634,9 +694,10 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
             }
 
 #ifdef DEBUG_IO
-            psSearch->nBytesRead += nBinSize;
+            psSearch->nBytesRead += nBinSize * sizeof(uint16_t);
 #endif
-            if (hSBN->sHooks.FRead(pabyBinShape, nBinSize, 1, hSBN->fpSBN) != 1)
+            if (hSBN->sHooks.FRead(pabyBinShape, nBinSize * sizeof(uint16_t), 1,
+                                   hSBN->fpSBN) != 1)
             {
                 hSBN->sHooks.Error("I/O error");
                 free(psNode->pabyShapeDesc);
@@ -663,18 +724,14 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
 
                 if (!psNode->bBBoxInit)
                 {
-#ifdef sanity_checks
-                    /* --------------------------------------------------------------------
-                     */
-                    /*      Those tests only check that the shape bounding box
-                     * in the bin   */
-                    /*      are consistent (self-consistent and consistent with
-                     * the node    */
-                    /*      they are attached to). They are optional however (as
-                     * far as     */
-                    /*      the safety of runtime is concerned at least). */
-                    /* --------------------------------------------------------------------
-                     */
+                    /* clang-format off */
+#ifdef ENABLE_SBN_SANITY_CHECKS
+                    /* -------------------------------------------------------------------- */
+                    /*      Those tests only check that the shape bounding box in the bin   */
+                    /*      are consistent (self-consistent and consistent with the node    */
+                    /*      they are attached to). They are optional however (as far as     */
+                    /*      the safety of runtime is concerned at least).                   */
+                    /* -------------------------------------------------------------------- */
 
                     if (!(((bMinX < bMaxX || (bMinX == 0 && bMaxX == 0) ||
                             (bMinX == 255 && bMaxX == 255))) &&
@@ -683,16 +740,15 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
                         bMaxX < bNodeMinX || bMaxY < bNodeMinY ||
                         bMinX > bNodeMaxX || bMinY > bNodeMaxY)
                     {
-                        /* printf("shape %d %d %d %d\n", bMinX, bMinY, bMaxX,
-                         * bMaxY);*/
-                        /* printf("node  %d %d %d %d\n", bNodeMinX, bNodeMinY,
-                         * bNodeMaxX, bNodeMaxY);*/
+                        /* printf("shape %d %d %d %d\n", bMinX, bMinY, bMaxX, bMaxY);*/
+                        /* printf("node  %d %d %d %d\n", bNodeMinX, bNodeMinY, bNodeMaxX, bNodeMaxY);*/
                         hSBN->sHooks.Error("Invalid shape bounding box in bin");
                         free(psNode->pabyShapeDesc);
                         psNode->pabyShapeDesc = SHPLIB_NULLPTR;
                         return false;
                     }
 #endif
+                    /* clang-format on */
                     if (bMinX < psNode->bMinX)
                         psNode->bMinX = bMinX;
                     if (bMinY < psNode->bMinY)
@@ -725,7 +781,12 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
         {
             free(psNode->pabyShapeDesc);
             psNode->pabyShapeDesc = SHPLIB_NULLPTR;
-            hSBN->sHooks.Error("Inconsistent shape count for bin");
+            char szMessage[96];
+            snprintf(
+                szMessage, sizeof(szMessage),
+                "Inconsistent shape count for node %d. Got %d, expected %d",
+                nNodeId, nShapeCountAcc, psNode->nShapeCount);
+            hSBN->sHooks.Error(szMessage);
             return false;
         }
 
@@ -787,16 +848,15 @@ static bool SBNSearchDiskInternal(SearchStruct *psSearch, int nDepth,
 /* helper for qsort */
 static int compare_ints(const void *a, const void *b)
 {
-    return *REINTERPRET_CAST(const int *, a) -
-           *REINTERPRET_CAST(const int *, b);
+    return *STATIC_CAST(const int *, a) - *STATIC_CAST(const int *, b);
 }
 
 /************************************************************************/
 /*                        SBNSearchDiskTree()                           */
 /************************************************************************/
 
-int *SBNSearchDiskTree(SBNSearchHandle hSBN, double *padfBoundsMin,
-                       double *padfBoundsMax, int *pnShapeCount)
+int *SBNSearchDiskTree(const SBNSearchHandle hSBN, const double *padfBoundsMin,
+                       const double *padfBoundsMax, int *pnShapeCount)
 {
     *pnShapeCount = 0;
 
@@ -894,7 +954,7 @@ int *SBNSearchDiskTree(SBNSearchHandle hSBN, double *padfBoundsMin,
 /*                     SBNSearchDiskTreeInteger()                       */
 /************************************************************************/
 
-int *SBNSearchDiskTreeInteger(SBNSearchHandle hSBN, int bMinX, int bMinY,
+int *SBNSearchDiskTreeInteger(const SBNSearchHandle hSBN, int bMinX, int bMinY,
                               int bMaxX, int bMaxY, int *pnShapeCount)
 {
     *pnShapeCount = 0;

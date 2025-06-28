@@ -12,6 +12,8 @@ GdalDriverHelper
 
   Symptoms add_gdal_driver( TARGET <target_name>
                             [SOURCES <source file> [<source file>[...]]]
+                            [CORE_SOURCES <source file> [<source file>[...]]]
+                            NO_SHARED_SYMBOL_WITH_CORE
                             BUILTIN | PLUGIN_CAPABLE | [PLUGIN_CAPABLE_IF <cond>]
                             [NO_DEPS]
                           )
@@ -30,6 +32,34 @@ GdalDriverHelper
     but extra conditions provided in <cond> (e.g "NOT GDAL_USE_JSONC_INTERNAL") are needed
 
   The NO_DEPS option express that the driver has no non-core external dependencies.
+
+  The CORE_SOURCES option points to a list of files that are used for deferred plugin
+  loading (cf RFC 96 https://gdal.org/development/rfc/rfc96_deferred_plugin_loading.html),
+  when the driver is built as a plugin.
+  Those files are build in libgdal so it has access to plugin metadata and the
+  identification method, and are typically exported so that the driver can also
+  access them.
+  However it has been found that this resulted in the inability of building a
+  plugin for a libgdal that hadn't been built with any form of support for it,
+  which is undesirable.
+  Starting with GDAL 3.9.1, NO_SHARED_SYMBOL_WITH_CORE must also be declared
+  when CORE_SOURCES is declared, so that the files pointed by CORE_SOURCES
+  are built twice: once in libgdal with a "GDAL_core_" prefix, and another time
+  in the plugin itself with a "GDAL_driver_" prefix, by using the
+  PLUGIN_SYMBOL_NAME() macro of gdal_priv.h
+
+  Example in ogrocidrivercore.h:
+
+        #define OGROCIDriverIdentify \
+           PLUGIN_SYMBOL_NAME(OGROCIDriverIdentify)
+        #define OGROCIDriverSetCommonMetadata \
+           PLUGIN_SYMBOL_NAME(OGROCIDriverSetCommonMetadata)
+
+        int OGROCIDriverIdentify(GDALOpenInfo *poOpenInfo);
+
+        void OGROCIDriverSetCommonMetadata(GDALDriver *poDriver);
+
+
 
   There are several examples to show how to write build cmake script.
 
@@ -68,10 +98,32 @@ GdalDriverHelper
 
 #]=======================================================================]
 
+function(_set_driver_core_sources _KEY _DRIVER_TARGET)
+
+    add_library(${_DRIVER_TARGET}_core OBJECT ${ARGN})
+    set_property(TARGET ${_DRIVER_TARGET}_core PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
+    target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:${_DRIVER_TARGET}_core>)
+    target_compile_definitions(${_DRIVER_TARGET}_core PRIVATE "-DPLUGIN_FILENAME=\"${_DRIVER_TARGET}${CMAKE_SHARED_LIBRARY_SUFFIX}\"")
+    string(FIND "${_DRIVER_TARGET}" "ogr" IS_OGR)
+    if (IS_OGR EQUAL -1) # raster
+        set(_var_PLUGIN_INSTALLATION_MESSAGE "GDAL_DRIVER_${_KEY}_PLUGIN_INSTALLATION_MESSAGE")
+    else()
+        set(_var_PLUGIN_INSTALLATION_MESSAGE "OGR_DRIVER_${_KEY}_PLUGIN_INSTALLATION_MESSAGE")
+    endif()
+    if (DEFINED ${_var_PLUGIN_INSTALLATION_MESSAGE})
+        target_compile_definitions(${_DRIVER_TARGET}_core PRIVATE "-DPLUGIN_INSTALLATION_MESSAGE=\"${${_var_PLUGIN_INSTALLATION_MESSAGE}}\"")
+    endif()
+    gdal_standard_includes(${_DRIVER_TARGET}_core)
+    add_dependencies(${_DRIVER_TARGET}_core generate_gdal_version_h)
+
+    target_compile_definitions(gdal_frmts PRIVATE -DDEFERRED_${_KEY}_DRIVER)
+
+endfunction()
+
 function(add_gdal_driver)
-    set(_options BUILTIN PLUGIN_CAPABLE NO_DEPS STRONG_CXX_WFLAGS CXX_WFLAGS_EFFCXX NO_CXX_WFLAGS)
+    set(_options BUILTIN PLUGIN_CAPABLE NO_DEPS NO_WFLAG_OLD_STYLE_CAST NO_CXX_WFLAGS_EFFCXX NO_CXX_WFLAGS NO_SHARED_SYMBOL_WITH_CORE SKIP_GDAL_PRIV_HEADER)
     set(_oneValueArgs TARGET DESCRIPTION DEF PLUGIN_CAPABLE_IF DRIVER_NAME_OPTION)
-    set(_multiValueArgs SOURCES)
+    set(_multiValueArgs SOURCES CORE_SOURCES)
     cmake_parse_arguments(_DRIVER "${_options}" "${_oneValueArgs}" "${_multiValueArgs}" ${ARGN})
     # Check mandatory arguments
     if (NOT _DRIVER_TARGET)
@@ -80,6 +132,10 @@ function(add_gdal_driver)
     if (NOT _DRIVER_SOURCES)
         message(FATAL_ERROR "ADD_GDAL_DRIVER(): SOURCES is a mandatory argument.")
     endif ()
+
+    if(DEFINED _DRIVER_UNPARSED_ARGUMENTS)
+        message(FATAL_ERROR "add_gdal_driver(): unknown arguments found: ${_DRIVER_UNPARSED_ARGUMENTS}")
+    endif()
 
     # Set *_FORMATS properties for summary and gdal_config utility
     string(FIND "${_DRIVER_TARGET}" "ogr" IS_OGR)
@@ -103,7 +159,11 @@ function(add_gdal_driver)
         set(_COND ${_DRIVER_PLUGIN_CAPABLE_IF})
     endif()
 
-    get_target_property(PLUGIN_OUTPUT_DIR ${GDAL_LIB_TARGET_NAME} PLUGIN_OUTPUT_DIR)
+    if(STANDALONE)
+        set(PLUGIN_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+    else()
+        get_target_property(PLUGIN_OUTPUT_DIR ${GDAL_LIB_TARGET_NAME} PLUGIN_OUTPUT_DIR)
+    endif()
 
     if (_DRIVER_PLUGIN_CAPABLE OR _DRIVER_PLUGIN_CAPABLE_IF)
         set(_INITIAL_VALUE OFF)
@@ -125,6 +185,29 @@ function(add_gdal_driver)
         if( NOT DEFINED ${_enable_plugin_var} )
             message(FATAL_ERROR "Option ${_enable_plugin_var} does not exist")
         endif()
+
+        if (DEFINED ${_enable_plugin_var}_PLUGIN AND DEFINED _DRIVER_PLUGIN_CAPABLE_IF)
+          if (${${_enable_plugin_var}_PLUGIN})
+            set(_COND_WITH_AND "")
+            foreach(_c IN LISTS _COND)
+                if(_COND_WITH_AND)
+                    set(_COND_WITH_AND "${_COND_WITH_AND}) AND (${_c}")
+                else()
+                    set(_COND_WITH_AND "(${_c}")
+                endif()
+            endforeach()
+            set(_COND_WITH_AND "${_COND_WITH_AND})")
+
+            file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/check_plugin_conditions.cmake "
+              if (NOT (${_COND_WITH_AND}))
+                message(FATAL_ERROR \"${_enable_plugin_var}_PLUGIN required, but condition ${_COND} not met\")
+              endif()"
+            )
+
+            include(${CMAKE_CURRENT_BINARY_DIR}/check_plugin_conditions.cmake)
+          endif()
+        endif()
+
         cmake_dependent_option(${_enable_plugin_var}_PLUGIN "Set ON to build ${_plugin_var_prefix} ${_KEY} driver as plugin"
                                ${_INITIAL_VALUE}
                                "${_enable_plugin_var};${_COND}" OFF)
@@ -164,6 +247,23 @@ function(add_gdal_driver)
         endif()
     endif()
 
+    if ((GDAL_REGISTER_DRIVER_${_KEY}_FOR_LATER_PLUGIN OR
+         OGR_REGISTER_DRIVER_${_KEY}_FOR_LATER_PLUGIN) AND
+         NOT GDAL_ENABLE_DRIVER_${_KEY} AND
+         NOT OGR_ENABLE_DRIVER_${_KEY})
+        if (NOT _DRIVER_CORE_SOURCES)
+            if (GDAL_REGISTER_DRIVER_${_KEY}_FOR_LATER_PLUGIN)
+                message(FATAL_ERROR "GDAL_REGISTER_DRIVER_${_KEY}_FOR_LATER_PLUGIN is set but that driver has no deferred plugin capabilities")
+            else()
+                message(FATAL_ERROR "OGR_REGISTER_DRIVER_${_KEY}_FOR_LATER_PLUGIN is set but that driver has no deferred plugin capabilities")
+            endif()
+        endif()
+
+        _set_driver_core_sources(${_KEY} ${_DRIVER_TARGET} ${_DRIVER_CORE_SOURCES})
+
+        return()
+    endif()
+
     # target configuration
     if (_DRIVER_PLUGIN_BUILD)
         # target become *.so *.dll or *.dylib
@@ -190,10 +290,27 @@ function(add_gdal_driver)
             install(CODE "execute_process(COMMAND install_name_tool -add_rpath \"@loader_path/${relDir}\" \"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${INSTALL_PLUGIN_DIR}/${_DRIVER_TARGET}${CMAKE_SHARED_LIBRARY_SUFFIX}\")")
         endif()
         set_property(GLOBAL APPEND PROPERTY PLUGIN_MODULES ${_DRIVER_TARGET})
+
+        if (_DRIVER_CORE_SOURCES)
+            if (_DRIVER_NO_SHARED_SYMBOL_WITH_CORE)
+                foreach(f IN LISTS _DRIVER_CORE_SOURCES)
+                    # Create a separate source file, to make sure we get a different object file
+                    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/for_driver_${f}" "#include \"${CMAKE_CURRENT_SOURCE_DIR}/${f}\"")
+                    target_sources(${_DRIVER_TARGET} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/for_driver_${f}")
+                endforeach()
+            else()
+                message(FATAL_ERROR "Driver ${_DRIVER_TARGET} should declare DRIVER_NO_SHARED_SYMBOL_WITH_CORE")
+            endif()
+            if(NOT STANDALONE)
+                _set_driver_core_sources(${_KEY} ${_DRIVER_TARGET} ${_DRIVER_CORE_SOURCES})
+            endif()
+        endif ()
+
     else ()
-        add_library(${_DRIVER_TARGET} OBJECT ${_DRIVER_SOURCES})
+        add_library(${_DRIVER_TARGET} OBJECT ${_DRIVER_SOURCES} ${_DRIVER_CORE_SOURCES})
         set_property(TARGET ${_DRIVER_TARGET} PROPERTY POSITION_INDEPENDENT_CODE ON)
         target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:${_DRIVER_TARGET}>)
+
         if (_DRIVER_DEF)
             if (IS_OGR EQUAL -1) # raster
                 target_compile_definitions(gdal_frmts PRIVATE -D${_DRIVER_DEF})
@@ -203,23 +320,42 @@ function(add_gdal_driver)
         else ()
             if (IS_OGR EQUAL -1) # raster
                 string(TOLOWER ${_DRIVER_TARGET} _FORMAT)
-                string(REPLACE "gdal" "FRMT" _DEF ${_FORMAT})
+                string(FIND "${_FORMAT}" "gdal_" PREFIX_POS)
+                if (PREFIX_POS EQUAL -1)
+                    message(FATAL_ERROR "Cannot find gdal_ prefix in ${_FORMAT}")
+                endif()
+                string(REPLACE "gdal_" "FRMT_" _DEF ${_FORMAT})
                 target_compile_definitions(gdal_frmts PRIVATE -D${_DEF})
             else () # vector
-                string(REPLACE "ogr_" "" _FORMAT ${_DRIVER_TARGET})
                 target_compile_definitions(ogrsf_frmts PRIVATE -D${_KEY}_ENABLED)
             endif ()
         endif ()
     endif ()
-    if (_DRIVER_CXX_WFLAGS_EFFCXX)
-        target_compile_options(${_DRIVER_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${GDAL_CXX_WARNING_FLAGS} ${WFLAG_EFFCXX}>)
-    elseif (_DRIVER_STRONG_CXX_WFLAGS)
-        target_compile_options(${_DRIVER_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX}>)
-    elseif( NOT _DRIVER_NO_CXX_WFLAGS )
-        target_compile_options(${_DRIVER_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${GDAL_CXX_WARNING_FLAGS}>)
+
+    target_compile_definitions(${_DRIVER_TARGET} PUBLIC $<$<CONFIG:DEBUG>:GDAL_DEBUG>)
+
+    if (USE_PRECOMPILED_HEADERS AND NOT _DRIVER_SKIP_GDAL_PRIV_HEADER)
+        target_precompile_headers(${_DRIVER_TARGET} REUSE_FROM gdal_priv_header)
+    endif()
+
+    set(CXX_FLAG_SET)
+
+    if( NOT _DRIVER_NO_CXX_WFLAGS )
+        set(CXX_FLAG_SET ${CXX_FLAG_SET} ${GDAL_CXX_WARNING_FLAGS})
+    endif()
+    if (NOT _DRIVER_NO_CXX_WFLAGS_EFFCXX)
+        set(CXX_FLAG_SET ${CXX_FLAG_SET} ${WFLAG_EFFCXX})
+    endif()
+    if (NOT _DRIVER_NO_WFLAG_OLD_STYLE_CAST)
+        set(CXX_FLAG_SET ${CXX_FLAG_SET} ${WFLAG_OLD_STYLE_CAST})
+    endif()
+    if (CXX_FLAG_SET)
+        target_compile_options(${_DRIVER_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${CXX_FLAG_SET}>)
     endif()
     target_compile_options(${_DRIVER_TARGET} PRIVATE $<$<COMPILE_LANGUAGE:C>:${GDAL_C_WARNING_FLAGS}>)
-    add_dependencies(${_DRIVER_TARGET} generate_gdal_version_h)
+    if (NOT STANDALONE)
+        add_dependencies(${_DRIVER_TARGET} generate_gdal_version_h)
+    endif()
 endfunction()
 
 # Detect whether driver is built as PLUGIN or not.
@@ -298,6 +434,19 @@ function(gdal_target_link_libraries target)
         gdal_target_interfaces(${target} ${_DRIVER_PRIVATE})
         gdal_add_private_link_libraries(${_DRIVER_PRIVATE})
     endif ()
+
+    # For debugging purposes
+    if(SHOW_DEPS_PER_TARGET)
+        foreach (_LIB IN ITEMS ${_DRIVER_PRIVATE})
+            if (TARGET ${_LIB})
+                include(GdalGenerateConfig)
+                gdal_get_lflags(_libs ${_LIB})
+                message(STATUS "Target ${target}: links against ${_libs} (target ${_LIB})")
+            else()
+                message(STATUS "Target ${target}: links against ${_LIB}")
+            endif()
+        endforeach()
+    endif()
 endfunction()
 
 macro(gdal_driver_standard_includes _TARGET)
@@ -324,16 +473,24 @@ macro(check_depend_condition variable depends)
     endforeach()
 
     if(${variable})
-        cmake_dependent_option(TO_BE_REMOVED "" ON "${depends}" OFF)
-        if(NOT ${TO_BE_REMOVED})
-            unset(TO_BE_REMOVED CACHE)
-            if (NOT GDAL_IGNORE_FAILED_CONDITIONS)
-                message(FATAL_ERROR "${variable} cannot be enabled because condition ${depends} is not met. To ignore this error (but the driver will not be built), set the GDAL_IGNORE_FAILED_CONDITIONS variable")
-            else()
-                message(WARNING "${variable} cannot be enabled because condition ${depends} is not met.")
+        foreach(_dep IN ITEMS ${depends})
+            cmake_dependent_option(TO_BE_REMOVED "" ON "${_dep}" OFF)
+            if(NOT ${TO_BE_REMOVED})
+                unset(TO_BE_REMOVED CACHE)
+                if (NOT GDAL_IGNORE_FAILED_CONDITIONS)
+                    set(ERROR_MSG_EXTRA_HINT)
+                    if( "${_dep}" MATCHES "OGR_ENABLE_DRIVER_" AND NOT ${OGR_BUILD_OPTIONAL_DRIVERS})
+                        set(ERROR_MSG_EXTRA_HINT ", presumably because OGR_BUILD_OPTIONAL_DRIVERS=OFF was explicitly set. You may conditionally enable the missing required driver by setting ${_dep}=ON")
+                    elseif ( "${_dep}" MATCHES "GDAL_ENABLE_DRIVER_" AND NOT ${GDAL_BUILD_OPTIONAL_DRIVERS})
+                        set(ERROR_MSG_EXTRA_HINT ", presumably because GDAL_BUILD_OPTIONAL_DRIVERS=OFF was explicitly set. You may conditionally enable the missing required driver by setting ${_dep}=ON")
+                    endif()
+                    message(FATAL_ERROR "${variable} cannot be enabled because condition ${_dep} is not met${ERROR_MSG_EXTRA_HINT}. To ignore this error (but the driver will not be built), set the GDAL_IGNORE_FAILED_CONDITIONS variable")
+                else()
+                    message(WARNING "${variable} cannot be enabled because condition ${_dep} is not met.")
+                endif()
             endif()
-        endif()
-        unset(TO_BE_REMOVED CACHE)
+            unset(TO_BE_REMOVED CACHE)
+        endforeach()
     endif()
 endmacro()
 
@@ -356,7 +513,7 @@ macro(gdal_dependent_format format desc depends)
     cmake_dependent_option(GDAL_ENABLE_DRIVER_${key} "Set ON to build ${desc} format" ${GDAL_BUILD_OPTIONAL_DRIVERS}
                            "${depends}" OFF)
     add_feature_info(gdal_${key} GDAL_ENABLE_DRIVER_${key} "${desc}")
-    if (GDAL_ENABLE_DRIVER_${key} AND NOT _GDF_SKIP_ADD_SUBDIRECTORY)
+    if (NOT STANDALONE AND (GDAL_ENABLE_DRIVER_${key} AND NOT _GDF_SKIP_ADD_SUBDIRECTORY) OR GDAL_REGISTER_DRIVER_${key}_FOR_LATER_PLUGIN)
         add_subdirectory(${format})
     endif ()
 endmacro()
@@ -380,7 +537,7 @@ macro(gdal_optional_format format desc)
     endif()
     option(GDAL_ENABLE_DRIVER_${key} "Set ON to build ${desc} format" ${GDAL_BUILD_OPTIONAL_DRIVERS})
     add_feature_info(gdal_${key} GDAL_ENABLE_DRIVER_${key} "${desc}")
-    if (GDAL_ENABLE_DRIVER_${key})
+    if (GDAL_ENABLE_DRIVER_${key} OR GDAL_REGISTER_DRIVER_${key}_FOR_LATER_PLUGIN)
         add_subdirectory(${format})
     endif ()
 endmacro()
@@ -398,7 +555,7 @@ macro(ogr_dependent_driver name desc depend)
                                "${depend}" OFF)
     endif()
     add_feature_info(ogr_${key} OGR_ENABLE_DRIVER_${key} "${desc}")
-    if (OGR_ENABLE_DRIVER_${key})
+    if (NOT STANDALONE AND OGR_ENABLE_DRIVER_${key} OR OGR_REGISTER_DRIVER_${key}_FOR_LATER_PLUGIN)
         add_subdirectory(${name})
     endif ()
 endmacro()
@@ -410,7 +567,7 @@ macro(ogr_optional_driver name desc)
     string(TOUPPER ${name} key)
     option(OGR_ENABLE_DRIVER_${key} "Set ON to build OGR ${desc} driver" ${OGR_BUILD_OPTIONAL_DRIVERS})
     add_feature_info(ogr_${key} OGR_ENABLE_DRIVER_${key} "${desc}")
-    if (OGR_ENABLE_DRIVER_${key})
+    if (OGR_ENABLE_DRIVER_${key} OR OGR_REGISTER_DRIVER_${key}_FOR_LATER_PLUGIN)
         add_subdirectory(${name})
     endif ()
 endmacro()
@@ -424,9 +581,16 @@ macro(ogr_default_driver name desc)
     add_feature_info(ogr_${key} OGR_ENABLE_DRIVER_${key} "${desc}")
     add_subdirectory(${name})
 endmacro()
-macro(ogr_default_driver2 name key desc)
-    set(OGR_ENABLE_DRIVER_${key} ON CACHE BOOL "${desc}" FORCE)
-    add_feature_info(ogr_${key} OGR_ENABLE_DRIVER_${key} "${desc}")
-    add_subdirectory(${name})
-endmacro()
 
+function(add_driver_embedded_resources driver_target is_plugin_var c_filename)
+    add_library(${driver_target}_resources OBJECT ${c_filename})
+    gdal_standard_includes(${driver_target}_resources)
+    set_property(TARGET ${driver_target}_resources PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
+    target_compile_definitions(${driver_target} PRIVATE EMBED_RESOURCE_FILES)
+    set_target_properties(${driver_target}_resources PROPERTIES C_STANDARD 23)
+    if (${${is_plugin_var}})
+        target_sources(${driver_target} PRIVATE $<TARGET_OBJECTS:${driver_target}_resources>)
+    else()
+        target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:${driver_target}_resources>)
+    endif()
+endfunction()

@@ -62,7 +62,7 @@ int LLVMFuzzerInitialize(int * /*argc*/, char ***argv)
     const char *exe_path = (*argv)[0];
     if (CPLGetConfigOption("GDAL_DATA", nullptr) == nullptr)
     {
-        CPLSetConfigOption("GDAL_DATA", CPLGetPath(exe_path));
+        CPLSetConfigOption("GDAL_DATA", CPLGetPathSafe(exe_path).c_str());
     }
     CPLSetConfigOption("CPL_TMPDIR", "/tmp");
     CPLSetConfigOption("DISABLE_OPEN_REAL_NETCDF_FILES", "YES");
@@ -107,6 +107,32 @@ int LLVMFuzzerTestOneInput(const uint8_t *buf, size_t len)
     CPLPushErrorHandler(CPLQuietErrorHandler);
 #ifdef USE_FILESYSTEM
     OGRDataSourceH hDS = OGROpen(szTempFilename, FALSE, nullptr);
+#elif defined(FOR_OGR_MIRAMON)
+    std::string osVsitarPrefix("/vsitar/");
+    char **papszFiles =
+        VSIReadDir(std::string(osVsitarPrefix).append(MEM_FILENAME).c_str());
+    std::string osFileInTar;
+    for (int i = 0; papszFiles && papszFiles[i]; ++i)
+    {
+        if (EQUAL(CPLGetExtension(papszFiles[i]), "pol") ||
+            EQUAL(CPLGetExtension(papszFiles[i]), "arc") ||
+            EQUAL(CPLGetExtension(papszFiles[i]), "pnt"))
+        {
+            osFileInTar = papszFiles[i];
+            break;
+        }
+    }
+    CSLDestroy(papszFiles);
+    OGRDataSourceH hDS = nullptr;
+    if (!osFileInTar.empty())
+    {
+        hDS = OGROpen(std::string(osVsitarPrefix)
+                          .append(MEM_FILENAME)
+                          .append("/")
+                          .append(osFileInTar)
+                          .c_str(),
+                      FALSE, nullptr);
+    }
 #else
     OGRDataSourceH hDS = OGROpen(GDAL_FILENAME, FALSE, nullptr);
 #endif

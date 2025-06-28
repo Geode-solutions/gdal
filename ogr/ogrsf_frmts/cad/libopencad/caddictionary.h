@@ -10,23 +10,7 @@
  *  Copyright (c) 2016 Alexandr Borzykh
  *  Copyright (c) 2016 NextGIS, <info@nextgis.com>
  *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to deal
- *  in the Software without restriction, including without limitation the rights
- *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- *  copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in all
- *  copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- *  SOFTWARE.
+  * SPDX-License-Identifier: MIT
  *******************************************************************************/
 #ifndef CADDICTIONARY_H
 #define CADDICTIONARY_H
@@ -40,12 +24,14 @@
 class OCAD_EXTERN CADDictionaryRecord
 {
 public:
-    CADDictionaryRecord();
-    virtual ~CADDictionaryRecord(){}
-
+    virtual ~CADDictionaryRecord();
     CADObject::ObjectType getType() const;
 
 protected:
+    CADDictionaryRecord();
+    CADDictionaryRecord(const CADDictionaryRecord&) = default;
+    CADDictionaryRecord(CADDictionaryRecord&&)=default;
+
     CADObject::ObjectType objType;
 };
 
@@ -56,13 +42,17 @@ class OCAD_EXTERN CADXRecord : public CADDictionaryRecord
 {
 public:
     CADXRecord();
-    virtual ~CADXRecord(){}
+    ~CADXRecord() override;
+    CADXRecord(const CADXRecord&) = default;
+    CADXRecord(CADXRecord&&)=default;
 
     const std::string getRecordData() const;
     void              setRecordData( const std::string& data );
 
 private:
     std::string sRecordData;
+    CADXRecord& operator=(const CADXRecord&) =delete;
+    CADXRecord& operator=(CADXRecord&&)= delete;
 };
 
 /*
@@ -73,7 +63,9 @@ class OCAD_EXTERN CADDictionary : public CADDictionaryRecord
 {
 public:
     CADDictionary();
-    virtual ~CADDictionary();
+    ~CADDictionary() override;
+    CADDictionary(const CADDictionary&) = default;
+    CADDictionary(CADDictionary&&)=default;
 
     size_t getRecordsCount();
     void   addRecord( CADDictionaryItem );
@@ -81,6 +73,8 @@ public:
     std::string getRecordByName(const std::string& name) const;
 private:
     std::vector< CADDictionaryItem > astXRecords;
+    CADDictionary& operator=(const CADDictionary&) =delete;
+    CADDictionary& operator=(CADDictionary&&)= delete;
 };
 
 #endif // CADDICTIONARY_H

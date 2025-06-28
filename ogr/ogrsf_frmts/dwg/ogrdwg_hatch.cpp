@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2011, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_dwg.h"
@@ -144,7 +128,7 @@ static OGRErr DWGCollectBoundaryLoop(OdDbHatchPtr poHatch, int iLoop,
 
         oSmoothPolyline.Close();
 
-        OGRLineString *poLS = oSmoothPolyline.Tessellate()->toLineString();
+        OGRLineString *poLS = oSmoothPolyline.Tessellate(false)->toLineString();
         poGC->addGeometryDirectly(poLS);
 
         return OGRERR_NONE;
@@ -156,10 +140,8 @@ static OGRErr DWGCollectBoundaryLoop(OdDbHatchPtr poHatch, int iLoop,
     EdgeArray oEdges;
     poHatch->getLoopAt(iLoop, oEdges);
 
-    for (i = 0; i < (int)oEdges.size(); i++)
+    for (OdGeCurve2d *poEdge : oEdges)
     {
-        OdGeCurve2d *poEdge = oEdges[i];
-
         if (poEdge->type() == OdGe::kLineSeg2d)
         {
             OGRLineString *poLS = new OGRLineString();
@@ -172,7 +154,7 @@ static OGRErr DWGCollectBoundaryLoop(OdDbHatchPtr poHatch, int iLoop,
         }
         else if (poEdge->type() == OdGe::kCircArc2d)
         {
-            OdGeCircArc2d *poCircArc = (OdGeCircArc2d *)poEdge;
+            OdGeCircArc2d *poCircArc = static_cast<OdGeCircArc2d *>(poEdge);
             OdGePoint2d oCenter = poCircArc->center();
             double dfStartAngle = poCircArc->startAng() * 180 / M_PI;
             double dfEndAngle = poCircArc->endAng() * 180 / M_PI;
@@ -197,7 +179,7 @@ static OGRErr DWGCollectBoundaryLoop(OdDbHatchPtr poHatch, int iLoop,
         }
         else if (poEdge->type() == OdGe::kEllipArc2d)
         {
-            OdGeEllipArc2d *poArc = (OdGeEllipArc2d *)poEdge;
+            OdGeEllipArc2d *poArc = static_cast<OdGeEllipArc2d *>(poEdge);
             OdGePoint2d oCenter = poArc->center();
             double dfRatio = poArc->minorRadius() / poArc->majorRadius();
             OdGeVector2d oMajorAxis = poArc->majorAxis();

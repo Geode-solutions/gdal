@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Nyall Dawson <nyall dot dawson at gmail dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef FILEGDB_RELATIONSHIP_H
@@ -242,7 +226,7 @@ ParseXMLRelationshipDef(const std::string &domainDef)
     }
     else
     {
-        poRelationship->SetRelatedTableType("feature");
+        poRelationship->SetRelatedTableType("features");
     }
     return poRelationship;
 }
@@ -548,7 +532,7 @@ BuildXMLRelationshipDef(const GDALRelationship *poRelationship, int iDsid,
     CPLCreateXMLElementAndValue(psRoot, "ReplicaTracked", "false");
 
     char *pszXML = CPLSerializeXMLTree(oTree.get());
-    const std::string osXML(pszXML);
+    std::string osXML(pszXML);
     CPLFree(pszXML);
     return osXML;
 }
@@ -612,7 +596,7 @@ BuildXMLRelationshipItemInfo(const GDALRelationship *poRelationship,
     CPLCreateXMLElementAndValue(psRoot, "propValues", "");
 
     char *pszXML = CPLSerializeXMLTree(oTree.get());
-    const std::string osXML(pszXML);
+    std::string osXML(pszXML);
     CPLFree(pszXML);
     return osXML;
 }
@@ -641,7 +625,7 @@ BuildXMLRelationshipDocumentation(const GDALRelationship * /*poRelationship*/,
     CPLCreateXMLNode(psDataProperties, CXT_Element, "lineage");
 
     char *pszXML = CPLSerializeXMLTree(oTree.get());
-    const std::string osXML(pszXML);
+    std::string osXML(pszXML);
     CPLFree(pszXML);
     return osXML;
 }

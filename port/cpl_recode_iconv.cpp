@@ -64,17 +64,21 @@ void CPLClearRecodeIconvWarningFlags()
 /************************************************************************/
 
 static const char *CPLFixInputEncoding(const char *pszSrcEncoding,
-                                       int nFirstByteVal)
+                                       int nFirstVal)
 {
+#if CPL_IS_LSB
     // iconv on Alpine Linux seems to assume BE order, when it is not explicit
     if (EQUAL(pszSrcEncoding, CPL_ENC_UCS2))
         pszSrcEncoding = "UCS-2LE";
-    else if (EQUAL(pszSrcEncoding, CPL_ENC_UTF16) && nFirstByteVal != 0xFF &&
-             nFirstByteVal != 0xFE)
+    else if (EQUAL(pszSrcEncoding, CPL_ENC_UTF16) && nFirstVal != 0xFF &&
+             nFirstVal != 0xFE && nFirstVal != 0xFFFE && nFirstVal != 0xFEFF)
     {
         // Only force UTF-16LE if there's no starting endianness marker
         pszSrcEncoding = "UTF-16LE";
     }
+#else
+    CPL_IGNORE_RET_VAL(nFirstVal);
+#endif
     return pszSrcEncoding;
 }
 
@@ -383,7 +387,7 @@ char *CPLRecodeFromWCharIconv(const wchar_t *pwszSource,
  *
  * @param pszSource input multi-byte character string.
  * @param pszSrcEncoding source encoding, typically CPL_ENC_UTF8.
- * @param pszDstEncoding destination encoding, typically CPL_ENC_UCS2.
+ * @param pszDstEncoding destination encoding. Must be "WCHAR_T".
  *
  * @return the zero terminated wchar_t string (to be freed with CPLFree()) or
  * NULL on error.
@@ -394,8 +398,19 @@ wchar_t *CPLRecodeToWCharIconv(const char *pszSource,
                                const char *pszDstEncoding)
 
 {
-    return reinterpret_cast<wchar_t *>(
-        CPLRecodeIconv(pszSource, pszSrcEncoding, pszDstEncoding));
+    if (strcmp(pszDstEncoding, "WCHAR_T") != 0)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Stub recoding implementation does not support "
+                 "CPLRecodeToWCharIconv(...,%s,%s)",
+                 pszSrcEncoding, pszDstEncoding);
+        return nullptr;
+    }
+
+    // Using double static_cast<> makes CodeQL cpp/incorrect-string-type-conversion
+    // check happy...
+    return static_cast<wchar_t *>(static_cast<void *>(
+        CPLRecodeIconv(pszSource, pszSrcEncoding, pszDstEncoding)));
 }
 
 #endif /* CPL_RECODE_ICONV */

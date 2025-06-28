@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_edigeo.h"
@@ -35,10 +19,10 @@
 /************************************************************************/
 
 OGREDIGEODataSource::OGREDIGEODataSource()
-    : pszName(nullptr), fpTHF(nullptr), papoLayers(nullptr), nLayers(0),
-      poSRS(nullptr), bExtentValid(FALSE), dfMinX(0), dfMinY(0), dfMaxX(0),
-      dfMaxY(0), bRecodeToUTF8(CPLTestBool(
-                     CPLGetConfigOption("OGR_EDIGEO_RECODE_TO_UTF8", "YES"))),
+    : fpTHF(nullptr), papoLayers(nullptr), nLayers(0), poSRS(nullptr),
+      bExtentValid(FALSE), dfMinX(0), dfMinY(0), dfMaxX(0), dfMaxY(0),
+      bRecodeToUTF8(
+          CPLTestBool(CPLGetConfigOption("OGR_EDIGEO_RECODE_TO_UTF8", "YES"))),
       bHasUTF8ContentOnly(TRUE), iATR(-1), iDI3(-1), iDI4(-1), iHEI(-1),
       iFON(-1), iATR_VAL(-1), iANGLE(-1), iSIZE(-1), iOBJ_LNK(-1),
       iOBJ_LNK_LAYER(-1),
@@ -64,22 +48,11 @@ OGREDIGEODataSource::~OGREDIGEODataSource()
         delete papoLayers[i];
     CPLFree(papoLayers);
 
-    CPLFree(pszName);
-
     if (fpTHF)
         VSIFCloseL(fpTHF);
 
     if (poSRS)
         poSRS->Release();
-}
-
-/************************************************************************/
-/*                           TestCapability()                           */
-/************************************************************************/
-
-int OGREDIGEODataSource::TestCapability(CPL_UNUSED const char *pszCap)
-{
-    return FALSE;
 }
 
 /************************************************************************/
@@ -183,16 +156,15 @@ VSILFILE *OGREDIGEODataSource::OpenFile(const char *pszType,
                                         const CPLString &osExt)
 {
     CPLString osTmp = osLON + pszType;
-    CPLString osFilename =
-        CPLFormCIFilename(CPLGetPath(pszName), osTmp.c_str(), osExt.c_str());
+    CPLString osFilename = CPLFormCIFilenameSafe(
+        CPLGetPathSafe(GetDescription()).c_str(), osTmp.c_str(), osExt.c_str());
     VSILFILE *fp = VSIFOpenL(osFilename, "rb");
     if (fp == nullptr)
     {
-        CPLString osExtLower = osExt;
-        for (int i = 0; i < (int)osExt.size(); i++)
-            osExtLower[i] = (char)tolower(osExt[i]);
-        CPLString osFilename2 = CPLFormCIFilename(
-            CPLGetPath(pszName), osTmp.c_str(), osExtLower.c_str());
+        const CPLString osExtLower = CPLString(osExt).tolower();
+        const CPLString osFilename2 =
+            CPLFormCIFilenameSafe(CPLGetPathSafe(GetDescription()).c_str(),
+                                  osTmp.c_str(), osExtLower.c_str());
         fp = VSIFOpenL(osFilename2, "rb");
         if (fp == nullptr)
         {
@@ -369,7 +341,7 @@ int OGREDIGEODataSource::ReadDIC()
                 OGREDIGEOAttributeDef sAttributeDef;
                 sAttributeDef.osLAB = osLAB;
                 sAttributeDef.osTYP = osTYP;
-                mapAttributes[osRID] = sAttributeDef;
+                mapAttributes[osRID] = std::move(sAttributeDef);
             }
         }
 
@@ -439,7 +411,7 @@ int OGREDIGEODataSource::ReadSCD()
                             osRID.c_str(), osNameRID.c_str(), osKND.c_str(),
                             (int)aosAttrRID.size());*/
 
-                    aoObjList.push_back(objDesc);
+                    aoObjList.push_back(std::move(objDesc));
                 }
             }
             else if (osRTY == "ATT")
@@ -458,7 +430,7 @@ int OGREDIGEODataSource::ReadSCD()
                     /*CPLDebug("EDIGEO", "Attribute %s = %s, %d",
                             osRID.c_str(), osNameRID.c_str(), nWidth);*/
 
-                    mapAttributesSCD[osRID] = attDesc;
+                    mapAttributesSCD[osRID] = std::move(attDesc);
                 }
             }
         }
@@ -712,15 +684,15 @@ int OGREDIGEODataSource::ReadVEC(const char *pszVECName)
                 {
                     /*CPLDebug("EDIGEO", "FEA[%s] -> PFE[%s]",
                              osLnkStartName.c_str(), osLnkEndName.c_str());*/
-                    listFEA_PFE.push_back(std::pair<CPLString, strListType>(
-                        osLnkStartName, osLnkEndNameList));
+                    listFEA_PFE.push_back(
+                        std::pair(osLnkStartName, osLnkEndNameList));
                 }
                 else if (osLnkStartType == "FEA" && osLnkEndType == "PAR")
                 {
                     /*CPLDebug("EDIGEO", "FEA[%s] -> PAR[%s]",
                              osLnkStartName.c_str(), osLnkEndName.c_str());*/
-                    listFEA_PAR.push_back(std::pair<CPLString, strListType>(
-                        osLnkStartName, osLnkEndNameList));
+                    listFEA_PAR.push_back(
+                        std::pair(osLnkStartName, osLnkEndNameList));
                 }
                 else if (osLnkStartType == "FEA" && osLnkEndType == "PNO")
                 {
@@ -753,7 +725,7 @@ int OGREDIGEODataSource::ReadVEC(const char *pszVECName)
                 feaDesc.aosAttIdVal = aosAttIdVal;
                 feaDesc.osSCP = osSCP;
                 feaDesc.osQUP_RID = osQUP_RID;
-                mapFEA[osRID] = feaDesc;
+                mapFEA[osRID] = std::move(feaDesc);
             }
             else if (osRTY == "PNO")
             {
@@ -1264,7 +1236,7 @@ int OGREDIGEODataSource::BuildPolygon(const CPLString &osFEA,
                 nIter++;
             }
 
-            aoXYList.push_back(aoXY);
+            aoXYList.push_back(std::move(aoXY));
         }
     }
 
@@ -1386,8 +1358,6 @@ static int OGREDIGEOSortForQGIS(const void *a, const void *b)
 int OGREDIGEODataSource::Open(const char *pszFilename)
 
 {
-    pszName = CPLStrdup(pszFilename);
-
     fpTHF = VSIFOpenL(pszFilename, "rb");
     if (fpTHF == nullptr)
         return FALSE;

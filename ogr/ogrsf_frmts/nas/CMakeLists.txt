@@ -7,10 +7,12 @@ add_gdal_driver(
           ogrnasdatasource.cpp
           ogrnasdriver.cpp
           ogrnaslayer.cpp
-          ogrnasrelationlayer.cpp
-  BUILTIN) # BUILTIN because of GML dependency
+  BUILTIN  # BUILTIN because of GML dependency
+  NO_CXX_WFLAGS_EFFCXX
+  NO_WFLAG_OLD_STYLE_CAST
+)
 gdal_standard_includes(ogr_NAS)
-target_include_directories(ogr_NAS PRIVATE $<TARGET_PROPERTY:ogr_GML,SOURCE_DIR>)
+target_include_directories(ogr_NAS PRIVATE $<TARGET_PROPERTY:ogr_GML,SOURCE_DIR> $<TARGET_PROPERTY:gmlutils,SOURCE_DIR>)
 if (GDAL_USE_EXPAT)
   target_compile_definitions(ogr_NAS PRIVATE -DHAVE_EXPAT)
   gdal_target_link_libraries(ogr_NAS PRIVATE ${EXPAT_TARGET})

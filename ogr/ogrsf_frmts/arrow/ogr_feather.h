@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_FEATHER_H
@@ -96,9 +80,15 @@ class OGRFeatherLayer final : public OGRArrowLayer
                          const std::string &key);
     OGRwkbGeometryType ComputeGeometryColumnType(int iGeomCol, int iCol) const;
     bool ReadNextBatch() override;
+
+    void InvalidateCachedBatches() override;
+
     OGRFeature *GetNextRawFeature();
 
     virtual bool CanRunNonForcedGetExtent() override;
+
+    bool
+    CanPostFilterArrowArray(const struct ArrowSchema *schema) const override;
 
     bool ReadNextBatchFile();
     bool ReadNextBatchStream();
@@ -150,6 +140,7 @@ class OGRFeatherWriterLayer final : public OGRArrowWriterLayer
     OGRFeatherWriterLayer(const OGRFeatherWriterLayer &) = delete;
     OGRFeatherWriterLayer &operator=(const OGRFeatherWriterLayer &) = delete;
 
+    GDALDataset *m_poDS = nullptr;
     bool m_bStreamFormat = false;
     std::shared_ptr<arrow::ipc::RecordBatchWriter> m_poFileWriter{};
     std::shared_ptr<arrow::KeyValueMetadata> m_poFooterKeyValueMetadata{};
@@ -158,8 +149,9 @@ class OGRFeatherWriterLayer final : public OGRArrowWriterLayer
     {
         return m_poFileWriter != nullptr;
     }
+
     virtual void CreateWriter() override;
-    virtual void CloseFileWriter() override;
+    virtual bool CloseFileWriter() override;
 
     virtual void CreateSchema() override;
     virtual void PerformStepsBeforeFinalFlushGroup() override;
@@ -173,6 +165,7 @@ class OGRFeatherWriterLayer final : public OGRArrowWriterLayer
 
     virtual bool
     IsSupportedGeometryType(OGRwkbGeometryType eGType) const override;
+
     virtual bool IsSRSRequired() const override
     {
         return true;
@@ -180,15 +173,24 @@ class OGRFeatherWriterLayer final : public OGRArrowWriterLayer
 
   public:
     OGRFeatherWriterLayer(
-        arrow::MemoryPool *poMemoryPool,
+        GDALDataset *poDS, arrow::MemoryPool *poMemoryPool,
         const std::shared_ptr<arrow::io::OutputStream> &poOutputStream,
         const char *pszLayerName);
 
     ~OGRFeatherWriterLayer() override;
 
     bool SetOptions(const std::string &osFilename, CSLConstList papszOptions,
-                    OGRSpatialReference *poSpatialRef,
+                    const OGRSpatialReference *poSpatialRef,
                     OGRwkbGeometryType eGType);
+
+    bool WriteArrowBatch(const struct ArrowSchema *schema,
+                         struct ArrowArray *array,
+                         CSLConstList papszOptions = nullptr) override;
+
+    GDALDataset *GetDataset() override
+    {
+        return m_poDS;
+    }
 };
 
 /************************************************************************/
@@ -224,9 +226,8 @@ class OGRFeatherWriterDataset final : public GDALPamDataset
 
   protected:
     OGRLayer *ICreateLayer(const char *pszName,
-                           OGRSpatialReference *poSpatialRef = nullptr,
-                           OGRwkbGeometryType eGType = wkbUnknown,
-                           char **papszOptions = nullptr) override;
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
 };
 
 #endif  // OGR_FEATHER_H

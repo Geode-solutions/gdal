@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Winor Chen <wchen329 at wisc.edu>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #ifndef __NETCDFSG_H__
 #define __NETCDFSG_H__
@@ -73,10 +57,12 @@ class Point
               new double[dim]))
     {
     }
+
     double &operator[](size_t i)
     {
         return this->values.get()[i];
     }
+
     int getOrder()
     {
         return this->size;
@@ -240,10 +226,12 @@ class SGeometry_PropertyScanner
     {
         return this->v_headers;
     }
+
     std::vector<int> &ids()
     {
         return this->v_ids;
     }
+
     SGeometry_PropertyScanner(int ncid, int cid) : nc(ncid)
     {
         this->open(cid);
@@ -256,21 +244,27 @@ class SGeometry_PropertyScanner
 class SG_Exception
 {
   public:
-    virtual const char *get_err_msg() = 0;
-    virtual ~SG_Exception();
+    ~SG_Exception();
+
+    const char *get_err_msg() const
+    {
+        return err_msg.c_str();
+    }
+
+  protected:
+    SG_Exception() = default;
+
+    explicit SG_Exception(const std::string &s) : err_msg(s)
+    {
+    }
+
+    std::string err_msg;
 };
 
 // Mismatched dimension exception
 class SG_Exception_Dim_MM : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     SG_Exception_Dim_MM(const char *geometry_container, const char *field_1,
                         const char *field_2);
 };
@@ -278,14 +272,7 @@ class SG_Exception_Dim_MM : public SG_Exception
 // Missing (existential) property error
 class SG_Exception_Existential : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     SG_Exception_Existential(const char *geometry_container,
                              const char *missing_name);
 };
@@ -293,14 +280,7 @@ class SG_Exception_Existential : public SG_Exception
 // Missing dependent property (arg_1 is dependent on arg_2)
 class SG_Exception_Dep : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     SG_Exception_Dep(const char *geometry_container, const char *arg_1,
                      const char *arg_2);
 };
@@ -309,14 +289,7 @@ class SG_Exception_Dep : public SG_Exception
 // variable
 class SG_Exception_BadSum : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     SG_Exception_BadSum(const char *geometry_container, const char *arg_1,
                         const char *arg_2);
 };
@@ -324,16 +297,9 @@ class SG_Exception_BadSum : public SG_Exception
 // Unsupported Feature Type
 class SG_Exception_BadFeature : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     SG_Exception_BadFeature()
-        : err_msg("Unsupported or unrecognized feature type.")
+        : SG_Exception("Unsupported or unrecognized feature type.")
     {
     }
 };
@@ -341,17 +307,11 @@ class SG_Exception_BadFeature : public SG_Exception
 // Failed Read
 class SG_Exception_BadPoint : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     SG_Exception_BadPoint()
-        : err_msg("An attempt was made to read an invalid point (likely index "
-                  "out of bounds).")
+        : SG_Exception(
+              "An attempt was made to read an invalid point (likely index "
+              "out of bounds).")
     {
     }
 };
@@ -359,17 +319,11 @@ class SG_Exception_BadPoint : public SG_Exception
 // Too many dimensions on node coordinates variable
 class SG_Exception_Not1D : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     SG_Exception_Not1D()
-        : err_msg("A node coordinates axis variable or node_counts is not one "
-                  "dimensional.")
+        : SG_Exception(
+              "A node coordinates axis variable or node_counts is not one "
+              "dimensional.")
     {
     }
 };
@@ -377,16 +331,10 @@ class SG_Exception_Not1D : public SG_Exception
 // Too many empty dimension
 class SG_Exception_EmptyDim : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     SG_Exception_EmptyDim()
-        : err_msg("A dimension has length <= 0, but it must have length > 0")
+        : SG_Exception(
+              "A dimension has length <= 0, but it must have length > 0")
     {
     }
 };
@@ -394,32 +342,20 @@ class SG_Exception_EmptyDim : public SG_Exception
 // general corruption or malformed error
 class SG_Exception_General_Malformed : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
-
     explicit SG_Exception_General_Malformed(const char *);
 };
 
 // Invalid value detected
 class SG_Exception_Value_Violation : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
     SG_Exception_Value_Violation(const char *containername, const char *type,
                                  const char *badvalue)
-        : err_msg(std::string("[") + std::string(containername) +
-                  std::string("] ") + std::string(type) +
-                  std::string(" values may not be ") + std::string(badvalue))
+        : SG_Exception(std::string("[") + std::string(containername) +
+                       std::string("] ") + std::string(type) +
+                       std::string(" values may not be ") +
+                       std::string(badvalue))
     {
     }
 };
@@ -427,18 +363,12 @@ class SG_Exception_Value_Violation : public SG_Exception
 // Required value(s)
 class SG_Exception_Value_Required : public SG_Exception
 {
-    std::string err_msg;
-
   public:
-    const char *get_err_msg() override
-    {
-        return err_msg.c_str();
-    }
     SG_Exception_Value_Required(const char *containername, const char *type,
                                 const char *expvalue)
-        : err_msg(std::string("[") + std::string(containername) +
-                  std::string("] ") + std::string(type) +
-                  std::string(" values must be ") + std::string(expvalue))
+        : SG_Exception(std::string("[") + std::string(containername) +
+                       std::string("] ") + std::string(type) +
+                       std::string(" values must be ") + std::string(expvalue))
     {
     }
 };

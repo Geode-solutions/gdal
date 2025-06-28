@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018-2019, Airbus DS Intelligence
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_http.h"
@@ -32,7 +16,7 @@
 #include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "gdal_mdreader.h"
-#include "../mem/memdataset.h"
+#include "memdataset.h"
 
 #include "cpl_json.h"
 
@@ -62,9 +46,9 @@ class GDALDAASBandDesc
     int nIndex = 0;
     GDALDataType eDT =
         GDT_Unknown;  // as declared in the GetMetadata response bands[]
-    CPLString osName;
-    CPLString osDescription;
-    CPLString osColorInterp;
+    CPLString osName{};
+    CPLString osDescription{};
+    CPLString osColorInterp{};
     bool bIsMask = false;
 };
 
@@ -88,36 +72,36 @@ class GDALDAASDataset final : public GDALDataset
   private:
     friend class GDALDAASRasterBand;
 
-    CPLString m_osGetMetadataURL;
+    CPLString m_osGetMetadataURL{};
 
-    CPLString m_osAuthURL;
-    CPLString m_osAccessToken;
+    CPLString m_osAuthURL{};
+    CPLString m_osAccessToken{};
     time_t m_nExpirationTime = 0;
-    CPLString m_osXForwardUser;
+    CPLString m_osXForwardUser{};
 
     GDALDAASDataset *m_poParentDS = nullptr;
     // int         m_iOvrLevel = 0;
 
     OGRSpatialReference m_oSRS{};
-    CPLString m_osSRSType;
-    CPLString m_osSRSValue;
+    CPLString m_osSRSType{};
+    CPLString m_osSRSValue{};
     bool m_bGotGeoTransform = false;
-    std::array<double, 6> m_adfGeoTransform{{0.0, 1.0, 0.0, 0.0, 0.0, 1.0}};
+    GDALGeoTransform m_gt{};
     bool m_bRequestInGeoreferencedCoordinates = false;
     GDALDataType m_eDT = GDT_Unknown;
     int m_nActualBitDepth = 0;
     bool m_bHasNoData = false;
     double m_dfNoDataValue = 0.0;
-    CPLString m_osGetBufferURL;
+    CPLString m_osGetBufferURL{};
     int m_nBlockSize = knDEFAULT_BLOCKSIZE;
     Format m_eFormat = Format::RAW;
     GIntBig m_nServerByteLimit = knDEFAULT_SERVER_BYTE_LIMIT;
     GDALRIOResampleAlg m_eCurrentResampleAlg = GRIORA_NearestNeighbour;
 
     int m_nMainMaskBandIndex = 0;
-    CPLString m_osMainMaskName;
+    CPLString m_osMainMaskName{};
     GDALDAASRasterBand *m_poMaskBand = nullptr;
-    std::vector<GDALDAASBandDesc> m_aoBandDesc;
+    std::vector<GDALDAASBandDesc> m_aoBandDesc{};
 
     int m_nXOffAdvise = 0;
     int m_nYOffAdvise = 0;
@@ -129,7 +113,7 @@ class GDALDAASDataset final : public GDALDataset
     int m_nXSizeFetched = 0;
     int m_nYSizeFetched = 0;
 
-    std::vector<std::unique_ptr<GDALDAASDataset>> m_apoOverviewDS;
+    std::vector<std::unique_ptr<GDALDAASDataset>> m_apoOverviewDS{};
 
     char **m_papszOpenOptions = nullptr;
 
@@ -143,6 +127,8 @@ class GDALDAASDataset final : public GDALDataset
     bool SetupServerSideReprojection(const char *pszTargetSRS);
     void InstantiateBands();
 
+    CPL_DISALLOW_COPY_ASSIGN(GDALDAASDataset)
+
   public:
     GDALDAASDataset();
     GDALDAASDataset(GDALDAASDataset *poParentDS, int iOvrLevel);
@@ -151,13 +137,13 @@ class GDALDAASDataset final : public GDALDataset
     static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *OpenStatic(GDALOpenInfo *poOpenInfo);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
                      int nYSize, void *pData, int nBufXSize, int nBufYSize,
-                     GDALDataType eBufType, int nBandCount, int *panBands,
-                     GSpacing nPixelSpace, GSpacing nLineSpace,
-                     GSpacing nBandSpace,
+                     GDALDataType eBufType, int nBandCount,
+                     BANDMAP_TYPE panBands, GSpacing nPixelSpace,
+                     GSpacing nLineSpace, GSpacing nBandSpace,
                      GDALRasterIOExtraArg *psExtraArg) override;
     CPLErr AdviseRead(int nXOff, int nYOff, int nXSize, int nYSize,
                       int /* nBufXSize */, int /* nBufYSize */,
@@ -247,14 +233,10 @@ GDALDAASDataset::GDALDAASDataset(GDALDAASDataset *poParentDS, int iOvrLevel)
 {
     nRasterXSize = m_poParentDS->nRasterXSize >> iOvrLevel;
     nRasterYSize = m_poParentDS->nRasterYSize >> iOvrLevel;
-    m_adfGeoTransform[0] = m_poParentDS->m_adfGeoTransform[0];
-    m_adfGeoTransform[1] = m_poParentDS->m_adfGeoTransform[1] *
-                           m_poParentDS->nRasterXSize / nRasterXSize;
-    m_adfGeoTransform[2] = m_poParentDS->m_adfGeoTransform[2];
-    m_adfGeoTransform[3] = m_poParentDS->m_adfGeoTransform[3];
-    m_adfGeoTransform[4] = m_poParentDS->m_adfGeoTransform[4];
-    m_adfGeoTransform[5] = m_poParentDS->m_adfGeoTransform[5] *
-                           m_poParentDS->nRasterYSize / nRasterYSize;
+    m_gt = m_poParentDS->m_gt;
+    m_gt.Rescale(static_cast<double>(m_poParentDS->nRasterXSize) / nRasterXSize,
+                 static_cast<double>(m_poParentDS->nRasterYSize) /
+                     nRasterYSize);
 
     InstantiateBands();
 
@@ -322,10 +304,9 @@ int GDALDAASDataset::Identify(GDALOpenInfo *poOpenInfo)
 /*                        GetGeoTransform()                             */
 /************************************************************************/
 
-CPLErr GDALDAASDataset::GetGeoTransform(double *padfTransform)
+CPLErr GDALDAASDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    std::copy_n(m_adfGeoTransform.begin(), m_adfGeoTransform.size(),
-                padfTransform);
+    gt = m_gt;
     return (m_bGotGeoTransform) ? CE_None : CE_Failure;
 }
 
@@ -403,8 +384,11 @@ char **GDALDAASDataset::GetHTTPOptions()
 static double DAASBackoffFactor(double base)
 {
     // We don't need cryptographic quality randomness...
-    // coverity[dont_call]
-    return base + rand() * 0.5 / RAND_MAX;
+    return base
+#ifndef __COVERITY__
+           + rand() * 0.5 / RAND_MAX
+#endif
+        ;
 }
 
 /************************************************************************/
@@ -445,7 +429,8 @@ static CPLHTTPResult *DAAS_CPLHTTPFetch(const char *pszURL, char **papszOptions)
                 nHTTPStatus =
                     atoi(psResult->pszErrBuf + strlen("HTTP error code : "));
                 if (psResult->pabyData)
-                    pszErrorText = (const char *)psResult->pabyData;
+                    pszErrorText =
+                        reinterpret_cast<const char *>(psResult->pabyData);
             }
 
             if ((nHTTPStatus == 500 ||
@@ -478,13 +463,13 @@ static CPLHTTPResult *DAAS_CPLHTTPFetch(const char *pszURL, char **papszOptions)
 
 bool GDALDAASDataset::GetAuthorization()
 {
-    CPLString osClientId =
+    const CPLString osClientId =
         CSLFetchNameValueDef(m_papszOpenOptions, "CLIENT_ID",
                              CPLGetConfigOption("GDAL_DAAS_CLIENT_ID", ""));
-    CPLString osAPIKey =
+    const CPLString osAPIKey =
         CSLFetchNameValueDef(m_papszOpenOptions, "API_KEY",
                              CPLGetConfigOption("GDAL_DAAS_API_KEY", ""));
-    CPLString osAuthorization =
+    std::string osAuthorization =
         CSLFetchNameValueDef(m_papszOpenOptions, "ACCESS_TOKEN",
                              CPLGetConfigOption("GDAL_DAAS_ACCESS_TOKEN", ""));
     m_osXForwardUser = CSLFetchNameValueDef(
@@ -501,7 +486,7 @@ bool GDALDAASDataset::GetAuthorization()
                 "GDAL_DAAS_ACCESS_TOKEN defined. Only the later taken into "
                 "account");
         }
-        m_osAccessToken = osAuthorization;
+        m_osAccessToken = std::move(osAuthorization);
         return true;
     }
 
@@ -601,7 +586,8 @@ bool GDALDAASDataset::GetAuthorization()
 /*                           GetObject()                                */
 /************************************************************************/
 
-static CPLJSONObject GetObject(CPLJSONObject &oContainer, const char *pszPath,
+static CPLJSONObject GetObject(const CPLJSONObject &oContainer,
+                               const char *pszPath,
                                CPLJSONObject::Type eExpectedType,
                                const char *pszExpectedType, bool bVerboseError,
                                bool &bError)
@@ -632,7 +618,7 @@ static CPLJSONObject GetObject(CPLJSONObject &oContainer, const char *pszPath,
 /*                          GetInteger()                                */
 /************************************************************************/
 
-static int GetInteger(CPLJSONObject &oContainer, const char *pszPath,
+static int GetInteger(const CPLJSONObject &oContainer, const char *pszPath,
                       bool bVerboseError, bool &bError)
 {
     CPLJSONObject oObj =
@@ -649,7 +635,7 @@ static int GetInteger(CPLJSONObject &oContainer, const char *pszPath,
 /*                          GetDouble()                                */
 /************************************************************************/
 
-static double GetDouble(CPLJSONObject &oContainer, const char *pszPath,
+static double GetDouble(const CPLJSONObject &oContainer, const char *pszPath,
                         bool bVerboseError, bool &bError)
 {
     CPLJSONObject oObj = oContainer.GetObj(pszPath);
@@ -676,7 +662,7 @@ static double GetDouble(CPLJSONObject &oContainer, const char *pszPath,
 /*                          GetString()                                 */
 /************************************************************************/
 
-static CPLString GetString(CPLJSONObject &oContainer, const char *pszPath,
+static CPLString GetString(const CPLJSONObject &oContainer, const char *pszPath,
                            bool bVerboseError, bool &bError)
 {
     CPLJSONObject oObj =
@@ -706,6 +692,7 @@ GetGDALDataTypeFromDAASPixelType(const CPLString &osPixelType)
         {"Int32", GDT_Int32},     {"Float32", GDT_Float32},
         {"Float64", GDT_Float64},
     };
+
     for (size_t i = 0; i < CPL_ARRAYSIZE(asDataTypes); ++i)
     {
         if (osPixelType == asDataTypes[i].pszName)
@@ -815,6 +802,7 @@ bool GDALDAASDataset::GetImageMetadata()
     {
         oGetBufferDict = oGetBufferObj;
     }
+    CPL_IGNORE_RET_VAL(oGetBufferObj);
     if (!oGetBufferDict.IsValid())
     {
         CPLError(CE_Failure, CPLE_AppDefined, "%s missing",
@@ -849,7 +837,7 @@ bool GDALDAASDataset::GetImageMetadata()
         m_bGotGeoTransform = true;
         for (int i = 0; i < 6; i++)
         {
-            m_adfGeoTransform[i] = oGTArray[i].ToDouble();
+            m_gt[i] = oGTArray[i].ToDouble();
         }
     }
 
@@ -903,7 +891,7 @@ bool GDALDAASDataset::GetImageMetadata()
                 }
                 else
                 {
-                    m_aoBandDesc.push_back(oDesc);
+                    m_aoBandDesc.push_back(std::move(oDesc));
                 }
             }
             else
@@ -995,8 +983,10 @@ void GDALDAASDataset::ReadSRS(const CPLJSONObject &oProperties)
             if (oSRSObj.GetType() == CPLJSONObject::Type::Object)
             {
                 bool bError = false;
-                CPLString osType(GetString(oSRSObj, "type", true, bError));
-                CPLString osValue(GetString(oSRSObj, "value", true, bError));
+                const std::string osType(
+                    GetString(oSRSObj, "type", true, bError));
+                const std::string osValue(
+                    GetString(oSRSObj, "value", true, bError));
                 // Use urn in priority
                 if (osType == "urn" && !osValue.empty())
                 {
@@ -1049,6 +1039,7 @@ void GDALDAASDataset::ReadRPCs(const CPLJSONObject &oProperties)
     {
         bool bRPCError = false;
         CPLStringList aoRPC;
+
         const struct
         {
             const char *pszJsonName;
@@ -1061,6 +1052,7 @@ void GDALDAASDataset::ReadRPCs(const CPLJSONObject &oProperties)
             {"sampScale", RPC_SAMP_SCALE}, {"latScale", RPC_LAT_SCALE},
             {"longScale", RPC_LONG_SCALE}, {"heightScale", RPC_HEIGHT_SCALE},
         };
+
         for (size_t i = 0; i < CPL_ARRAYSIZE(asRPCSingleValues); ++i)
         {
             bool bRPCErrorTmp = false;
@@ -1078,7 +1070,7 @@ void GDALDAASDataset::ReadRPCs(const CPLJSONObject &oProperties)
                 continue;
             }
             aoRPC.SetNameValue(asRPCSingleValues[i].pszGDALName,
-                               CPLSPrintf("%.18g", dfRPCVal));
+                               CPLSPrintf("%.17g", dfRPCVal));
         }
 
         const struct
@@ -1091,6 +1083,7 @@ void GDALDAASDataset::ReadRPCs(const CPLJSONObject &oProperties)
             {"sampNumCoeff", RPC_SAMP_NUM_COEFF},
             {"sampDenCoeff", RPC_SAMP_DEN_COEFF},
         };
+
         for (size_t i = 0; i < CPL_ARRAYSIZE(asRPCArrayValues); ++i)
         {
             CPLJSONArray oRPCArray =
@@ -1102,7 +1095,7 @@ void GDALDAASDataset::ReadRPCs(const CPLJSONObject &oProperties)
                 {
                     if (j > 0)
                         osVal += " ";
-                    osVal += CPLSPrintf("%.18g", oRPCArray[j].ToDouble());
+                    osVal += CPLSPrintf("%.17g", oRPCArray[j].ToDouble());
                 }
                 aoRPC.SetNameValue(asRPCArrayValues[i].pszGDALName,
                                    osVal.c_str());
@@ -1171,13 +1164,13 @@ bool GDALDAASDataset::SetupServerSideReprojection(const char *pszTargetSRS)
         return false;
     }
 
-    GDALTransformerInfo *psInfo = (GDALTransformerInfo *)hTransformArg;
-    double adfGeoTransform[6];
+    GDALTransformerInfo *psInfo =
+        static_cast<GDALTransformerInfo *>(hTransformArg);
     double adfExtent[4];
     int nXSize, nYSize;
 
     if (GDALSuggestedWarpOutput2(this, psInfo->pfnTransform, hTransformArg,
-                                 adfGeoTransform, &nXSize, &nYSize, adfExtent,
+                                 m_gt.data(), &nXSize, &nYSize, adfExtent,
                                  0) != CE_None)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
@@ -1189,11 +1182,10 @@ bool GDALDAASDataset::SetupServerSideReprojection(const char *pszTargetSRS)
 
     GDALDestroyGenImgProjTransformer(hTransformArg);
 
-    std::copy_n(adfGeoTransform, 6, m_adfGeoTransform.begin());
     m_bRequestInGeoreferencedCoordinates = true;
     m_osSRSType = "epsg";
-    m_osSRSValue = osTargetEPSGCode;
-    m_oSRS = oSRS;
+    m_osSRSValue = std::move(osTargetEPSGCode);
+    m_oSRS = std::move(oSRS);
     nRasterXSize = nXSize;
     nRasterYSize = nYSize;
     return true;
@@ -1323,7 +1315,7 @@ bool GDALDAASDataset::Open(GDALOpenInfo *poOpenInfo)
             break;
         }
         m_apoOverviewDS.push_back(
-            cpl::make_unique<GDALDAASDataset>(this, iOvr));
+            std::make_unique<GDALDAASDataset>(this, iOvr));
     }
 
     return true;
@@ -1334,7 +1326,7 @@ GDALDataset *GDALDAASDataset::OpenStatic(GDALOpenInfo *poOpenInfo)
     if (!Identify(poOpenInfo))
         return nullptr;
 
-    auto poDS = cpl::make_unique<GDALDAASDataset>();
+    auto poDS = std::make_unique<GDALDAASDataset>();
     if (!poDS->Open(poOpenInfo))
         return nullptr;
     return poDS.release();
@@ -1371,6 +1363,7 @@ GDALDAASRasterBand::GDALDAASRasterBand(GDALDAASDataset *poDSIn, int nBandIn,
         {"BLUE", GCI_BlueBand},   {"GRAY", GCI_GrayIndex},
         {"ALPHA", GCI_AlphaBand}, {"UNDEFINED", GCI_Undefined},
     };
+
     for (size_t i = 0; i < CPL_ARRAYSIZE(asColorInterpretations); ++i)
     {
         if (EQUAL(oBandDesc.osColorInterp, asColorInterpretations[i].pszName))
@@ -1501,7 +1494,7 @@ CPLErr GDALDAASDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                                   int nXSize, int nYSize, void *pData,
                                   int nBufXSize, int nBufYSize,
                                   GDALDataType eBufType, int nBandCount,
-                                  int *panBandMap, GSpacing nPixelSpace,
+                                  BANDMAP_TYPE panBandMap, GSpacing nPixelSpace,
                                   GSpacing nLineSpace, GSpacing nBandSpace,
                                   GDALRasterIOExtraArg *psExtraArg)
 {
@@ -2072,14 +2065,12 @@ CPLErr GDALDAASRasterBand::GetBlocks(int nBlockXOff, int nBlockYOff,
     if (poGDS->m_bRequestInGeoreferencedCoordinates)
     {
         double dfULX, dfULY;
-        GDALApplyGeoTransform(poGDS->m_adfGeoTransform.data(), nULX, nULY,
-                              &dfULX, &dfULY);
+        GDALApplyGeoTransform(poGDS->m_gt.data(), nULX, nULY, &dfULX, &dfULY);
         oUL.Add("x", dfULX);
         oUL.Add("y", dfULY);
 
         double dfLRX, dfLRY;
-        GDALApplyGeoTransform(poGDS->m_adfGeoTransform.data(), nLRX, nLRY,
-                              &dfLRX, &dfLRY);
+        GDALApplyGeoTransform(poGDS->m_gt.data(), nLRX, nLRY, &dfLRX, &dfLRY);
         oLR.Add("x", dfLRX);
         oLR.Add("y", dfLRY);
     }
@@ -2112,8 +2103,8 @@ CPLErr GDALDAASRasterBand::GetBlocks(int nBlockXOff, int nBlockYOff,
     CPLJSONObject oStepTargetModel;
     if (poGDS->m_bRequestInGeoreferencedCoordinates)
     {
-        oStepTargetModel.Add("x", poGDS->m_adfGeoTransform[1]);
-        oStepTargetModel.Add("y", fabs(poGDS->m_adfGeoTransform[5]));
+        oStepTargetModel.Add("x", poGDS->m_gt[1]);
+        oStepTargetModel.Add("y", fabs(poGDS->m_gt[5]));
     }
     else
     {
@@ -2165,7 +2156,7 @@ CPLErr GDALDAASRasterBand::GetBlocks(int nBlockXOff, int nBlockYOff,
 
     CPLJSONArray oBands;
     bool bOK = true;
-    for (auto &iBand : anRequestedBands)
+    for (const int iBand : anRequestedBands)
     {
         auto desc = (iBand == MAIN_MASK_BAND_NUMBER)
                         ? poGDS->m_poMaskBand->GetDescription()
@@ -2212,7 +2203,7 @@ CPLErr GDALDAASRasterBand::GetBlocks(int nBlockXOff, int nBlockYOff,
         {
             for (int iXBlock = 0; iXBlock < nXBlocks; iXBlock++)
             {
-                for (auto &iBand : anRequestedBands)
+                for (const int iBand : anRequestedBands)
                 {
                     GByte *pabyDstBuffer = nullptr;
                     GDALDAASRasterBand *poIterBand;
@@ -2411,7 +2402,7 @@ CPLErr GDALDAASRasterBand::GetBlocks(int nBlockXOff, int nBlockYOff,
     }
     else
     {
-        CPLString osTmpMemFile = CPLSPrintf("/vsimem/daas_%p", this);
+        const CPLString osTmpMemFile = VSIMemGenerateHiddenFilename("daas");
         VSIFCloseL(VSIFileFromMemBuffer(
             osTmpMemFile, psResult->pasMimePart[iDataPart].pabyData,
             psResult->pasMimePart[iDataPart].nDataLen, false));
@@ -2520,7 +2511,7 @@ CPLErr GDALDAASRasterBand::GetBlocks(int nBlockXOff, int nBlockYOff,
                     GF_Read, iXBlock * nBlockXSize, iYBlock * nBlockYSize,
                     nBlockActualXSize, nBlockActualYSize, pabyDstBuffer,
                     nBlockActualXSize, nBlockActualYSize, eIterBandDT, nDTSize,
-                    nDTSize * nBlockXSize, nullptr);
+                    static_cast<GSpacing>(nDTSize) * nBlockXSize, nullptr);
 
                 if (poBlock)
                     poBlock->DropLock();

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL Core
  * Purpose:  Test block cache under multi-threading
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2015, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef DEBUG
@@ -70,6 +53,7 @@ typedef enum
 } Strategy;
 
 typedef struct _Request Request;
+
 struct _Request
 {
     int nXOff, nYOff, nXWin, nYWin;
@@ -78,6 +62,7 @@ struct _Request
 };
 
 typedef struct _Resource Resource;
+
 struct _Resource
 {
     GDALDataset *poDS;
@@ -101,6 +86,7 @@ static Resource *psGlobalResourceLast = nullptr;
  * implementation */
 /* RAND_MAX assumed to be 32767 */
 #define MYRAND_MAX 32767
+
 static int myrand_r(unsigned long *pseed)
 {
     *pseed = *pseed * 1103515245 + 12345;
@@ -459,7 +445,8 @@ TEST(testblockcache, test)
                          papszOptions);
         if (bCheck)
         {
-            GByte *pabyLine = (GByte *)VSIMalloc(nBands * nXSize);
+            GByte *pabyLine =
+                (GByte *)VSIMalloc(static_cast<size_t>(nBands) * nXSize);
             for (int iY = 0; iY < nYSize; iY++)
             {
                 for (int iX = 0; iX < nXSize; iX++)

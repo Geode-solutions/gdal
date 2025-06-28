@@ -10,23 +10,7 @@
 ###############################################################################
 # Copyright (c) 2014, Oslandia <info at oslandia dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import math
@@ -71,6 +55,7 @@ def test_ogr_wasp_elevation_from_linestring_z():
     layer = gdaltest.wasp_ds.CreateLayer("mylayer", ref, geom_type=ogr.wkbLineString25D)
 
     assert layer is not None, "unable to create layer"
+    assert layer.GetDataset().GetDescription() == gdaltest.wasp_ds.GetDescription()
 
     dfn = ogr.FeatureDefn()
 
@@ -118,13 +103,20 @@ def test_ogr_wasp_elevation_from_linestring_z_toler():
     )
 
     if not ogrtest.have_geos():
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-    layer = gdaltest.wasp_ds.CreateLayer(
-        "mylayer", ref, options=["WASP_TOLERANCE=.1"], geom_type=ogr.wkbLineString25D
-    )
-    if not ogrtest.have_geos():
-        gdal.PopErrorHandler()
-
+        with gdal.quiet_errors():
+            layer = gdaltest.wasp_ds.CreateLayer(
+                "mylayer",
+                ref,
+                options=["WASP_TOLERANCE=.1"],
+                geom_type=ogr.wkbLineString25D,
+            )
+    else:
+        layer = gdaltest.wasp_ds.CreateLayer(
+            "mylayer",
+            ref,
+            options=["WASP_TOLERANCE=.1"],
+            geom_type=ogr.wkbLineString25D,
+        )
     assert layer is not None, "unable to create layer"
 
     dfn = ogr.FeatureDefn()
@@ -270,15 +262,11 @@ def test_ogr_wasp_roughness_from_polygon_z():
     test_ogr_wasp_create_ds()
 
     if not ogrtest.have_geos():
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-    layer = gdaltest.wasp_ds.CreateLayer("mylayer", geom_type=ogr.wkbPolygon25D)
-    if not ogrtest.have_geos():
-        gdal.PopErrorHandler()
-
-    if layer is None:
-        assert not ogrtest.have_geos(), "unable to create layer"
+        with pytest.raises(Exception):
+            gdaltest.wasp_ds.CreateLayer("mylayer", geom_type=ogr.wkbPolygon25D)
         return
 
+    layer = gdaltest.wasp_ds.CreateLayer("mylayer", geom_type=ogr.wkbPolygon25D)
     dfn = ogr.FeatureDefn()
 
     for i in range(6):
@@ -335,17 +323,15 @@ def test_ogr_wasp_roughness_from_polygon_field():
     test_ogr_wasp_create_ds()
 
     if not ogrtest.have_geos():
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
+        with pytest.raises(Exception):
+            gdaltest.wasp_ds.CreateLayer(
+                "mylayer", options=["WASP_FIELDS=roughness"], geom_type=ogr.wkbPolygon
+            )
+        return
+
     layer = gdaltest.wasp_ds.CreateLayer(
         "mylayer", options=["WASP_FIELDS=roughness"], geom_type=ogr.wkbPolygon
     )
-    if not ogrtest.have_geos():
-        gdal.PopErrorHandler()
-
-    if layer is None:
-        assert not ogrtest.have_geos(), "unable to create layer"
-        return
-
     layer.CreateField(ogr.FieldDefn("roughness", ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn("dummy", ogr.OFTString))
 
@@ -405,15 +391,11 @@ def test_ogr_wasp_merge():
     test_ogr_wasp_create_ds()
 
     if not ogrtest.have_geos():
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-    layer = gdaltest.wasp_ds.CreateLayer("mylayer", geom_type=ogr.wkbPolygon25D)
-    if not ogrtest.have_geos():
-        gdal.PopErrorHandler()
-
-    if layer is None:
-        assert not ogrtest.have_geos(), "unable to create layer"
+        with pytest.raises(Exception):
+            layer = gdaltest.wasp_ds.CreateLayer("mylayer", geom_type=ogr.wkbPolygon25D)
         return
 
+    layer = gdaltest.wasp_ds.CreateLayer("mylayer", geom_type=ogr.wkbPolygon25D)
     dfn = ogr.FeatureDefn()
 
     for i in range(6):

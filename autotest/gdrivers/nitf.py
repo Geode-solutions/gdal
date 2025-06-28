@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read/write functionality for NITF driver.
@@ -11,23 +10,7 @@
 # Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import array
@@ -45,13 +28,165 @@ from osgeo import gdal, ogr, osr
 pytestmark = pytest.mark.require_driver("NITF")
 
 
-@pytest.fixture(scope="module")
-def not_jpeg_9b():
-    import jpeg
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
-    jpeg.test_jpeg_1()
-    if gdaltest.jpeg_version == "9b":
+
+@pytest.fixture(scope="module")
+def not_jpeg_9b(jpeg_version):
+    if jpeg_version == "9b":
         pytest.skip()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def setup_and_cleanup():
+
+    yield
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf9.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/test_13.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/test_29.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/test_29_copy.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf36.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf37.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf38.ntf")
+        os.unlink("tmp/nitf38.ntf_0.ovr")
+    except (RuntimeError, OSError):
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf39.ntf")
+    except (RuntimeError, OSError):
+        pass
+
+    try:
+        os.stat("tmp/nitf40.ntf")
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf40.ntf")
+    except (RuntimeError, OSError):
+        pass
+
+    try:
+        os.stat("tmp/nitf42.ntf")
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf42.ntf")
+    except (OSError, RuntimeError):
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf44.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf45.ntf")
+        os.unlink("tmp/nitf45.ntf_0.ovr")
+    except (RuntimeError, OSError):
+        pass
+
+    try:
+        os.stat("tmp/nitf46.ntf")
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf46.ntf")
+        os.unlink("tmp/nitf46.ntf_0.ovr")
+    except (RuntimeError, OSError):
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf49.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf49_2.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf50.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf51.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf52.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf53.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf54.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf55.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf56.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf57.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf58.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        os.remove("tmp/nitf59.hdr")
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf59.ntf")
+    except (OSError, RuntimeError):
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf62.ntf")
+    except RuntimeError:
+        pass
+
+    try:
+        gdal.GetDriverByName("NITF").Delete("tmp/nitf63.ntf")
+    except RuntimeError:
+        pass
 
 
 def hex_string(s):
@@ -65,7 +200,7 @@ def hex_string(s):
 def test_nitf_1():
 
     tst = gdaltest.GDALTest("NITF", "byte.tif", 1, 4672)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -75,7 +210,7 @@ def test_nitf_1():
 def test_nitf_2():
 
     tst = gdaltest.GDALTest("NITF", "int16.tif", 1, 4672)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -85,28 +220,27 @@ def test_nitf_2():
 def test_nitf_3():
 
     tst = gdaltest.GDALTest("NITF", "rgbsmall.tif", 3, 21349)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
 # Test direction creation of an NITF file.
 
 
-def nitf_create(creation_options, set_inverted_color_interp=True, createcopy=False):
+def nitf_create(
+    filename,
+    creation_options,
+    set_inverted_color_interp=True,
+    createcopy=False,
+    nbands=3,
+):
 
     drv = gdal.GetDriverByName("NITF")
 
-    try:
-        os.remove("tmp/test_create.ntf")
-    except OSError:
-        pass
-
     if createcopy:
-        ds = gdal.GetDriverByName("MEM").Create("", 200, 100, 3, gdal.GDT_Byte)
+        ds = gdal.GetDriverByName("MEM").Create("", 200, 100, nbands, gdal.GDT_Byte)
     else:
-        ds = drv.Create(
-            "tmp/test_create.ntf", 200, 100, 3, gdal.GDT_Byte, creation_options
-        )
+        ds = drv.Create(filename, 200, 100, nbands, gdal.GDT_Byte, creation_options)
     ds.SetGeoTransform((100, 0.1, 0.0, 30.0, 0.0, -0.1))
 
     if set_inverted_color_interp:
@@ -119,32 +253,27 @@ def nitf_create(creation_options, set_inverted_color_interp=True, createcopy=Fal
         ds.GetRasterBand(3).SetRasterColorInterpretation(gdal.GCI_BlueBand)
 
     my_list = list(range(200)) + list(range(20, 220)) + list(range(30, 230))
-    try:
-        raw_data = array.array("h", my_list).tobytes()
-    except Exception:
-        # Python 2
-        raw_data = array.array("h", my_list).tostring()
+    if nbands == 4:
+        my_list += list(range(40, 240))
+    raw_data = array.array("h", my_list).tobytes()
 
     for line in range(100):
         ds.WriteRaster(
-            0, line, 200, 1, raw_data, buf_type=gdal.GDT_Int16, band_list=[1, 2, 3]
+            0,
+            line,
+            200,
+            1,
+            raw_data,
+            buf_type=gdal.GDT_Int16,
         )
 
     assert ds.FlushCache() == gdal.CE_None
 
     if createcopy:
-        ds = drv.CreateCopy("tmp/test_create.ntf", ds, options=creation_options)
+        ds = drv.CreateCopy(filename, ds, options=creation_options)
 
     ds = None
-
-
-###############################################################################
-# Test direction creation of an non-compressed NITF file.
-
-
-def test_nitf_4():
-
-    return nitf_create(["ICORDS=G"])
+    gdal.Unlink(filename + ".aux.xml")
 
 
 ###############################################################################
@@ -152,11 +281,12 @@ def test_nitf_4():
 
 
 def nitf_check_created_file(
+    filename,
     checksum1,
     checksum2,
     checksum3,
-    filename="tmp/test_create.ntf",
     set_inverted_color_interp=True,
+    createcopy=False,
 ):
     ds = gdal.Open(filename)
 
@@ -183,6 +313,10 @@ def nitf_check_created_file(
     ), "geotransform differs from expected"
 
     if set_inverted_color_interp:
+
+        if createcopy:
+            assert ds.GetMetadataItem("NITF_IREP") == "MULTI"
+
         assert (
             ds.GetRasterBand(1).GetRasterColorInterpretation() == gdal.GCI_BlueBand
         ), "Got wrong color interpretation."
@@ -195,16 +329,41 @@ def nitf_check_created_file(
             ds.GetRasterBand(3).GetRasterColorInterpretation() == gdal.GCI_RedBand
         ), "Got wrong color interpretation."
 
+        if ds.RasterCount == 4:
+            assert (
+                ds.GetRasterBand(4).GetRasterColorInterpretation() == gdal.GCI_GrayIndex
+            ), "Got wrong color interpretation."
+
     ds = None
 
 
 ###############################################################################
-# Verify file created by nitf_4()
+# Test direction creation of an non-compressed NITF file.
 
 
-def test_nitf_5():
+@pytest.mark.parametrize("createcopy", [False, True])
+@pytest.mark.parametrize("set_inverted_color_interp", [False, True])
+@pytest.mark.parametrize("nbands", [3, 4])
+def test_nitf_5(tmp_path, createcopy, set_inverted_color_interp, nbands):
 
-    nitf_check_created_file(32498, 42602, 38982)
+    filename = str(tmp_path / "test.ntf")
+
+    nitf_create(
+        filename,
+        ["ICORDS=G"],
+        set_inverted_color_interp=set_inverted_color_interp,
+        createcopy=createcopy,
+        nbands=nbands,
+    )
+
+    nitf_check_created_file(
+        filename,
+        32498,
+        42602,
+        38982,
+        set_inverted_color_interp=set_inverted_color_interp,
+        createcopy=createcopy,
+    )
 
 
 ###############################################################################
@@ -214,7 +373,7 @@ def test_nitf_5():
 def test_nitf_6():
 
     tst = gdaltest.GDALTest("NITF", "nitf/rgb.ntf", 3, 21349)
-    return tst.testOpen(
+    tst.testOpen(
         check_prj="WGS84",
         check_gt=(
             -44.842029478458,
@@ -234,7 +393,7 @@ def test_nitf_6():
 def test_nitf_7():
 
     tst = gdaltest.GDALTest("NITF", "rgbsmall.tif", 3, 21349)
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -291,13 +450,8 @@ def test_nitf_9():
     md = ds.GetMetadata("IMAGE_STRUCTURE")
     assert md["COMPRESSION"] == "JPEG", "Did not get expected compression value."
 
-
-###############################################################################
-# For esoteric reasons, createcopy from jpeg compressed nitf files can be
-# tricky.  Verify this is working.
-
-
-def test_nitf_10():
+    # For esoteric reasons, createcopy from jpeg compressed nitf files can be
+    # tricky.  Verify this is working.
 
     src_ds = gdal.Open("tmp/nitf9.ntf")
     expected_cs = src_ds.GetRasterBand(2).Checksum()
@@ -309,7 +463,7 @@ def test_nitf_10():
     )
 
     tst = gdaltest.GDALTest("NITF", "../tmp/nitf9.ntf", 2, expected_cs)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -320,7 +474,7 @@ def test_nitf_11():
 
     # From http://www.gwg.nga.mil/ntb/baseline/software/testfile/Nitfv2_1/i_3034c.ntf
     tst = gdaltest.GDALTest("NITF", "nitf/i_3034c.ntf", 1, 170)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -392,12 +546,8 @@ def test_nitf_13():
 
     ds = None
 
-
-###############################################################################
-# Verify previous file
-
-
-def test_nitf_14():
+    ###############################################################################
+    # Verify file
     ds = gdal.Open("tmp/test_13.ntf")
 
     chksum = ds.GetRasterBand(1).Checksum()
@@ -465,7 +615,7 @@ def test_nitf_create_copy_user_provided_IGEOLO_without_ICORDS():
         "/vsimem/test_nitf_create_copy_user_provided_IGEOLO_without_ICORDS.ntf"
     )
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             gdal.GetDriverByName("NITF").CreateCopy(
                 outfilename, src_ds, options=["IGEOLO=" + ("0" * 60)]
@@ -540,7 +690,7 @@ def test_nitf_15():
 
     tst = gdaltest.GDALTest("NITF", "byte.tif", 1, 4672)
 
-    return tst.testCreateCopy(vsimem=1)
+    tst.testCreateCopy(vsimem=1)
 
 
 ###############################################################################
@@ -551,7 +701,7 @@ def test_nitf_16():
 
     # From http://www.gwg.nga.mil/ntb/baseline/software/testfile/Nitfv2_1/ns3034d.nsf
     tst = gdaltest.GDALTest("NITF", "nitf/ns3034d.nsf", 1, 170)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -563,7 +713,7 @@ def test_nitf_17():
 
     # From http://www.gwg.nga.mil/ntb/baseline/software/testfile/Nitfv2_1/i_3034f.ntf
     tst = gdaltest.GDALTest("NITF", "nitf/i_3034f.ntf", 1, 170)
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -573,10 +723,9 @@ def test_nitf_17():
 def test_nitf_18():
 
     # Shut up the warning about missing image segment
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    # From http://www.gwg.nga.mil/ntb/baseline/software/testfile/Nitfv1_1/U_0006A.NTF
-    ds = gdal.Open("data/nitf/U_0006A.NTF")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        # From http://www.gwg.nga.mil/ntb/baseline/software/testfile/Nitfv1_1/U_0006A.NTF
+        ds = gdal.Open("data/nitf/U_0006A.NTF")
 
     assert ds.RasterCount == 0
 
@@ -590,7 +739,7 @@ def test_nitf_19():
     # From http://www.gwg.nga.mil/ntb/baseline/software/testfile/Nitfv2_0/U_1050A.NTF
     tst = gdaltest.GDALTest("NITF", "nitf/U_1050A.NTF", 1, 65024)
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -600,10 +749,9 @@ def test_nitf_19():
 def test_nitf_20():
 
     # Shut up the warning about file either corrupt or empty
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    # From http://www.gwg.nga.mil/ntb/baseline/software/testfile/Nitfv1_1/U_0002A.NTF
-    ds = gdal.Open("data/nitf/U_0002A.NTF")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        # From http://www.gwg.nga.mil/ntb/baseline/software/testfile/Nitfv1_1/U_0002A.NTF
+        ds = gdal.Open("data/nitf/U_0002A.NTF")
 
     assert ds is None
 
@@ -617,9 +765,8 @@ def test_nitf_20():
 def test_nitf_21():
 
     # Shut up the warning about missing image segment
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("data/nitf/ns3114a.nsf")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("data/nitf/ns3114a.nsf")
 
     mdTEXT = ds.GetMetadata("TEXT")
 
@@ -642,7 +789,7 @@ def test_nitf_21():
 def test_nitf_22():
 
     tst = gdaltest.GDALTest("NITF", "../../gcore/data/int32.tif", 1, 4672)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -652,7 +799,7 @@ def test_nitf_22():
 def test_nitf_23():
 
     tst = gdaltest.GDALTest("NITF", "../../gcore/data/float32.tif", 1, 4672)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -662,7 +809,7 @@ def test_nitf_23():
 def test_nitf_24():
 
     tst = gdaltest.GDALTest("NITF", "../../gcore/data/float64.tif", 1, 4672)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -672,7 +819,7 @@ def test_nitf_24():
 def test_nitf_25():
 
     tst = gdaltest.GDALTest("NITF", "../../gcore/data/uint16.tif", 1, 4672)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -682,18 +829,20 @@ def test_nitf_25():
 def test_nitf_26():
 
     tst = gdaltest.GDALTest("NITF", "../../gcore/data/uint32.tif", 1, 4672)
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
 # Test Create() with IC=NC compression, and multi-blocks
 
 
-def test_nitf_27():
+def test_nitf_27(tmp_path):
 
-    nitf_create(["ICORDS=G", "IC=NC", "BLOCKXSIZE=10", "BLOCKYSIZE=10"])
+    filename = str(tmp_path / "test.ntf")
 
-    nitf_check_created_file(32498, 42602, 38982)
+    nitf_create(filename, ["ICORDS=G", "IC=NC", "BLOCKXSIZE=10", "BLOCKYSIZE=10"])
+
+    nitf_check_created_file(filename, 32498, 42602, 38982)
 
 
 ###############################################################################
@@ -701,7 +850,7 @@ def test_nitf_27():
 
 
 @pytest.mark.require_driver("JP2ECW")
-def test_nitf_28_jp2ecw():
+def test_nitf_28_jp2ecw(tmp_path):
 
     import ecw
 
@@ -711,9 +860,17 @@ def test_nitf_28_jp2ecw():
     # Deregister other potential conflicting JPEG2000 drivers
     gdaltest.deregister_all_jpeg2000_drivers_but("JP2ECW")
     try:
-        nitf_create(["ICORDS=G", "IC=C8", "TARGET=75"], set_inverted_color_interp=False)
+        filename = str(tmp_path / "test.ntf")
 
-        nitf_check_created_file(32398, 42502, 38882, set_inverted_color_interp=False)
+        nitf_create(
+            filename,
+            ["ICORDS=G", "IC=C8", "TARGET=75"],
+            set_inverted_color_interp=False,
+        )
+
+        nitf_check_created_file(
+            filename, 32398, 42502, 38882, set_inverted_color_interp=False
+        )
 
         tmpfilename = "/vsimem/nitf_28_jp2ecw.ntf"
         src_ds = gdal.GetDriverByName("MEM").Create("", 1025, 1025)
@@ -722,10 +879,11 @@ def test_nitf_28_jp2ecw():
         blockxsize, blockysize = ds.GetRasterBand(1).GetBlockSize()
         ds = None
         gdal.Unlink(tmpfilename)
-        assert (blockxsize, blockysize) == (
-            256,
-            256,
-        )  # 256 since this is hardcoded as such in the ECW driver
+        # 256 for ECW < 5.1, 1024 for ECW >= 5.1
+        assert (blockxsize, blockysize) == (256, 256) or (blockxsize, blockysize) == (
+            1024,
+            1024,
+        )
     finally:
         gdaltest.reregister_all_jpeg2000_drivers()
 
@@ -740,17 +898,15 @@ def test_nitf_28_jp2mrsid():
     # Deregister other potential conflicting JPEG2000 drivers
     gdaltest.deregister_all_jpeg2000_drivers_but("JP2MrSID")
 
-    ret = nitf_check_created_file(
+    nitf_check_created_file(
+        "data/nitf/test_jp2_ecw33.ntf",
         32398,
         42502,
         38882,
-        filename="data/nitf/test_jp2_ecw33.ntf",
         set_inverted_color_interp=False,
     )
 
     gdaltest.reregister_all_jpeg2000_drivers()
-
-    return ret
 
 
 ###############################################################################
@@ -763,17 +919,15 @@ def test_nitf_28_jp2kak():
     # Deregister other potential conflicting JPEG2000 drivers
     gdaltest.deregister_all_jpeg2000_drivers_but("JP2KAK")
 
-    ret = nitf_check_created_file(
+    nitf_check_created_file(
+        "data/nitf/test_jp2_ecw33.ntf",
         32398,
         42502,
         38882,
-        filename="data/nitf/test_jp2_ecw33.ntf",
         set_inverted_color_interp=False,
     )
 
     gdaltest.reregister_all_jpeg2000_drivers()
-
-    return ret
 
 
 ###############################################################################
@@ -787,10 +941,10 @@ def test_nitf_28_jp2openjpeg():
     gdaltest.deregister_all_jpeg2000_drivers_but("JP2OpenJPEG")
     try:
         nitf_check_created_file(
+            "data/nitf/test_jp2_ecw33.ntf",
             32398,
             42502,
             38882,
-            filename="data/nitf/test_jp2_ecw33.ntf",
             set_inverted_color_interp=False,
         )
     finally:
@@ -802,19 +956,51 @@ def test_nitf_28_jp2openjpeg():
 
 
 @pytest.mark.require_driver("JP2OpenJPEG")
-def test_nitf_28_jp2openjpeg_bis():
+def test_nitf_28_jp2openjpeg_bis(tmp_path):
 
     # Deregister other potential conflicting JPEG2000 drivers
     gdaltest.deregister_all_jpeg2000_drivers_but("JP2OpenJPEG")
     try:
+        filename = str(tmp_path / "test.ntf")
+
         nitf_create(
+            filename,
             ["ICORDS=G", "IC=C8", "QUALITY=25"],
             set_inverted_color_interp=False,
             createcopy=True,
         )
-        ds = gdal.Open("tmp/test_create.ntf")
+        ds = gdal.Open(filename)
+        size = os.stat(filename).st_size
         assert ds.GetRasterBand(1).Checksum() in (31604, 31741)
         ds = None
+
+        nitf_create(
+            filename,
+            ["ICORDS=G", "IC=C8", "QUALITY=1,25"],
+            set_inverted_color_interp=False,
+            createcopy=True,
+        )
+        ds = gdal.Open(filename)
+        size2 = os.stat(filename).st_size
+        assert ds.GetRasterBand(1).Checksum() in (31604, 31741)
+        ds = None
+
+        assert size2 > size
+
+        # Check that floating-point values in QUALITY are honored
+        nitf_create(
+            filename,
+            ["ICORDS=G", "IC=C8", "QUALITY=1.9,25"],
+            set_inverted_color_interp=False,
+            createcopy=True,
+        )
+        ds = gdal.Open(filename)
+        size3 = os.stat(filename).st_size
+        assert ds.GetRasterBand(1).Checksum() in (31604, 31741)
+        ds = None
+
+        # The fact that size3 > size2 is a bit of a chance here...
+        assert size3 > size2
 
         tmpfilename = "/vsimem/nitf_28_jp2openjpeg_bis.ntf"
         src_ds = gdal.GetDriverByName("MEM").Create("", 1025, 1025)
@@ -832,16 +1018,17 @@ def test_nitf_28_jp2openjpeg_bis():
 # Test CreateCopy() with IC=C8 compression and NPJE profiles with the JP2OpenJPEG driver
 
 
-def test_nitf_jp2openjpeg_npje_numerically_lossless():
+def test_nitf_jp2openjpeg_npje_numerically_lossless(tmp_vsimem):
     jp2openjpeg_drv = gdal.GetDriverByName("JP2OpenJPEG")
     if jp2openjpeg_drv is None:
         pytest.skip()
 
     src_ds = gdal.Open("../gcore/data/uint16.tif")
     # May throw a warning with openjpeg < 2.5
-    with gdaltest.error_handler():
+    out1_filename = str(tmp_vsimem / "tmp.ntf")
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").CreateCopy(
-            "/vsimem/tmp.ntf",
+            out1_filename,
             src_ds,
             strict=False,
             options=[
@@ -852,19 +1039,17 @@ def test_nitf_jp2openjpeg_npje_numerically_lossless():
             ],
         )
 
-    ds = gdal.Open("/vsimem/tmp.ntf")
+    ds = gdal.Open(out1_filename)
+    assert ds.GetMetadataItem("NITF_ABPP") == "12"
+    assert ds.GetRasterBand(1).GetMetadataItem("NBITS", "IMAGE_STRUCTURE") == "12"
     assert ds.GetRasterBand(1).Checksum() == 4672
     assert (
         ds.GetMetadataItem("J2KLRA", "TRE")
         == "0050000102000000.03125000100.06250000200.12500000300.25000000400.50000000500.60000000600.70000000700.80000000800.90000000901.00000001001.10000001101.20000001201.30000001301.50000001401.70000001502.00000001602.30000001703.50000001803.90000001912.000000"
     )
     assert ds.GetMetadataItem("COMRAT", "DEBUG") in (
-        "N141",
-        "N142",
-        "N143",
-        "N147",
-        "N169",
-        "N174",
+        "N145",  # OpenJPEG 2.3.1 and 2.4
+        "N172",  # OpenJPEG 2.5
     )
     assert (
         ds.GetMetadataItem("COMPRESSION_REVERSIBILITY", "IMAGE_STRUCTURE") == "LOSSLESS"
@@ -884,7 +1069,7 @@ def test_nitf_jp2openjpeg_npje_numerically_lossless():
         in structure
     )
     assert (
-        '<Field name="Ssiz0" type="uint8" description="Unsigned 16 bits">15</Field>'
+        '<Field name="Ssiz0" type="uint8" description="Unsigned 12 bits">11</Field>'
         in structure
     )
     assert '<Field name="XTsiz" type="uint32">1024</Field>' in structure
@@ -917,7 +1102,25 @@ def test_nitf_jp2openjpeg_npje_numerically_lossless():
         assert '<Marker name="TLM"' in structure
         assert '<Marker name="PLT"' in structure
 
-    gdal.Unlink("/vsimem/tmp.ntf")
+    # Check that NBITS is propagated as ABPP
+    out2_filename = str(tmp_vsimem / "tmp.ntf")
+    with gdal.quiet_errors():
+        gdal.GetDriverByName("NITF").CreateCopy(
+            out2_filename,
+            gdal.Open(out1_filename),
+            strict=False,
+            options=[
+                "IC=C8",
+                "JPEG2000_DRIVER=JP2OpenJPEG",
+                "PROFILE=NPJE_NUMERICALLY_LOSSLESS",
+                "QUALITY=10,100",
+            ],
+        )
+
+    ds = gdal.Open(out2_filename)
+    assert ds.GetMetadataItem("NITF_ABPP") == "12"
+    assert ds.GetRasterBand(1).GetMetadataItem("NBITS", "IMAGE_STRUCTURE") == "12"
+    assert ds.GetRasterBand(1).Checksum() == 4672
 
 
 ###############################################################################
@@ -931,7 +1134,7 @@ def test_nitf_jp2openjpeg_npje_visually_lossless():
 
     src_ds = gdal.Open("data/byte.tif")
     # May throw a warning with openjpeg < 2.5
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").CreateCopy(
             "/vsimem/tmp.ntf",
             src_ds,
@@ -1019,7 +1222,7 @@ def test_nitf_jp2openjpeg_npje_visually_lossless_with_quality():
 
     src_ds = gdal.Open("data/byte.tif")
     # May throw a warning with openjpeg < 2.5
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").CreateCopy(
             "/vsimem/tmp.ntf",
             src_ds,
@@ -1236,11 +1439,15 @@ def test_nitf_30():
 # Verify we can write a file with a custom TRE and read it back properly.
 
 
-def test_nitf_31():
+def test_nitf_31(tmp_path):
 
-    nitf_create(["TRE=CUSTOM= Test TRE1\\0MORE", "TRE=TOTEST=SecondTRE", "ICORDS=G"])
+    filename = str(tmp_path / "test.ntf")
 
-    ds = gdal.Open("tmp/test_create.ntf")
+    nitf_create(
+        filename, ["TRE=CUSTOM= Test TRE1\\0MORE", "TRE=TOTEST=SecondTRE", "ICORDS=G"]
+    )
+
+    ds = gdal.Open(filename)
 
     md = ds.GetMetadata("TRE")
     assert len(md) == 2, "Did not get expected TRE count"
@@ -1258,27 +1465,31 @@ def test_nitf_31():
     ), "Did not get expected TRE contents"
 
     ds = None
-    return nitf_check_created_file(32498, 42602, 38982)
+    return nitf_check_created_file(filename, 32498, 42602, 38982)
 
 
 ###############################################################################
 # Test Create() with ICORDS=D
 
 
-def test_nitf_32():
+def test_nitf_32(tmp_path):
 
-    nitf_create(["ICORDS=D"])
+    filename = str(tmp_path / "test.ntf")
 
-    return nitf_check_created_file(32498, 42602, 38982)
+    nitf_create(filename, ["ICORDS=D"])
+
+    return nitf_check_created_file(filename, 32498, 42602, 38982)
 
 
 ###############################################################################
 # Test Create() with ICORDS=D and a consistent BLOCKA
 
 
-def test_nitf_33():
+def test_nitf_33(tmp_path):
 
+    filename = str(tmp_path / "test.ntf")
     nitf_create(
+        filename,
         [
             "ICORDS=D",
             "BLOCKA_BLOCK_COUNT=01",
@@ -1288,10 +1499,10 @@ def test_nitf_33():
             "BLOCKA_LRLC_LOC_01=+20.050000+119.950000",
             "BLOCKA_LRFC_LOC_01=+20.050000+100.050000",
             "BLOCKA_FRFC_LOC_01=+29.950000+100.050000",
-        ]
+        ],
     )
 
-    return nitf_check_created_file(32498, 42602, 38982)
+    return nitf_check_created_file(filename, 32498, 42602, 38982)
 
 
 ###############################################################################
@@ -1302,13 +1513,17 @@ def test_nitf_33():
 def test_nitf_34():
 
     tst = gdaltest.GDALTest("NITF", "n43.dt0", 1, 49187, options=["BLOCKSIZE=64"])
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
 # Test CreateCopy() writing file with a text segment.
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_nitf_35():
 
     src_ds = gdal.Open("data/nitf/text_md.vrt")
@@ -1354,8 +1569,7 @@ def test_nitf_36():
         ds.GetRasterBand(1).GetMinimum() is None
     ), "Did not expect to have minimum value at that point."
 
-    (_, _, mean, stddev) = ds.GetRasterBand(1).GetStatistics(False, False)
-    assert stddev < 0, "Did not expect to have statistics at that point."
+    assert ds.GetRasterBand(1).GetStatistics(False, False) is None
 
     (exp_mean, exp_stddev) = (65.4208, 47.254550335)
     (_, _, mean, stddev) = ds.GetRasterBand(1).GetStatistics(False, True)
@@ -1402,6 +1616,10 @@ def test_nitf_37():
 # Create and read a NITF file with 999 images
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_nitf_38():
 
     ds = gdal.Open("data/byte.tif")
@@ -1611,6 +1829,32 @@ def test_nitf_42(not_jpeg_9b):
 
 
 ###############################################################################
+# Check creating a 12-bit JPEG compressed NITF
+
+
+def test_nitf_write_jpeg12(not_jpeg_9b, tmp_path):
+    # Check if JPEG driver supports 12bit JPEG reading/writing
+    jpg_drv = gdal.GetDriverByName("JPEG")
+    md = jpg_drv.GetMetadata()
+    if md[gdal.DMD_CREATIONDATATYPES].find("UInt16") == -1:
+        pytest.skip("12bit jpeg not available")
+
+    ds = gdal.GetDriverByName("MEM").Create("", 10000, 1, 3, gdal.GDT_UInt16)
+    ds.GetRasterBand(1).Fill(4096)
+    ds.GetRasterBand(2).Fill(0)
+    ds.GetRasterBand(3).Fill(4096)
+    out_filename = str(tmp_path / "out.ntf")
+    with gdal.quiet_errors():
+        gdal.GetDriverByName("NITF").CreateCopy(out_filename, ds, options=["IC=C3"])
+
+    ds = gdal.Open(out_filename)
+    assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
+    assert [
+        ds.GetRasterBand(i + 1).GetStatistics(0, 1)[2] for i in range(3)
+    ] == pytest.approx([4095, 0, 4095], abs=1)
+
+
+###############################################################################
 # Test CreateCopy() in IC=C8 with various JPEG2000 drivers
 
 
@@ -1622,17 +1866,16 @@ def nitf_43(driver_to_test, options):
             jp2_drv = None
 
     if jp2_drv is None:
-        pytest.skip()
+        pytest.skip(f"Driver {driver_to_test} not available")
 
     # Deregister other potential conflicting JPEG2000 drivers
     gdaltest.deregister_all_jpeg2000_drivers_but(driver_to_test)
     try:
         ds = gdal.Open("data/byte.tif")
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        out_ds = gdal.GetDriverByName("NITF").CreateCopy(
-            "tmp/nitf_43.ntf", ds, options=options, strict=0
-        )
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            out_ds = gdal.GetDriverByName("NITF").CreateCopy(
+                "tmp/nitf_43.ntf", ds, options=options, strict=0
+            )
         out_ds = None
         out_ds = gdal.Open("tmp/nitf_43.ntf")
         assert out_ds.GetRasterBand(1).Checksum() == 4672
@@ -1718,7 +1961,7 @@ def test_nitf_check_jpeg2000_overviews(driver_to_test):
 
     jp2_drv = gdal.GetDriverByName(driver_to_test)
     if jp2_drv is None:
-        pytest.skip("Driver {driver_to_test} missing")
+        pytest.skip(f"Driver {driver_to_test} missing")
 
     # Deregister other potential conflicting JPEG2000 drivers
     gdaltest.deregister_all_jpeg2000_drivers_but(driver_to_test)
@@ -1757,6 +2000,10 @@ def test_nitf_check_jpeg2000_overviews(driver_to_test):
 # Check reading of rsets.
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_nitf_47():
 
     ds = gdal.Open("data/nitf/rset.ntf.r0")
@@ -1776,6 +2023,10 @@ def test_nitf_47():
 # Check building of standard overviews in place of rset overviews.
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_nitf_48():
 
     try:
@@ -1817,6 +2068,10 @@ def test_nitf_48():
 # Test TEXT and CGM creation options with CreateCopy() (#3376)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_nitf_49():
 
     options = [
@@ -1841,26 +2096,16 @@ def test_nitf_49():
     ds2 = gdal.GetDriverByName("NITF").CreateCopy("tmp/nitf49_2.ntf", ds)
 
     md = ds2.GetMetadata("TEXT")
-    if (
-        "DATA_0" not in md
-        or md["DATA_0"] != "COUCOU"
-        or "HEADER_0" not in md
-        or md["HEADER_0"].find("ABC  ") == -1
-    ):
-        gdaltest.post_reason("did not get expected TEXT metadata")
-        print(md)
-        return
+    assert "DATA_0" in md
+    assert md["DATA_0"] == "COUCOU"
+    assert "HEADER_0" in md
+    assert "ABC  " in md["HEADER_0"]
 
     md = ds2.GetMetadata("CGM")
-    if (
-        "SEGMENT_COUNT" not in md
-        or md["SEGMENT_COUNT"] != "1"
-        or "SEGMENT_0_DATA" not in md
-        or md["SEGMENT_0_DATA"] != "XYZ"
-    ):
-        gdaltest.post_reason("did not get expected CGM metadata")
-        print(md)
-        return
+    assert "SEGMENT_COUNT" in md
+    assert md["SEGMENT_COUNT"] == "1"
+    assert "SEGMENT_0_DATA" in md
+    assert md["SEGMENT_0_DATA"] == "XYZ"
 
     src_ds = None
     ds = None
@@ -1909,26 +2154,16 @@ def test_nitf_50():
     ds = gdal.Open("tmp/nitf50.ntf")
 
     md = ds.GetMetadata("TEXT")
-    if (
-        "DATA_0" not in md
-        or md["DATA_0"] != "COUCOU"
-        or "HEADER_0" not in md
-        or md["HEADER_0"].find("ABC  ") == -1
-    ):
-        gdaltest.post_reason("did not get expected TEXT metadata")
-        print(md)
-        return
+    assert "DATA_0" in md
+    assert md["DATA_0"] == "COUCOU"
+    assert "HEADER_0" in md
+    assert "ABC  " in md["HEADER_0"]
 
     md = ds.GetMetadata("CGM")
-    if (
-        "SEGMENT_COUNT" not in md
-        or md["SEGMENT_COUNT"] != "1"
-        or "SEGMENT_0_DATA" not in md
-        or md["SEGMENT_0_DATA"] != "XYZ"
-    ):
-        gdaltest.post_reason("did not get expected CGM metadata")
-        print(md)
-        return
+    assert "SEGMENT_COUNT" in md
+    assert md["SEGMENT_COUNT"] == "1"
+    assert "SEGMENT_0_DATA" in md
+    assert md["SEGMENT_0_DATA"] == "XYZ"
 
     ds = None
 
@@ -2140,10 +2375,7 @@ def test_nitf_57():
     gt = ds.GetGeoTransform()
     ds = None
 
-    if gt != (-180.0, 1.0, 0.0, 90.0, 0.0, -1.0):
-        gdaltest.post_reason("did not get expected geotransform")
-        print(gt)
-        return
+    assert gt == (-180.0, 1.0, 0.0, 90.0, 0.0, -1.0)
 
 
 ###############################################################################
@@ -2204,7 +2436,7 @@ def test_nitf_read_IMRFCA_IMASDA():
     assert md == {}
 
     # Too short IMRFCA
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").Create(
             tmpfile,
             1,
@@ -2218,7 +2450,7 @@ def test_nitf_read_IMRFCA_IMASDA():
     assert md == {}
 
     # Too short IMASDA
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").Create(
             tmpfile,
             1,
@@ -2272,9 +2504,8 @@ def test_nitf_59():
 def test_nitf_60():
 
     # Shut down errors because the file is truncated
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("data/nitf/testtest.on9")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("data/nitf/testtest.on9")
     wkt = ds.GetProjectionRef()
     gt = ds.GetGeoTransform()
     ds = None
@@ -2523,14 +2754,13 @@ def test_nitf_66():
 def test_nitf_67():
 
     src_ds = gdal.Open("data/byte.tif")
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.GetDriverByName("NITF").CreateCopy(
-        "/vsimem/nitf_67.ntf",
-        src_ds,
-        options=["BLOCKYSIZE=1", "BLOCKXSIZE=10"],
-        strict=0,
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.GetDriverByName("NITF").CreateCopy(
+            "/vsimem/nitf_67.ntf",
+            src_ds,
+            options=["BLOCKYSIZE=1", "BLOCKXSIZE=10"],
+            strict=0,
+        )
     ds = None
     src_ds = None
 
@@ -2563,6 +2793,10 @@ def test_nitf_68():
 # Test SetGCPs() support
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_nitf_69():
 
     vrt_txt = """<VRTDataset rasterXSize="20" rasterYSize="20">
@@ -2791,6 +3025,7 @@ def test_nitf_72():
     src_md = src_md_max_precision
     src_ds.SetMetadata(src_md, "RPC")
 
+    gdal.ErrorReset()
     gdal.GetDriverByName("NITF").CreateCopy("/vsimem/nitf_72.ntf", src_ds)
 
     assert gdal.GetLastErrorMsg() == "", "fail: did not expect warning"
@@ -2938,7 +3173,7 @@ def test_nitf_72():
 
         src_ds.SetMetadata(src_md, "RPC")
 
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ds = gdal.GetDriverByName("NITF").CreateCopy("/vsimem/nitf_72.ntf", src_ds)
         assert ds is not None, "fail: expected a dataset"
         ds = None
@@ -2969,7 +3204,7 @@ def test_nitf_72():
     ] = "0 9.876543e-10 9.876543e-9 -9.876543e+9 -9.876543e-9 0 9.876543e+9 9.876543e-9 -9.876543e+9 -9.876543e-9 0 9.876543e+9 9.876543e-9 -9.876543e+9 -9.876543e-9 0 9.876543e+9 9.876543e-9 -9.876543e+9 -9.876543e-9"
     src_ds.SetMetadata(src_md, "RPC")
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.GetDriverByName("NITF").CreateCopy("/vsimem/nitf_72.ntf", src_ds)
     assert ds is not None, "fail: expected a dataset"
     ds = None
@@ -2992,7 +3227,7 @@ def test_nitf_72():
     assert RPC00B == expected_RPC00B, "fail: did not get expected RPC00B"
 
     # Test RPCTXT creation option
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").CreateCopy(
             "/vsimem/nitf_72.ntf", src_ds, options=["RPCTXT=YES"]
         )
@@ -3038,7 +3273,7 @@ def test_nitf_72():
 
         src_ds.SetMetadata(src_md, "RPC")
 
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ds = gdal.GetDriverByName("NITF").CreateCopy("/vsimem/nitf_72.ntf", src_ds)
         assert ds is None, "fail: expected failure for %s" % key
 
@@ -3050,7 +3285,7 @@ def test_nitf_72():
     ] = "0 9.876543e10 9.876543e-9 -9.876543e+9 -9.876543e-9 0 9.876543e+9 9.876543e-9 -9.876543e+9 -9.876543e-9 0 9.876543e+9 9.876543e-9 -9.876543e+9 -9.876543e-9 0 9.876543e+9 9.876543e-9 -9.876543e+9 -9.876543e-9"
     src_ds.SetMetadata(src_md, "RPC")
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.GetDriverByName("NITF").CreateCopy("/vsimem/nitf_72.ntf", src_ds)
     assert ds is None, "fail: expected failure"
 
@@ -3061,7 +3296,7 @@ def test_nitf_72():
 
 def test_nitf_73():
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.Open("data/nitf/oss_fuzz_1525.ntf")
 
 
@@ -3878,6 +4113,386 @@ def test_nitf_86():
     <field name="RESERVED_LEN" value="00000" />
   </tre>
 </tres>
+"""
+    assert data == expected_data
+
+
+###############################################################################
+# Test parsing CSCSDB DES (STDI-0002-1-v5.0 App M)
+
+
+def test_nitf_CSCSDB(tmp_vsimem):
+    tre_data = "DES=CSCSDB=01U                                                                                                                                                                      008517261ee9-2175-4ff2-86ad-dddda1f8270c001002001824ecf8e-1041-4cce-9edb-bc92d88624ca000020050407132420050407072409.88900000031231+2.50000000000000E+03+0.00000000000000E+00+0.00000000000000E+00+2.50000000000000E+03+0.00000000000000E+00+2.50000000000000E+0300101020050407072409.8890000002451+2.01640000000000E-08+0.00000000000000E+00+2.01640000000000E-080010312005040726649.889000000001.8750000000081+7.22500000000000E-09+0.00000000000000E+00+7.22500000000000E-09100104020050407072409.889000000161+2.01640000000000E-0800105020050407072409.889000000171+1.96000000000000E-0400107000100303+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+00+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+00+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+00+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+00+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+00+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+00+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+00+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+00+4.00000000000000E+00+0.00000000000000E+00+4.00000000000000E+000910107010101.0001.0000000.00000000.000000+1.00000000000000E+03020101.0001.0000000.00000000.000000+5.00000000000000E+02030101.0001.0000000.00000000.000000+5.00000000000000E+02040101.0001.0000000.00000000.000000+5.00000000000000E+02050101.0001.0000000.00000000.000000+5.00000000000000E+02060101.0001.0000000.00000000.000000+5.00000000000000E+02070101.0001.0000000.00000000.000000+1.00000000000000E+020000000000"
+
+    filename = str(tmp_vsimem / "test.ntf")
+    ds = gdal.GetDriverByName("NITF").Create(filename, 1, 1, options=[tre_data])
+    ds = None
+
+    ds = gdal.Open(filename)
+    data = ds.GetMetadata("xml:DES")[0]
+    ds = None
+
+    expected_data = """<des_list>
+  <des name="CSCSDB">
+    <field name="DESVER" value="01" />
+    <field name="DECLAS" value="U" />
+    <field name="DESCLSY" value="" />
+    <field name="DESCODE" value="" />
+    <field name="DESCTLH" value="" />
+    <field name="DESREL" value="" />
+    <field name="DESDCTP" value="" />
+    <field name="DESDCDT" value="" />
+    <field name="DESDCXM" value="" />
+    <field name="DESDG" value="" />
+    <field name="DESDGDT" value="" />
+    <field name="DESCLTX" value="" />
+    <field name="DESCATP" value="" />
+    <field name="DESCAUT" value="" />
+    <field name="DESCRSN" value="" />
+    <field name="DESSRDT" value="" />
+    <field name="DESCTLN" value="" />
+    <field name="DESSHL" value="0085" />
+    <field name="DESSHF" value="17261ee9-2175-4ff2-86ad-dddda1f8270c001002001824ecf8e-1041-4cce-9edb-bc92d88624ca0000">
+      <user_defined_fields>
+        <field name="UUID" value="17261ee9-2175-4ff2-86ad-dddda1f8270c" />
+        <field name="NUMAIS" value="001" />
+        <repeated number="1">
+          <group index="0">
+            <field name="AISDLVL" value="002" />
+          </group>
+        </repeated>
+        <field name="NUM_ASSOC_ELEM" value="001" />
+        <repeated name="ASSOC_ELEM" number="1">
+          <group index="0">
+            <field name="ASSOC_ELEM_UUID" value="824ecf8e-1041-4cce-9edb-bc92d88624ca" />
+          </group>
+        </repeated>
+        <field name="RESERVEDSUBH_LEN" value="0000" />
+      </user_defined_fields>
+    </field>
+    <field name="DESDATA" value="MjAwNTA0MDcxMzI0MjAwNTA0MDcwNzI0MDkuODg5MDAwMDAwMzEyMzErMi41MDAwMDAwMDAwMDAwMEUrMDMrMC4wMDAwMDAwMDAwMDAwMEUrMDArMC4wMDAwMDAwMDAwMDAwMEUrMDArMi41MDAwMDAwMDAwMDAwMEUrMDMrMC4wMDAwMDAwMDAwMDAwMEUrMDArMi41MDAwMDAwMDAwMDAwMEUrMDMwMDEwMTAyMDA1MDQwNzA3MjQwOS44ODkwMDAwMDAyNDUxKzIuMDE2NDAwMDAwMDAwMDBFLTA4KzAuMDAwMDAwMDAwMDAwMDBFKzAwKzIuMDE2NDAwMDAwMDAwMDBFLTA4MDAxMDMxMjAwNTA0MDcyNjY0OS44ODkwMDAwMDAwMDEuODc1MDAwMDAwMDA4MSs3LjIyNTAwMDAwMDAwMDAwRS0wOSswLjAwMDAwMDAwMDAwMDAwRSswMCs3LjIyNTAwMDAwMDAwMDAwRS0wOTEwMDEwNDAyMDA1MDQwNzA3MjQwOS44ODkwMDAwMDAxNjErMi4wMTY0MDAwMDAwMDAwMEUtMDgwMDEwNTAyMDA1MDQwNzA3MjQwOS44ODkwMDAwMDAxNzErMS45NjAwMDAwMDAwMDAwMEUtMDQwMDEwNzAwMDEwMDMwMys0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMCswLjAwMDAwMDAwMDAwMDAwRSswMCs0LjAwMDAwMDAwMDAwMDAwRSswMDA5MTAxMDcwMTAxMDEuMDAwMS4wMDAwMDAwLjAwMDAwMDAwLjAwMDAwMCsxLjAwMDAwMDAwMDAwMDAwRSswMzAyMDEwMS4wMDAxLjAwMDAwMDAuMDAwMDAwMDAuMDAwMDAwKzUuMDAwMDAwMDAwMDAwMDBFKzAyMDMwMTAxLjAwMDEuMDAwMDAwMC4wMDAwMDAwMC4wMDAwMDArNS4wMDAwMDAwMDAwMDAwMEUrMDIwNDAxMDEuMDAwMS4wMDAwMDAwLjAwMDAwMDAwLjAwMDAwMCs1LjAwMDAwMDAwMDAwMDAwRSswMjA1MDEwMS4wMDAxLjAwMDAwMDAuMDAwMDAwMDAuMDAwMDAwKzUuMDAwMDAwMDAwMDAwMDBFKzAyMDYwMTAxLjAwMDEuMDAwMDAwMC4wMDAwMDAwMC4wMDAwMDArNS4wMDAwMDAwMDAwMDAwMEUrMDIwNzAxMDEuMDAwMS4wMDAwMDAwLjAwMDAwMDAwLjAwMDAwMCsxLjAwMDAwMDAwMDAwMDAwRSswMjAwMDAwMDAwMDA=">
+      <data_fields>
+        <field name="COV_VERSION_DATE" value="20050407" />
+        <field name="CORE_SETS" value="1" />
+        <repeated name="CORE_SETS" number="1">
+          <group index="0">
+            <field name="REF_FRAME_POSITION" value="3" />
+            <field name="REF_FRAME_ATTITUDE" value="2" />
+            <field name="NUM_GROUPS" value="4" />
+            <repeated name="GROUPS" number="4">
+              <group index="0">
+                <field name="CORR_REF_DATE" value="20050407" />
+                <field name="CORR_REF_TIME" value="072409.889000000" />
+                <field name="NUM_ADJ_PARM" value="3" />
+                <repeated name="ADJ_PARM" number="3">
+                  <group index="0">
+                    <field name="ADJ_PARM_ID" value="1" />
+                  </group>
+                  <group index="1">
+                    <field name="ADJ_PARM_ID" value="2" />
+                  </group>
+                  <group index="2">
+                    <field name="ADJ_PARM_ID" value="3" />
+                  </group>
+                </repeated>
+                <field name="BASIC_SUB_ALLOC" value="1" />
+                <repeated number="6">
+                  <group index="0">
+                    <field name="ERRCOV_C1" value="+2.50000000000000E+03" />
+                  </group>
+                  <group index="1">
+                    <field name="ERRCOV_C1" value="+0.00000000000000E+00" />
+                  </group>
+                  <group index="2">
+                    <field name="ERRCOV_C1" value="+0.00000000000000E+00" />
+                  </group>
+                  <group index="3">
+                    <field name="ERRCOV_C1" value="+2.50000000000000E+03" />
+                  </group>
+                  <group index="4">
+                    <field name="ERRCOV_C1" value="+0.00000000000000E+00" />
+                  </group>
+                  <group index="5">
+                    <field name="ERRCOV_C1" value="+2.50000000000000E+03" />
+                  </group>
+                </repeated>
+                <field name="BASIC_PF_FLAG" value="0" />
+                <field name="BASIC_PL_FLAG" value="0" />
+                <field name="BASIC_SR_FLAG" value="1" />
+                <field name="BASIC_SR_SPDCF" value="01" />
+                <field name="POST_SUB_ALLOC" value="0" />
+              </group>
+              <group index="1">
+                <field name="CORR_REF_DATE" value="20050407" />
+                <field name="CORR_REF_TIME" value="072409.889000000" />
+                <field name="NUM_ADJ_PARM" value="2" />
+                <repeated name="ADJ_PARM" number="2">
+                  <group index="0">
+                    <field name="ADJ_PARM_ID" value="4" />
+                  </group>
+                  <group index="1">
+                    <field name="ADJ_PARM_ID" value="5" />
+                  </group>
+                </repeated>
+                <field name="BASIC_SUB_ALLOC" value="1" />
+                <repeated number="3">
+                  <group index="0">
+                    <field name="ERRCOV_C1" value="+2.01640000000000E-08" />
+                  </group>
+                  <group index="1">
+                    <field name="ERRCOV_C1" value="+0.00000000000000E+00" />
+                  </group>
+                  <group index="2">
+                    <field name="ERRCOV_C1" value="+2.01640000000000E-08" />
+                  </group>
+                </repeated>
+                <field name="BASIC_PF_FLAG" value="0" />
+                <field name="BASIC_PL_FLAG" value="0" />
+                <field name="BASIC_SR_FLAG" value="1" />
+                <field name="BASIC_SR_SPDCF" value="03" />
+                <field name="POST_SUB_ALLOC" value="1" />
+                <field name="POST_START_DATE" value="20050407" />
+                <field name="POST_START_TIME" value="26649.889000000" />
+                <field name="POST_DT" value="001.875000000" />
+                <field name="NUM_POSTS" value="008" />
+                <field name="COMMON_POSTS_COV" value="1" />
+                <repeated number="3">
+                  <group index="0">
+                    <field name="ERRCOV_C2" value="+7.22500000000000E-09" />
+                  </group>
+                  <group index="1">
+                    <field name="ERRCOV_C2" value="+0.00000000000000E+00" />
+                  </group>
+                  <group index="2">
+                    <field name="ERRCOV_C2" value="+7.22500000000000E-09" />
+                  </group>
+                </repeated>
+                <field name="POST_INTERP" value="1" />
+                <field name="POST_PF_FLAG" value="0" />
+                <field name="POST_PL_FLAG" value="0" />
+                <field name="POST_SR_FLAG" value="1" />
+                <field name="POST_SR_SPDCF" value="04" />
+                <field name="POST_CORR" value="0" />
+              </group>
+              <group index="2">
+                <field name="CORR_REF_DATE" value="20050407" />
+                <field name="CORR_REF_TIME" value="072409.889000000" />
+                <field name="NUM_ADJ_PARM" value="1" />
+                <repeated name="ADJ_PARM" number="1">
+                  <group index="0">
+                    <field name="ADJ_PARM_ID" value="6" />
+                  </group>
+                </repeated>
+                <field name="BASIC_SUB_ALLOC" value="1" />
+                <repeated number="1">
+                  <group index="0">
+                    <field name="ERRCOV_C1" value="+2.01640000000000E-08" />
+                  </group>
+                </repeated>
+                <field name="BASIC_PF_FLAG" value="0" />
+                <field name="BASIC_PL_FLAG" value="0" />
+                <field name="BASIC_SR_FLAG" value="1" />
+                <field name="BASIC_SR_SPDCF" value="05" />
+                <field name="POST_SUB_ALLOC" value="0" />
+              </group>
+              <group index="3">
+                <field name="CORR_REF_DATE" value="20050407" />
+                <field name="CORR_REF_TIME" value="072409.889000000" />
+                <field name="NUM_ADJ_PARM" value="1" />
+                <repeated name="ADJ_PARM" number="1">
+                  <group index="0">
+                    <field name="ADJ_PARM_ID" value="7" />
+                  </group>
+                </repeated>
+                <field name="BASIC_SUB_ALLOC" value="1" />
+                <repeated number="1">
+                  <group index="0">
+                    <field name="ERRCOV_C1" value="+1.96000000000000E-04" />
+                  </group>
+                </repeated>
+                <field name="BASIC_PF_FLAG" value="0" />
+                <field name="BASIC_PL_FLAG" value="0" />
+                <field name="BASIC_SR_FLAG" value="1" />
+                <field name="BASIC_SR_SPDCF" value="07" />
+                <field name="POST_SUB_ALLOC" value="0" />
+              </group>
+            </repeated>
+          </group>
+        </repeated>
+        <field name="IO_CAL_AP" value="0" />
+        <field name="TS_CAL_AP" value="0" />
+        <field name="UE_FLAG" value="1" />
+        <field name="LINE_DIMENSION" value="003" />
+        <field name="SAMPLE_DIMENSION" value="03" />
+        <repeated name="LINE" number="3">
+          <group index="0">
+            <repeated name="SAMPLE" number="3">
+              <group index="0">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+              <group index="1">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+              <group index="2">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+            </repeated>
+          </group>
+          <group index="1">
+            <repeated name="SAMPLE" number="3">
+              <group index="0">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+              <group index="1">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+              <group index="2">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+            </repeated>
+          </group>
+          <group index="2">
+            <repeated name="SAMPLE" number="3">
+              <group index="0">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+              <group index="1">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+              <group index="2">
+                <field name="URR" value="+4.00000000000000E+00" />
+                <field name="URC" value="+0.00000000000000E+00" />
+                <field name="UCC" value="+4.00000000000000E+00" />
+              </group>
+            </repeated>
+          </group>
+        </repeated>
+        <field name="LINE_SPDCF" value="09" />
+        <field name="SAMPLE_SPDCF" value="10" />
+        <field name="SPDC_FLAG" value="1" />
+        <field name="NUM_SPDCF" value="07" />
+        <repeated name="SPDCF" number="7">
+          <group index="0">
+            <field name="SPDCF_ID" value="01" />
+            <field name="SPDCF_P" value="01" />
+            <repeated name="CONSTITUENT" number="1">
+              <group index="0">
+                <field name="SPDCF_FAM" value="0" />
+                <field name="SPDCF_WEIGHT" value="1.000" />
+                <field name="FP_A" value="1.000000" />
+                <field name="FP_ALPHA" value="0.000000" />
+                <field name="FP_BETA" value="00.000000" />
+                <field name="FP_T" value="+1.00000000000000E+03" />
+              </group>
+            </repeated>
+          </group>
+          <group index="1">
+            <field name="SPDCF_ID" value="02" />
+            <field name="SPDCF_P" value="01" />
+            <repeated name="CONSTITUENT" number="1">
+              <group index="0">
+                <field name="SPDCF_FAM" value="0" />
+                <field name="SPDCF_WEIGHT" value="1.000" />
+                <field name="FP_A" value="1.000000" />
+                <field name="FP_ALPHA" value="0.000000" />
+                <field name="FP_BETA" value="00.000000" />
+                <field name="FP_T" value="+5.00000000000000E+02" />
+              </group>
+            </repeated>
+          </group>
+          <group index="2">
+            <field name="SPDCF_ID" value="03" />
+            <field name="SPDCF_P" value="01" />
+            <repeated name="CONSTITUENT" number="1">
+              <group index="0">
+                <field name="SPDCF_FAM" value="0" />
+                <field name="SPDCF_WEIGHT" value="1.000" />
+                <field name="FP_A" value="1.000000" />
+                <field name="FP_ALPHA" value="0.000000" />
+                <field name="FP_BETA" value="00.000000" />
+                <field name="FP_T" value="+5.00000000000000E+02" />
+              </group>
+            </repeated>
+          </group>
+          <group index="3">
+            <field name="SPDCF_ID" value="04" />
+            <field name="SPDCF_P" value="01" />
+            <repeated name="CONSTITUENT" number="1">
+              <group index="0">
+                <field name="SPDCF_FAM" value="0" />
+                <field name="SPDCF_WEIGHT" value="1.000" />
+                <field name="FP_A" value="1.000000" />
+                <field name="FP_ALPHA" value="0.000000" />
+                <field name="FP_BETA" value="00.000000" />
+                <field name="FP_T" value="+5.00000000000000E+02" />
+              </group>
+            </repeated>
+          </group>
+          <group index="4">
+            <field name="SPDCF_ID" value="05" />
+            <field name="SPDCF_P" value="01" />
+            <repeated name="CONSTITUENT" number="1">
+              <group index="0">
+                <field name="SPDCF_FAM" value="0" />
+                <field name="SPDCF_WEIGHT" value="1.000" />
+                <field name="FP_A" value="1.000000" />
+                <field name="FP_ALPHA" value="0.000000" />
+                <field name="FP_BETA" value="00.000000" />
+                <field name="FP_T" value="+5.00000000000000E+02" />
+              </group>
+            </repeated>
+          </group>
+          <group index="5">
+            <field name="SPDCF_ID" value="06" />
+            <field name="SPDCF_P" value="01" />
+            <repeated name="CONSTITUENT" number="1">
+              <group index="0">
+                <field name="SPDCF_FAM" value="0" />
+                <field name="SPDCF_WEIGHT" value="1.000" />
+                <field name="FP_A" value="1.000000" />
+                <field name="FP_ALPHA" value="0.000000" />
+                <field name="FP_BETA" value="00.000000" />
+                <field name="FP_T" value="+5.00000000000000E+02" />
+              </group>
+            </repeated>
+          </group>
+          <group index="6">
+            <field name="SPDCF_ID" value="07" />
+            <field name="SPDCF_P" value="01" />
+            <repeated name="CONSTITUENT" number="1">
+              <group index="0">
+                <field name="SPDCF_FAM" value="0" />
+                <field name="SPDCF_WEIGHT" value="1.000" />
+                <field name="FP_A" value="1.000000" />
+                <field name="FP_ALPHA" value="0.000000" />
+                <field name="FP_BETA" value="00.000000" />
+                <field name="FP_T" value="+1.00000000000000E+02" />
+              </group>
+            </repeated>
+          </group>
+        </repeated>
+        <field name="DIRECT_COVARIANCE_FLAG" value="0" />
+        <field name="RESERVED_LEN" value="000000000" />
+      </data_fields>
+    </field>
+  </des>
+</des_list>
 """
     assert data == expected_data
 
@@ -4756,7 +5371,7 @@ def test_nitf_tre_overflow_des_error_missing_RESERVE_SPACE_FOR_TRE_OVERFLOW():
     des_data = "CSEPHA" + ("%05d" % len(CSEPHA_DATA)) + CSEPHA_DATA
     des = des_header + des_data
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         gdal.GetDriverByName("NITF").Create(
             "/vsimem/nitf_DES.ntf", 1, 1, options=["DES=TRE_OVERFLOW=" + des]
@@ -4789,7 +5404,7 @@ def test_nitf_tre_overflow_des_errorinvalid_DESITEM():
     des_data = "CSEPHA" + ("%05d" % len(CSEPHA_DATA)) + CSEPHA_DATA
     des = des_header + des_data
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         gdal.GetDriverByName("NITF").Create(
             "/vsimem/nitf_DES.ntf",
@@ -4800,6 +5415,109 @@ def test_nitf_tre_overflow_des_errorinvalid_DESITEM():
         assert gdal.GetLastErrorMsg() != ""
 
     gdal.GetDriverByName("NITF").Delete("/vsimem/nitf_DES.ntf")
+
+
+###############################################################################
+# Test reading a XML_DATA_CONTENT DES
+
+
+def test_nitf_des_XML_DATA_CONTENT(tmp_vsimem):
+    des_data = "02U" + " " * 166 + r"0000<test/>"
+
+    filename = str(tmp_vsimem / "test_nitf_des_XML_DATA_CONTENT.ntf")
+    ds = gdal.GetDriverByName("NITF").Create(
+        filename,
+        1,
+        1,
+        options=["DES=XML_DATA_CONTENT=" + des_data],
+    )
+    ds = None
+
+    ds = gdal.Open(filename)
+    data = ds.GetMetadata("xml:DES")[0]
+    ds = None
+
+    assert (
+        data
+        == """<des_list>
+  <des name="XML_DATA_CONTENT">
+    <field name="DESVER" value="02" />
+    <field name="DECLAS" value="U" />
+    <field name="DESCLSY" value="" />
+    <field name="DESCODE" value="" />
+    <field name="DESCTLH" value="" />
+    <field name="DESREL" value="" />
+    <field name="DESDCTP" value="" />
+    <field name="DESDCDT" value="" />
+    <field name="DESDCXM" value="" />
+    <field name="DESDG" value="" />
+    <field name="DESDGDT" value="" />
+    <field name="DESCLTX" value="" />
+    <field name="DESCATP" value="" />
+    <field name="DESCAUT" value="" />
+    <field name="DESCRSN" value="" />
+    <field name="DESSRDT" value="" />
+    <field name="DESCTLN" value="" />
+    <field name="DESSHL" value="0000" />
+    <field name="DESDATA">
+      <xml_content>
+        <test />
+      </xml_content>
+    </field>
+  </des>
+</des_list>
+"""
+    )
+
+
+###############################################################################
+# Test reading a invalid XML_DATA_CONTENT DES
+
+
+def test_nitf_des_XML_DATA_CONTENT_invalid(tmp_vsimem):
+    des_data = "02U" + " " * 166 + r"0000invalid <xml"
+
+    filename = str(tmp_vsimem / "test_nitf_des_XML_DATA_CONTENT_invalid.ntf")
+    ds = gdal.GetDriverByName("NITF").Create(
+        filename,
+        1,
+        1,
+        options=["DES=XML_DATA_CONTENT=" + des_data],
+    )
+    ds = None
+
+    with gdal.quiet_errors():
+        ds = gdal.Open(filename)
+        data = ds.GetMetadata("xml:DES")[0]
+    ds = None
+
+    assert (
+        data
+        == """<des_list>
+  <des name="XML_DATA_CONTENT">
+    <field name="DESVER" value="02" />
+    <field name="DECLAS" value="U" />
+    <field name="DESCLSY" value="" />
+    <field name="DESCODE" value="" />
+    <field name="DESCTLH" value="" />
+    <field name="DESREL" value="" />
+    <field name="DESDCTP" value="" />
+    <field name="DESDCDT" value="" />
+    <field name="DESDCXM" value="" />
+    <field name="DESDG" value="" />
+    <field name="DESDGDT" value="" />
+    <field name="DESCLTX" value="" />
+    <field name="DESCATP" value="" />
+    <field name="DESCAUT" value="" />
+    <field name="DESCRSN" value="" />
+    <field name="DESSRDT" value="" />
+    <field name="DESCTLN" value="" />
+    <field name="DESSHL" value="0000" />
+    <field name="DESDATA" value="aW52YWxpZCA8eG1s" />
+  </des>
+</des_list>
+"""
+    )
 
 
 ###############################################################################
@@ -5016,7 +5734,8 @@ def test_nitf_invalid_udid():
 def test_nitf_isubcat_populated():
 
     # Check a dataset with IQ complex data.
-    ds = gdal.Open("data/nitf/sar_sicd.ntf")
+    with gdal.config_option("NITF_SAR_AS_COMPLEX_TYPE", "NO"):
+        ds = gdal.Open("data/nitf/sar_sicd.ntf")
     expected = ["I", "Q"]
     for b in range(ds.RasterCount):
         md = ds.GetRasterBand(b + 1).GetMetadata()
@@ -5037,13 +5756,13 @@ def test_nitf_create_too_large_file():
 
     # Test 1e10 byte limit for a single image
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").Create("/vsimem/out.ntf", int(1e5), int(1e5))
     assert gdal.GetLastErrorMsg() != ""
 
     # Test 1e12 byte limit for while file
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").Create(
             "/vsimem/out.ntf",
             int(1e5),
@@ -5115,6 +5834,7 @@ def test_nitf_create_three_images_final_uncompressed():
     src_ds_8193.GetRasterBand(1).Fill(2)
 
     # Write first image segment, reserve space for two other ones and a DES
+    gdal.ErrorReset()
     ds = gdal.GetDriverByName("NITF").CreateCopy(
         "/vsimem/out.ntf", src_ds_2049, options=["NUMI=3", "NUMDES=1"]
     )
@@ -5380,7 +6100,7 @@ def test_nitf_no_image_segment():
 
     src_ds = gdal.Open("data/byte.tif")
     out_filename = "/vsimem/test_nitf_no_image_segment.ntf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert (
             gdal.GetDriverByName("NITF").CreateCopy(
                 out_filename, src_ds, strict=False, options=["NUMI=0"]
@@ -5388,14 +6108,14 @@ def test_nitf_no_image_segment():
             is not None
         )
     gdal.Unlink(out_filename + ".aux.xml")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open(out_filename)
     assert ds is not None
     for domain in ds.GetMetadataDomainList():
         ds.GetMetadata(domain)
     ds = None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").Delete(out_filename)
 
 
@@ -5406,7 +6126,7 @@ def test_nitf_no_image_segment():
 def test_nitf_metadata_validation_tre():
 
     filename = "/vsimem/test_nitf_metadata_validation_tre.ntf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").Create(
             filename,
             1,
@@ -5416,7 +6136,7 @@ def test_nitf_metadata_validation_tre():
             ],
         )
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(filename, open_options=["VALIDATE=YES"])
     assert gdal.GetLastErrorMsg() != ""
     md = ds.GetMetadata("xml:TRE")[0]
@@ -5443,7 +6163,7 @@ def test_nitf_metadata_validation_tre():
 """
     )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             filename, open_options=["VALIDATE=YES", "FAIL_IF_VALIDATION_ERROR=YES"]
         )
@@ -5461,12 +6181,12 @@ def test_nitf_metadata_validation_des():
     filename = "/vsimem/test_nitf_metadata_validation_des.ntf"
     des_data = b"02U" + b" " * 166 + b"0004ABCD"
     escaped_data = gdal.EscapeString(des_data, gdal.CPLES_BackslashQuotable)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.GetDriverByName("NITF").Create(
             filename, 1, 1, options=[b"DES=CSATTA DES=" + escaped_data]
         )
     gdal.ErrorReset()
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(filename, open_options=["VALIDATE=YES"])
     assert gdal.GetLastErrorMsg() != ""
     md = ds.GetMetadata("xml:DES")[0]
@@ -5503,13 +6223,64 @@ def test_nitf_metadata_validation_des():
 """
     )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             filename, open_options=["VALIDATE=YES", "FAIL_IF_VALIDATION_ERROR=YES"]
         )
     assert ds is None
 
     gdal.Unlink(filename)
+
+
+###############################################################################
+# Test CreateCopy() with IC=C8 compression and NPJE profiles with the JP2OpenJPEG driver
+
+
+def test_nitf_report_ABPP_as_NBITS(tmp_vsimem):
+
+    out_filename = str(tmp_vsimem / "tmp.ntf")
+    gdal.GetDriverByName("NITF").Create(
+        out_filename, 1, 1, 1, gdal.GDT_UInt16, options=["NBITS=9"]
+    )
+
+    ds = gdal.Open(out_filename)
+    assert ds.GetMetadataItem("NITF_ABPP") == "09"
+    assert ds.GetRasterBand(1).GetMetadataItem("NBITS", "IMAGE_STRUCTURE") == "9"
+
+
+###############################################################################
+# Test reading SAR products with I,Q bands
+
+
+def test_nitf_readSAR_IQ(tmp_vsimem):
+
+    out_filename = str(tmp_vsimem / "tmp.ntf")
+    gdal.Translate(
+        out_filename,
+        "data/byte.tif",
+        options="-b 1 -b 1 -outsize 40 20 -co ICAT=SAR -ot Float32 -co ISUBCAT=I,Q -scale_2 0 255 255 0",
+    )
+    gdal.Unlink(out_filename + ".aux.xml")
+
+    ds = gdal.Open(out_filename)
+    assert ds.RasterCount == 1
+    assert ds.RasterXSize == 40
+    assert ds.RasterYSize == 20
+    assert ds.GetRasterBand(1).DataType == gdal.GDT_CFloat32
+    assert ds.GetMetadataItem("NITF_ISUBCAT") is None
+
+    src_ds = gdal.Open("data/byte.tif")
+    ds = gdal.Open("DERIVED_SUBDATASET:REAL:" + out_filename)
+    assert (
+        ds.ReadRaster(0, 0, 40, 20, 20, 20, buf_type=gdal.GDT_Byte)
+        == src_ds.ReadRaster()
+    )
+    ds = gdal.Open("DERIVED_SUBDATASET:IMAG:" + out_filename)
+    mod_src_ds = gdal.Translate("", src_ds, options="-f MEM -scale 0 255 255 0")
+    assert (
+        ds.ReadRaster(0, 0, 40, 20, 20, 20, buf_type=gdal.GDT_Byte)
+        == mod_src_ds.ReadRaster()
+    )
 
 
 ###############################################################################
@@ -5532,11 +6303,8 @@ def test_nitf_online_1():
     )
 
     # Shut up the warning about missing image segment
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ret = tst.testOpen()
-    gdal.PopErrorHandler()
-
-    return ret
+    with gdal.quiet_errors():
+        tst.testOpen()
 
 
 ###############################################################################
@@ -5570,7 +6338,7 @@ def test_nitf_online_3():
         "NITF", "NITF_IM:3:tmp/cache/U_0001a.ntf", 1, 23463, filename_absolute=1
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -5598,7 +6366,7 @@ def test_nitf_online_4():
         "NITF", "tmp/cache/001zc013.on1", 1, 53960, filename_absolute=1
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -5615,7 +6383,7 @@ def test_nitf_online_5():
         "NITF", "tmp/cache/overview.ovr", 1, 60699, filename_absolute=1
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -5632,7 +6400,7 @@ def test_nitf_online_6():
         "NITF", "tmp/cache/U_4001b.ntf", 1, 60030, filename_absolute=1
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -5687,7 +6455,7 @@ def test_nitf_online_8():
         "NITF", "tmp/cache/ns3301j.nsf", 1, 56861, filename_absolute=1
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -5705,7 +6473,7 @@ def test_nitf_online_9():
         "NITF", "tmp/cache/ns3304a.nsf", 1, 32419, filename_absolute=1
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -5720,9 +6488,8 @@ def test_nitf_online_10():
     )
 
     # Shut up the warning about missing image segment
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("tmp/cache/ns3119b.nsf")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("tmp/cache/ns3119b.nsf")
 
     mdCGM = ds.GetMetadata("CGM")
 
@@ -5808,7 +6575,7 @@ def test_nitf_online_12():
         "NITF", "tmp/cache/i_3430a.ntf", 1, 38647, filename_absolute=1
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -6024,15 +6791,12 @@ def test_nitf_online_18():
             0.0,
             -724.73626818537434,
         )
-        assert gdaltest.geotransform_equals(
-            gt, expected_gt, 1.0
-        ), "did not get expected geotransform."
+        gdaltest.check_geotransform(gt, expected_gt, 1.0)
 
     # If we do not have a functioning coordinate transformer.
     else:
-        assert prj == "" and gdaltest.geotransform_equals(
-            gt, (0, 1, 0, 0, 0, 1), 0.00000001
-        ), "did not get expected empty gt/projection"
+        assert prj == ""
+        gdaltest.check_geotransform(gt, (0, 1, 0, 0, 0, 1), 0.00000001)
 
         prj = ds.GetGCPProjection()
         assert prj[:6] == "GEOGCS", "did not get expected geographic srs"
@@ -6063,7 +6827,7 @@ def test_nitf_online_19():
         "NITF", "tmp/cache/0000M033.GN3", 1, 38928, filename_absolute=1
     )
 
-    return tst.testOpen(
+    tst.testOpen(
         check_gt=(
             174.375000000000000,
             0.010986328125000,
@@ -6234,13 +6998,17 @@ def test_nitf_online_23():
         "NITF", "tmp/cache/U_3058b.ntf", 1, 44748, filename_absolute=1
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
 # Test reading ECRG frames
 
 
+@pytest.mark.skipif(
+    not os.path.exists("tmp/cache/ECRG_Sample.zip"),
+    reason="Test data no longer available",
+)
 def test_nitf_online_24():
 
     gdaltest.download_or_skip(
@@ -6252,12 +7020,10 @@ def test_nitf_online_24():
     except OSError:
         pytest.skip()
 
-    oldval = gdal.GetConfigOption("NITF_OPEN_UNDERLYING_DS")
-    gdal.SetConfigOption("NITF_OPEN_UNDERLYING_DS", "NO")
-    ds = gdal.Open(
-        "/vsizip/tmp/cache/ECRG_Sample.zip/ECRG_Sample/EPF/clfc/2/000000009s0013.lf2"
-    )
-    gdal.SetConfigOption("NITF_OPEN_UNDERLYING_DS", oldval)
+    with gdal.config_option("NITF_OPEN_UNDERLYING_DS", "NO"):
+        ds = gdal.Open(
+            "/vsizip/tmp/cache/ECRG_Sample.zip/ECRG_Sample/EPF/clfc/2/000000009s0013.lf2"
+        )
     assert ds is not None
     xml_tre = ds.GetMetadata("xml:TRE")[0]
     ds = None
@@ -6298,156 +7064,3 @@ def test_nitf_online_25():
     ds = None
 
     assert xml_tre.find('<tre name="PIAPRD"') != -1, "did not get expected xml:TRE"
-
-
-###############################################################################
-# Cleanup.
-
-
-def test_nitf_cleanup():
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/test_create.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf9.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/test_13.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/test_29.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/test_29_copy.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf36.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf37.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf38.ntf")
-        os.unlink("tmp/nitf38.ntf_0.ovr")
-    except (RuntimeError, OSError):
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf39.ntf")
-    except (RuntimeError, OSError):
-        pass
-
-    try:
-        os.stat("tmp/nitf40.ntf")
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf40.ntf")
-    except (RuntimeError, OSError):
-        pass
-
-    try:
-        os.stat("tmp/nitf42.ntf")
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf42.ntf")
-    except (OSError, RuntimeError):
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf44.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf45.ntf")
-        os.unlink("tmp/nitf45.ntf_0.ovr")
-    except (RuntimeError, OSError):
-        pass
-
-    try:
-        os.stat("tmp/nitf46.ntf")
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf46.ntf")
-        os.unlink("tmp/nitf46.ntf_0.ovr")
-    except (RuntimeError, OSError):
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf49.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf49_2.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf50.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf51.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf52.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf53.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf54.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf55.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf56.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf57.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf58.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        os.remove("tmp/nitf59.hdr")
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf59.ntf")
-    except (OSError, RuntimeError):
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf62.ntf")
-    except RuntimeError:
-        pass
-
-    try:
-        gdal.GetDriverByName("NITF").Delete("tmp/nitf63.ntf")
-    except RuntimeError:
-        pass

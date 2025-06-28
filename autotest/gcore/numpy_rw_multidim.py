@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test multidimensional support with numpy
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -40,11 +23,11 @@ from osgeo import gdal
 # verify that we can load Numeric python, and find the Numpy driver.
 
 
-def test_numpy_rw_multidim_init():
+@pytest.fixture(scope="module", autouse=True)
+def setup_and_cleanup():
 
-    gdaltest.numpy_drv = None
     # importing gdal_array will allow numpy driver registration
-    pytest.importorskip("osgeo.gdal_array")
+    gdaltest.importorskip_gdal_array()
 
     gdal.AllRegister()
 
@@ -57,8 +40,6 @@ def test_numpy_rw_multidim_init():
 
 def test_numpy_rw_multidim_readasarray_writearray():
 
-    if gdaltest.numpy_drv is None:
-        pytest.skip()
     import numpy as np
 
     drv = gdal.GetDriverByName("MEM")
@@ -100,8 +81,6 @@ def test_numpy_rw_multidim_readasarray_writearray():
 
 def test_numpy_rw_multidim_numpy_array_as_dataset():
 
-    if gdaltest.numpy_drv is None:
-        pytest.skip()
     import numpy as np
 
     from osgeo import gdal_array
@@ -115,8 +94,8 @@ def test_numpy_rw_multidim_numpy_array_as_dataset():
         np.int32,
         np.float32,
         np.float64,
-        np.cfloat,
-        np.cdouble,
+        np.complex64,
+        np.complex128,
     ):
         ar = np.array([[1, 2, 3], [4, 5, 6]], dtype=typ)
         ds = gdal_array.OpenMultiDimensionalNumPyArray(ar)
@@ -127,14 +106,18 @@ def test_numpy_rw_multidim_numpy_array_as_dataset():
         assert myarray
         assert np.array_equal(myarray.ReadAsArray(), ar)
 
+    ar = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.str_)
+    with pytest.raises(
+        Exception, match="Unable to access numpy arrays of typecode `U'"
+    ):
+        gdal_array.OpenMultiDimensionalNumPyArray(ar)
+
 
 ###############################################################################
 
 
 def test_numpy_rw_multidim_readasarray_writearray_negative_strides():
 
-    if gdaltest.numpy_drv is None:
-        pytest.skip()
     import numpy as np
 
     drv = gdal.GetDriverByName("MEM")
@@ -177,8 +160,6 @@ def test_numpy_rw_multidim_readasarray_writearray_negative_strides():
 
 def test_numpy_rw_multidim_numpy_array_as_dataset_negative_strides():
 
-    if gdaltest.numpy_drv is None:
-        pytest.skip()
     import numpy as np
 
     from osgeo import gdal_array
@@ -192,8 +173,8 @@ def test_numpy_rw_multidim_numpy_array_as_dataset_negative_strides():
         np.int32,
         np.float32,
         np.float64,
-        np.cfloat,
-        np.cdouble,
+        np.complex64,
+        np.complex128,
     ):
         ar = np.array([[1, 2, 3], [4, 5, 6]], dtype=typ)
         ar = ar[::-1, ::-1]  # Test negative strides
@@ -211,8 +192,6 @@ def test_numpy_rw_multidim_numpy_array_as_dataset_negative_strides():
 
 def test_numpy_rw_multidim_compound_datatype():
 
-    if gdaltest.numpy_drv is None:
-        pytest.skip()
     import numpy as np
 
     from osgeo import gdal_array
@@ -275,8 +254,6 @@ def test_numpy_rw_multidim_compound_datatype():
 )
 def test_numpy_rw_multidim_datatype(datatype):
 
-    if gdaltest.numpy_drv is None:
-        pytest.skip()
     import numpy as np
 
     drv = gdal.GetDriverByName("MEM")

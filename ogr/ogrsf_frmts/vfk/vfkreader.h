@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  VFK Reader
  * Purpose:  Public Declarations for OGR free VFK Reader code.
@@ -8,25 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2009-2014, Martin Landa <landa.martin gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDAL_OGR_VFK_VFKREADER_H_INCLUDED
@@ -96,18 +77,22 @@ class VFKProperty
     {
         return m_bIsNull;
     }
+
     int GetValueI() const
     {
         return static_cast<int>(m_iValue);
     }
+
     GIntBig GetValueI64() const
     {
         return m_iValue;
     }
+
     double GetValueD() const
     {
         return m_dValue;
     }
+
     const char *GetValueS(bool = false) const;
 };
 
@@ -116,13 +101,19 @@ class VFKProperty
 /************************************************************************/
 class IVFKFeature
 {
+  private:
+    static double GetDeterminatOfMatrixDim3(double[3], double[3], double[3]);
+    static void GetCircleCenterFrom3Points(double[2], double[3], double[3]);
+    static void AddCirclePointsToGeomString(OGRCircularString &, double, double,
+                                            double);
+
   protected:
     IVFKDataBlock *m_poDataBlock;
     GIntBig m_nFID;
     OGRwkbGeometryType m_nGeometryType;
     bool m_bGeometry;
     bool m_bValid;
-    OGRGeometry *m_paGeom;
+    std::unique_ptr<OGRGeometry> m_paGeom{};
 
     virtual bool LoadGeometryPoint() = 0;
     virtual bool LoadGeometryLineStringSBP() = 0;
@@ -137,6 +128,7 @@ class IVFKFeature
     {
         return m_nFID;
     }
+
     void SetFID(GIntBig);
     void SetGeometryType(OGRwkbGeometryType);
 
@@ -149,12 +141,14 @@ class IVFKFeature
     {
         return m_poDataBlock;
     }
+
     OGRwkbGeometryType GetGeometryType() const
     {
         return m_nGeometryType;
     }
-    bool SetGeometry(OGRGeometry *, const char * = nullptr);
-    OGRGeometry *GetGeometry();
+
+    bool SetGeometry(const OGRGeometry *, const char * = nullptr);
+    const OGRGeometry *GetGeometry();
 
     bool LoadGeometry();
     virtual OGRErr LoadProperties(OGRFeature *) = 0;
@@ -241,19 +235,24 @@ class VFKPropertyDefn
     {
         return m_pszName;
     }
+
     int GetWidth() const
     {
         return m_nWidth;
     }
+
     int GetPrecision() const
     {
         return m_nPrecision;
     }
+
     OGRFieldType GetType() const
     {
         return m_eFType;
     }
+
     CPLString GetTypeSQL() const;
+
     const char *GetEncoding() const
     {
         return m_pszEncoding;
@@ -315,6 +314,7 @@ class IVFKDataBlock
     {
         return m_nPropertyCount;
     }
+
     VFKPropertyDefn *GetProperty(int) const;
     void SetProperties(const char *);
     int GetPropertyIndex(const char *) const;
@@ -344,6 +344,7 @@ class IVFKDataBlock
     {
         return m_poReader;
     }
+
     int GetRecordCount(RecordType = RecordValid) const;
     void SetIncRecordCount(RecordType);
 };
@@ -375,6 +376,7 @@ class VFKDataBlock : public IVFKDataBlock
     {
         return OGRERR_UNSUPPORTED_OPERATION;
     }
+
     OGRErr CleanProperties() override
     {
         return OGRERR_UNSUPPORTED_OPERATION;
@@ -405,7 +407,7 @@ class VFKDataBlockSQLite : public IVFKDataBlock
 
     static bool IsRingClosed(const OGRLinearRing *);
     void UpdateVfkBlocks(int);
-    void UpdateFID(GIntBig, std::vector<int>);
+    void UpdateFID(GIntBig, const std::vector<int> &);
 
     friend class VFKFeatureSQLite;
 
@@ -449,7 +451,7 @@ class IVFKReader
     virtual bool IsValid() const = 0;
     virtual bool HasFileField() const = 0;
     virtual int ReadDataBlocks(bool = false) = 0;
-    virtual int ReadDataRecords(IVFKDataBlock * = nullptr) = 0;
+    virtual int64_t ReadDataRecords(IVFKDataBlock * = nullptr) = 0;
     virtual int LoadGeometry() = 0;
 
     virtual int GetDataBlockCount() const = 0;

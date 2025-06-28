@@ -12,6 +12,10 @@ HDF5 -- Hierarchical Data Format Release 5 (HDF5)
 
 This driver intended for HDF5 file formats importing.
 
+Starting with GDAL 3.7, the driver can parse HDF-EOS5 encoded grid and swath
+metadata to establish projection and geotransform (for grids), and geolocation
+array (for swaths)
+
 Driver capabilities
 -------------------
 
@@ -44,6 +48,12 @@ like this:
 | *file_name* is the name of the input file, and
 | *subdataset* is the dataset name of the array to use (for internal use
   in GDAL).
+
+Starting with GDAL 3.10, specifying the ``-if HDF5`` option to command line utilities
+accepting it, or ``HDF5`` as the only value of the ``papszAllowedDrivers`` of
+:cpp:func:`GDALOpenEx`, also forces the driver to recognize the passed
+filename, when it is not using subdataset syntax (it can typically be used to
+force open a netCDF file that would be nominally recognized by the netCDF driver).
 
 On the second step you should provide this name for **gdalinfo** or
 **gdal_translate** for actual reading of the data.
@@ -191,9 +201,12 @@ However, some product types have mechanisms for saving georeferencing,
 and some of these are supported by GDAL. Currently supported are
 (*subdataset_type* shown in parenthesis):
 
--  HDF5 OMI/Aura Ozone (O3) Total Column 1-Orbit L2 Swath 13x24km
-   (**Level-2 OMTO3**)
+- HDF5 OMI/Aura Ozone (O3) Total Column 1-Orbit L2 Swath 13x24km
+  (**Level-2 OMTO3**)
 
+- HDF-EOS5 grids (starting with GDAL 3.7)
+
+- HDF-EOS5 swaths (starting with GDAL 3.7)
 
 Multi-file support
 ------------------
@@ -224,8 +237,8 @@ download source code NCSA HDF Home Page (see links below).
 See Also
 --------
 
-Implemented as ``gdal/frmts/hdf5/hdf5dataset.cpp`` and
-``gdal/frmts/hdf5/hdf5imagedataset.cpp``.
+Implemented as :source_file:`frmts/hdf5/hdf5dataset.cpp` and
+:source_file:`frmts/hdf5/hdf5imagedataset.cpp`.
 
 `The NCSA HDF5 Download
 Page <http://hdf.ncsa.uiuc.edu/HDF5/release/obtain5.html>`__ at the
@@ -237,5 +250,8 @@ HDF5 files. <http://hdf.ncsa.uiuc.edu/hdf-java-html/hdfview/>`__
 
 Documentation to individual products, supported by this driver:
 
--  `OMTO3: OMI/Aura Ozone (O3) Total Column 1-Orbit L2 Swath 13x24km
-   V003 <https://disc.gsfc.nasa.gov/uui/datasets/OMTO3_V003/summary>`__
+- `OMTO3: OMI/Aura Ozone (O3) Total Column 1-Orbit L2 Swath 13x24km
+  V003 <https://disc.gsfc.nasa.gov/uui/datasets/OMTO3_V003/summary>`__
+
+- `HDF-EOS5 Data Model, File Format and Library
+  <https://www.earthdata.nasa.gov/s3fs-public/imported/ESDS-RFC-008-v1.1.pdf>`__

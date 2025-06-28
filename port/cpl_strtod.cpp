@@ -8,23 +8,7 @@
  * Copyright (c) 2006, Andrey Kiselev
  * Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -35,6 +19,17 @@
 #include <cstring>
 #include <cstdlib>
 #include <limits>
+
+// Coverity complains about CPLAtof(CPLGetConfigOption(...)) causing
+// a "untrusted loop bound" in the loop "Find a reasonable position for the end
+// of the string to provide to fast_float"
+#ifndef __COVERITY__
+#define USE_FAST_FLOAT
+#endif
+
+#ifdef USE_FAST_FLOAT
+#include "include_fast_float.h"
+#endif
 
 #include "cpl_config.h"
 
@@ -154,7 +149,8 @@ double CPLAtofM(const char *nptr)
  */
 static char *CPLReplacePointByLocalePoint(const char *pszNumber, char point)
 {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) && __ANDROID_API__ < 20
+    // localeconv() only available since API 20
     static char byPoint = 0;
     if (byPoint == 0)
     {
@@ -221,8 +217,15 @@ static char *CPLReplacePointByLocalePoint(const char *pszNumber, char point)
  */
 double CPLStrtodDelim(const char *nptr, char **endptr, char point)
 {
-    while (*nptr == ' ')
+    while (*nptr == ' '
+#ifdef USE_FAST_FLOAT
+           // The GSAG driver provides leading end-of-line character
+           || *nptr == '\r' || *nptr == '\n' || *nptr == '\t'
+#endif
+    )
+    {
         nptr++;
+    }
 
     if (nptr[0] == '-')
     {
@@ -235,8 +238,11 @@ double CPLStrtodDelim(const char *nptr, char **endptr, char point)
             // quiet (non-signalling) NaN.
             return std::numeric_limits<double>::quiet_NaN();
         }
-
-        if (strcmp(nptr, "-inf") == 0 || STARTS_WITH_CI(nptr, "-1.#INF"))
+        if (
+#ifndef USE_FAST_FLOAT
+            strcmp(nptr, "-inf") == 0 ||
+#endif
+            STARTS_WITH_CI(nptr, "-1.#INF"))
         {
             if (endptr)
                 *endptr = const_cast<char *>(nptr) + strlen(nptr);
@@ -258,6 +264,7 @@ double CPLStrtodDelim(const char *nptr, char **endptr, char point)
             return std::numeric_limits<double>::infinity();
         }
     }
+#ifndef USE_FAST_FLOAT
     else if (nptr[0] == 'i' && strcmp(nptr, "inf") == 0)
     {
         if (endptr)
@@ -270,7 +277,69 @@ double CPLStrtodDelim(const char *nptr, char **endptr, char point)
             *endptr = const_cast<char *>(nptr) + strlen(nptr);
         return std::numeric_limits<double>::quiet_NaN();
     }
+#endif
 
+#ifdef USE_FAST_FLOAT
+    // Skip leading '+' as non-handled by fast_float
+    if (*nptr == '+')
+        nptr++;
+
+    // Find a reasonable position for the end of the string to provide to
+    // fast_float
+    const char *endptrIn = nptr;
+    while ((*endptrIn >= '0' && *endptrIn <= '9') || *endptrIn == point ||
+           *endptrIn == '+' || *endptrIn == '-' || *endptrIn == 'e' ||
+           *endptrIn == 'E')
+    {
+        ++endptrIn;
+    }
+
+    double dfValue = 0;
+    const fast_float::parse_options options{fast_float::chars_format::general,
+                                            point};
+    auto answer =
+        fast_float::from_chars_advanced(nptr, endptrIn, dfValue, options);
+    if (answer.ec != std::errc())
+    {
+        if (
+            // Triggered by ogr_pg tests
+            STARTS_WITH_CI(nptr, "-Infinity"))
+        {
+            dfValue = -std::numeric_limits<double>::infinity();
+            answer.ptr = nptr + strlen("-Infinity");
+        }
+        else if (STARTS_WITH_CI(nptr, "-inf"))
+        {
+            dfValue = -std::numeric_limits<double>::infinity();
+            answer.ptr = nptr + strlen("-inf");
+        }
+        else if (
+            // Triggered by ogr_pg tests
+            STARTS_WITH_CI(nptr, "Infinity"))
+        {
+            dfValue = std::numeric_limits<double>::infinity();
+            answer.ptr = nptr + strlen("Infinity");
+        }
+        else if (STARTS_WITH_CI(nptr, "inf"))
+        {
+            dfValue = std::numeric_limits<double>::infinity();
+            answer.ptr = nptr + strlen("inf");
+        }
+        else if (STARTS_WITH_CI(nptr, "nan"))
+        {
+            dfValue = std::numeric_limits<double>::quiet_NaN();
+            answer.ptr = nptr + strlen("nan");
+        }
+        else
+        {
+            errno = answer.ptr == nptr ? 0 : ERANGE;
+        }
+    }
+    if (endptr)
+    {
+        *endptr = const_cast<char *>(answer.ptr);
+    }
+#else
     /* -------------------------------------------------------------------- */
     /*  We are implementing a simple method here: copy the input string     */
     /*  into the temporary buffer, replace the specified decimal delimiter  */
@@ -290,6 +359,8 @@ double CPLStrtodDelim(const char *nptr, char **endptr, char point)
         CPLFree(pszNewNumberOrNull);
 
     errno = nError;
+#endif
+
     return dfValue;
 }
 
@@ -316,6 +387,44 @@ double CPLStrtodDelim(const char *nptr, char **endptr, char point)
  */
 double CPLStrtod(const char *nptr, char **endptr)
 {
+    return CPLStrtodDelim(nptr, endptr, '.');
+}
+
+/************************************************************************/
+/*                            CPLStrtodM()                              */
+/************************************************************************/
+
+/**
+ * Converts ASCII string to floating point number.
+ *
+ * This function converts the initial portion of the string pointed to
+ * by nptr to double floating point representation. This function does the
+ * same as standard strtod(3), but does not take locale in account.
+ *
+ * That function accepts '.' (decimal point) or ',' (comma) as decimal
+ * delimiter.
+ *
+ * @param nptr Pointer to string to convert.
+ * @param endptr If is not NULL, a pointer to the character after the last
+ * character used in the conversion is stored in the location referenced
+ * by endptr.
+ *
+ * @return Converted value, if any.
+ * @since GDAL 3.9
+ */
+double CPLStrtodM(const char *nptr, char **endptr)
+
+{
+    const int nMaxSearch = 50;
+
+    for (int i = 0; i < nMaxSearch; i++)
+    {
+        if (nptr[i] == ',')
+            return CPLStrtodDelim(nptr, endptr, ',');
+        if (nptr[i] == '.' || nptr[i] == '\0')
+            return CPLStrtodDelim(nptr, endptr, '.');
+    }
+
     return CPLStrtodDelim(nptr, endptr, '.');
 }
 

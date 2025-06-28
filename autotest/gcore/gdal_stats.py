@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test core numeric operations and statistics calculations
@@ -31,6 +30,7 @@ import math
 import os
 import shutil
 import struct
+import sys
 
 import gdaltest
 import pytest
@@ -43,20 +43,14 @@ from osgeo import gdal
 
 def test_stats_nan_1():
 
-    gdaltest.gtiff_drv = gdal.GetDriverByName("GTiff")
-    if gdaltest.gtiff_drv is None:
-        pytest.skip()
-
     stats = (50.0, 58.0, 54.0, 2.5819888974716)
 
     shutil.copyfile("data/nan32.tif", "tmp/nan32.tif")
 
     t = gdaltest.GDALTest("GTiff", "tmp/nan32.tif", 1, 874, filename_absolute=1)
-    ret = t.testOpen(check_approx_stat=stats, check_stat=stats)
+    t.testOpen(check_approx_stat=stats, check_stat=stats)
 
     gdal.GetDriverByName("GTiff").Delete("tmp/nan32.tif")
-
-    return ret
 
 
 ###############################################################################
@@ -65,29 +59,22 @@ def test_stats_nan_1():
 
 def test_stats_nan_2():
 
-    if gdaltest.gtiff_drv is None:
-        pytest.skip()
-
     stats = (50.0, 58.0, 54.0, 2.5819888974716)
 
     shutil.copyfile("data/nan64.tif", "tmp/nan64.tif")
 
     t = gdaltest.GDALTest("GTiff", "tmp/nan64.tif", 1, 4414, filename_absolute=1)
-    ret = t.testOpen(check_approx_stat=stats, check_stat=stats)
+    t.testOpen(check_approx_stat=stats, check_stat=stats)
 
     gdal.GetDriverByName("GTiff").Delete("tmp/nan64.tif")
-
-    return ret
 
 
 ###############################################################################
 # Test stats on signed byte (#3151)
 
 
+@pytest.mark.require_driver("HFA")
 def test_stats_signedbyte():
-
-    if gdaltest.gtiff_drv is None:
-        pytest.skip()
 
     stats = (-128.0, 127.0, -0.2, 80.64)
 
@@ -96,11 +83,9 @@ def test_stats_signedbyte():
     t = gdaltest.GDALTest(
         "HFA", "tmp/stats_signed_byte.img", 1, 11, filename_absolute=1
     )
-    ret = t.testOpen(check_approx_stat=stats, check_stat=stats, skip_checksum=1)
+    t.testOpen(check_approx_stat=stats, check_stat=stats, skip_checksum=1)
 
     gdal.GetDriverByName("HFA").Delete("tmp/stats_signed_byte.img")
-
-    return ret
 
 
 ###############################################################################
@@ -110,10 +95,11 @@ def test_stats_signedbyte():
 
 def test_stats_dont_force():
 
-    gdal.Unlink("data/byte.tif.aux.xml")
+    if os.path.exists("data/byte.tif.aux.xml"):
+        gdal.Unlink("data/byte.tif.aux.xml")
     ds = gdal.Open("data/byte.tif")
     stats = ds.GetRasterBand(1).GetStatistics(0, 0)
-    assert stats == [0, 0, 0, -1], "did not get expected stats"
+    assert stats is None
 
 
 ###############################################################################
@@ -144,7 +130,7 @@ def test_stats_approx_nodata():
     os.remove("tmp/minfloat.tif")
 
     if nodata != -3.4028234663852886e38:
-        print("%.18g" % nodata)
+        print("%.17g" % nodata)
         pytest.fail("did not get expected nodata")
 
     assert stats == [-3.0, 5.0, 1.0, 4.0], "did not get expected stats"
@@ -164,13 +150,14 @@ def test_stats_approx_nodata():
 # Test read and copy of dataset with nan as nodata value (#3576)
 
 
+@pytest.mark.require_driver("GTiff")
 def test_stats_nan_3():
 
     src_ds = gdal.Open("data/nan32_nodata.tif")
     nodata = src_ds.GetRasterBand(1).GetNoDataValue()
     assert gdaltest.isnan(nodata), "expected nan, got %f" % nodata
 
-    out_ds = gdaltest.gtiff_drv.CreateCopy("tmp/nan32_nodata.tif", src_ds)
+    out_ds = gdal.GetDriverByName("GTiff").CreateCopy("tmp/nan32_nodata.tif", src_ds)
     del out_ds
 
     src_ds = None
@@ -184,7 +171,7 @@ def test_stats_nan_3():
     nodata = ds.GetRasterBand(1).GetNoDataValue()
     ds = None
 
-    gdaltest.gtiff_drv.Delete("tmp/nan32_nodata.tif")
+    gdal.GetDriverByName("GTiff").Delete("tmp/nan32_nodata.tif")
     assert gdaltest.isnan(nodata), "expected nan, got %f" % nodata
 
 
@@ -193,6 +180,10 @@ def test_stats_nan_3():
 # and complex source nodata (#3576)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_stats_nan_4():
 
     ds = gdal.Open("data/nan32_nodata.vrt")
@@ -210,6 +201,10 @@ def test_stats_nan_4():
 # and complex source nodata (nan must be translated to 0 then) (#3576)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_stats_nan_5():
 
     ds = gdal.Open("data/nan32_nodata_nan_to_zero.vrt")
@@ -226,6 +221,10 @@ def test_stats_nan_5():
 # Test reading a warped VRT with nan as src nodata and dest nodata (#3576)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_stats_nan_6():
 
     ds = gdal.Open("data/nan32_nodata_warp.vrt")
@@ -242,6 +241,10 @@ def test_stats_nan_6():
 # Test reading a warped VRT with nan as src nodata and 0 as dest nodata (#3576)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_stats_nan_7():
 
     ds = gdal.Open("data/nan32_nodata_warp_nan_to_zero.vrt")
@@ -258,6 +261,10 @@ def test_stats_nan_7():
 # Test reading a warped VRT with zero as src nodata and nan as dest nodata (#3576)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_stats_nan_8():
 
     ds = gdal.Open("data/nan32_nodata_warp_zero_to_nan.vrt")
@@ -279,6 +286,7 @@ def stats_nodata_inf_progress_cbk(value, string, extra):
     extra[0] = value
 
 
+@pytest.mark.require_driver("HFA")
 def test_stats_nodata_inf():
 
     ds = gdal.GetDriverByName("HFA").Create(
@@ -424,7 +432,7 @@ def test_stats_flt_min():
     os.remove("tmp/flt_min.tif")
 
     if nodata != 1.17549435082228751e-38:
-        print("%.18g" % nodata)
+        print("%.17g" % nodata)
         pytest.fail("did not get expected nodata")
 
     assert stats == [0.0, 1.0, 0.33333333333333337, 0.47140452079103168] or stats == [
@@ -463,7 +471,7 @@ def test_stats_dbl_min():
     os.remove("tmp/dbl_min.tif")
 
     if nodata != 2.22507385850720138e-308:
-        print("%.18g" % nodata)
+        print("%.17g" % nodata)
         pytest.fail("did not get expected nodata")
 
     assert stats == [0.0, 1.0, 0.33333333333333337, 0.47140452079103168] or stats == [
@@ -775,7 +783,7 @@ def test_stats_approx_stats_flag(dt=gdal.GDT_Byte, struct_frmt="B"):
     approx_ok = 0
     force = 0
     stats = ds.GetRasterBand(1).GetStatistics(approx_ok, force)
-    assert stats == [0.0, 0.0, 0.0, -1.0], "did not get expected stats"
+    assert stats is None
 
     approx_ok = 0
     force = 1
@@ -794,33 +802,33 @@ def test_stats_all_nodata():
     ds = gdal.GetDriverByName("MEM").Create("", 2000, 2000)
     ds.GetRasterBand(1).SetNoDataValue(0)
 
-    with gdaltest.error_handler():
+    with gdaltest.disable_exceptions(), gdaltest.error_handler():
         minmax = ds.GetRasterBand(1).ComputeRasterMinMax()
         assert math.isnan(minmax[0])
         assert math.isnan(minmax[1])
 
-    with gdaltest.error_handler():
-        minmax = ds.GetRasterBand(1).ComputeRasterMinMax(can_return_none=True)
-    assert minmax is None
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1).ComputeRasterMinMax()
 
-    with gdaltest.error_handler():
-        # can_return_null also accepted for similarity with other methods
-        minmax = ds.GetRasterBand(1).ComputeRasterMinMax(can_return_null=True)
-    assert minmax is None
+    assert ds.GetRasterBand(1).ComputeRasterMinMax(can_return_none=True) is None
+
+    with gdaltest.disable_exceptions(), gdal.quiet_errors():
+        assert ds.GetRasterBand(1).ComputeRasterMinMax(can_return_none=True) is None
+
+    # can_return_null also accepted for similarity with other methods
+    assert ds.GetRasterBand(1).ComputeRasterMinMax(can_return_null=True) is None
 
     approx_ok = 1
     force = 1
-    with gdaltest.error_handler():
-        stats = ds.GetRasterBand(1).GetStatistics(approx_ok, force)
-    assert stats == [0.0, 0.0, 0.0, 0.0], "did not get expected stats"
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1).GetStatistics(approx_ok, force)
 
     ds = gdal.GetDriverByName("MEM").Create("", 2000, 2000, 1, gdal.GDT_Float32)
     ds.GetRasterBand(1).SetNoDataValue(0)
     approx_ok = 1
     force = 1
-    with gdaltest.error_handler():
-        stats = ds.GetRasterBand(1).GetStatistics(approx_ok, force)
-    assert stats == [0.0, 0.0, 0.0, 0.0], "did not get expected stats"
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1).GetStatistics(approx_ok, force)
 
 
 def test_stats_float32_with_nodata_slightly_above_float_max():
@@ -838,15 +846,15 @@ def test_stats_clear():
     filename = "/vsimem/out.tif"
     gdal.Translate(filename, "data/byte.tif")
     ds = gdal.Open(filename)
-    assert ds.GetRasterBand(1).GetStatistics(False, False) == [0, 0, 0, -1]
-    assert ds.GetRasterBand(1).ComputeStatistics(False) != [0, 0, 0, -1]
+    assert ds.GetRasterBand(1).GetStatistics(False, False) is None
+    assert ds.GetRasterBand(1).ComputeStatistics(False) is not None
 
     ds = gdal.Open(filename)
-    assert ds.GetRasterBand(1).GetStatistics(False, False) != [0, 0, 0, -1]
+    assert ds.GetRasterBand(1).GetStatistics(False, False) is not None
     ds.ClearStatistics()
 
     ds = gdal.Open(filename)
-    assert ds.GetRasterBand(1).GetStatistics(False, False) == [0, 0, 0, -1]
+    assert ds.GetRasterBand(1).GetStatistics(False, False) is None
 
     gdal.GetDriverByName("GTiff").Delete(filename)
 
@@ -919,3 +927,18 @@ def test_stats_mask_band():
     assert src_ds.GetRasterBand(1).ComputeRasterMinMax(False) == (2, 3)
     assert src_ds.GetRasterBand(1).ComputeStatistics(False) == [2, 3, 2.5, 0.5]
     assert src_ds.GetRasterBand(1).GetHistogram(False) == [0, 0, 1, 1] + ([0] * 252)
+
+
+###############################################################################
+# Test statistics on a band with all values to large values
+
+
+@pytest.mark.parametrize(
+    "value", [sys.float_info.max, -sys.float_info.max, float("inf"), -float("inf")]
+)
+def test_stats_all_large_values(value):
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 2, 1, 1, gdal.GDT_Float64)
+    src_ds.WriteRaster(0, 0, 2, 1, struct.pack("d" * 2, value, value))
+    assert src_ds.GetRasterBand(1).ComputeRasterMinMax(False) == (value, value)
+    assert src_ds.GetRasterBand(1).ComputeStatistics(False) == [value, value, value, 0]

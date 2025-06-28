@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test multidimensional support in MEM driver
@@ -9,33 +8,25 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import array
 import math
 import struct
+import sys
 
 import gdaltest
 import pytest
 
 from osgeo import gdal, osr
+
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 def test_mem_md_basic():
@@ -60,17 +51,17 @@ def test_mem_md_basic():
     assert not rg.GetAttribute("not existing")
     assert not rg.GetVectorLayerNames()
     assert not rg.OpenVectorLayer("not existing")
-    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+    with gdal.ExceptionMgr(), pytest.raises(Exception):
         rg.OpenMDArray("not existing")
-    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+    with gdal.ExceptionMgr(), pytest.raises(Exception):
         rg.OpenMDArrayFromFullname("not existing")
-    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+    with gdal.ExceptionMgr(), pytest.raises(Exception):
         rg.OpenGroup("not existing")
-    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+    with gdal.ExceptionMgr(), pytest.raises(Exception):
         rg.OpenGroupFromFullname("not existing")
-    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+    with gdal.ExceptionMgr(), pytest.raises(Exception):
         rg.GetAttribute("not existing")
-    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+    with gdal.ExceptionMgr(), pytest.raises(Exception):
         rg.OpenVectorLayer("not existing")
 
 
@@ -80,9 +71,9 @@ def test_mem_md_subgroup():
     ds = drv.CreateMultiDimensional("myds")
     rg = ds.GetRootGroup()
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not rg.CreateGroup("")  # unnamed group not supported
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         assert not rg.CreateGroup(None)
 
     subg = rg.CreateGroup("subgroup")
@@ -103,7 +94,7 @@ def test_mem_md_subgroup():
     array = rg.OpenMDArrayFromFullname("/subgroup/myarray")
     assert array is not None
     assert array.GetFullName() == "/subgroup/myarray"
-    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+    with gdal.ExceptionMgr(), pytest.raises(Exception):
         array.GetAttribute("not existing")
 
     copy_ds = drv.CreateCopy("", ds)
@@ -119,7 +110,7 @@ def test_mem_md_array_unnamed_array():
     ds = drv.CreateMultiDimensional("myds")
     rg = ds.GetRootGroup()
     edt = gdal.ExtendedDataType.Create(gdal.GDT_Byte)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not rg.CreateMDArray("", [], edt)
 
 
@@ -131,7 +122,7 @@ def test_mem_md_array_duplicated_array_name():
     assert rg.CreateMDArray(
         "same_name", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not rg.CreateMDArray(
             "same_name", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
         )
@@ -255,7 +246,7 @@ def test_mem_md_array_single_dim():
     assert myarray.SetNoDataValue(1) == gdal.CE_None
     assert myarray.GetNoDataValue() == 1
     assert myarray.SetNoDataValueRaw(struct.pack("B", 127)) == gdal.CE_None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert myarray.SetNoDataValueRaw(struct.pack("h", 127)) != gdal.CE_None
     assert struct.unpack("B", myarray.GetNoDataValueAsRaw()) == (127,)
 
@@ -296,7 +287,7 @@ def test_mem_md_array_single_dim():
 
     assert myarray.DeleteNoDataValue() == gdal.CE_None
     assert myarray.GetNoDataValueAsDouble() is None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert myarray.GetNoDataValueAsString() is None
 
     assert myarray.SetUnit("foo") == gdal.CE_None
@@ -331,12 +322,12 @@ def test_mem_md_datatypes():
     assert dt_byte.GetNumericDataType() == gdal.GDT_Byte
     assert dt_byte.GetSize() == 1
     assert dt_byte.CanConvertTo(dt_byte)
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         assert dt_byte.CanConvertTo(None)
     assert dt_byte == gdal.ExtendedDataType.Create(gdal.GDT_Byte)
     assert not dt_byte != gdal.ExtendedDataType.Create(gdal.GDT_Byte)
     assert dt_byte.Equals(dt_byte)
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         assert dt_byte.Equals(None)
     assert not dt_byte.GetComponents()
 
@@ -373,7 +364,7 @@ def test_mem_md_datatypes():
         "y", 4, gdal.ExtendedDataType.Create(gdal.GDT_Int32)
     )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert gdal.ExtendedDataType.CreateCompound("mytype", 8, []) is None
         assert (
             gdal.ExtendedDataType.CreateCompound("mytype", 2000 * 1000 * 1000, [comp0])
@@ -398,7 +389,7 @@ def test_mem_md_datatypes():
     assert not compound_dt.Equals(dt_byte)
     assert not dt_byte.Equals(compound_dt)
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         # Too short size
         assert not gdal.ExtendedDataType.CreateCompound("mytype", 7, [comp0, comp1])
 
@@ -467,7 +458,7 @@ def test_mem_md_array_compoundtype():
     assert len(got_data) == 8
     assert struct.unpack("i" * 2, got_data) == (1000000, -1000000)
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not myarray.GetView('["z')
         assert not myarray.GetView('["z"')
         assert not myarray.GetView('["z"]')
@@ -502,7 +493,7 @@ def test_mem_md_array_compoundtype():
     assert len(got_data) == 8
     assert struct.unpack("i" * 2, got_data) == (1000000, -1000000)
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not y_ar.GetView('["y"]')
 
     assert y_ar.AdviseRead() == gdal.CE_None
@@ -672,7 +663,7 @@ def test_mem_md_array_read_write_errors():
     assert myarray
 
     assert myarray.Read([0, 0, 0], [1, 1, 1], [1, 1, 1], [0, 0, 0])
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
 
         # Invalid number of values in array_idx array
         assert not myarray.Read([0, 0], [1, 1, 1], [1, 1, 1], [0, 0, 0])
@@ -720,7 +711,7 @@ def test_mem_md_array_read_write_errors():
 
     data = struct.pack("d" * 1, 25.0)
     float64dt = gdal.ExtendedDataType.Create(gdal.GDT_Float64)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert myarray.Write("", [1, 2, 3], [1, 1, 1]) == gdal.CE_Failure
         assert (
             myarray.Write(data[0:7], [1, 2, 3], [1, 1, 1], buffer_datatype=float64dt)
@@ -734,7 +725,7 @@ def test_mem_md_invalid_dims():
     ds = drv.CreateMultiDimensional("myds")
     rg = ds.GetRootGroup()
     assert rg.CreateDimension("dim1", None, None, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         # empty name
         assert not rg.CreateDimension("", None, None, 1)
         # existing dim
@@ -754,9 +745,9 @@ def test_mem_md_array_invalid_args():
         rg.CreateMDArray("myarray", [None], edt)
     with pytest.raises((TypeError, SystemError)):
         rg.CreateMDArray("myarray", [1], edt)
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         rg.CreateMDArray("myarray", [dim], None)
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):
         rg.CreateMDArray(None, [dim], edt)
 
 
@@ -766,7 +757,7 @@ def test_mem_md_array_too_large():
     ds = drv.CreateMultiDimensional("myds")
     rg = ds.GetRootGroup()
     dim = rg.CreateDimension("dim0", None, None, (1 << 64) - 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not rg.CreateMDArray(
             "myarray", [dim], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
         )
@@ -780,7 +771,7 @@ def test_mem_md_array_too_large_overflow_dim():
     dim0 = rg.CreateDimension("dim0", None, None, 1 << 25)
     dim1 = rg.CreateDimension("dim1", None, None, 1 << 25)
     dim2 = rg.CreateDimension("dim2", None, None, 1 << 25)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not rg.CreateMDArray(
             "myarray", [dim0, dim1, dim2], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
         )
@@ -827,10 +818,10 @@ def test_mem_md_group_attribute_single_numeric():
     rg = ds.GetRootGroup()
 
     float64dt = gdal.ExtendedDataType.Create(gdal.GDT_Float64)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not rg.CreateAttribute("", [1], float64dt)  # unnamed attr not supported
-    with pytest.raises(ValueError):
-        assert not rg.CreateAttribute(None, [1], float64dt)
+    with pytest.raises(Exception):
+        rg.CreateAttribute(None, [1], float64dt)
 
     attr = rg.CreateAttribute("attr", [1], float64dt)
     assert attr
@@ -855,7 +846,7 @@ def test_mem_md_group_attribute_single_numeric():
     assert attr.Read() == 2
     assert attr.Write([2.25]) == gdal.CE_None
     assert attr.Read() == 2.25
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert attr.Write([]) != gdal.CE_None
         assert attr.Write([1, 2]) != gdal.CE_None
 
@@ -943,12 +934,12 @@ def test_mem_md_array_attribute():
     )
 
     float64dt = gdal.ExtendedDataType.Create(gdal.GDT_Float64)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not myarray.CreateAttribute(
             "", [1], float64dt
         )  # unnamed attr not supported
-    with pytest.raises(ValueError):
-        assert not myarray.CreateAttribute(None, [1], float64dt)
+    with pytest.raises(Exception):
+        myarray.CreateAttribute(None, [1], float64dt)
 
     attr = myarray.CreateAttribute("attr", [1], float64dt)
     assert attr
@@ -969,7 +960,7 @@ def test_mem_md_array_slice():
 
     ar = rg.CreateMDArray("nodim", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
     assert ar.Write(struct.pack("B", 1)) == gdal.CE_None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not ar[:]
 
     ar = rg.CreateMDArray(
@@ -986,7 +977,7 @@ def test_mem_md_array_slice():
     )
     assert attr.Write(1) == gdal.CE_None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not ar.GetView("")
         assert not ar.GetView("x")
         assert not ar.GetView("[")
@@ -1276,11 +1267,11 @@ def test_mem_md_array_as_classic_dataset():
     dim_y.SetIndexingVariable(dim_y_var)
 
     ar = rg.CreateMDArray("nodim", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not ar.AsClassicDataset(0, 0)
 
     ar = rg.CreateMDArray("1d", [dim_x], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not ar.AsClassicDataset(1, 0)
     ds = ar.AsClassicDataset(0, 0)
     assert ds.RasterXSize == 3
@@ -1303,7 +1294,7 @@ def test_mem_md_array_as_classic_dataset():
     ar = rg.CreateMDArray(
         "2d_string", [dim_y, dim_x], gdal.ExtendedDataType.CreateString()
     )
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not ar.AsClassicDataset(0, 1)
 
     # 2D
@@ -1316,7 +1307,7 @@ def test_mem_md_array_as_classic_dataset():
     attr.Write(1.25)
     attr = ar.CreateAttribute("attr_strings", [2], gdal.ExtendedDataType.CreateString())
     attr.Write(["foo", "bar"])
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not ar.AsClassicDataset(0, 0)
         assert not ar.AsClassicDataset(0, 2)
         assert not ar.AsClassicDataset(2, 0)
@@ -1463,7 +1454,7 @@ def test_mem_md_array_transpose():
     data = array.array("H", list(range(24))).tobytes()
     assert ar.Write(data) == gdal.CE_None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not ar.Transpose([])  # 0 axis
         assert not ar.Transpose([0, 1])  # missing axis
         assert not ar.Transpose([0, 1, 2, 3])  # too many axis
@@ -1923,7 +1914,7 @@ def test_mem_md_array_get_mask():
         "myarray_string", [dim0], gdal.ExtendedDataType.CreateString()
     )
     # Non-numeric array unsupported
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert not myarray.GetMask()
 
     myarray = rg.CreateMDArray(
@@ -1935,7 +1926,7 @@ def test_mem_md_array_get_mask():
     mask = myarray.GetMask()
     assert mask.GetOffset() is None
     assert mask.GetScale() is None
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         assert mask.Write(mask.Read()) == gdal.CE_Failure
     assert mask.GetNoDataValueAsRaw() is None
     assert mask.GetSpatialRef() is None
@@ -1970,6 +1961,7 @@ def test_mem_md_array_get_mask():
 
     # Test no data value
     myarray.SetNoDataValueDouble(10)
+    mask = myarray.GetMask()
     expected_data = [1] * 24
     expected_data[10] = 0
     assert [x for x in struct.unpack("B" * 24, mask.Read())] == expected_data
@@ -2017,6 +2009,7 @@ def test_mem_md_array_get_mask():
     assert attr.Write(2) == gdal.CE_None
     attr = myarray.CreateAttribute("valid_max", [1], bytedt)
     assert attr.Write(22) == gdal.CE_None
+    mask = myarray.GetMask()
     expected_data = [1] * 24
     expected_data[0] = 0
     expected_data[1] = 0
@@ -2044,6 +2037,10 @@ def test_mem_md_array_get_mask():
 
     try:
         import numpy
+
+        from osgeo import gdal_array
+
+        str(gdal_array)
 
         has_numpy = True
     except ImportError:
@@ -2096,6 +2093,153 @@ def test_mem_md_array_get_mask():
         ] == expected, myarray.GetName()
 
 
+@gdaltest.enable_exceptions()
+def test_mem_md_array_get_mask_unmask_flags_option_flag_values_only():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+
+    dim0 = rg.CreateDimension("dim0", None, None, 2)
+    dim1 = rg.CreateDimension("dim1", None, None, 3)
+    myarray = rg.CreateMDArray(
+        "myarray", [dim0, dim1], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+
+    with pytest.raises(Exception, match="no flag_meanings attribute"):
+        myarray.GetMask(["UNMASK_FLAGS=bar"])
+
+    flag_meanings = myarray.CreateAttribute(
+        "flag_meanings", [], gdal.ExtendedDataType.CreateString()
+    )
+
+    with pytest.raises(Exception, match="Cannot read flag_meanings attribute"):
+        myarray.GetMask(["UNMASK_FLAGS=bar"])
+
+    flag_meanings.Write("one two _255")
+    with pytest.raises(
+        Exception, match="Cannot find flag_values and/or flag_masks attribute"
+    ):
+        myarray.GetMask(["UNMASK_FLAGS=one"])
+
+    flag_values = myarray.CreateAttribute(
+        "flag_values", [1], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+    with pytest.raises(
+        Exception,
+        match="Number of values in flag_values attribute is different from the one in flag_meanings",
+    ):
+        myarray.GetMask(["UNMASK_FLAGS=one"])
+
+    myarray.DeleteAttribute("flag_values")
+    flag_values = myarray.CreateAttribute(
+        "flag_values", [3], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+    flag_values.Write(array.array("h", [1, 2, 255]))
+
+    with pytest.raises(Exception, match="Cannot fing flag three in flag_meanings"):
+        myarray.GetMask(["UNMASK_FLAGS=three"])
+
+    data = array.array("h", list(range(2 * 3))).tobytes()
+    assert myarray.Write(data) == gdal.CE_None
+
+    mask = myarray.GetMask(["UNMASK_FLAGS=two"])
+    assert array.array("B", mask.Read()).tolist() == [0, 0, 1, 0, 0, 0]
+    assert array.array(
+        "h", mask.Read(buffer_datatype=gdal.ExtendedDataType.Create(gdal.GDT_Int16))
+    ).tolist() == [0, 0, 1, 0, 0, 0]
+
+    mask = myarray.GetMask(["UNMASK_FLAGS=two,one"])
+    assert array.array("B", mask.Read()).tolist() == [0, 1, 1, 0, 0, 0]
+
+    mask = myarray.GetMask(["UNMASK_FLAGS=_255"])
+    assert array.array("B", mask.Read()).tolist() == [0, 0, 0, 0, 0, 0]
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_array_get_mask_unmask_flags_option_flag_masks_only():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+
+    dim0 = rg.CreateDimension("dim0", None, None, 2)
+    dim1 = rg.CreateDimension("dim1", None, None, 3)
+    myarray = rg.CreateMDArray(
+        "myarray", [dim0, dim1], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+
+    flag_meanings = myarray.CreateAttribute(
+        "flag_meanings", [], gdal.ExtendedDataType.CreateString()
+    )
+    flag_meanings.Write("bit_0 bit_1 bit_7")
+
+    flag_masks = myarray.CreateAttribute(
+        "flag_masks", [1], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+    with pytest.raises(
+        Exception,
+        match="Number of values in flag_masks attribute is different from the one in flag_meanings",
+    ):
+        myarray.GetMask(["UNMASK_FLAGS=one"])
+
+    myarray.DeleteAttribute("flag_masks")
+    flag_masks = myarray.CreateAttribute(
+        "flag_masks", [3], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+    flag_masks.Write(array.array("h", [1 << 0, 1 << 1, 1 << 7]))
+
+    data = array.array("h", list(range(2 * 3))).tobytes()
+    assert myarray.Write(data) == gdal.CE_None
+
+    mask = myarray.GetMask(["UNMASK_FLAGS=bit_0"])
+    assert array.array("B", mask.Read()).tolist() == [0, 1, 0, 1, 0, 1]
+
+    mask = myarray.GetMask(["UNMASK_FLAGS=bit_1"])
+    assert array.array("B", mask.Read()).tolist() == [0, 0, 1, 1, 0, 0]
+
+    mask = myarray.GetMask(["UNMASK_FLAGS=bit_1,bit_0"])
+    assert array.array("B", mask.Read()).tolist() == [0, 1, 1, 1, 0, 1]
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_array_get_mask_unmask_flags_option_flag_values_and_masks():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+
+    dim0 = rg.CreateDimension("dim0", None, None, 2)
+    dim1 = rg.CreateDimension("dim1", None, None, 3)
+    myarray = rg.CreateMDArray(
+        "myarray", [dim0, dim1], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+
+    flag_meanings = myarray.CreateAttribute(
+        "flag_meanings", [], gdal.ExtendedDataType.CreateString()
+    )
+    flag_meanings.Write("valid invalid_1 invalid_2 invalid_3")
+
+    flag_values = myarray.CreateAttribute(
+        "flag_values", [4], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+    flag_values.Write(array.array("h", [1, (1 << 1), (2 << 1), (3 << 1)]))
+
+    flag_masks = myarray.CreateAttribute(
+        "flag_masks", [4], gdal.ExtendedDataType.Create(gdal.GDT_Int16)
+    )
+    flag_masks.Write(array.array("h", [1, 6, 6, 6]))
+
+    data = array.array("h", [1, (1 << 1), (2 << 1), (3 << 1), 1, 1]).tobytes()
+    assert myarray.Write(data) == gdal.CE_None
+
+    mask = myarray.GetMask(["UNMASK_FLAGS=valid"])
+    assert array.array("B", mask.Read()).tolist() == [1, 0, 0, 0, 1, 1]
+
+    mask = myarray.GetMask(["UNMASK_FLAGS=invalid_1"])
+    assert array.array("B", mask.Read()).tolist() == [0, 1, 0, 0, 0, 0]
+
+
 def test_mem_md_array_resolvemdarray():
 
     drv = gdal.GetDriverByName("MEM")
@@ -2114,7 +2258,7 @@ def test_mem_md_array_resolvemdarray():
     b.CreateMDArray("var_c", [], gdal.ExtendedDataType.Create(gdal.GDT_Int16))
 
     assert rg.ResolveMDArray("x", "/") is None
-    with gdaltest.enable_exceptions(), pytest.raises(Exception):
+    with gdal.ExceptionMgr(), pytest.raises(Exception):
         rg.ResolveMDArray("x", "/")
 
     assert rg.ResolveMDArray("/a/var_a", "/").GetFullName() == "/a/var_a"
@@ -2345,9 +2489,547 @@ def test_mem_md_getcoordinatevariables():
     assert len(coordVars) == 3
 
     assert coordinates.WriteString("other non_existing") == 0
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         coordVars = ar.GetCoordinateVariables()
         assert len(coordVars) == 1
+
+
+@pytest.mark.parametrize("new_size", [[], [1, 2], [0]])
+def test_mem_md_resize_dim_wrong_new_size(new_size):
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    xDim = rg.CreateDimension("x", None, None, 4)
+    v = rg.CreateMDArray("v", [xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64))
+    v.Write(struct.pack("d" * 4, 1, 2, 3, 4))
+    with gdal.quiet_errors():
+        assert v.Resize(new_size) == gdal.CE_Failure
+
+
+def test_mem_md_resize_dim_wrong_too_big_allocation_before_malloc():
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    xDim = rg.CreateDimension("x", None, None, 4)
+    v = rg.CreateMDArray("v", [xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64))
+    v.Write(struct.pack("d" * 4, 1, 2, 3, 4))
+    with gdal.quiet_errors():
+        assert v.Resize([1 << 63]) == gdal.CE_Failure
+
+
+@pytest.mark.skipif(sys.maxsize < 2**32, reason="only on 64bit")
+def test_mem_md_resize_dim_wrong_too_big_allocation_at_malloc():
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    xDim = rg.CreateDimension("x", None, None, 4)
+    v = rg.CreateMDArray("v", [xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64))
+    v.Write(struct.pack("d" * 4, 1, 2, 3, 4))
+    sizeof_double = 8
+    with gdal.quiet_errors():
+        assert v.Resize([sys.maxsize // sizeof_double]) == gdal.CE_Failure
+
+
+@pytest.mark.parametrize("new_size,new_values", [(5, (1, 2, 3, 4, 0)), (3, (1, 2, 3))])
+def test_mem_md_resize_dim(new_size, new_values):
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    xDim = rg.CreateDimension("x", None, None, 4)
+    v = rg.CreateMDArray("v", [xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64))
+    v.Write(struct.pack("d" * 4, 1, 2, 3, 4))
+    assert v.Resize([new_size]) == gdal.CE_None
+    assert xDim.GetSize() == new_size
+    assert struct.unpack("d" * new_size, v.Read()) == new_values
+
+
+@pytest.mark.parametrize(
+    "new_size,new_values",
+    [
+        (5, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 0.0, 0.0)),
+        (3, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)),
+    ],
+)
+def test_mem_md_resize_first_dim(new_size, new_values):
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    yDim = rg.CreateDimension("y", None, None, 4)
+    xDim = rg.CreateDimension("x", None, None, 2)
+    v = rg.CreateMDArray(
+        "v", [yDim, xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    v.Write(struct.pack("d" * 8, 1, 2, 3, 4, 5, 6, 7, 8))
+    assert v.Resize([new_size, xDim.GetSize()]) == gdal.CE_None
+    assert yDim.GetSize() == new_size
+    assert xDim.GetSize() == 2
+    assert struct.unpack("d" * new_size * 2, v.Read()) == new_values
+
+
+@pytest.mark.parametrize(
+    "new_size,new_values",
+    [
+        (5, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 0.0, 0.0)),
+        (3, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)),
+    ],
+)
+def test_mem_md_resize_first_dim_and_other_array(new_size, new_values):
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    yDim = rg.CreateDimension("y", None, None, 4)
+    xDim = rg.CreateDimension("x", None, None, 2)
+    v = rg.CreateMDArray(
+        "v", [yDim, xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    v.Write(struct.pack("d" * 8, 1, 2, 3, 4, 5, 6, 7, 8))
+    v2 = rg.CreateMDArray(
+        "v2", [yDim, xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    v.Write(struct.pack("d" * 8, 1, 2, 3, 4, 5, 6, 7, 8))
+    v2.Write(struct.pack("d" * 8, 1, 2, 3, 4, 5, 6, 7, 8))
+    assert v.Resize([new_size, xDim.GetSize()]) == gdal.CE_None
+    assert yDim.GetSize() == new_size
+    assert xDim.GetSize() == 2
+    assert struct.unpack("d" * new_size * 2, v.Read()) == new_values
+    assert struct.unpack("d" * new_size * 2, v2.Read()) == new_values
+
+
+@pytest.mark.parametrize(
+    "new_size,new_values",
+    [
+        (5, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 0.0, 0.0)),
+        (3, (1.0, 2.0, 3.0, 4.0, 5.0, 6.0)),
+    ],
+)
+def test_mem_md_resize_arbitrary_dim(new_size, new_values):
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    yDim = rg.CreateDimension("y", None, None, 4)
+    xDim = rg.CreateDimension("x", None, None, 2)
+    otherDim = rg.CreateDimension("otherDim", None, None, 1)
+    v = rg.CreateMDArray(
+        "v", [otherDim, yDim, xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    v.Write(struct.pack("d" * 8, 1, 2, 3, 4, 5, 6, 7, 8))
+    v2 = rg.CreateMDArray(
+        "v2", [otherDim, yDim, xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    v.Write(struct.pack("d" * 8, 1, 2, 3, 4, 5, 6, 7, 8))
+    v2.Write(struct.pack("d" * 8, 1, 2, 3, 4, 5, 6, 7, 8))
+
+    with gdal.quiet_errors():
+        assert v.Resize([1, 1 << 63, xDim.GetSize()]) == gdal.CE_Failure
+
+    assert v.Resize([1, new_size, xDim.GetSize()]) == gdal.CE_None
+    assert otherDim.GetSize() == 1
+    assert yDim.GetSize() == new_size
+    assert xDim.GetSize() == 2
+    assert struct.unpack("d" * new_size * 2, v.Read()) == new_values
+    assert struct.unpack("d" * new_size * 2, v2.Read()) == new_values
+
+
+def test_mem_md_resize_two_dims_at_once():
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    yDim = rg.CreateDimension("y", None, None, 4)
+    xDim = rg.CreateDimension("x", None, None, 2)
+    v = rg.CreateMDArray(
+        "v", [yDim, xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    v.Write(struct.pack("d" * 8, 1, 2, 3, 4, 5, 6, 7, 8))
+    assert v.Resize([3, 4]) == gdal.CE_None
+    assert struct.unpack("d" * 3 * 4, v.Read()) == (
+        1.0,
+        2.0,
+        0.0,
+        0.0,
+        3.0,
+        4.0,
+        0.0,
+        0.0,
+        5.0,
+        6.0,
+        0.0,
+        0.0,
+    )
+
+
+def test_mem_md_resize_dim_referenced_twice():
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    xDim = rg.CreateDimension("x", None, None, 2)
+    v = rg.CreateMDArray(
+        "v", [xDim, xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    v.Write(struct.pack("d" * 4, 1, 2, 3, 4))
+    assert v.Resize([3, 3]) == gdal.CE_None
+    assert struct.unpack("d" * 3 * 3, v.Read()) == (
+        1.0,
+        2.0,
+        0.0,
+        3.0,
+        4.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+
+
+def test_mem_md_resize_dim_referenced_twice_error():
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+    xDim = rg.CreateDimension("x", None, None, 2)
+    v = rg.CreateMDArray(
+        "v", [xDim, xDim], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    with gdal.quiet_errors():
+        assert v.Resize([2, 3]) == gdal.CE_Failure
+        assert v.Resize([3, 2]) == gdal.CE_Failure
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_rename_group():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+    group = rg.CreateGroup("group")
+    group_attr = group.CreateAttribute(
+        "group_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+    rg.CreateGroup("other_group")
+    dim = group.CreateDimension("dim0", "unspecified type", "unspecified direction", 2)
+    ar = group.CreateMDArray("ar", [dim], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    ar_attr = ar.CreateAttribute(
+        "ar_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+
+    subgroup = group.CreateGroup("subgroup")
+    subgroup.CreateGroup("subsubgroup")
+    subgroup_attr = subgroup.CreateAttribute(
+        "subgroup_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+    subgroup_ar = subgroup.CreateMDArray(
+        "subgroup_ar", [dim], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+    subgroup_ar_attr = subgroup_ar.CreateAttribute(
+        "subgroup_ar_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+
+    # Cannot rename root group
+    with pytest.raises(Exception):
+        rg.Rename("foo")
+
+    # Empty name
+    with pytest.raises(Exception):
+        group.Rename("")
+
+    # Existing name
+    with pytest.raises(Exception):
+        group.Rename("other_group")
+
+    # Rename group and test effects
+    group.Rename("group_renamed")
+    assert group.GetName() == "group_renamed"
+    assert group.GetFullName() == "/group_renamed"
+
+    assert set(rg.GetGroupNames()) == {"group_renamed", "other_group"}
+
+    assert dim.GetName() == "dim0"
+    assert dim.GetFullName() == "/group_renamed/dim0"
+
+    assert group_attr.GetName() == "group_attr"
+    assert group_attr.GetFullName() == "/group_renamed/group_attr"
+
+    assert ar.GetName() == "ar"
+    assert ar.GetFullName() == "/group_renamed/ar"
+
+    assert ar_attr.GetName() == "ar_attr"
+    assert ar_attr.GetFullName() == "/group_renamed/ar/ar_attr"
+
+    assert subgroup.GetName() == "subgroup"
+    assert subgroup.GetFullName() == "/group_renamed/subgroup"
+
+    assert subgroup_attr.GetName() == "subgroup_attr"
+    assert subgroup_attr.GetFullName() == "/group_renamed/subgroup/subgroup_attr"
+
+    assert subgroup_ar.GetName() == "subgroup_ar"
+    assert subgroup_ar.GetFullName() == "/group_renamed/subgroup/subgroup_ar"
+
+    assert subgroup_ar_attr.GetName() == "subgroup_ar_attr"
+    assert (
+        subgroup_ar_attr.GetFullName()
+        == "/group_renamed/subgroup/subgroup_ar/subgroup_ar_attr"
+    )
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_rename_dimension():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+    dim = rg.CreateDimension("dim", "unspecified type", "unspecified direction", 2)
+    rg.CreateDimension("other_dim", "unspecified type", "unspecified direction", 2)
+    ar = rg.CreateMDArray("ar", [dim], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+
+    # Empty name
+    with pytest.raises(Exception):
+        dim.Rename("")
+
+    # Existing name
+    with pytest.raises(Exception):
+        dim.Rename("other_dim")
+
+    # Rename dimension and test effects
+    dim.Rename("dim_renamed")
+    assert dim.GetName() == "dim_renamed"
+    assert dim.GetFullName() == "/dim_renamed"
+
+    assert set(x.GetFullName() for x in rg.GetDimensions()) == {
+        "/dim_renamed",
+        "/other_dim",
+    }
+
+    assert [x.GetFullName() for x in ar.GetDimensions()] == ["/dim_renamed"]
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_rename_attribute():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+    subg = rg.CreateGroup("group")
+    subg_attr = subg.CreateAttribute(
+        "subg_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+    subg.CreateAttribute(
+        "subg_other_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+    ar = subg.CreateMDArray("ar", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    attr = ar.CreateAttribute("attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    ar.CreateAttribute("other_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+
+    # Empty name
+    with pytest.raises(Exception):
+        attr.Rename("")
+
+    # Existing name
+    with pytest.raises(Exception):
+        attr.Rename("other_attr")
+
+    # Rename array attribute and test effects
+    attr.Rename("attr_renamed")
+    assert attr.GetName() == "attr_renamed"
+    assert attr.GetFullName() == "/group/ar/attr_renamed"
+    assert set(x.GetName() for x in ar.GetAttributes()) == {
+        "attr_renamed",
+        "other_attr",
+    }
+
+    # Existing name
+    with pytest.raises(Exception):
+        subg_attr.Rename("subg_other_attr")
+
+    # Rename group attribute and test effects
+    subg_attr.Rename("subg_attr_renamed")
+    assert subg_attr.GetName() == "subg_attr_renamed"
+    assert subg_attr.GetFullName() == "/group/_GLOBAL_/subg_attr_renamed"
+    assert set(x.GetName() for x in subg.GetAttributes()) == {
+        "subg_attr_renamed",
+        "subg_other_attr",
+    }
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_rename_array():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+    subg = rg.CreateGroup("group")
+    ar = subg.CreateMDArray("ar", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    subg.CreateMDArray("other_array", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    attr = ar.CreateAttribute("attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+
+    # Empty name
+    with pytest.raises(Exception):
+        ar.Rename("")
+
+    # Existing name
+    with pytest.raises(Exception):
+        ar.Rename("other_array")
+
+    # Rename array and test effects
+    ar.Rename("ar_renamed")
+    assert ar.GetName() == "ar_renamed"
+    assert ar.GetFullName() == "/group/ar_renamed"
+
+    assert attr.GetName() == "attr"
+    assert attr.GetFullName() == "/group/ar_renamed/attr"
+
+    assert set(subg.GetMDArrayNames()) == {"ar_renamed", "other_array"}
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_delete_group():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+
+    group = rg.CreateGroup("group")
+    group_attr = group.CreateAttribute(
+        "ar_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+    ar = group.CreateMDArray("ar", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    ar_attr = ar.CreateAttribute(
+        "ar_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+    subgroup = group.CreateGroup("subgroup")
+
+    with pytest.raises(Exception, match="is not a sub-group"):
+        rg.DeleteGroup("non_existing")
+
+    # Delete group and test effects
+    rg.DeleteGroup("group")
+
+    assert len(rg.GetGroupNames()) == 0
+
+    with pytest.raises(Exception, match="has been deleted"):
+        group.GetMDArrayNames()
+
+    with pytest.raises(Exception, match="has been deleted"):
+        group_attr.Rename("foo")
+
+    with pytest.raises(Exception, match="has been deleted"):
+        subgroup.GetMDArrayNames()
+
+    with pytest.raises(Exception, match="has been deleted"):
+        ar.GetAttributes()
+
+    with pytest.raises(Exception, match="has been deleted"):
+        ar_attr.Rename("foo")
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_delete_array():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+
+    group = rg.CreateGroup("group")
+    ar = group.CreateMDArray("ar", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    ar_attr = ar.CreateAttribute(
+        "ar_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+
+    with pytest.raises(Exception, match="is not an array"):
+        group.DeleteMDArray("non_existing")
+
+    # Delete array and test effects
+    group.DeleteMDArray("ar")
+
+    assert len(rg.GetMDArrayNames()) == 0
+
+    with pytest.raises(Exception, match="has been deleted"):
+        ar.GetAttributes()
+
+    with pytest.raises(Exception, match="has been deleted"):
+        ar_attr.Rename("foo")
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_delete_group_attribute():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+
+    group = rg.CreateGroup("group")
+    group_attr = group.CreateAttribute(
+        "group_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+
+    with pytest.raises(Exception, match="is not an attribute"):
+        group.DeleteAttribute("non_existing")
+
+    # Delete attribute and test effects
+    group.DeleteAttribute("group_attr")
+
+    assert len(group.GetAttributes()) == 0
+
+    with pytest.raises(Exception, match="has been deleted"):
+        group_attr.Rename("foo")
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_delete_array_attribute():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+
+    group = rg.CreateGroup("group")
+    ar = group.CreateMDArray("ar", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    ar_attr = ar.CreateAttribute(
+        "ar_attr", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+    )
+
+    with pytest.raises(Exception, match="is not an attribute"):
+        ar.DeleteAttribute("non_existing")
+
+    # Delete attribute and test effects
+    ar.DeleteAttribute("ar_attr")
+
+    assert len(ar.GetAttributes()) == 0
+
+    with pytest.raises(Exception, match="has been deleted"):
+        ar_attr.Rename("foo")
+
+
+@gdaltest.enable_exceptions()
+def test_mem_md_GetMDArrayFullNamesRecursive():
+
+    drv = gdal.GetDriverByName("MEM")
+    ds = drv.CreateMultiDimensional("myds")
+    rg = ds.GetRootGroup()
+
+    rg.CreateMDArray("ar0", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+
+    group = rg.CreateGroup("group")
+    group.CreateMDArray("ar1", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+
+    subgroup = group.CreateGroup("subgroup")
+    subgroup.CreateMDArray("ar2", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+
+    group2 = rg.CreateGroup("group2")
+    group2.CreateMDArray("ar3", [], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+
+    assert rg.GetMDArrayFullNamesRecursive() == [
+        "/ar0",
+        "/group/ar1",
+        "/group/subgroup/ar2",
+        "/group2/ar3",
+    ]
 
 
 def XX_test_all_forever():

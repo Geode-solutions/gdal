@@ -9,23 +9,7 @@
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -44,20 +28,13 @@
 /*                      GDALMultiDomainMetadata()                       */
 /************************************************************************/
 
-GDALMultiDomainMetadata::GDALMultiDomainMetadata()
-    : papszDomainList(nullptr), papoMetadataLists(nullptr)
-{
-}
+GDALMultiDomainMetadata::GDALMultiDomainMetadata() = default;
 
 /************************************************************************/
 /*                      ~GDALMultiDomainMetadata()                      */
 /************************************************************************/
 
-GDALMultiDomainMetadata::~GDALMultiDomainMetadata()
-
-{
-    Clear();
-}
+GDALMultiDomainMetadata::~GDALMultiDomainMetadata() = default;
 
 /************************************************************************/
 /*                               Clear()                                */
@@ -66,16 +43,17 @@ GDALMultiDomainMetadata::~GDALMultiDomainMetadata()
 void GDALMultiDomainMetadata::Clear()
 
 {
-    const int nDomainCount = CSLCount(papszDomainList);
-    CSLDestroy(papszDomainList);
-    papszDomainList = nullptr;
+    aosDomainList.clear();
+    oMetadata.clear();
+}
 
-    for (int i = 0; i < nDomainCount; i++)
-    {
-        delete papoMetadataLists[i];
-    }
-    CPLFree(papoMetadataLists);
-    papoMetadataLists = nullptr;
+/************************************************************************/
+/*                           SanitizeDomain()                           */
+/************************************************************************/
+
+static inline const char *SanitizeDomain(const char *pszDomain)
+{
+    return pszDomain ? pszDomain : "";
 }
 
 /************************************************************************/
@@ -85,50 +63,44 @@ void GDALMultiDomainMetadata::Clear()
 char **GDALMultiDomainMetadata::GetMetadata(const char *pszDomain)
 
 {
-    if (pszDomain == nullptr)
-        pszDomain = "";
-
-    const int iDomain = CSLFindString(papszDomainList, pszDomain);
-
-    if (iDomain == -1)
+    const auto oIter = oMetadata.find(SanitizeDomain(pszDomain));
+    if (oIter == oMetadata.end())
         return nullptr;
-
-    return papoMetadataLists[iDomain]->List();
+    return oIter->second.List();
 }
 
 /************************************************************************/
 /*                            SetMetadata()                             */
 /************************************************************************/
 
-CPLErr GDALMultiDomainMetadata::SetMetadata(char **papszMetadata,
+CPLErr GDALMultiDomainMetadata::SetMetadata(CSLConstList papszMetadata,
                                             const char *pszDomain)
 
 {
-    if (pszDomain == nullptr)
-        pszDomain = "";
+    pszDomain = SanitizeDomain(pszDomain);
 
-    int iDomain = CSLFindString(papszDomainList, pszDomain);
-
-    if (iDomain == -1)
+    auto oIter = oMetadata.find(pszDomain);
+    if (oIter == oMetadata.end())
     {
-        papszDomainList = CSLAddString(papszDomainList, pszDomain);
-        const int nDomainCount = CSLCount(papszDomainList);
-
-        papoMetadataLists = static_cast<CPLStringList **>(
-            CPLRealloc(papoMetadataLists, sizeof(void *) * (nDomainCount + 1)));
-        papoMetadataLists[nDomainCount] = nullptr;
-        papoMetadataLists[nDomainCount - 1] = new CPLStringList();
-        iDomain = nDomainCount - 1;
+        aosDomainList.AddString(pszDomain);
+        oIter =
+            oMetadata.insert(std::pair(aosDomainList.back(), CPLStringList()))
+                .first;
     }
 
-    papoMetadataLists[iDomain]->Assign(CSLDuplicate(papszMetadata));
+    auto &oMDList = oIter->second;
+    oMDList = papszMetadata;
 
     // we want to mark name/value pair domains as being sorted for fast
     // access.
     if (!STARTS_WITH_CI(pszDomain, "xml:") &&
-        !STARTS_WITH_CI(pszDomain, "json:") && !EQUAL(pszDomain, "SUBDATASETS"))
+        !STARTS_WITH_CI(pszDomain, "json:") &&
+        !EQUAL(pszDomain, "SUBDATASETS")
+        // The IMD metadata domain should not be sorted, as order matters
+        // when writing it back. Cf https://github.com/OSGeo/gdal/issues/11470
+        && !EQUAL(pszDomain, "IMD"))
     {
-        papoMetadataLists[iDomain]->Sort();
+        oMDList.Sort();
     }
 
     return CE_None;
@@ -142,15 +114,10 @@ const char *GDALMultiDomainMetadata::GetMetadataItem(const char *pszName,
                                                      const char *pszDomain)
 
 {
-    if (pszDomain == nullptr)
-        pszDomain = "";
-
-    const int iDomain = CSLFindString(papszDomainList, pszDomain);
-
-    if (iDomain == -1)
+    const auto oIter = oMetadata.find(SanitizeDomain(pszDomain));
+    if (oIter == oMetadata.end())
         return nullptr;
-
-    return papoMetadataLists[iDomain]->FetchNameValue(pszName);
+    return oIter->second.FetchNameValue(pszName);
 }
 
 /************************************************************************/
@@ -162,24 +129,25 @@ CPLErr GDALMultiDomainMetadata::SetMetadataItem(const char *pszName,
                                                 const char *pszDomain)
 
 {
-    if (pszDomain == nullptr)
-        pszDomain = "";
+    pszDomain = SanitizeDomain(pszDomain);
 
     /* -------------------------------------------------------------------- */
     /*      Create the domain if it does not already exist.                 */
     /* -------------------------------------------------------------------- */
-    int iDomain = CSLFindString(papszDomainList, pszDomain);
 
-    if (iDomain == -1)
+    auto oIter = oMetadata.find(pszDomain);
+    if (oIter == oMetadata.end())
     {
-        SetMetadata(nullptr, pszDomain);
-        iDomain = CSLFindString(papszDomainList, pszDomain);
+        aosDomainList.AddString(pszDomain);
+        oIter =
+            oMetadata.insert(std::pair(aosDomainList.back(), CPLStringList()))
+                .first;
     }
 
     /* -------------------------------------------------------------------- */
     /*      Set the value in the domain list.                               */
     /* -------------------------------------------------------------------- */
-    papoMetadataLists[iDomain]->SetNameValue(pszName, pszValue);
+    oIter->second.SetNameValue(pszName, pszValue);
 
     return CE_None;
 }
@@ -191,9 +159,9 @@ CPLErr GDALMultiDomainMetadata::SetMetadataItem(const char *pszName,
 /*      <Metadata> elements.                                            */
 /************************************************************************/
 
-int GDALMultiDomainMetadata::XMLInit(CPLXMLNode *psTree, int /* bMerge */)
+int GDALMultiDomainMetadata::XMLInit(const CPLXMLNode *psTree, int /* bMerge */)
 {
-    CPLXMLNode *psMetadata = nullptr;
+    const CPLXMLNode *psMetadata = nullptr;
 
     /* ==================================================================== */
     /*      Process all <Metadata> elements, each for one domain.           */
@@ -213,10 +181,10 @@ int GDALMultiDomainMetadata::XMLInit(CPLXMLNode *psTree, int /* bMerge */)
         if (GetMetadata(pszDomain) == nullptr)
             SetMetadata(nullptr, pszDomain);
 
-        const int iDomain = CSLFindString(papszDomainList, pszDomain);
-        CPLAssert(iDomain != -1);
+        auto oIter = oMetadata.find(pszDomain);
+        CPLAssert(oIter != oMetadata.end());
 
-        CPLStringList *poMDList = papoMetadataLists[iDomain];
+        auto &oMDList = oIter->second;
 
         /* --------------------------------------------------------------------
          */
@@ -226,14 +194,14 @@ int GDALMultiDomainMetadata::XMLInit(CPLXMLNode *psTree, int /* bMerge */)
         if (EQUAL(pszFormat, "xml"))
         {
             // Find first non-attribute child of current element.
-            CPLXMLNode *psSubDoc = psMetadata->psChild;
+            const CPLXMLNode *psSubDoc = psMetadata->psChild;
             while (psSubDoc != nullptr && psSubDoc->eType == CXT_Attribute)
                 psSubDoc = psSubDoc->psNext;
 
             char *pszDoc = CPLSerializeXMLTree(psSubDoc);
 
-            poMDList->Clear();
-            poMDList->AddStringDirectly(pszDoc);
+            oMDList.Clear();
+            oMDList.AddStringDirectly(pszDoc);
         }
 
         /* --------------------------------------------------------------------
@@ -244,13 +212,13 @@ int GDALMultiDomainMetadata::XMLInit(CPLXMLNode *psTree, int /* bMerge */)
         else if (EQUAL(pszFormat, "json"))
         {
             // Find first text child of current element.
-            CPLXMLNode *psSubDoc = psMetadata->psChild;
+            const CPLXMLNode *psSubDoc = psMetadata->psChild;
             while (psSubDoc != nullptr && psSubDoc->eType != CXT_Text)
                 psSubDoc = psSubDoc->psNext;
             if (psSubDoc)
             {
-                poMDList->Clear();
-                poMDList->AddString(psSubDoc->pszValue);
+                oMDList.Clear();
+                oMDList.AddString(psSubDoc->pszValue);
             }
         }
 
@@ -262,8 +230,8 @@ int GDALMultiDomainMetadata::XMLInit(CPLXMLNode *psTree, int /* bMerge */)
          */
         else
         {
-            for (CPLXMLNode *psMDI = psMetadata->psChild; psMDI != nullptr;
-                 psMDI = psMDI->psNext)
+            for (const CPLXMLNode *psMDI = psMetadata->psChild;
+                 psMDI != nullptr; psMDI = psMDI->psNext)
             {
                 if (!EQUAL(psMDI->pszValue, "MDI") ||
                     psMDI->eType != CXT_Element || psMDI->psChild == nullptr ||
@@ -275,42 +243,39 @@ int GDALMultiDomainMetadata::XMLInit(CPLXMLNode *psTree, int /* bMerge */)
                 char *pszName = psMDI->psChild->psChild->pszValue;
                 char *pszValue = psMDI->psChild->psNext->pszValue;
                 if (pszName != nullptr && pszValue != nullptr)
-                    poMDList->SetNameValue(pszName, pszValue);
+                    oMDList.SetNameValue(pszName, pszValue);
             }
         }
     }
 
-    return CSLCount(papszDomainList) != 0;
+    return !aosDomainList.empty();
 }
 
 /************************************************************************/
 /*                             Serialize()                              */
 /************************************************************************/
 
-CPLXMLNode *GDALMultiDomainMetadata::Serialize()
+CPLXMLNode *GDALMultiDomainMetadata::Serialize() const
 
 {
     CPLXMLNode *psFirst = nullptr;
 
-    for (int iDomain = 0;
-         papszDomainList != nullptr && papszDomainList[iDomain] != nullptr;
-         iDomain++)
+    for (const auto &[pszDomainName, oList] : oMetadata)
     {
-        char **papszMD = papoMetadataLists[iDomain]->List();
+        CSLConstList papszMD = oList.List();
         // Do not serialize empty domains.
         if (papszMD == nullptr || papszMD[0] == nullptr)
             continue;
 
         CPLXMLNode *psMD = CPLCreateXMLNode(nullptr, CXT_Element, "Metadata");
 
-        if (strlen(papszDomainList[iDomain]) > 0)
+        if (strlen(pszDomainName) > 0)
             CPLCreateXMLNode(CPLCreateXMLNode(psMD, CXT_Attribute, "domain"),
-                             CXT_Text, papszDomainList[iDomain]);
+                             CXT_Text, pszDomainName);
 
         bool bFormatXMLOrJSon = false;
 
-        if (STARTS_WITH_CI(papszDomainList[iDomain], "xml:") &&
-            CSLCount(papszMD) == 1)
+        if (STARTS_WITH_CI(pszDomainName, "xml:") && CSLCount(papszMD) == 1)
         {
             CPLXMLNode *psValueAsXML = CPLParseXMLString(papszMD[0]);
             if (psValueAsXML != nullptr)
@@ -325,8 +290,7 @@ CPLXMLNode *GDALMultiDomainMetadata::Serialize()
             }
         }
 
-        if (STARTS_WITH_CI(papszDomainList[iDomain], "json:") &&
-            CSLCount(papszMD) == 1)
+        if (STARTS_WITH_CI(pszDomainName, "json:") && CSLCount(papszMD) == 1)
         {
             bFormatXMLOrJSon = true;
 
@@ -375,4 +339,5 @@ CPLXMLNode *GDALMultiDomainMetadata::Serialize()
 
     return psFirst;
 }
+
 //! @endcond

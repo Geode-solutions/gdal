@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_pdf.h"
@@ -34,7 +18,6 @@
 
 #include "cpl_vsi.h"
 
-/* Poppler 0.31.0 is the first one that needs to know the file size */
 static vsi_l_offset VSIPDFFileStreamGetSize(VSILFILE *f)
 {
     VSIFSeekL(f, 0, SEEK_END);
@@ -48,16 +31,10 @@ static vsi_l_offset VSIPDFFileStreamGetSize(VSILFILE *f)
 /************************************************************************/
 
 VSIPDFFileStream::VSIPDFFileStream(VSILFILE *fIn, const char *pszFilename,
-                                   makeSubStream_object_type dictA)
-    :
-#if POPPLER_MAJOR_VERSION >= 1 || POPPLER_MINOR_VERSION >= 58
-      BaseStream(std::move(dictA), (Goffset)VSIPDFFileStreamGetSize(fIn)),
-#else
-      BaseStream(dictA, (setPos_offset_type)VSIPDFFileStreamGetSize(fIn)),
-#endif
-      poParent(nullptr), poFilename(new GooString(pszFilename)), f(fIn),
-      nStart(0), bLimited(gFalse), nLength(0), nCurrentPos(VSI_L_OFFSET_MAX),
-      bHasSavedPos(FALSE), nSavedPos(0), nPosInBuffer(-1), nBufferLength(-1)
+                                   Object &&dictA)
+    : BaseStream(std::move(dictA),
+                 static_cast<Goffset>(VSIPDFFileStreamGetSize(fIn))),
+      poParent(nullptr), poFilename(new GooString(pszFilename)), f(fIn)
 {
 }
 
@@ -66,19 +43,11 @@ VSIPDFFileStream::VSIPDFFileStream(VSILFILE *fIn, const char *pszFilename,
 /************************************************************************/
 
 VSIPDFFileStream::VSIPDFFileStream(VSIPDFFileStream *poParentIn,
-                                   vsi_l_offset startA, GBool limitedA,
-                                   vsi_l_offset lengthA,
-                                   makeSubStream_object_type dictA)
-    :
-#if POPPLER_MAJOR_VERSION >= 1 || POPPLER_MINOR_VERSION >= 58
-      BaseStream(std::move(dictA), (Goffset)lengthA),
-#else
-      BaseStream(dictA, (makeSubStream_offset_type)lengthA),
-#endif
+                                   vsi_l_offset startA, bool limitedA,
+                                   vsi_l_offset lengthA, Object &&dictA)
+    : BaseStream(std::move(dictA), static_cast<Goffset>(lengthA)),
       poParent(poParentIn), poFilename(poParentIn->poFilename),
-      f(poParentIn->f), nStart(startA), bLimited(limitedA), nLength(lengthA),
-      nCurrentPos(VSI_L_OFFSET_MAX), bHasSavedPos(FALSE), nSavedPos(0),
-      nPosInBuffer(-1), nBufferLength(-1)
+      f(poParentIn->f), nStart(startA), bLimited(limitedA), nLength(lengthA)
 {
 }
 
@@ -99,61 +68,58 @@ VSIPDFFileStream::~VSIPDFFileStream()
 /*                                  copy()                              */
 /************************************************************************/
 
-#if POPPLER_MAJOR_VERSION >= 1 || POPPLER_MINOR_VERSION >= 58
 BaseStream *VSIPDFFileStream::copy()
 {
     return new VSIPDFFileStream(poParent, nStart, bLimited, nLength,
                                 dict.copy());
 }
-#else
-BaseStream *VSIPDFFileStream::copy()
-{
-    return new VSIPDFFileStream(poParent, nStart, bLimited, nLength, &dict);
-}
-#endif
 
 /************************************************************************/
 /*                             makeSubStream()                          */
 /************************************************************************/
-Stream *VSIPDFFileStream::makeSubStream(makeSubStream_offset_type startA,
-                                        GBool limitedA,
-                                        makeSubStream_offset_type lengthA,
-                                        makeSubStream_object_type dictA)
+
+#if POPPLER_MAJOR_VERSION > 25 ||                                              \
+    (POPPLER_MAJOR_VERSION == 25 && POPPLER_MINOR_VERSION >= 5)
+std::unique_ptr<Stream> VSIPDFFileStream::makeSubStream(Goffset startA,
+                                                        bool limitedA,
+                                                        Goffset lengthA,
+                                                        Object &&dictA)
 {
-#if POPPLER_MAJOR_VERSION >= 1 || POPPLER_MINOR_VERSION >= 58
+    return std::make_unique<VSIPDFFileStream>(this, startA, limitedA, lengthA,
+                                              std::move(dictA));
+}
+#else
+Stream *VSIPDFFileStream::makeSubStream(Goffset startA, bool limitedA,
+                                        Goffset lengthA, Object &&dictA)
+{
     return new VSIPDFFileStream(this, startA, limitedA, lengthA,
                                 std::move(dictA));
-#else
-    return new VSIPDFFileStream(this, startA, limitedA, lengthA, dictA);
-#endif
 }
+#endif
 
 /************************************************************************/
 /*                                 getPos()                             */
 /************************************************************************/
 
-getPos_ret_type VSIPDFFileStream::getPos()
+Goffset VSIPDFFileStream::getPos()
 {
-    return (getPos_ret_type)nCurrentPos;
+    return static_cast<Goffset>(nCurrentPos);
 }
 
 /************************************************************************/
 /*                                getStart()                            */
 /************************************************************************/
 
-getStart_ret_type VSIPDFFileStream::getStart()
+Goffset VSIPDFFileStream::getStart()
 {
-    return (getStart_ret_type)nStart;
+    return static_cast<Goffset>(nStart);
 }
 
 /************************************************************************/
 /*                             getKind()                                */
 /************************************************************************/
 
-StreamKind VSIPDFFileStream::getKind()
-#if POPPLER_MAJOR_VERSION >= 1 || POPPLER_MINOR_VERSION >= 83
-    const
-#endif
+StreamKind VSIPDFFileStream::getKind() const
 {
     return strFile;
 }
@@ -183,12 +149,12 @@ int VSIPDFFileStream::FillBuffer()
     if (!bLimited)
         nToRead = BUFFER_SIZE;
     else if (nCurrentPos + BUFFER_SIZE > nStart + nLength)
-        nToRead = (int)(nStart + nLength - nCurrentPos);
+        nToRead = static_cast<int>(nStart + nLength - nCurrentPos);
     else
         nToRead = BUFFER_SIZE;
     if (nToRead < 0)
         return FALSE;
-    nBufferLength = (int)VSIFReadL(abyBuffer, 1, nToRead, f);
+    nBufferLength = static_cast<int>(VSIFReadL(abyBuffer, 1, nToRead, f));
     if (nBufferLength == 0)
         return FALSE;
 
@@ -202,7 +168,8 @@ int VSIPDFFileStream::FillBuffer()
     // with allocation and liberation of VSIPDFFileStream as PDFDoc::str member.
     if (nCurrentPos == 0 || nCurrentPos == VSI_L_OFFSET_MAX)
     {
-        for (int i = 0; i < nBufferLength - (int)strlen("/Linearized "); i++)
+        for (int i = 0;
+             i < nBufferLength - static_cast<int>(strlen("/Linearized ")); i++)
         {
             if (memcmp(abyBuffer + i, "/Linearized ", strlen("/Linearized ")) ==
                 0)
@@ -283,23 +250,40 @@ int VSIPDFFileStream::lookChar()
 /*                                reset()                               */
 /************************************************************************/
 
+#if POPPLER_MAJOR_VERSION > 25 ||                                              \
+    (POPPLER_MAJOR_VERSION == 25 && POPPLER_MINOR_VERSION >= 2)
+bool VSIPDFFileStream::reset()
+#else
 void VSIPDFFileStream::reset()
+#endif
 {
     nSavedPos = VSIFTellL(f);
     bHasSavedPos = TRUE;
     VSIFSeekL(f, nCurrentPos = nStart, SEEK_SET);
     nPosInBuffer = -1;
     nBufferLength = -1;
+#if POPPLER_MAJOR_VERSION > 25 ||                                              \
+    (POPPLER_MAJOR_VERSION == 25 && POPPLER_MINOR_VERSION >= 2)
+    return true;
+#endif
 }
 
 /************************************************************************/
 /*                         unfilteredReset()                            */
 /************************************************************************/
 
+#if POPPLER_MAJOR_VERSION > 25 ||                                              \
+    (POPPLER_MAJOR_VERSION == 25 && POPPLER_MINOR_VERSION >= 3)
+bool VSIPDFFileStream::unfilteredReset()
+{
+    return reset();
+}
+#else
 void VSIPDFFileStream::unfilteredReset()
 {
     reset();
 }
+#endif
 
 /************************************************************************/
 /*                                close()                               */
@@ -308,7 +292,10 @@ void VSIPDFFileStream::unfilteredReset()
 void VSIPDFFileStream::close()
 {
     if (bHasSavedPos)
-        VSIFSeekL(f, nCurrentPos = nSavedPos, SEEK_SET);
+    {
+        nCurrentPos = nSavedPos;
+        VSIFSeekL(f, nCurrentPos, SEEK_SET);
+    }
     bHasSavedPos = FALSE;
     nSavedPos = 0;
 }
@@ -317,7 +304,7 @@ void VSIPDFFileStream::close()
 /*                               setPos()                               */
 /************************************************************************/
 
-void VSIPDFFileStream::setPos(setPos_offset_type pos, int dir)
+void VSIPDFFileStream::setPos(Goffset pos, int dir)
 {
     if (dir >= 0)
     {
@@ -325,7 +312,7 @@ void VSIPDFFileStream::setPos(setPos_offset_type pos, int dir)
     }
     else
     {
-        if (bLimited == gFalse)
+        if (bLimited == false)
         {
             VSIFSeekL(f, 0, SEEK_END);
         }
@@ -334,7 +321,7 @@ void VSIPDFFileStream::setPos(setPos_offset_type pos, int dir)
             VSIFSeekL(f, nStart + nLength, SEEK_SET);
         }
         vsi_l_offset size = VSIFTellL(f);
-        vsi_l_offset newpos = (vsi_l_offset)pos;
+        vsi_l_offset newpos = static_cast<vsi_l_offset>(pos);
         if (newpos > size)
             newpos = size;
         VSIFSeekL(f, nCurrentPos = size - newpos, SEEK_SET);
@@ -347,10 +334,11 @@ void VSIPDFFileStream::setPos(setPos_offset_type pos, int dir)
 /*                            moveStart()                               */
 /************************************************************************/
 
-void VSIPDFFileStream::moveStart(moveStart_delta_type delta)
+void VSIPDFFileStream::moveStart(Goffset delta)
 {
     nStart += delta;
-    VSIFSeekL(f, nCurrentPos = nStart, SEEK_SET);
+    nCurrentPos = nStart;
+    VSIFSeekL(f, nCurrentPos, SEEK_SET);
     nPosInBuffer = -1;
     nBufferLength = -1;
 }
@@ -359,7 +347,7 @@ void VSIPDFFileStream::moveStart(moveStart_delta_type delta)
 /*                          hasGetChars()                               */
 /************************************************************************/
 
-GBool VSIPDFFileStream::hasGetChars()
+bool VSIPDFFileStream::hasGetChars()
 {
     return true;
 }
@@ -368,7 +356,7 @@ GBool VSIPDFFileStream::hasGetChars()
 /*                            getChars()                                */
 /************************************************************************/
 
-int VSIPDFFileStream::getChars(int nChars, Guchar *buffer)
+int VSIPDFFileStream::getChars(int nChars, unsigned char *buffer)
 {
     int nRead = 0;
     while (nRead < nChars)
@@ -378,7 +366,8 @@ int VSIPDFFileStream::getChars(int nChars, Guchar *buffer)
         {
             if (!bLimited && nToRead > BUFFER_SIZE)
             {
-                int nJustRead = (int)VSIFReadL(buffer + nRead, 1, nToRead, f);
+                int nJustRead =
+                    static_cast<int>(VSIFReadL(buffer + nRead, 1, nToRead, f));
                 nPosInBuffer = -1;
                 nBufferLength = -1;
                 nCurrentPos += nJustRead;

@@ -59,11 +59,13 @@
  ****************************************************************************/
 
 #include "marfa.h"
+#include "mrfdrivercore.h"
 #include "cpl_multiproc.h" /* for CPLSleep() */
 #include "gdal_priv.h"
 #include <assert.h>
 
 #include <algorithm>
+#include <limits>
 #include <vector>
 #if defined(ZSTD_SUPPORT)
 #include <zstd.h>
@@ -86,10 +88,6 @@ MRFDataset::MRFDataset()
       pzscctx(nullptr), pzsdctx(nullptr), read_timer(), write_timer(0)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    //                X0   Xx   Xy  Y0    Yx   Yy
-    double gt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-
-    memcpy(GeoTransform, gt, sizeof(gt));
     ifp.FP = dfp.FP = nullptr;
     dfp.acc = GF_Read;
     ifp.acc = GF_Read;
@@ -150,14 +148,6 @@ int MRFDataset::CloseDependentDatasets()
 
 MRFDataset::~MRFDataset()
 {  // Make sure everything gets written
-    if (0 != write_timer.count())
-        CPLDebug("MRF_Timing", "Compression took %fms",
-                 1e-6 * write_timer.count());
-
-    if (0 != read_timer.count())
-        CPLDebug("MRF_Timing", "Decompression took %fms",
-                 1e-6 * read_timer.count());
-
     if (eAccess != GA_ReadOnly && !bCrystalized)
         if (!MRFDataset::Crystalize())
         {
@@ -182,6 +172,14 @@ MRFDataset::~MRFDataset()
     ZSTD_freeCCtx(static_cast<ZSTD_CCtx *>(pzscctx));
     ZSTD_freeDCtx(static_cast<ZSTD_DCtx *>(pzsdctx));
 #endif
+    // total time spend doing compression and decompression
+    if (0 != write_timer.count())
+        CPLDebug("MRF_Timing", "Compression took %fms",
+                 1e-6 * write_timer.count());
+
+    if (0 != read_timer.count())
+        CPLDebug("MRF_Timing", "Decompression took %fms",
+                 1e-6 * read_timer.count());
 }
 
 /*
@@ -192,7 +190,7 @@ MRFDataset::~MRFDataset()
 CPLErr MRFDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                              int nXSize, int nYSize, void *pData, int nBufXSize,
                              int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, int *panBandMap,
+                             int nBandCount, BANDMAP_TYPE panBandMap,
                              GSpacing nPixelSpace, GSpacing nLineSpace,
                              GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArgs)
@@ -235,6 +233,9 @@ CPLErr MRFDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
                                    CSLConstList papszOptions)
 
 {
+    if (pfnProgress == nullptr)
+        pfnProgress = GDALDummyProgress;
+
     CPLErr eErr = CE_None;
     CPLDebug("MRF_OVERLAY", "IBuildOverviews %d, bands %d\n", nOverviews,
              nBandsIn);
@@ -255,37 +256,29 @@ CPLErr MRFDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
             pfnProgress, pProgressData, papszOptions);
     }
 
-    /* -------------------------------------------------------------------- */
-    /*      If zero overviews were requested, we need to clear all          */
-    /*      existing overviews.                                             */
-    /*      This should just clear the index file                           */
-    /*      Right now it just fails or does nothing                         */
-    /* -------------------------------------------------------------------- */
-
     if (nOverviews == 0)
     {
-        if (current.size.l == 0)
+        // If there are none, nothing to do
+        if (GetRasterBand(1)->GetOverviewCount() == 0)
+            return CE_None;
+
+        auto *b = static_cast<MRFRasterBand *>(GetRasterBand(1));
+        // If the first band internal overviews don't exist, they are external
+        if (b->overviews.empty())
             return GDALDataset::IBuildOverviews(
                 pszResampling, nOverviews, panOverviewList, nBands, panBandList,
                 pfnProgress, pProgressData, papszOptions);
-        // We should clean overviews, but this is not possible in an MRF
+
+        // We should clean overviews, but this is not allowed in an MRF
+        CPLError(CE_Warning, CPLE_NotSupported,
+                 "MRF: Internal overviews cannot be removed, "
+                 "but they can be rebuilt");
         return CE_None;
     }
 
-    // Array of source bands
-    GDALRasterBand **papoBandList =
-        static_cast<GDALRasterBand **>(CPLCalloc(sizeof(void *), nBands));
-    // Array of destination bands
-    GDALRasterBand **papoOverviewBandList =
-        static_cast<GDALRasterBand **>(CPLCalloc(sizeof(void *), nBands));
-    // Triple level pointer, that's what GDAL ROMB wants
-    GDALRasterBand ***papapoOverviewBands =
-        static_cast<GDALRasterBand ***>(CPLCalloc(sizeof(void *), nBands));
-
-    int *panOverviewListNew =
-        static_cast<int *>(CPLMalloc(sizeof(int) * nOverviews));
-    memcpy(panOverviewListNew, panOverviewList, sizeof(int) * nOverviews);
-
+    std::vector<int> panOverviewListNew(nOverviews);
+    for (int i = 0; i < nOverviews; i++)
+        panOverviewListNew[i] = panOverviewList[i];
     try
     {  // Throw an error code, to make sure memory gets freed properly
         // Modify the metadata file if it doesn't already have the Rset model
@@ -312,20 +305,31 @@ CPLErr MRFDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
                                config, "Rsets.scale",
                                CPLOPrintf("%d", panOverviewList[0]).c_str()),
                            nullptr);
+                if (scale == 0.0)
+                {
+                    CPLError(CE_Failure, CPLE_IllegalArg,
+                             "Invalid Rsets.scale value");
+                    throw CE_Failure;
+                }
 
                 if (static_cast<int>(scale) != 2 &&
                     (EQUALN("Avg", pszResampling, 3) ||
                      EQUALN("Nnb", pszResampling, 3)))
                 {
                     CPLError(CE_Failure, CPLE_IllegalArg,
-                             "MRF internal resampling only works for a scale "
-                             "factor of two");
+                             "MRF internal resampling requires a scale factor "
+                             "of two");
                     throw CE_Failure;
                 }
 
                 // Initialize the empty overlays, all of them for a given scale
                 // They could already exist, in which case they are not erased
                 idxSize = AddOverviews(int(scale));
+
+                // If we don't have overviews, don't try to generate them
+                if (GetRasterBand(1)->GetOverviewCount() == 0)
+                    throw CE_None;
+
                 if (!CheckFileSize(current.idxfname, idxSize, GA_Update))
                 {
                     CPLError(CE_Failure, CPLE_AppDefined,
@@ -376,12 +380,9 @@ CPLErr MRFDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
                              "Generating %d levels instead of the %d requested",
                              ovrcount, nOverviews);
                     nOverviews = ovrcount;
-                    panOverviewListNew = reinterpret_cast<int *>(CPLRealloc(
-                        panOverviewListNew, sizeof(int) * nOverviews));
-                    panOverviewListNew[0] = static_cast<int>(scale);
-                    for (int i = 1; i < nOverviews; i++)
-                        panOverviewListNew[i] =
-                            static_cast<int>(scale * panOverviewListNew[i - 1]);
+                    panOverviewListNew.resize(ovrcount);
+                    for (int i = 0; i < ovrcount; i++)
+                        panOverviewListNew[i] = int(std::pow(scale, i + 1));
                 }
             }
         }
@@ -389,21 +390,26 @@ CPLErr MRFDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
         if (static_cast<int>(scale) != 2 && (EQUALN("Avg", pszResampling, 3) ||
                                              EQUALN("Nnb", pszResampling, 3)))
         {
-            CPLError(
-                CE_Failure, CPLE_IllegalArg,
-                "MRF internal resampling only works for a scale factor of two");
+            CPLError(CE_Failure, CPLE_IllegalArg,
+                     "MRF internal resampling requires a scale factor of two");
             throw CE_Failure;
         }
 
+        // First pass, count the pixels to be processed, mark invalid levels
+        // Smallest positive value to avoid Coverity Scan complaining about
+        // division by zero
+        double dfTotalPixels = std::numeric_limits<double>::min();
+        double dfPixels = double(nRasterXSize) * nRasterYSize;
         for (int i = 0; i < nOverviews; i++)
         {
             // Verify that scales are reasonable, val/scale has to be an integer
             if (!IsPower(panOverviewListNew[i], scale))
             {
                 CPLError(CE_Warning, CPLE_AppDefined,
-                         "MRF:IBuildOverviews, overview factor %d is not a "
-                         "power of %f",
+                         "MRF:IBuildOverviews, skipping overview factor %d,"
+                         " it is not a power of %f",
                          panOverviewListNew[i], scale);
+                panOverviewListNew[i] = -1;
                 continue;
             };
 
@@ -417,17 +423,29 @@ CPLErr MRFDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
                          "MRF:IBuildOverviews, overview factor %d is not valid "
                          "for this dataset",
                          panOverviewListNew[i]);
+                panOverviewListNew[i] = -1;
                 continue;
             }
+            dfTotalPixels += dfPixels * std::pow(scale, -srclevel);
+        }
 
-            // Generate the overview using the previous level as the source
+        dfPixels = 0;
+        for (int i = 0; i < nOverviews; i++)
+        {
+            // Skip the invalid levels
+            if (panOverviewListNew[i] < 0)
+                continue;
 
+            int srclevel = int(logbase(panOverviewListNew[i], scale) - 0.5);
+            auto dfLevelPixels =
+                std::pow(scale, -srclevel) * nRasterXSize * nRasterYSize;
             // Use "avg" flag to trigger the internal average sampling
             if (EQUALN("Avg", pszResampling, 3) ||
                 EQUALN("Nnb", pszResampling, 3))
             {
                 int sampling = EQUALN("Avg", pszResampling, 3) ? SAMPLING_Avg
                                                                : SAMPLING_Near;
+                auto b = static_cast<MRFRasterBand *>(GetRasterBand(1));
                 // Internal, using PatchOverview
                 if (srclevel > 0)
                     b = static_cast<MRFRasterBand *>(
@@ -441,51 +459,45 @@ CPLErr MRFDataset::IBuildOverviews(const char *pszResampling, int nOverviews,
             }
             else
             {
-                //
-                // Use the GDAL method, which is slightly different for bilinear
-                // interpolation and also handles nearest mode
-                //
-                //
+                // Use the GDAL method
+                std::vector<GDALRasterBand *> apoSrcBandList(nBands);
+                std::vector<std::vector<GDALRasterBand *>> aapoOverviewBandList(
+                    nBands);
                 for (int iBand = 0; iBand < nBands; iBand++)
                 {
                     // This is the base level
-                    papoBandList[iBand] = GetRasterBand(panBandList[iBand]);
+                    apoSrcBandList[iBand] = GetRasterBand(panBandList[iBand]);
                     // Set up the destination
-                    papoOverviewBandList[iBand] =
-                        papoBandList[iBand]->GetOverview(srclevel);
-
-                    // Use the previous level as the source, the overviews are 0
-                    // based thus an extra -1
+                    aapoOverviewBandList[iBand] = std::vector<GDALRasterBand *>{
+                        apoSrcBandList[iBand]->GetOverview(srclevel)};
+                    // Use the previous level as the source
                     if (srclevel > 0)
-                        papoBandList[iBand] =
-                            papoBandList[iBand]->GetOverview(srclevel - 1);
-
-                    // Hook it up, via triple pointer level
-                    papapoOverviewBands[iBand] = &(papoOverviewBandList[iBand]);
+                        apoSrcBandList[iBand] =
+                            apoSrcBandList[iBand]->GetOverview(srclevel - 1);
                 }
 
-                //
-                // Ready, generate this overview
-                // Note that this function has a bug in GDAL, the block stepping
-                // is incorrect It can generate multiple overview in one call,
-                // Could rewrite this loop so this function only gets called
-                // once
-                //
-                GDALRegenerateOverviewsMultiBand(
-                    nBands, papoBandList, 1, papapoOverviewBands, pszResampling,
-                    pfnProgress, pProgressData, papszOptions);
+                auto pScaledProgress = GDALCreateScaledProgress(
+                    dfPixels / dfTotalPixels,
+                    (dfPixels + dfLevelPixels) / dfTotalPixels, pfnProgress,
+                    pProgressData);
+                eErr = GDALRegenerateOverviewsMultiBand(
+                    apoSrcBandList, aapoOverviewBandList, pszResampling,
+                    GDALScaledProgress, pScaledProgress, papszOptions);
+                GDALDestroyScaledProgress(pScaledProgress);
             }
+            dfPixels += dfLevelPixels;
+            pfnProgress(dfPixels / dfTotalPixels, "", pProgressData);
+            if (eErr == CE_Failure)
+                throw eErr;
         }
+
+        pfnProgress(1.0, "", pProgressData);
     }
     catch (const CPLErr &e)
     {
         eErr = e;
     }
 
-    CPLFree(panOverviewListNew);
-    CPLFree(papapoOverviewBands);
-    CPLFree(papoOverviewBandList);
-    CPLFree(papoBandList);
     return eErr;
 }
 
@@ -517,37 +529,6 @@ void MRFDataset::SetMinValue(const char *pszVal)
 void MRFDataset::SetMaxValue(const char *pszVal)
 {
     list2vec(vMax, pszVal);
-}
-
-/**
- *\brief Idenfity a MRF file, lightweight
- *
- * Lightweight test, otherwise Open gets called.
- *
- */
-int MRFDataset::Identify(GDALOpenInfo *poOpenInfo)
-{
-    if (STARTS_WITH(poOpenInfo->pszFilename, "<MRF_META>"))
-        return TRUE;
-
-    CPLString fn(poOpenInfo->pszFilename);
-    if (fn.find(":MRF:") != string::npos)
-        return TRUE;
-
-    if (poOpenInfo->nHeaderBytes < 10)
-        return FALSE;
-
-    const char *pszHeader = reinterpret_cast<char *>(poOpenInfo->pabyHeader);
-    fn.assign(pszHeader, pszHeader + poOpenInfo->nHeaderBytes);
-    if (STARTS_WITH(fn, "<MRF_META>"))
-        return TRUE;
-
-#if defined(LERC)  // Could be single LERC tile
-    if (LERC_Band::IsLerc1(fn) || LERC_Band::IsLerc2(fn))
-        return TRUE;
-#endif
-
-    return FALSE;
 }
 
 /**
@@ -615,7 +596,7 @@ static int getnum(const vector<string> &theStringVector, const char prefix,
  */
 GDALDataset *MRFDataset::Open(GDALOpenInfo *poOpenInfo)
 {
-    if (!Identify(poOpenInfo))
+    if (!MRFDriverIdentify(poOpenInfo))
         return nullptr;
 
     CPLXMLNode *config = nullptr;
@@ -625,15 +606,26 @@ GDALDataset *MRFDataset::Open(GDALOpenInfo *poOpenInfo)
     int level = -1;   // All levels
     int version = 0;  // Current
     int zslice = 0;
-    string fn;  // Used to parse and adjust the file name
+    string fn;        // Used to parse and adjust the file name
+    string insidefn;  // inside tar file name
 
     // Different ways to open an MRF
     if (poOpenInfo->nHeaderBytes >= 10)
     {
         const char *pszHeader =
             reinterpret_cast<char *>(poOpenInfo->pabyHeader);
+        fn.assign(pszHeader, poOpenInfo->nHeaderBytes);
         if (STARTS_WITH(pszHeader, "<MRF_META>"))  // Regular file name
             config = CPLParseXMLFile(pszFileName);
+        else if (poOpenInfo->eAccess == GA_ReadOnly && fn.size() > 600 &&
+                 (fn[262] == 0 || fn[262] == 32) &&
+                 STARTS_WITH(fn.c_str() + 257, "ustar") &&
+                 strlen(CPLGetPathSafe(fn.c_str()).c_str()) == 0 &&
+                 STARTS_WITH(fn.c_str() + 512, "<MRF_META>"))
+        {  // An MRF inside a tar
+            insidefn = string("/vsitar/") + pszFileName + "/" + pszHeader;
+            config = CPLParseXMLFile(insidefn.c_str());
+        }
 #if defined(LERC)
         else
             config = LERC_Band::GetMRFConfig(poOpenInfo);
@@ -666,6 +658,11 @@ GDALDataset *MRFDataset::Open(GDALOpenInfo *poOpenInfo)
 
     MRFDataset *ds = new MRFDataset();
     ds->fname = pszFileName;
+    if (!insidefn.empty())
+    {
+        ds->publicname = pszFileName;
+        ds->fname = insidefn;
+    }
     ds->eAccess = poOpenInfo->eAccess;
     ds->level = level;
     ds->zslice = zslice;
@@ -679,7 +676,7 @@ GDALDataset *MRFDataset::Open(GDALOpenInfo *poOpenInfo)
     {
         // Open the whole dataset, then pick one level
         ds->cds = new MRFDataset();
-        ds->cds->fname = pszFileName;
+        ds->cds->fname = ds->fname;
         ds->cds->eAccess = ds->eAccess;
         ds->zslice = zslice;
         ret = ds->cds->Initialize(config);
@@ -705,7 +702,7 @@ GDALDataset *MRFDataset::Open(GDALOpenInfo *poOpenInfo)
     }
 
     // Tell PAM what our real file name is, to help it find the aux.xml
-    ds->SetPhysicalFilename(pszFileName);
+    ds->SetPhysicalFilename(ds->fname);
     // Don't mess with metadata after this, otherwise PAM will re-write the
     // aux.xml
     ds->TryLoadXML();
@@ -713,7 +710,7 @@ GDALDataset *MRFDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Open external overviews.                                        */
     /* -------------------------------------------------------------------- */
-    ds->oOvManager.Initialize(ds, pszFileName);
+    ds->oOvManager.Initialize(ds, ds->fname);
 
     return ds;
 }
@@ -770,11 +767,11 @@ CPLErr MRFDataset::LevelInit(const int l)
     SetMetadataItem("INTERLEAVE", OrderName(current.order), "IMAGE_STRUCTURE");
     SetMetadataItem("COMPRESSION", CompName(current.comp), "IMAGE_STRUCTURE");
 
-    bGeoTransformValid = (CE_None == cds->GetGeoTransform(GeoTransform));
+    bGeoTransformValid = (CE_None == cds->GetGeoTransform(m_gt));
     for (int i = 0; i < l + 1; i++)
     {
-        GeoTransform[1] *= scale;
-        GeoTransform[5] *= scale;
+        m_gt[1] *= scale;
+        m_gt[5] *= scale;
     }
 
     nRasterXSize = current.size.x;
@@ -968,14 +965,14 @@ static CPLErr Init_Raster(ILImage &image, MRFDataset *ds, CPLXMLNode *defimage)
     // Data Type, use GDAL Names
     image.dt = GDALGetDataTypeByName(
         CPLGetXMLValue(defimage, "DataType", GDALGetDataTypeName(image.dt)));
-    if (image.dt == GDT_Unknown || GDALGetDataTypeSize(image.dt) == 0)
+    if (image.dt == GDT_Unknown || GDALGetDataTypeSizeBytes(image.dt) == 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "GDAL MRF: Unsupported type");
         return CE_Failure;
     }
 
     // Check the endianness if needed, assume host order
-    if (is_Endianess_Dependent(image.dt, image.comp))
+    if (is_Endianness_Dependent(image.dt, image.comp))
         image.nbo = on(CPLGetXMLValue(defimage, "NetByteOrder", "No"));
 
     CPLXMLNode *DataValues = CPLGetXMLNode(defimage, "DataValues");
@@ -1034,10 +1031,13 @@ char **MRFDataset::GetFileList()
 {
     char **papszFileList = nullptr;
 
+    string usename = fname;
+    if (!publicname.empty())
+        usename = publicname;
     // Add the header file name if it is real
     VSIStatBufL sStat;
-    if (VSIStatExL(fname, &sStat, VSI_STAT_EXISTS_FLAG) == 0)
-        papszFileList = CSLAddString(papszFileList, fname);
+    if (VSIStatExL(usename.c_str(), &sStat, VSI_STAT_EXISTS_FLAG) == 0)
+        papszFileList = CSLAddString(papszFileList, usename.c_str());
 
     // These two should be real
     // We don't really want to add these files, since they will be erased when
@@ -1345,7 +1345,7 @@ CPLXMLNode *MRFDataset::BuildConfig()
         }
     }
 
-    if (is_Endianess_Dependent(full.dt, full.comp))  // Need to set the order
+    if (is_Endianness_Dependent(full.dt, full.comp))  // Need to set the order
         CPLCreateXMLElementAndValue(raster, "NetByteOrder",
                                     (full.nbo || NET_ORDER) ? "TRUE" : "FALSE");
 
@@ -1364,7 +1364,7 @@ CPLXMLNode *MRFDataset::BuildConfig()
     CPLXMLNode *gtags = CPLCreateXMLNode(config, CXT_Element, "GeoTags");
 
     // Do we have an affine transform different from identity?
-    double gt[6];
+    GDALGeoTransform gt;
     if ((MRFDataset::GetGeoTransform(gt) == CE_None) &&
         (gt[0] != 0 || gt[1] != 1 || gt[2] != 0 || gt[3] != 0 || gt[4] != 0 ||
          gt[5] != 1))
@@ -1392,7 +1392,7 @@ CPLXMLNode *MRFDataset::BuildConfig()
             options += optlist[i];
             options += ' ';
         }
-        options.resize(options.size() - 1);
+        options.pop_back();
         CPLCreateXMLElementAndValue(config, "Options", options);
     }
 
@@ -1438,12 +1438,12 @@ CPLErr MRFDataset::Initialize(CPLXMLNode *config)
         y1 = atof(CPLGetXMLValue(bbox, "maxy", "1"));
         y0 = atof(CPLGetXMLValue(bbox, "miny", "0"));
 
-        GeoTransform[0] = x0;
-        GeoTransform[1] = (x1 - x0) / full.size.x;
-        GeoTransform[2] = 0;
-        GeoTransform[3] = y1;
-        GeoTransform[4] = 0;
-        GeoTransform[5] = (y0 - y1) / full.size.y;
+        m_gt[0] = x0;
+        m_gt[1] = (x1 - x0) / full.size.x;
+        m_gt[2] = 0;
+        m_gt[3] = y1;
+        m_gt[4] = 0;
+        m_gt[5] = (y0 - y1) / full.size.y;
         bGeoTransformValid = TRUE;
     }
 
@@ -1484,7 +1484,7 @@ CPLErr MRFDataset::Initialize(CPLXMLNode *config)
     SetMetadataItem("INTERLEAVE", OrderName(current.order), "IMAGE_STRUCTURE");
     SetMetadataItem("COMPRESSION", CompName(current.comp), "IMAGE_STRUCTURE");
 
-    if (is_Endianess_Dependent(current.dt, current.comp))
+    if (is_Endianness_Dependent(current.dt, current.comp))
         SetMetadataItem("NETBYTEORDER", current.nbo ? "TRUE" : "FALSE",
                         "IMAGE_STRUCTURE");
 
@@ -1619,15 +1619,16 @@ static inline bool is_absolute(const CPLString &name)
 {
     return (name.find_first_of("/\\") == 0)  // Starts with root
            || (name.size() > 1 && name[1] == ':' &&
-               isalpha(name[0]))  // Starts with drive letter
-           || (name[0] == '<');   // Maybe it is XML
+               isalpha(static_cast<unsigned char>(
+                   name[0])))    // Starts with drive letter
+           || (name[0] == '<');  // Maybe it is XML
 }
 
 // Add the dirname of path to the beginning of name, if it is relative
 // returns true if name was modified
 static inline bool make_absolute(CPLString &name, const CPLString &path)
 {
-    if (!is_absolute(path) && (path.find_first_of("/\\") != string::npos))
+    if (!is_absolute(name) && (path.find_first_of("/\\") != string::npos))
     {
         name = path.substr(0, path.find_last_of("/\\") + 1) + name;
         return true;
@@ -1645,9 +1646,12 @@ GDALDataset *MRFDataset::GetSrcDS()
     if (source.empty())
         return nullptr;
 
+    // Stub out the error handler
+    CPLPushErrorHandler(CPLQuietErrorHandler);
     // Try open the source dataset as is
     poSrcDS =
         GDALDataset::FromHandle(GDALOpenShared(source.c_str(), GA_ReadOnly));
+    CPLPopErrorHandler();
 
     // It the open fails, try again with the current dataset path prepended
     if (!poSrcDS && make_absolute(source, fname))
@@ -1697,15 +1701,14 @@ GIntBig MRFDataset::AddOverviews(int scaleIn)
 
         // And adjust the offset again, within next level
         img.idxoffset += sizeof(ILIdx) * img.pagecount.l / img.size.z * zslice;
-
+        int l = static_cast<int>(img.size.l);
         // Create and register the overviews for each band
         for (int i = 1; i <= nBands; i++)
         {
             MRFRasterBand *b =
                 reinterpret_cast<MRFRasterBand *>(GetRasterBand(i));
-            if (!(b->GetOverview(static_cast<int>(img.size.l) - 1)))
-                b->AddOverview(newMRFRasterBand(this, img, i,
-                                                static_cast<int>(img.size.l)));
+            if (!(b->GetOverview(l - 1)))
+                b->AddOverview(newMRFRasterBand(this, img, i, l));
         }
     }
 
@@ -1807,7 +1810,7 @@ GDALDataset *MRFDataset::CreateCopy(const char *pszFilename,
         }
 
         // Geotags
-        double gt[6];
+        GDALGeoTransform gt;
         if (CE_None == poSrcDS->GetGeoTransform(gt))
             poDS->SetGeoTransform(gt);
 
@@ -2044,10 +2047,10 @@ CPLErr MRFDataset::ZenCopy(GDALDataset *poSrc, GDALProgressFunc pfnProgress,
                 continue;
 
             // get the data in the buffer, interleaved
-            eErr =
-                poSrc->RasterIO(GF_Read, col, row, nCols, nRows, buffer, nCols,
-                                nRows, eDT, nBandCount, nullptr, nBands * dts,
-                                nBands * dts * nCols, dts, nullptr);
+            eErr = poSrc->RasterIO(
+                GF_Read, col, row, nCols, nRows, buffer, nCols, nRows, eDT,
+                nBandCount, nullptr, static_cast<GSpacing>(nBands) * dts,
+                static_cast<GSpacing>(nBands) * dts * nCols, dts, nullptr);
 
             if (eErr != CE_None)
                 break;
@@ -2073,9 +2076,10 @@ CPLErr MRFDataset::ZenCopy(GDALDataset *poSrc, GDALProgressFunc pfnProgress,
 
             // Write
             if (eErr == CE_None)
-                eErr = RasterIO(GF_Write, col, row, nCols, nRows, buffer, nCols,
-                                nRows, eDT, nBandCount, nullptr, nBands * dts,
-                                nBands * dts * nCols, dts, nullptr);
+                eErr = RasterIO(
+                    GF_Write, col, row, nCols, nRows, buffer, nCols, nRows, eDT,
+                    nBandCount, nullptr, static_cast<GSpacing>(nBands) * dts,
+                    static_cast<GSpacing>(nBands) * dts * nCols, dts, nullptr);
 
         }  // Columns
         if (eErr != CE_None)
@@ -2508,7 +2512,7 @@ CPLErr MRFDataset::WriteTile(void *buff, GUIntBig infooffset, GUIntBig size)
     return ret;
 }
 
-CPLErr MRFDataset::SetGeoTransform(double *gt)
+CPLErr MRFDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
     if (GetAccess() != GA_Update || bCrystalized)
     {
@@ -2516,7 +2520,7 @@ CPLErr MRFDataset::SetGeoTransform(double *gt)
                  "SetGeoTransform only works during Create call");
         return CE_Failure;
     }
-    memcpy(GeoTransform, gt, 6 * sizeof(double));
+    m_gt = gt;
     bGeoTransformValid = TRUE;
     return CE_None;
 }
@@ -2532,10 +2536,11 @@ bool MRFDataset::IsSingleTile()
 /*
  *  Returns 0,1,0,0,0,1 even if it was not set
  */
-CPLErr MRFDataset::GetGeoTransform(double *gt)
+CPLErr MRFDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    memcpy(gt, GeoTransform, 6 * sizeof(double));
-    if (GetMetadata("RPC") || GetGCPCount())
+    gt = m_gt;
+    MRFDataset *nonConstThis = const_cast<MRFDataset *>(this);
+    if (nonConstThis->GetMetadata("RPC") || nonConstThis->GetGCPCount())
         bGeoTransformValid = FALSE;
     if (!bGeoTransformValid)
         return CE_Failure;

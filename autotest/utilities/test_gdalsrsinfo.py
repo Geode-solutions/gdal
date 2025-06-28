@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  gdalsrsinfo testing
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import sys
@@ -144,6 +127,7 @@ def test_gdalsrsinfo_6(gdalsrsinfo_path):
 # Test -o mapinfo option
 
 
+@pytest.mark.require_driver("MapInfo File")
 def test_gdalsrsinfo_7(gdalsrsinfo_path):
 
     ret = gdaltest.runexternal(gdalsrsinfo_path + " -o mapinfo ../gcore/data/byte.tif")
@@ -270,7 +254,7 @@ def test_gdalsrsinfo_15(gdalsrsinfo_path):
 
     assert (
         ret.strip()
-        == "+proj=lcc +lat_0=33.75 +lon_0=-79 +lat_1=34.3333333333333 +lat_2=36.1666666666667 +x_0=609601.22 +y_0=0 +datum=NAD83 +units=m +no_defs"
+        == "+proj=lcc +lat_0=33.75 +lon_0=-79 +lat_1=36.1666666666667 +lat_2=34.3333333333333 +x_0=609601.22 +y_0=0 +datum=NAD83 +units=m +no_defs"
     )
 
 
@@ -294,7 +278,7 @@ def test_gdalsrsinfo_16(gdalsrsinfo_path):
 # Test -e
 
 
-def test_gdalsrsinfo_17(gdalsrsinfo_path):
+def test_gdalsrsinfo_17(gdalsrsinfo_path, tmp_path):
 
     # Zero match
     ret = gdaltest.runexternal(gdalsrsinfo_path + ' -e "LOCAL_CS[foo]"')
@@ -307,10 +291,12 @@ def test_gdalsrsinfo_17(gdalsrsinfo_path):
     assert "EPSG:32119" in ret
 
     # Two matches
-    open("tmp/test_gdalsrsinfo_17.wkt", "wt").write(
+    open(f"{tmp_path}/test_gdalsrsinfo_17.wkt", "wt").write(
         'GEOGCS["myLKS94",DATUM["Lithuania_1994_ETRS89",SPHEROID["GRS_1980",6378137,298.257222101],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
     )
-    ret = gdaltest.runexternal(gdalsrsinfo_path + """ -e tmp/test_gdalsrsinfo_17.wkt""")
+    ret = gdaltest.runexternal(
+        f"{gdalsrsinfo_path} -e {tmp_path}/test_gdalsrsinfo_17.wkt"
+    )
     assert "EPSG:4669" in ret
 
 

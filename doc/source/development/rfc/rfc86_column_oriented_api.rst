@@ -75,7 +75,7 @@ two main callbacks to get:
   a set of values for a specific column/field in a subset of features.
   This is the equivalent of a
   `Series <https://arrow.apache.org/docs/python/pandas.html#series>`_ in a Pandas DataFrame.
-  This is a potentially hiearchical structure that can aggregate
+  This is a potentially hierarchical structure that can aggregate
   sub arrays, and in OGR usage, the main array will be a StructArray which is
   the collection of OGR attribute and geometry fields.
   The layout of buffers and children arrays per data type is detailed in the
@@ -96,7 +96,7 @@ over individual features, one iterates over a batch of several features at
 once.
 
 The ArrowArrayStream, ArrowSchema, ArrowArray structures are defined in a ogr_recordbatch.h
-public header file, directly derived from https://github.com/apache/arrow/blob/master/cpp/src/arrow/c/abi.h
+public header file, directly derived from https://github.com/apache/arrow/blob/main/cpp/src/arrow/c/abi.h
 to get API/ABI compatibility with Apache Arrow C++. This header file must be
 explicitly included when the related array batch API is used.
 
@@ -566,8 +566,8 @@ expose a layer as GeoPandas GeoDataFrame (which involves parsing WKB as GEOS obj
 
 .. _rfc-86-bench-geopandas:
 
-bench_gepandas.py
-+++++++++++++++++
+bench_geopandas.py
+++++++++++++++++++
 
 Use of the GeoPandas Python library which uses Fiona underneath to
 expose a layer as GeoPandas GeoDataFrame.
@@ -641,7 +641,7 @@ GeoPandas GeoDataFrame from the concatenation of the returned arrays.
         geom_field_name = None
         for field in schema:
             field_md = field.metadata
-            if (field_md and field_md.get(b'ARROW:extension:name', None) == b'WKB') or field.name == lyr.GetGeometryColumn():
+            if (field_md and field_md.get(b'ARROW:extension:name', None) == b'ogc.wkb') or field.name == lyr.GetGeometryColumn():
                 geom_field_name = field.name
                 break
 

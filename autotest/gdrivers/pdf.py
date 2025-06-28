@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  PDF Testing.
@@ -10,26 +9,12 @@
 ###############################################################################
 # Copyright (c) 2010-2019, Even Rouault <even.rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import json
 import os
+import shutil
 import sys
 
 import gdaltest
@@ -39,6 +24,13 @@ import pytest
 from osgeo import gdal, ogr, osr
 
 pytestmark = pytest.mark.require_driver("PDF")
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 ###############################################################################
 # Test driver presence
@@ -163,11 +155,11 @@ def test_pdf_online_1(poppler_or_pdfium):
     if pdf_is_pdfium():
         expected_gt = (
             -77.11232757568358,
-            9.1663393281356228e-06,
+            9.166339328135623e-06,
             0.0,
-            38.897842406247477,
+            38.89784240741306,
             0.0,
-            -9.1665025563464202e-06,
+            -9.166503628631888e-06,
         )
     elif pdf_is_poppler():
         expected_gt = (
@@ -229,11 +221,11 @@ def test_pdf_online_2(poppler_or_pdfium):
     if pdf_is_pdfium():
         expected_gt = (
             -77.11232757568358,
-            9.1663393281356228e-06,
+            9.166339328135623e-06,
             0.0,
-            38.897842406247477,
+            38.89784240741306,
             0.0,
-            -9.1665025563464202e-06,
+            -9.166503628631888e-06,
         )
     elif pdf_is_poppler():
         expected_gt = (
@@ -278,9 +270,8 @@ def test_pdf_online_2(poppler_or_pdfium):
 
 
 def test_pdf_1(poppler_or_pdfium):
-    gdal.SetConfigOption("GDAL_PDF_DPI", "200")
-    ds = gdal.Open("data/pdf/adobe_style_geospatial.pdf")
-    gdal.SetConfigOption("GDAL_PDF_DPI", None)
+    with gdal.config_option("GDAL_PDF_DPI", "200"):
+        ds = gdal.Open("data/pdf/adobe_style_geospatial.pdf")
     assert ds is not None
 
     gt = ds.GetGeoTransform()
@@ -288,12 +279,12 @@ def test_pdf_1(poppler_or_pdfium):
 
     if pdf_is_pdfium():
         expected_gt = (
-            333275.12406585668,
-            31.764450118407499,
+            333274.5701626293,
+            31.765012397640078,
             0.0,
-            4940392.1233656602,
+            4940391.755002656,
             0.0,
-            -31.794983670894396,
+            -31.794694104865194,
         )
     else:
         expected_gt = (
@@ -320,16 +311,14 @@ def test_pdf_1(poppler_or_pdfium):
     got_geom = ogr.CreateGeometryFromWkt(neatline)
     if pdf_is_pdfium():
         expected_geom = ogr.CreateGeometryFromWkt(
-            "POLYGON ((338304.28536533244187 4896674.10591614805162,338304.812550922040828 4933414.853961281478405,382774.246895745047368 4933414.855149634182453,382774.983309225703124 4896673.95723026804626,338304.28536533244187 4896674.10591614805162))"
+            "POLYGON ((338304.274926337 4896673.68220244,338304.206397453 4933414.86906802,382774.239238623 4933414.4314159,382774.990878249 4896674.38093959,338304.274926337 4896673.68220244))"
         )
     else:
         expected_geom = ogr.CreateGeometryFromWkt(
             "POLYGON ((338304.150125828920864 4896673.639421294443309,338304.177293475600891 4933414.799376524984837,382774.271384406310972 4933414.546264361590147,382774.767329963855445 4896674.273581005632877,338304.150125828920864 4896673.639421294443309))"
         )
 
-    if ogrtest.check_feature_geometry(got_geom, expected_geom) != 0:
-        print(neatline)
-        pytest.fail("bad neatline")
+    ogrtest.check_feature_geometry(got_geom, expected_geom)
 
 
 ###############################################################################
@@ -338,14 +327,12 @@ def test_pdf_1(poppler_or_pdfium):
 
 def test_pdf_iso32000(poppler_or_pdfium_or_podofo):
     tst = gdaltest.GDALTest("PDF", "byte.tif", 1, None)
-    ret = tst.testCreateCopy(
+    tst.testCreateCopy(
         check_minmax=0,
         check_gt=1,
         check_srs=True,
         check_checksum_not_null=pdf_checksum_available(),
     )
-
-    return ret
 
 
 ###############################################################################
@@ -354,92 +341,12 @@ def test_pdf_iso32000(poppler_or_pdfium_or_podofo):
 
 def test_pdf_iso32000_dpi_300(poppler_or_pdfium):
     tst = gdaltest.GDALTest("PDF", "byte.tif", 1, None, options=["DPI=300"])
-    ret = tst.testCreateCopy(
+    tst.testCreateCopy(
         check_minmax=0,
         check_gt=1,
         check_srs=True,
         check_checksum_not_null=pdf_checksum_available(),
     )
-
-    return ret
-
-
-###############################################################################
-# Test write support with OGC_BP geo encoding
-
-
-def test_pdf_ogcbp(poppler_or_pdfium_or_podofo):
-    gdal.SetConfigOption("GDAL_PDF_OGC_BP_WRITE_WKT", "FALSE")
-    tst = gdaltest.GDALTest("PDF", "byte.tif", 1, None, options=["GEO_ENCODING=OGC_BP"])
-    ret = tst.testCreateCopy(
-        check_minmax=0,
-        check_gt=1,
-        check_srs=True,
-        check_checksum_not_null=pdf_checksum_available(),
-    )
-    gdal.SetConfigOption("GDAL_PDF_OGC_BP_WRITE_WKT", None)
-
-    return ret
-
-
-###############################################################################
-# Test write support with OGC_BP geo encoding, with DPI=300
-
-
-def test_pdf_ogcbp_dpi_300(poppler_or_pdfium):
-    gdal.SetConfigOption("GDAL_PDF_OGC_BP_WRITE_WKT", "FALSE")
-    tst = gdaltest.GDALTest(
-        "PDF", "byte.tif", 1, None, options=["GEO_ENCODING=OGC_BP", "DPI=300"]
-    )
-    ret = tst.testCreateCopy(
-        check_minmax=0,
-        check_gt=1,
-        check_srs=True,
-        check_checksum_not_null=pdf_checksum_available(),
-    )
-    gdal.SetConfigOption("GDAL_PDF_OGC_BP_WRITE_WKT", None)
-
-    return ret
-
-
-def test_pdf_ogcbp_lcc(poppler_or_pdfium):
-    wkt = """PROJCS["NAD83 / Utah North",
-    GEOGCS["NAD83",
-        DATUM["North_American_Datum_1983",
-            SPHEROID["GRS 1980",6378137,298.257222101,
-                AUTHORITY["EPSG","7019"]],
-            TOWGS84[0,0,0,0,0,0,0]],
-        PRIMEM["Greenwich",0],
-        UNIT["degree",0.0174532925199433]],
-    PROJECTION["Lambert_Conformal_Conic_2SP"],
-    PARAMETER["standard_parallel_1",41.78333333333333],
-    PARAMETER["standard_parallel_2",40.71666666666667],
-    PARAMETER["latitude_of_origin",40.33333333333334],
-    PARAMETER["central_meridian",-111.5],
-    PARAMETER["false_easting",500000],
-    PARAMETER["false_northing",1000000],
-    UNIT["metre",1]]]"""
-
-    src_ds = gdal.GetDriverByName("GTiff").Create("tmp/temp.tif", 1, 1)
-    src_ds.SetProjection(wkt)
-    src_ds.SetGeoTransform([500000, 1, 0, 1000000, 0, -1])
-
-    gdal.SetConfigOption("GDAL_PDF_OGC_BP_WRITE_WKT", "FALSE")
-    out_ds = gdaltest.pdf_drv.CreateCopy("tmp/pdf_ogcbp_lcc.pdf", src_ds)
-    out_wkt = out_ds.GetProjectionRef()
-    out_ds = None
-    gdal.SetConfigOption("GDAL_PDF_OGC_BP_WRITE_WKT", None)
-
-    src_ds = None
-
-    gdal.Unlink("tmp/temp.tif")
-    gdal.GetDriverByName("PDF").Delete("tmp/pdf_ogcbp_lcc.pdf")
-
-    sr1 = osr.SpatialReference(wkt)
-    sr2 = osr.SpatialReference(out_wkt)
-    if sr1.IsSame(sr2) == 0:
-        print(sr2.ExportToPrettyWkt())
-        pytest.fail("wrong wkt")
 
 
 ###############################################################################
@@ -448,14 +355,12 @@ def test_pdf_ogcbp_lcc(poppler_or_pdfium):
 
 def test_pdf_no_compression(poppler_or_pdfium):
     tst = gdaltest.GDALTest("PDF", "byte.tif", 1, None, options=["COMPRESS=NONE"])
-    ret = tst.testCreateCopy(
+    tst.testCreateCopy(
         check_minmax=0,
         check_gt=0,
         check_srs=None,
         check_checksum_not_null=pdf_checksum_available(),
     )
-
-    return ret
 
 
 ###############################################################################
@@ -545,11 +450,10 @@ def pdf_rgba_default_compression(options_param=None):
     out_ds = None
 
     # gdal.SetConfigOption('GDAL_PDF_BANDS', '4')
-    gdal.SetConfigOption("PDF_DUMP_OBJECT", "tmp/rgba.pdf.txt")
-    gdal.SetConfigOption("PDF_DUMP_PARENT", "YES")
-    out_ds = gdal.Open("tmp/rgba.pdf")
-    gdal.SetConfigOption("PDF_DUMP_OBJECT", None)
-    gdal.SetConfigOption("PDF_DUMP_PARENT", None)
+    with gdal.config_options(
+        {"PDF_DUMP_OBJECT": "tmp/rgba.pdf.txt", "PDF_DUMP_PARENT": "YES"}
+    ):
+        out_ds = gdal.Open("tmp/rgba.pdf")
     content = open("tmp/rgba.pdf.txt", "rt").read()
     os.unlink("tmp/rgba.pdf.txt")
     cs1 = out_ds.GetRasterBand(1).Checksum()
@@ -605,26 +509,22 @@ def test_pdf_jpeg_compression_rgba(poppler_or_pdfium):
 
 def test_pdf_predictor_2(poppler_or_pdfium):
     tst = gdaltest.GDALTest("PDF", "utm.tif", 1, None, options=["PREDICTOR=2"])
-    ret = tst.testCreateCopy(
+    tst.testCreateCopy(
         check_minmax=0,
         check_gt=0,
         check_srs=None,
         check_checksum_not_null=pdf_checksum_available(),
     )
-
-    return ret
 
 
 def test_pdf_predictor_2_rgb(poppler_or_pdfium):
     tst = gdaltest.GDALTest("PDF", "rgbsmall.tif", 1, None, options=["PREDICTOR=2"])
-    ret = tst.testCreateCopy(
+    tst.testCreateCopy(
         check_minmax=0,
         check_gt=0,
         check_srs=None,
         check_checksum_not_null=pdf_checksum_available(),
     )
-
-    return ret
 
 
 ###############################################################################
@@ -635,28 +535,24 @@ def test_pdf_tiled(poppler_or_pdfium):
     tst = gdaltest.GDALTest(
         "PDF", "utm.tif", 1, None, options=["COMPRESS=DEFLATE", "TILED=YES"]
     )
-    ret = tst.testCreateCopy(
+    tst.testCreateCopy(
         check_minmax=0,
         check_gt=0,
         check_srs=None,
         check_checksum_not_null=pdf_checksum_available(),
     )
-
-    return ret
 
 
 def test_pdf_tiled_128(poppler_or_pdfium):
     tst = gdaltest.GDALTest(
         "PDF", "utm.tif", 1, None, options=["BLOCKXSIZE=128", "BLOCKYSIZE=128"]
     )
-    ret = tst.testCreateCopy(
+    tst.testCreateCopy(
         check_minmax=0,
         check_gt=0,
         check_srs=None,
         check_checksum_not_null=pdf_checksum_available(),
     )
-
-    return ret
 
 
 ###############################################################################
@@ -667,14 +563,12 @@ def test_pdf_tiled_128(poppler_or_pdfium):
 def test_pdf_color_table(poppler_or_pdfium):
 
     tst = gdaltest.GDALTest("PDF", "small_world_pct.tif", 1, None)
-    ret = tst.testCreateCopy(
+    tst.testCreateCopy(
         check_minmax=0,
         check_gt=0,
         check_srs=None,
         check_checksum_not_null=pdf_checksum_available(),
     )
-
-    return ret
 
 
 ###############################################################################
@@ -1019,148 +913,18 @@ def _pdf_update_gcps(poppler_or_pdfium):
     expected_geom = ogr.Geometry(ogr.wkbPolygon)
     expected_geom.AddGeometry(expected_lr)
 
-    if (
-        ogrtest.check_feature_geometry(got_geom, expected_geom, max_error=max_error)
-        != 0
-    ):
-        print("got : %s" % got_neatline)
-        print("expected : %s" % expected_geom.ExportToWkt())
-        pytest.fail("bad neatline")
+    ogrtest.check_feature_geometry(got_geom, expected_geom, max_error=max_error)
 
     gdaltest.pdf_drv.Delete(out_filename)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_pdf_update_gcps_iso32000(poppler_or_pdfium):
     gdal.SetConfigOption("GDAL_PDF_GEO_ENCODING", None)
     _pdf_update_gcps(poppler_or_pdfium)
-
-
-def test_pdf_update_gcps_ogc_bp(poppler_or_pdfium):
-    gdal.SetConfigOption("GDAL_PDF_GEO_ENCODING", "OGC_BP")
-    _pdf_update_gcps(poppler_or_pdfium)
-    gdal.SetConfigOption("GDAL_PDF_GEO_ENCODING", None)
-
-
-###############################################################################
-# Check SetGCPs() but with GCPs that do *not* resolve to a geotransform
-
-
-def test_pdf_set_5_gcps_ogc_bp(poppler_or_pdfium):
-    dpi = 300
-    out_filename = "tmp/pdf_set_5_gcps_ogc_bp.pdf"
-
-    src_ds = gdal.Open("data/byte.tif")
-    src_wkt = src_ds.GetProjectionRef()
-    src_gt = src_ds.GetGeoTransform()
-    src_ds = None
-
-    gcp = [
-        [2.0, 8.0, 0, 0],
-        [2.0, 10.0, 0, 0],
-        [2.0, 18.0, 0, 0],
-        [16.0, 18.0, 0, 0],
-        [16.0, 8.0, 0, 0],
-    ]
-
-    for i, _ in enumerate(gcp):
-        gcp[i][2] = src_gt[0] + gcp[i][0] * src_gt[1] + gcp[i][1] * src_gt[2]
-        gcp[i][3] = src_gt[3] + gcp[i][0] * src_gt[4] + gcp[i][1] * src_gt[5]
-
-    # That way, GCPs will not resolve to a geotransform
-    gcp[1][2] -= 100
-
-    vrt_txt = """<VRTDataset rasterXSize="20" rasterYSize="20">
-<GCPList Projection='%s'>
-    <GCP Id="" Pixel="%f" Line="%f" X="%f" Y="%f"/>
-    <GCP Id="" Pixel="%f" Line="%f" X="%f" Y="%f"/>
-    <GCP Id="" Pixel="%f" Line="%f" X="%f" Y="%f"/>
-    <GCP Id="" Pixel="%f" Line="%f" X="%f" Y="%f"/>
-    <GCP Id="" Pixel="%f" Line="%f" X="%f" Y="%f"/>
-</GCPList>
-<VRTRasterBand dataType="Byte" band="1">
-    <SimpleSource>
-    <SourceFilename relativeToVRT="1">data/byte.tif</SourceFilename>
-    <SourceProperties RasterXSize="20" RasterYSize="20" DataType="Byte" BlockXSize="20" BlockYSize="20" />
-    <SourceBand>1</SourceBand>
-    </SimpleSource>
-</VRTRasterBand>
-</VRTDataset>""" % (
-        src_wkt,
-        gcp[0][0],
-        gcp[0][1],
-        gcp[0][2],
-        gcp[0][3],
-        gcp[1][0],
-        gcp[1][1],
-        gcp[1][2],
-        gcp[1][3],
-        gcp[2][0],
-        gcp[2][1],
-        gcp[2][2],
-        gcp[2][3],
-        gcp[3][0],
-        gcp[3][1],
-        gcp[3][2],
-        gcp[3][3],
-        gcp[4][0],
-        gcp[4][1],
-        gcp[4][2],
-        gcp[4][3],
-    )
-    vrt_ds = gdal.Open(vrt_txt)
-    vrt_gcps = vrt_ds.GetGCPs()
-
-    # Create PDF
-    ds = gdaltest.pdf_drv.CreateCopy(
-        out_filename, vrt_ds, options=["GEO_ENCODING=OGC_BP", "DPI=%d" % dpi]
-    )
-    ds = None
-
-    vrt_ds = None
-
-    # Check
-    ds = gdal.Open(out_filename)
-    got_gt = ds.GetGeoTransform()
-    got_wkt = ds.GetProjectionRef()
-    got_gcp_count = ds.GetGCPCount()
-    got_gcps = ds.GetGCPs()
-    got_gcp_wkt = ds.GetGCPProjection()
-    got_neatline = ds.GetMetadataItem("NEATLINE")
-    ds = None
-
-    assert got_wkt == "", "did not expect non null GetProjectionRef"
-
-    assert got_gcp_wkt != "", "did not expect null GetGCPProjection"
-
-    expected_gt = [0, 1, 0, 0, 0, 1]
-    for i in range(6):
-        assert got_gt[i] == pytest.approx(
-            expected_gt[i], abs=1e-8
-        ), "did not get expected gt"
-
-    assert got_gcp_count == len(gcp), "did not get expected GCP count"
-
-    for i in range(got_gcp_count):
-        assert (
-            got_gcps[i].GCPX == pytest.approx(vrt_gcps[i].GCPX, abs=1e-5)
-            and got_gcps[i].GCPY == pytest.approx(vrt_gcps[i].GCPY, abs=1e-5)
-            and got_gcps[i].GCPPixel == pytest.approx(vrt_gcps[i].GCPPixel, abs=1e-5)
-            and got_gcps[i].GCPLine == pytest.approx(vrt_gcps[i].GCPLine, abs=1e-5)
-        ), ("did not get expected GCP (%d)" % i)
-
-    got_geom = ogr.CreateGeometryFromWkt(got_neatline)
-    # Not sure this is really what we want, but without any geotransform, we cannot
-    # find projected coordinates
-    expected_geom = ogr.CreateGeometryFromWkt(
-        "POLYGON ((2 8,2 10,2 18,16 18,16 8,2 8))"
-    )
-
-    if ogrtest.check_feature_geometry(got_geom, expected_geom) != 0:
-        print("got : %s" % got_neatline)
-        print("expected : %s" % expected_geom.ExportToWkt())
-        pytest.fail("bad neatline")
-
-    gdaltest.pdf_drv.Delete(out_filename)
 
 
 ###############################################################################
@@ -1196,15 +960,6 @@ def _pdf_set_neatline(pdf_backend, geo_encoding, dpi=300):
     got_neatline = ds.GetMetadataItem("NEATLINE")
 
     if pdf_is_pdfium():
-        if geo_encoding == "ISO32000":
-            expected_gt = (
-                440722.21886505646,
-                59.894520395349709,
-                0.020450745157516229,
-                3751318.6133243339,
-                0.077268565258743135,
-                -60.009312694035692,
-            )
         max_error = 1
     else:
         max_error = 0.0001
@@ -1218,13 +973,7 @@ def _pdf_set_neatline(pdf_backend, geo_encoding, dpi=300):
     got_geom = ogr.CreateGeometryFromWkt(got_neatline)
     expected_geom = ogr.CreateGeometryFromWkt(neatline)
 
-    if (
-        ogrtest.check_feature_geometry(got_geom, expected_geom, max_error=max_error)
-        != 0
-    ):
-        print("got : %s" % got_neatline)
-        print("expected : %s" % expected_geom.ExportToWkt())
-        pytest.fail("bad neatline")
+    ogrtest.check_feature_geometry(got_geom, expected_geom, max_error=max_error)
 
     # Test SetMetadataItem()
     ds = gdal.Open(out_filename, gdal.GA_Update)
@@ -1233,24 +982,23 @@ def _pdf_set_neatline(pdf_backend, geo_encoding, dpi=300):
     ds = None
 
     # Check
-    gdal.SetConfigOption("GDAL_PDF_GEO_ENCODING", geo_encoding)
-    ds = gdal.Open(out_filename)
-    got_gt = ds.GetGeoTransform()
-    got_neatline = ds.GetMetadataItem("NEATLINE")
+    with gdal.config_option("GDAL_PDF_GEO_ENCODING", geo_encoding):
+        ds = gdal.Open(out_filename)
+        got_gt = ds.GetGeoTransform()
+        got_neatline = ds.GetMetadataItem("NEATLINE")
 
-    if pdf_is_pdfium():
-        if geo_encoding == "ISO32000":
-            expected_gt = (
-                440722.36151923181,
-                59.93217744208814,
-                0.0,
-                3751318.7819266757,
-                0.0,
-                -59.941906300000845,
-            )
+        if pdf_is_pdfium():
+            if geo_encoding == "ISO32000":
+                expected_gt = (
+                    440722.36151923181,
+                    59.93217744208814,
+                    0.0,
+                    3751318.7819266757,
+                    0.0,
+                    -59.941906300000845,
+                )
 
-    ds = None
-    gdal.SetConfigOption("GDAL_PDF_GEO_ENCODING", None)
+        ds = None
 
     for i in range(6):
         assert not (
@@ -1263,13 +1011,7 @@ def _pdf_set_neatline(pdf_backend, geo_encoding, dpi=300):
     got_geom = ogr.CreateGeometryFromWkt(got_neatline)
     expected_geom = ogr.CreateGeometryFromWkt(neatline)
 
-    if (
-        ogrtest.check_feature_geometry(got_geom, expected_geom, max_error=max_error)
-        != 0
-    ):
-        print("got : %s" % got_neatline)
-        print("expected : %s" % expected_geom.ExportToWkt())
-        pytest.fail("bad neatline")
+    ogrtest.check_feature_geometry(got_geom, expected_geom, max_error=max_error)
 
     gdaltest.pdf_drv.Delete(out_filename)
 
@@ -1278,14 +1020,14 @@ def test_pdf_set_neatline_iso32000(poppler_or_pdfium):
     return _pdf_set_neatline(poppler_or_pdfium, "ISO32000")
 
 
-def test_pdf_set_neatline_ogc_bp(poppler_or_pdfium):
-    return _pdf_set_neatline(poppler_or_pdfium, "OGC_BP")
-
-
 ###############################################################################
 # Check that we can generate identical file
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_pdf_check_identity_iso32000(poppler_or_pdfium):
     out_filename = "tmp/pdf_check_identity_iso32000.pdf"
 
@@ -1300,40 +1042,17 @@ def test_pdf_check_identity_iso32000(poppler_or_pdfium):
     data_ref = f.read()
     f.close()
 
-    f = open(out_filename, "rb")
-    data_got = f.read()
-    f.close()
-
-    assert data_ref == data_got, "content does not match reference content"
-
-    gdaltest.pdf_drv.Delete(out_filename)
-
-
-###############################################################################
-# Check that we can generate identical file
-
-
-def test_pdf_check_identity_ogc_bp(poppler_or_pdfium):
-    out_filename = "tmp/pdf_check_identity_ogc_bp.pdf"
-
-    src_ds = gdal.Open("data/pdf/test_pdf.vrt")
-    gdal.SetConfigOption("GDAL_PDF_OGC_BP_WRITE_WKT", "NO")
-    out_ds = gdaltest.pdf_drv.CreateCopy(
-        out_filename, src_ds, options=["GEO_ENCODING=OGC_BP", "STREAM_COMPRESS=NONE"]
-    )
-    del out_ds
-    gdal.SetConfigOption("GDAL_PDF_OGC_BP_WRITE_WKT", None)
-    src_ds = None
-
-    f = open("data/pdf/test_ogc_bp.pdf", "rb")
-    data_ref = f.read()
+    f = open("data/pdf/test_iso32000_libpng_1_6_40.pdf", "rb")
+    data_ref2 = f.read()
     f.close()
 
     f = open(out_filename, "rb")
     data_got = f.read()
     f.close()
 
-    assert data_ref == data_got, "content does not match reference content"
+    assert (
+        data_got == data_ref or data_got == data_ref2
+    ), "content does not match reference content"
 
     gdaltest.pdf_drv.Delete(out_filename)
 
@@ -1364,20 +1083,18 @@ def test_pdf_layers(poppler_or_pdfium):
         pytest.skip()
 
     # Turn a layer off
-    gdal.SetConfigOption("GDAL_PDF_LAYERS_OFF", "New_Data_Frame")
-    ds = gdal.Open("data/pdf/adobe_style_geospatial.pdf")
-    cs2 = ds.GetRasterBand(1).Checksum()
-    ds = None
-    gdal.SetConfigOption("GDAL_PDF_LAYERS_OFF", None)
+    with gdal.config_option("GDAL_PDF_LAYERS_OFF", "New_Data_Frame"):
+        ds = gdal.Open("data/pdf/adobe_style_geospatial.pdf")
+        cs2 = ds.GetRasterBand(1).Checksum()
+        ds = None
 
     assert cs2 != cs1, "did not get expected checksum"
 
     # Turn the other layer on
-    gdal.SetConfigOption("GDAL_PDF_LAYERS", "Layers")
-    ds = gdal.Open("data/pdf/adobe_style_geospatial.pdf")
-    cs3 = ds.GetRasterBand(1).Checksum()
-    ds = None
-    gdal.SetConfigOption("GDAL_PDF_LAYERS", None)
+    with gdal.config_option("GDAL_PDF_LAYERS", "Layers"):
+        ds = gdal.Open("data/pdf/adobe_style_geospatial.pdf")
+        cs3 = ds.GetRasterBand(1).Checksum()
+        ds = None
 
     # So the end result must be identical
     assert cs3 == cs2, "did not get expected checksum"
@@ -1391,6 +1108,48 @@ def test_pdf_layers(poppler_or_pdfium):
     ds = None
 
     assert not (cs4 == cs1 or cs4 == cs2), "did not get expected checksum"
+
+
+###############################################################################
+# Check layers support
+
+
+def test_pdf_layers_with_same_name_on_different_pages(poppler_or_pdfium):
+
+    ds = gdal.Open("data/pdf/layer_with_same_name_on_different_pages.pdf")
+    layers = ds.GetMetadata_List("LAYERS")
+    assert layers == [
+        "LAYER_00_NAME=Map_Frame (page 1)",
+        "LAYER_01_NAME=Map_Frame.Map (page 1)",
+        "LAYER_02_NAME=Map_Frame.Map.States (page 1)",
+        "LAYER_03_NAME=Map_Frame (page 2)",
+        "LAYER_04_NAME=Map_Frame.Map (page 2)",
+        "LAYER_05_NAME=Map_Frame.Map.States (page 2)",
+        "LAYER_06_NAME=Map_Frame (page 3)",
+        "LAYER_07_NAME=Map_Frame.Map (page 3)",
+        "LAYER_08_NAME=Map_Frame.Map.States (page 3)",
+        "LAYER_09_NAME=Map_Frame (page 4)",
+        "LAYER_10_NAME=Map_Frame.Map (page 4)",
+        "LAYER_11_NAME=Map_Frame.Map.States (page 4)",
+    ]
+
+    for page in (1, 2, 3, 4):
+        ds = gdal.Open(
+            f"PDF:{page}:data/pdf/layer_with_same_name_on_different_pages.pdf"
+        )
+        layers = ds.GetMetadata_List("LAYERS")
+        assert layers == [
+            "LAYER_00_NAME=Map_Frame",
+            "LAYER_01_NAME=Map_Frame.Map",
+            "LAYER_02_NAME=Map_Frame.Map.States",
+        ]
+        cs_all = ds.GetRasterBand(1).Checksum()
+
+        ds = gdal.OpenEx(
+            f"PDF:{page}:data/pdf/layer_with_same_name_on_different_pages.pdf",
+            open_options=["LAYERS_OFF=Map_Frame.Map.States"],
+        )
+        assert ds.GetRasterBand(1).Checksum() != cs_all
 
 
 ###############################################################################
@@ -1440,6 +1199,10 @@ if (button == 4) app.launchURL('http://gdal.org/');"""
 # Test CLIPPING_EXTENT, EXTRA_RASTERS, EXTRA_RASTERS_LAYER_NAME, OFF_LAYERS, EXCLUSIVE_LAYERS options
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_pdf_extra_rasters(poppler_or_pdfium):
     subbyte = """<VRTDataset rasterXSize="10" rasterYSize="10">
   <SRS>PROJCS["NAD27 / UTM zone 11N",GEOGCS["NAD27",DATUM["North_American_Datum_1927",SPHEROID["Clarke 1866",6378206.4,294.9786982139006,AUTHORITY["EPSG","7008"]],AUTHORITY["EPSG","6267"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4267"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-117],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","26711"]]</SRS>
@@ -1501,13 +1264,14 @@ def test_pdf_extra_rasters(poppler_or_pdfium):
             "LAYER_01_NAME=subbyte",
         ], "did not get expected layers"
     if pdf_is_poppler():
-        assert cs in (7926, 8177, 8174, 8165, 8172)
+        assert cs in (7926, 8177, 8174, 8165, 8172, 8193)
 
 
 ###############################################################################
 # Test adding a OGR datasource
 
 
+@pytest.mark.require_driver("CSV")
 def test_pdf_write_ogr(poppler_or_pdfium):
     f = gdal.VSIFOpenL("tmp/test.csv", "wb")
     data = """id,foo,WKT,style
@@ -1612,6 +1376,7 @@ def test_pdf_write_ogr(poppler_or_pdfium):
 # Test adding a OGR datasource with reprojection of OGR SRS to GDAL SRS
 
 
+@pytest.mark.require_driver("CSV")
 def test_pdf_write_ogr_with_reprojection(poppler_or_pdfium):
 
     f = gdal.VSIFOpenL("tmp/test.csv", "wb")
@@ -1704,6 +1469,10 @@ def test_pdf_jpeg_direct_copy(poppler_or_pdfium):
 # Test direct copy of source JPEG file within VRT file
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 @pytest.mark.require_driver("JPEG")
 def test_pdf_jpeg_in_vrt_direct_copy(poppler_or_pdfium):
 
@@ -1751,14 +1520,13 @@ def test_pdf_jpeg_in_vrt_direct_copy(poppler_or_pdfium):
 @pytest.mark.parametrize("src_filename", ["data/byte.tif", "data/rgbsmall.tif"])
 def pdf_georef_on_image(src_filename, pdf_backend):
     src_ds = gdal.Open(src_filename)
-    gdal.SetConfigOption("GDAL_PDF_WRITE_GEOREF_ON_IMAGE", "YES")
-    out_ds = gdaltest.pdf_drv.CreateCopy(
-        "tmp/pdf_georef_on_image.pdf",
-        src_ds,
-        options=["MARGIN=10", "GEO_ENCODING=NONE"],
-    )
-    del out_ds
-    gdal.SetConfigOption("GDAL_PDF_WRITE_GEOREF_ON_IMAGE", None)
+    with gdal.config_option("GDAL_PDF_WRITE_GEOREF_ON_IMAGE", "YES"):
+        out_ds = gdaltest.pdf_drv.CreateCopy(
+            "tmp/pdf_georef_on_image.pdf",
+            src_ds,
+            options=["MARGIN=10", "GEO_ENCODING=NONE"],
+        )
+        del out_ds
     if pdf_checksum_available():
         src_cs = src_ds.GetRasterBand(1).Checksum()
     else:
@@ -1807,9 +1575,8 @@ def test_pdf_write_huge(poppler_or_pdfium):
         ds = None
 
         gdal.ErrorReset()
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        ds = gdaltest.pdf_drv.CreateCopy(tmp_filename, src_ds, options=["DPI=72"])
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            ds = gdaltest.pdf_drv.CreateCopy(tmp_filename, src_ds, options=["DPI=72"])
         msg = gdal.GetLastErrorMsg()
         assert msg != ""
         ds = None
@@ -1822,9 +1589,8 @@ def test_pdf_write_huge(poppler_or_pdfium):
     for option in ["LEFT_MARGIN=14400", "TOP_MARGIN=14400"]:
         src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 1)
         gdal.ErrorReset()
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        ds = gdaltest.pdf_drv.CreateCopy(tmp_filename, src_ds, options=[option])
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            ds = gdaltest.pdf_drv.CreateCopy(tmp_filename, src_ds, options=[option])
         msg = gdal.GetLastErrorMsg()
         assert msg != ""
         ds = None
@@ -1856,12 +1622,9 @@ def test_pdf_overviews(poppler_or_pdfium):
     before = ds.GetRasterBand(1).GetOverviewCount()
     ds.GetRasterBand(1).GetOverview(-1)
     ds.GetRasterBand(1).GetOverview(10)
-    if before >= 1:
-        assert pdf_is_pdfium(), "No overview expected at this point!"
-        cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
-        assert cs == 5934
-    elif pdf_is_pdfium():
-        pytest.fail("Overview expected at this point!")
+    assert before >= 1
+    cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
+    assert cs == 5934
     ds.BuildOverviews("NONE", [2])
     after = ds.GetRasterBand(1).GetOverviewCount()
     assert after == 1
@@ -1877,16 +1640,22 @@ def test_pdf_overviews(poppler_or_pdfium):
 
 
 def test_pdf_password(poppler_or_pdfium_or_podofo):
+
+    if gdaltest.is_travis_branch("alpine_32bit") or gdaltest.is_travis_branch(
+        "cmake-ubuntu-jammy"
+    ):
+        pytest.skip()
+
     # User password of this test file is user_password and owner password is
     # owner_password
 
     # No password
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("data/pdf/byte_enc.pdf")
     assert ds is None
 
     # Wrong password
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(
             "data/pdf/byte_enc.pdf", open_options=["USER_PWD=wrong_password"]
         )
@@ -1952,15 +1721,15 @@ def test_pdf_multipage(poppler_or_pdfium_or_podofo):
     ds2 = gdal.Open("PDF:2:data/pdf/byte_and_rgbsmall_2pages.pdf")
     assert ds2.RasterXSize == 50, "wrong width"
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds3 = gdal.Open("PDF:0:data/pdf/byte_and_rgbsmall_2pages.pdf")
     assert ds3 is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds3 = gdal.Open("PDF:3:data/pdf/byte_and_rgbsmall_2pages.pdf")
     assert ds3 is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.Open("PDF:1:/does/not/exist.pdf")
     assert ds is None
 
@@ -1985,6 +1754,24 @@ def test_pdf_metadata(poppler_or_pdfium):
     ds = None
 
     gdal.GetDriverByName("PDF").Delete("tmp/pdf_metadata.pdf")
+
+
+###############################################################################
+# Test PAM support with subdatasets
+
+
+def test_pdf_pam_subdatasets(poppler_or_pdfium, tmp_path):
+
+    tmpfilename = str(tmp_path / "test_pdf_pam_subdatasets.pdf")
+    shutil.copy("data/pdf/byte_and_rgbsmall_2pages.pdf", tmpfilename)
+
+    ds = gdal.Open("PDF:1:" + tmpfilename)
+    ds.GetRasterBand(1).ComputeStatistics(False)
+    ds = None
+    assert gdal.VSIStatL(tmpfilename + ".aux.xml")
+    ds = gdal.Open("PDF:1:" + tmpfilename)
+    assert ds.GetRasterBand(1).GetMetadataItem("STATISTICS_MINIMUM") is not None
+    ds = None
 
 
 ###############################################################################
@@ -2016,6 +1803,7 @@ def test_pdf_pam_georef(poppler_or_pdfium):
 # Test XML composition
 
 
+@pytest.mark.require_driver("CSV")
 def test_pdf_composition():
 
     xml_content = """<PDFComposition>
@@ -2048,7 +1836,7 @@ if (button == 4) app.launchURL('http://gdal.org/');</Javascript>
         <Width>20</Width>
         <Height>10</Height>
 
-        <Georeferencing ISO32000ExtensionFormat="true" OGCBestPracticeFormat="true">
+        <Georeferencing ISO32000ExtensionFormat="true">
             <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
             <BoundingBox x1="1" y1="1" x2="19" y2="9"/>
             <BoundingPolygon>POLYGON((1 1,19 1,19 9,1 9,1 1))</BoundingPolygon>
@@ -2138,11 +1926,17 @@ if (button == 4) app.launchURL('http://gdal.org/');</Javascript>
     data_ref = f.read()
     f.close()
 
+    f = open("data/pdf/test_pdf_composition_libpng_1_6_40.pdf", "rb")
+    data_ref2 = f.read()
+    f.close()
+
     f = open(out_filename, "rb")
     data_got = f.read()
     f.close()
 
-    assert data_ref == data_got, "content does not match reference content"
+    assert (
+        data_got == data_ref or data_got == data_ref2
+    ), "content does not match reference content"
 
     gdal.Unlink(out_filename)
 
@@ -2178,11 +1972,19 @@ def test_pdf_composition_raster_tiled_blending():
     data_ref = f.read()
     f.close()
 
+    f = open(
+        "data/pdf/test_pdf_composition_raster_tiled_blending_libpng_1_6_40.pdf", "rb"
+    )
+    data_ref2 = f.read()
+    f.close()
+
     f = open(out_filename, "rb")
     data_got = f.read()
     f.close()
 
-    assert data_ref == data_got, "content does not match reference content"
+    assert (
+        data_got == data_ref or data_got == data_ref2
+    ), "content does not match reference content"
 
     gdal.Unlink(out_filename)
 
@@ -2250,7 +2052,7 @@ def test_pdf_composition_error_pdf_content_missing_filename(
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2277,7 +2079,7 @@ def test_pdf_composition_error_pdf_content_non_existing(poppler_or_pdfium_or_pod
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2306,7 +2108,7 @@ def test_pdf_composition_error_pdf_content_missing_contents(
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2335,7 +2137,7 @@ def test_pdf_composition_error_pdf_content_missing_contents_stream(
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2346,6 +2148,7 @@ def test_pdf_composition_error_pdf_content_missing_contents_stream(
         )
     assert not out_ds
     assert gdal.GetLastErrorMsg() in (
+        "Missing Contents",
         "Missing Contents stream",
         "data/pdf/missing_stream.pdf is not a valid PDF file",
     )
@@ -2367,7 +2170,7 @@ def test_pdf_composition_error_pdf_content_missing_resources(
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2424,11 +2227,19 @@ def test_pdf_composition_raster_georeferenced():
     data_ref = f.read()
     f.close()
 
+    f = open(
+        "data/pdf/test_pdf_composition_raster_georeferenced_libpng_1_6_40.pdf", "rb"
+    )
+    data_ref2 = f.read()
+    f.close()
+
     f = open(out_filename, "rb")
     data_got = f.read()
     f.close()
 
-    assert data_ref == data_got, "content does not match reference content"
+    assert (
+        data_got == data_ref or data_got == data_ref2
+    ), "content does not match reference content"
 
     gdal.Unlink(out_filename)
 
@@ -2722,7 +2533,7 @@ def test_pdf_composition_outline():
 def test_pdf_composition_error_missing_file():
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2741,7 +2552,7 @@ def test_pdf_composition_error_missing_page():
     xml_content = """<PDFComposition></PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2760,7 +2571,7 @@ def test_pdf_composition_error_missing_page_width():
     xml_content = """<PDFComposition><Page/></PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2779,7 +2590,7 @@ def test_pdf_composition_error_missing_page_content():
     xml_content = """<PDFComposition><Page><Width>1</Width><Height>1</Height></Page></PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2803,7 +2614,7 @@ def test_pdf_composition_error_invalid_layer_missing_id():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2827,7 +2638,7 @@ def test_pdf_composition_error_invalid_layer_missing_name():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2852,7 +2663,7 @@ def test_pdf_composition_error_duplicate_layer_id():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2881,7 +2692,7 @@ def test_pdf_composition_error_referencing_invalid_layer_id():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2917,7 +2728,7 @@ def test_pdf_composition_error_missing_srs():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2951,7 +2762,7 @@ def test_pdf_composition_error_missing_control_point():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -2987,7 +2798,7 @@ def test_pdf_composition_error_missing_attribute_in_control_point():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3026,7 +2837,7 @@ def test_pdf_composition_error_invalid_bbox():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3052,7 +2863,7 @@ def test_pdf_composition_error_missing_dataset_attribute():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3078,7 +2889,7 @@ def test_pdf_composition_error_invalid_dataset():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3109,7 +2920,7 @@ def test_pdf_composition_duplicate_page_id():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3143,7 +2954,7 @@ def test_pdf_composition_outline_item_gotopage_action_missing_page_id():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3177,7 +2988,7 @@ def test_pdf_composition_outline_item_gotopage_action_pointing_to_invalid_page_i
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3214,7 +3025,7 @@ def test_pdf_composition_outline_item_setlayerstate_missing_layer_id():
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3248,7 +3059,7 @@ def test_pdf_composition_outline_item_setlayerstate_pointing_to_invalid_layer_id
 </PDFComposition>"""
 
     out_filename = "/vsimem/tmp.pdf"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         out_ds = gdaltest.pdf_drv.Create(
             out_filename,
             0,
@@ -3276,3 +3087,68 @@ def test_pdf_iso32000_esri_as_epsg():
     assert sr.GetAuthorityName(None) == "ESRI"
     assert sr.GetAuthorityCode(None) == "102422"
     assert gdal.GetLastErrorMsg() == ""
+
+
+###############################################################################
+# Test bugfix for https://issues.oss-fuzz.com/issues/376126833
+
+
+@pytest.mark.skipif(not have_read_support(), reason="no read support available")
+def test_pdf_iso32000_invalid_srs():
+
+    # Just test that this does not crash
+    gdal.Open("data/pdf/invalid_srs.pdf")
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.skipif(not have_read_support(), reason="no read support available")
+def test_pdf_gdal_driver_pdf_list_layer():
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]
+    assert alg.GetName() == "driver"
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]["pdf"]
+    assert alg.GetName() == "pdf"
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]["pdf"]["list-layers"]
+    assert alg.GetName() == "list-layers"
+    alg["input"] = "data/pdf/adobe_style_geospatial.pdf"
+    assert alg.Run()
+    assert json.loads(alg["output-string"]) == [
+        "New_Data_Frame",
+        "New_Data_Frame.Graticule",
+        "Layers",
+        "Layers.Measured_Grid",
+        "Layers.Graticule",
+    ]
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]["pdf"]["list-layers"]
+    alg["input"] = "data/pdf/adobe_style_geospatial.pdf"
+    alg["output-format"] = "text"
+    assert alg.Run()
+    assert (
+        alg["output-string"]
+        == "New_Data_Frame\nNew_Data_Frame.Graticule\nLayers\nLayers.Measured_Grid\nLayers.Graticule\n"
+    )
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]["pdf"]["list-layers"]
+    assert alg.GetName() == "list-layers"
+    alg["input"] = "data/byte.tif"
+    with pytest.raises(Exception, match="is not a PDF"):
+        alg.Run()
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.require_driver("L1B")
+def test_pdf_create_copy_from_ysize_0(tmp_vsimem):
+    src_ds = gdal.Open("../gdrivers/data/l1b/n12gac8bit_truncated_ysize_0_1band.l1b")
+    with pytest.raises(Exception, match="nWidth == 0 || nHeight == 0 not supported"):
+        gdal.GetDriverByName("PDF").CreateCopy(tmp_vsimem / "out.pdf", src_ds)

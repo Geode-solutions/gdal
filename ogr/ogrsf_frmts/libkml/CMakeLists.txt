@@ -15,7 +15,17 @@ add_gdal_driver(
           ogrlibkmlstyle.cpp
           ogrlibkmldatasource.cpp
           ogrlibkmlfield.cpp
-          PLUGIN_CAPABLE)
+  CORE_SOURCES
+          ogrlibkmldrivercore.cpp
+  PLUGIN_CAPABLE
+  NO_SHARED_SYMBOL_WITH_CORE
+  NO_CXX_WFLAGS_EFFCXX
+  NO_WFLAG_OLD_STYLE_CAST
+)
+if(NOT TARGET ogr_LIBKML)
+    return()
+endif()
+
 gdal_standard_includes(ogr_LIBKML)
 gdal_target_link_libraries(ogr_LIBKML PRIVATE LIBKML::LibKML LIBKML::DOM LIBKML::ENGINE)
 if (TARGET LIBKML::MINIZIP AND TARGET LIBKML::URIPARSER AND TARGET ZLIB::ZLIB AND GDAL_USE_EXPAT)

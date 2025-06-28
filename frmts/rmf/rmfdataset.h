@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Raster Matrix Format
  * Purpose:  Private class declarations for the RMF classes used to read/write
@@ -10,25 +9,13 @@
  * Copyright (c) 2007, Andrey Kiselev <dron@ak4719.spb.edu>
  * Copyright (c) 2023, NextGIS <info@nextgis.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
+#ifndef RMFDATASET_H_INCLUDED
+#define RMFDATASET_H_INCLUDED
+
+#include <array>
 #include <list>
 #include "gdal_priv.h"
 #include "cpl_worker_thread_pool.h"
@@ -60,8 +47,8 @@ class RMFDataset;
 
 #define RMF_HUGE_OFFSET_FACTOR 256
 
-#define RMF_JPEG_BAND_COUNT 3
-#define RMF_DEM_BAND_COUNT 1
+constexpr int RMF_JPEG_BAND_COUNT = 3;
+constexpr int RMF_DEM_BAND_COUNT = 1;
 
 /************************************************************************/
 /*                            RMFHeader                                 */
@@ -172,6 +159,12 @@ struct RMFCompressionJob
     size_t nCompressedBytes = 0;
     GUInt32 nXSize = 0;
     GUInt32 nYSize = 0;
+
+    RMFCompressionJob() = default;
+    RMFCompressionJob(const RMFCompressionJob &) = delete;
+    RMFCompressionJob &operator=(const RMFCompressionJob &) = delete;
+    RMFCompressionJob(RMFCompressionJob &&) = default;
+    RMFCompressionJob &operator=(RMFCompressionJob &&) = default;
 };
 
 /************************************************************************/
@@ -180,9 +173,9 @@ struct RMFCompressionJob
 
 struct RMFCompressData
 {
-    CPLWorkerThreadPool oThreadPool;
-    std::vector<RMFCompressionJob> asJobs;
-    std::list<RMFCompressionJob *> asReadyJobs;
+    CPLWorkerThreadPool oThreadPool{};
+    std::vector<RMFCompressionJob> asJobs{};
+    std::list<RMFCompressionJob *> asReadyJobs{};
     GByte *pabyBuffers = nullptr;
     CPLMutex *hReadyJobMutex = nullptr;
     CPLMutex *hWriteTileMutex = nullptr;
@@ -200,7 +193,7 @@ struct RMFCompressData
 
 struct RMFTileData
 {
-    std::vector<GByte> oData;
+    std::vector<GByte> oData{};
     int nBandsWritten = 0;
 };
 
@@ -213,33 +206,33 @@ class RMFDataset final : public GDALDataset
     friend class RMFRasterBand;
 
   private:
-    RMFHeader sHeader;
-    RMFExtHeader sExtHeader;
-    RMFType eRMFType;
-    GUInt32 nXTiles;
-    GUInt32 nYTiles;
-    GUInt32 *paiTiles;
-    GByte *pabyDecompressBuffer;
-    GByte *pabyCurrentTile;
-    bool bCurrentTileIsNull;
-    int nCurrentTileXOff;
-    int nCurrentTileYOff;
-    GUInt32 nCurrentTileBytes;
-    GUInt32 nColorTableSize;
-    GByte *pabyColorTable;
-    GDALColorTable *poColorTable;
-    double adfGeoTransform[6];
+    RMFHeader sHeader{};
+    RMFExtHeader sExtHeader{};
+    RMFType eRMFType = RMFT_RSW;
+    GUInt32 nXTiles = 0;
+    GUInt32 nYTiles = 0;
+    GUInt32 *paiTiles = nullptr;
+    GByte *pabyDecompressBuffer = nullptr;
+    GByte *pabyCurrentTile = nullptr;
+    bool bCurrentTileIsNull = false;
+    int nCurrentTileXOff = -1;
+    int nCurrentTileYOff = -1;
+    GUInt32 nCurrentTileBytes = 0;
+    GUInt32 nColorTableSize = 0;
+    GByte *pabyColorTable = nullptr;
+    GDALColorTable *poColorTable = nullptr;
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
 
-    char *pszUnitType;
+    char *pszUnitType = nullptr;
 
-    bool bBigEndian;
-    bool bHeaderDirty;
+    bool bBigEndian = false;
+    bool bHeaderDirty = false;
 
-    VSILFILE *fp;
+    VSILFILE *fp = nullptr;
 
-    std::shared_ptr<RMFCompressData> poCompressData;
-    std::map<GUInt32, RMFTileData> oUnfinishedTiles;
+    std::shared_ptr<RMFCompressData> poCompressData{};
+    std::map<GUInt32, RMFTileData> oUnfinishedTiles{};
 
     CPLErr WriteHeader();
     static size_t LZWDecompress(const GByte *, GUInt32, GByte *, GUInt32,
@@ -270,7 +263,8 @@ class RMFDataset final : public GDALDataset
                  small returns 0 too).
     */
     size_t (*Decompress)(const GByte *pabyIn, GUInt32 nSizeIn, GByte *pabyOut,
-                         GUInt32 nSizeOut, GUInt32 nTileSx, GUInt32 nTileSy);
+                         GUInt32 nSizeOut, GUInt32 nTileSx,
+                         GUInt32 nTileSy) = nullptr;
 
     /*!
         Tile compress callback
@@ -287,11 +281,14 @@ class RMFDataset final : public GDALDataset
     */
     size_t (*Compress)(const GByte *pabyIn, GUInt32 nSizeIn, GByte *pabyOut,
                        GUInt32 nSizeOut, GUInt32 nTileSx, GUInt32 nTileSy,
-                       const RMFDataset *poDS);
+                       const RMFDataset *poDS) = nullptr;
 
-    std::vector<RMFDataset *> poOvrDatasets;
-    vsi_l_offset nHeaderOffset;
-    RMFDataset *poParentDS;
+    std::vector<RMFDataset *> poOvrDatasets{};
+    vsi_l_offset nHeaderOffset = 0;
+    RMFDataset *poParentDS = nullptr;
+
+    RMFDataset(const RMFDataset &) = delete;
+    RMFDataset &operator=(const RMFDataset &) = delete;
 
   public:
     RMFDataset();
@@ -308,8 +305,8 @@ class RMFDataset final : public GDALDataset
                                double dfOvFactor);
     virtual CPLErr FlushCache(bool bAtClosing) override;
 
-    virtual CPLErr GetGeoTransform(double *padfTransform) override;
-    virtual CPLErr SetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    virtual CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
@@ -322,7 +319,7 @@ class RMFDataset final : public GDALDataset
     virtual CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                              int nXSize, int nYSize, void *pData, int nBufXSize,
                              int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, int *panBandMap,
+                             int nBandCount, BANDMAP_TYPE panBandMap,
                              GSpacing nPixelSpace, GSpacing nLineSpace,
                              GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg) override;
@@ -330,6 +327,7 @@ class RMFDataset final : public GDALDataset
                                    const char *pszDomain = "") override;
     virtual CPLErr SetMetadata(char **papszMetadata,
                                const char *pszDomain = "") override;
+    // cppcheck-suppress functionStatic
     vsi_l_offset GetFileOffset(GUInt32 iRMFOffset) const;
     GUInt32 GetRMFOffset(vsi_l_offset iFileOffset,
                          vsi_l_offset *piNewFileOffset) const;
@@ -359,12 +357,11 @@ class RMFRasterBand final : public GDALRasterBand
     friend class RMFDataset;
 
   private:
-    GUInt32 nBytesPerPixel;
-    GUInt32 nBlockSize;
-    GUInt32 nBlockBytes;
-    GUInt32 nLastTileWidth;
-    GUInt32 nLastTileHeight;
-    GUInt32 nDataSize;
+    GUInt32 nBlockSize = 0;
+    GUInt32 nBlockBytes = 0;
+    GUInt32 nLastTileWidth = 0;
+    GUInt32 nLastTileHeight = 0;
+    GUInt32 nDataSize = 0;
 
   public:
     RMFRasterBand(RMFDataset *, int, GDALDataType);
@@ -389,3 +386,5 @@ class RMFRasterBand final : public GDALRasterBand
                              GSpacing nPixelSpace, GSpacing nLineSpace,
                              GDALRasterIOExtraArg *psExtraArg) override;
 };
+
+#endif

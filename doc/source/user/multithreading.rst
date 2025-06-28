@@ -4,8 +4,8 @@
 Multi-threading
 ===============
 
-GDAL API: re-entrant, but not thread-safe
------------------------------------------
+GDAL API: re-entrant, but (generally) not thread-safe
+-----------------------------------------------------
 
 The exact meaning of the terms ``thread-safe`` or ``re-entrant`` is not fully
 standardized. We will use here the `QT definitions <https://doc.qt.io/qt-5/threads-reentrancy.html>`__.
@@ -31,14 +31,42 @@ on different :cpp:class:`GDALRasterBand` instances owned by the same
 :cpp:class:`GDALDataset` instance (each thread should instead manipulate a
 distinct GDALDataset). Similarly for a GDALDataset owning several :cpp:class:`OGRLayer`.
 
+The reason is that most implementations of GDALDataset or GDALRasterBand
+are stateful. A GDALDataset typically owns a file handle,
+and performs seek/read operations on it, thus not allowing concurrent access.
+Block cache related structures for a given GDALDataset are not thread-safe.
+Drivers also often implement lazy initialization strategies to access various
+metadata which are resolved only the first time the method to access them is
+invoked. Drivers may also rely on third-party libraries that expose objects
+that are not thread-safe.
+
 Those restrictions apply to the C and C++ ABI, and all languages bindings (unless
 they would take special precautions to serialize calls)
+
+Thread-safe GDAL dataset instances for raster read-only use cases
+-----------------------------------------------------------------
+
+.. versionadded:: 3.10
+
+:ref:`rfc-101` adds a new capability to open, or obtain, a thread-safe dataset from
+any dataset, but only for raster read-only use cases.
+
+At open time, this can be done by passing ``GDAL_OF_RASTER | GDAL_OF_THREAD_SAFE``
+to :cpp:func:`GDALOpenEx` / :cpp:func:`GDALDataset::Open`.
+
+Given an existing GDALDataset* instance, :cpp:func:`GDALDataset::IsThreadSafe`
+can be used to determine if it is thread-safe or not. If not,
+:cpp:func:`GDALGetThreadSafeDataset` can be used.
+
+Note that the generic implementation of this capability involves opening one
+dataset the first time a thread-safe dataset/raster band is accessed by a thread.
+While this is an implementation detail that can be ignored to develop code, it is
+important to note regarding potential performance impacts
 
 GDAL block cache and multi-threading
 ------------------------------------
 
-The current design of the GDAL raster block cache make it appropriate to
-read several datasets from several threads. However performance issues may
+The current design of the GDAL raster block cache allows concurrent reads of several datasets. However performance issues may
 arise when writing several datasets from several threads, due to lock contention
 in the global structures of the block cache mechanism.
 

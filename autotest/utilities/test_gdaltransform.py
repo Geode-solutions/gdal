@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  gdaltransform testing
@@ -9,29 +8,16 @@
 ###############################################################################
 # Copyright (c) 2008-2009, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import sys
 
 import gdaltest
 import pytest
 import test_cli_utilities
+
+from osgeo import osr
 
 pytestmark = pytest.mark.skipif(
     test_cli_utilities.get_gdaltransform_path() is None,
@@ -225,3 +211,117 @@ def test_gdaltransform_ct_4D(gdaltransform_path):
     assert values[0] == pytest.approx(2.0000005420366, abs=1e-10), ret
     assert values[1] == pytest.approx(49.0000003766711, abs=1e-10), ret
     assert values[2] == pytest.approx(-0.0222802283242345, abs=1e-8), ret
+
+
+###############################################################################
+# Test s_coord_epoch
+
+
+@pytest.mark.require_proj(7, 2)
+def test_gdaltransform_s_coord_epoch(gdaltransform_path):
+
+    ret = gdaltest.runexternal(
+        gdaltransform_path
+        + " -s_srs EPSG:9000 -s_coord_epoch 2030 -t_srs EPSG:7844 -coord 150 -30"
+    )
+
+    values = [float(x) for x in ret.split(" ")]
+    assert len(values) == 3, ret
+    assert abs(values[0] - 150) > 1e-8, ret
+    assert abs(values[1] - -30) > 1e-8, ret
+
+
+###############################################################################
+# Test t_coord_epoch
+
+
+@pytest.mark.require_proj(7, 2)
+def test_gdaltransform_t_coord_epoch(gdaltransform_path):
+
+    ret = gdaltest.runexternal(
+        gdaltransform_path
+        + " -s_srs EPSG:7844 -t_srs EPSG:9000 -t_coord_epoch 2030 -coord 150 -30"
+    )
+
+    values = [float(x) for x in ret.split(" ")]
+    assert len(values) == 3, ret
+    assert abs(values[0] - 150) > 1e-8, ret
+    assert abs(values[1] - -30) > 1e-8, ret
+
+
+###############################################################################
+# Test s_coord_epoch and t_coord_epoch
+
+
+@pytest.mark.require_proj(9, 4)
+def test_gdaltransform_s_t_coord_epoch(gdaltransform_path):
+
+    sep = ";" if sys.platform == "win32" else ":"
+    PROJ_DATA = sep.join(osr.GetPROJSearchPaths())
+
+    ret = gdaltest.runexternal(
+        gdaltransform_path
+        + f' -s_srs EPSG:8254 -s_coord_epoch 2002 -t_srs EPSG:8254 -t_coord_epoch 2010 -coord -79.5 60.5 --config PROJ_DATA "{PROJ_DATA}"'
+    )
+
+    values = [float(x) for x in ret.split(" ")]
+    assert len(values) == 3, ret
+    assert abs(values[0] - -79.499999630188) < 1e-8, ret
+    assert abs(values[1] - 60.4999999378478) < 1e-8, ret
+
+
+###############################################################################
+# Test extra input
+
+
+def test_gdaltransform_extra_input(gdaltransform_path):
+
+    strin = (
+        "2 49 1 my first point\n" + "3 50 second point\n" + "4 51 10 2 third point\n"
+    )
+    ret = gdaltest.runexternal(
+        gdaltransform_path + " -field_sep ,",
+        strin,
+    )
+
+    assert "2,49,1,my first point" in ret
+    assert "3,50,0,second point" in ret
+    assert "4,51,10,third point" in ret
+
+
+###############################################################################
+# Test ignoring extra input
+
+
+def test_gdaltransform_extra_input_ignored(gdaltransform_path):
+
+    strin = "2 49 1 my first point\n"
+    ret = gdaltest.runexternal(
+        gdaltransform_path + " -ignore_extra_input",
+        strin,
+    )
+
+    assert "my first point" not in ret
+
+
+###############################################################################
+# Test echo mode
+
+
+def test_gdaltransform_echo(gdaltransform_path):
+
+    strin = "0 0 1 my first point\n"
+
+    ret = gdaltest.runexternal(
+        gdaltransform_path + " -s_srs EPSG:4326 -t_srs EPSG:4978 -E -field_sep ,",
+        strin,
+    )
+
+    assert "0,0,1,6378138,0,0,my first point" in ret
+
+    ret = gdaltest.runexternal(
+        gdaltransform_path + " -s_srs EPSG:4326 -t_srs EPSG:4978 -E -output_xy",
+        strin,
+    )
+
+    assert "0 0 6378138 0 my first point" in ret

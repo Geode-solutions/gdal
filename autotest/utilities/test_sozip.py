@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  sozip testing
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -65,103 +48,112 @@ def test_sozip_list(sozip_path):
 ###############################################################################
 
 
-def test_sozip_create(sozip_path):
+def test_sozip_create(sozip_path, tmp_path):
+
+    output_zip = str(tmp_path / "sozip.zip")
 
     (out, err) = gdaltest.runexternal_out_and_err(
-        sozip_path
-        + " -j --overwrite --enable-sozip=yes --sozip-chunk-size 128 --content-type=image/tiff tmp/sozip.zip ../gcore/data/byte.tif"
+        f"{sozip_path} -j --overwrite --enable-sozip=yes --sozip-chunk-size 128 --content-type=image/tiff {output_zip} ../gcore/data/byte.tif"
     )
     assert err is None or err == "", "got error/warning"
 
-    md = gdal.GetFileMetadata("/vsizip/tmp/sozip.zip/byte.tif", None)
+    md = gdal.GetFileMetadata(f"/vsizip/{output_zip}/byte.tif", None)
     assert md["Content-Type"] == "image/tiff"
 
-    md = gdal.GetFileMetadata("/vsizip/tmp/sozip.zip/byte.tif", "ZIP")
+    md = gdal.GetFileMetadata(f"/vsizip/{output_zip}/byte.tif", "ZIP")
     assert md["SOZIP_VALID"] == "YES"
     assert md["SOZIP_CHUNK_SIZE"] == "128"
-
-    gdal.Unlink("tmp/sozip.zip")
 
 
 ###############################################################################
 
 
-def test_sozip_append(sozip_path):
+def test_sozip_create_recurse(sozip_path, tmp_path):
 
-    gdal.Unlink("tmp/sozip.zip")
+    gdal.Mkdir(tmp_path / "subdir", 0o755)
+    with gdal.VSIFile(tmp_path / "subdir" / "a", "wb") as f:
+        f.write(b"x" * 10001)
+
+    output_zip = str(tmp_path / "sozip.zip")
 
     (out, err) = gdaltest.runexternal_out_and_err(
-        sozip_path
-        + " -j --enable-sozip=yes --sozip-chunk-size 128 tmp/sozip.zip ../gcore/data/byte.tif"
+        f"{sozip_path} -r --sozip-min-file-size 1000 --sozip-chunk-size 128 -j {output_zip} {tmp_path}"
+    )
+    assert err is None or err == "", "got error/warning"
+
+    md = gdal.GetFileMetadata(f"/vsizip/{output_zip}/a", "ZIP")
+    assert md["SOZIP_VALID"] == "YES"
+
+
+###############################################################################
+
+
+def test_sozip_append(sozip_path, tmp_path):
+
+    output_zip = str(tmp_path / "sozip.zip")
+
+    (out, err) = gdaltest.runexternal_out_and_err(
+        f"{sozip_path} -j --enable-sozip=yes --sozip-chunk-size 128 {output_zip} ../gcore/data/byte.tif"
     )
     assert err is None or err == "", "got error/warning"
 
     (out, err) = gdaltest.runexternal_out_and_err(
-        sozip_path + " -j tmp/sozip.zip ../gcore/data/uint16.tif"
+        f"{sozip_path} -j {output_zip} ../gcore/data/uint16.tif"
     )
     assert err is None or err == "", "got error/warning"
 
-    md = gdal.GetFileMetadata("/vsizip/tmp/sozip.zip/byte.tif", "ZIP")
+    md = gdal.GetFileMetadata(f"/vsizip/{output_zip}/byte.tif", "ZIP")
     assert md["SOZIP_VALID"] == "YES"
     assert md["SOZIP_CHUNK_SIZE"] == "128"
 
-    md = gdal.GetFileMetadata("/vsizip/tmp/sozip.zip/uint16.tif", "ZIP")
+    md = gdal.GetFileMetadata(f"/vsizip/{output_zip}/uint16.tif", "ZIP")
     assert md != {}
     assert "SOZIP_VALID" not in md
 
-    gdal.Unlink("tmp/sozip.zip")
-
 
 ###############################################################################
 
 
-def test_sozip_validate(sozip_path):
+def test_sozip_validate(sozip_path, tmp_path):
 
-    gdal.Unlink("tmp/sozip.zip")
+    output_zip = str(tmp_path / "sozip.zip")
 
     (out, err) = gdaltest.runexternal_out_and_err(
-        sozip_path
-        + " -j --enable-sozip=yes --sozip-chunk-size 128 tmp/sozip.zip ../gcore/data/byte.tif"
+        f"{sozip_path} -j --enable-sozip=yes --sozip-chunk-size 128 {output_zip} ../gcore/data/byte.tif"
     )
     assert err is None or err == "", "got error/warning"
 
     (out, err) = gdaltest.runexternal_out_and_err(
-        sozip_path + " --validate tmp/sozip.zip"
+        f"{sozip_path} --validate {output_zip}"
     )
     assert err is None or err == "", "got error/warning"
     assert "File byte.tif has a valid SOZip index, using chunk_size = 128" in out
-    assert (
-        "tmp/sozip.zip is a valid .zip file, and contains 1 SOZip-enabled file(s)"
-        in out
-    )
+    assert "sozip.zip is a valid .zip file, and contains 1 SOZip-enabled file(s)" in out
 
-    gdal.Unlink("tmp/sozip.zip")
+    (out2, err) = gdaltest.runexternal_out_and_err(
+        f"{sozip_path} --validate --verbose {output_zip}"
+    )
+    assert len(out2) > len(out)
 
 
 ###############################################################################
 
 
-def test_sozip_optimize_from(sozip_path):
+def test_sozip_optimize_from(sozip_path, tmp_path):
 
-    gdal.Unlink("tmp/sozip.zip")
+    output_zip = str(tmp_path / "sozip.zip")
 
     (out, err) = gdaltest.runexternal_out_and_err(
-        sozip_path
-        + " --optimize-from=../ogr/data/filegdb/test_spatial_index.gdb.zip tmp/sozip.zip"
+        f"{sozip_path} --optimize-from=../ogr/data/filegdb/test_spatial_index.gdb.zip {output_zip}"
     )
     assert err is None or err == "", "got error/warning"
 
     (out, err) = gdaltest.runexternal_out_and_err(
-        sozip_path + " --validate tmp/sozip.zip"
+        f"{sozip_path} --validate {output_zip}"
     )
     assert err is None or err == "", "got error/warning"
     assert (
         "File test_spatial_index.gdb/a00000009.spx has a valid SOZip index, using chunk_size = 32768"
         in out
     )
-    assert (
-        "tmp/sozip.zip is a valid .zip file, and contains 2 SOZip-enabled file(s)"
-        in out
-    )
-
-    gdal.Unlink("tmp/sozip.zip")
+    assert "sozip.zip is a valid .zip file, and contains 2 SOZip-enabled file(s)" in out

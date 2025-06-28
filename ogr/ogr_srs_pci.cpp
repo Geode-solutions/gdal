@@ -9,23 +9,7 @@
  * Copyright (c) 2003, Andrey Kiselev <dron@ak4719.spb.edu>
  * Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -164,7 +148,7 @@ OGRErr OSRImportFromPCI(OGRSpatialReferenceH hSRS, const char *pszProj,
  *
  * @param pszProj NULL terminated string containing the definition. Looks
  * like "pppppppppppp Ennn" or "pppppppppppp Dnnn", where "pppppppppppp" is
- * a projection code, "Ennn" is an ellipsoid code, "Dnnn" --- a datum code.
+ * a projection code, "Ennn" is an ellipsoid code, "Dnnn" a datum code.
  *
  * @param pszUnits Grid units code ("DEGREE" or "METRE"). If NULL "METRE" will
  * be used.
@@ -198,7 +182,7 @@ OGRErr OSRImportFromPCI(OGRSpatialReferenceH hSRS, const char *pszProj,
 
 OGRErr OGRSpatialReference::importFromPCI(const char *pszProj,
                                           const char *pszUnits,
-                                          double *padfPrjParams)
+                                          const double *padfPrjParams)
 
 {
     Clear();
@@ -214,16 +198,10 @@ OGRErr OGRSpatialReference::importFromPCI(const char *pszProj,
     /* -------------------------------------------------------------------- */
     /*      Use safe defaults if projection parameters are not supplied.    */
     /* -------------------------------------------------------------------- */
-    bool bProjAllocated = false;
-
+    static const double adfZeroedPrjParams[17] = {0};
     if (padfPrjParams == nullptr)
     {
-        padfPrjParams = static_cast<double *>(CPLMalloc(17 * sizeof(double)));
-        if (!padfPrjParams)
-            return OGRERR_NOT_ENOUGH_MEMORY;
-        for (int i = 0; i < 17; i++)
-            padfPrjParams[i] = 0.0;
-        bProjAllocated = true;
+        padfPrjParams = adfZeroedPrjParams;
     }
 
     /* -------------------------------------------------------------------- */
@@ -242,7 +220,7 @@ OGRErr OGRSpatialReference::importFromPCI(const char *pszProj,
 
             if (nCode >= -99 && nCode <= 999)
                 snprintf(szEarthModel, sizeof(szEarthModel), "%c%03d",
-                         toupper(*pszEM), nCode);
+                         CPLToupper(static_cast<unsigned char>(*pszEM)), nCode);
 
             break;
         }
@@ -328,6 +306,13 @@ OGRErr OGRSpatialReference::importFromPCI(const char *pszProj,
     }
     else if (STARTS_WITH_CI(pszProj, "MER"))
     {
+        if (EQUAL(pszEM, "D894") && padfPrjParams[3] == 0 &&
+            padfPrjParams[2] == 0 && padfPrjParams[8] == 1.0 &&
+            padfPrjParams[6] == 0 && padfPrjParams[7] == 0)
+        {
+            // Special case for Web Mercator
+            return importFromEPSG(3857);
+        }
         SetMercator(padfPrjParams[3], padfPrjParams[2],
                     (padfPrjParams[8] != 0.0) ? padfPrjParams[8] : 1.0,
                     padfPrjParams[6], padfPrjParams[7]);
@@ -695,9 +680,6 @@ OGRErr OGRSpatialReference::importFromPCI(const char *pszProj,
             SetLinearUnits(SRS_UL_METER, 1.0);
     }
 
-    if (bProjAllocated && padfPrjParams)
-        CPLFree(padfPrjParams);
-
     return OGRERR_NONE;
 }
 
@@ -1044,6 +1026,16 @@ OGRErr OGRSpatialReference::exportToPCI(char **ppszProj, char **ppszUnits,
     else if (EQUAL(pszDatum, SRS_DN_WGS84))
     {
         CPLPrintStringFill(szEarthModel, "D000", 4);
+        if (pszProjection && EQUAL(pszProjection, SRS_PT_MERCATOR_1SP))
+        {
+            // Special case for Web Mercator
+            const char *method_name = "";
+            GetWKT2ProjectionMethod(&method_name, nullptr, nullptr);
+            if (EQUAL(method_name, "Popular Visualisation Pseudo Mercator"))
+            {
+                CPLPrintStringFill(szEarthModel, "D894", 4);
+            }
+        }
     }
 
     /* -------------------------------------------------------------------- */

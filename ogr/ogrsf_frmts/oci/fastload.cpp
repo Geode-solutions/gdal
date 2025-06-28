@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2002, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <stdio.h>
@@ -96,20 +80,22 @@ int main()
     int iBindRow;
     for (iBindRow = 0; iBindRow < 100; iBindRow++)
     {
-        if (oSession.Failed(OCIObjectNew(oSession.hEnv, oSession.hError,
-                                         oSession.hSvcCtx, OCI_TYPECODE_VARRAY,
-                                         oSession.hElemInfoTDO, (dvoid *)NULL,
-                                         OCI_DURATION_SESSION, FALSE,
-                                         (dvoid **)(aphElemInfos + iBindRow)),
-                            "OCIObjectNew()"))
+        if (oSession.Failed(
+                OCIObjectNew(
+                    oSession.hEnv, oSession.hError, oSession.hSvcCtx,
+                    OCI_TYPECODE_VARRAY, oSession.hElemInfoTDO,
+                    static_cast<dvoid *>(NULL), OCI_DURATION_SESSION, FALSE,
+                    reinterpret_cast<dvoid **>(aphElemInfos + iBindRow)),
+                "OCIObjectNew()"))
             exit(1);
 
-        if (oSession.Failed(OCIObjectNew(oSession.hEnv, oSession.hError,
-                                         oSession.hSvcCtx, OCI_TYPECODE_VARRAY,
-                                         oSession.hOrdinatesTDO, (dvoid *)NULL,
-                                         OCI_DURATION_SESSION, FALSE,
-                                         (dvoid **)(aphOrdinates + iBindRow)),
-                            "OCIObjectNew()"))
+        if (oSession.Failed(
+                OCIObjectNew(
+                    oSession.hEnv, oSession.hError, oSession.hSvcCtx,
+                    OCI_TYPECODE_VARRAY, oSession.hOrdinatesTDO,
+                    static_cast<dvoid *>(NULL), OCI_DURATION_SESSION, FALSE,
+                    reinterpret_cast<dvoid **>(aphOrdinates + iBindRow)),
+                "OCIObjectNew()"))
             exit(1);
     }
 
@@ -142,9 +128,9 @@ int main()
         for (i = 0; i < nElemInfoCount; i++)
         {
             if (oSession.Failed(
-                    OCINumberFromInt(oSession.hError, (dvoid *)(anElemInfo + i),
-                                     (uword)sizeof(int), OCI_NUMBER_SIGNED,
-                                     &oci_number),
+                    OCINumberFromInt(
+                        oSession.hError, static_cast<dvoid *>(anElemInfo + i),
+                        (uword)sizeof(int), OCI_NUMBER_SIGNED, &oci_number),
                     "OCINumberFromInt"))
                 exit(1);
 
@@ -170,15 +156,16 @@ int main()
         // Prepare the VARRAY of ordinate values.
         for (i = 0; i < nOrdCount; i++)
         {
-            if (oSession.Failed(OCINumberFromReal(oSession.hError,
-                                                  (dvoid *)(adfOrdinates + i),
-                                                  (uword)sizeof(double),
-                                                  &oci_number),
-                                "OCINumberFromReal"))
+            if (oSession.Failed(
+                    OCINumberFromReal(oSession.hError,
+                                      static_cast<dvoid *>(adfOrdinates + i),
+                                      (uword)sizeof(double), &oci_number),
+                    "OCINumberFromReal"))
                 exit(1);
 
             if (oSession.Failed(OCICollAppend(oSession.hEnv, oSession.hError,
-                                              (dvoid *)&oci_number, (dvoid *)0,
+                                              static_cast<dvoid *>(&oci_number),
+                                              static_cast<dvoid *>(NULL),
                                               aphOrdinates[iRow]),
                                 "OCICollAppend"))
                 exit(1);
@@ -191,16 +178,17 @@ int main()
         poInd->sdo_point._atomic = OCI_IND_NULL;
 
         if (oSession.Failed(
-                OCINumberFromInt(oSession.hError, (dvoid *)(anGType + iRow),
+                OCINumberFromInt(oSession.hError,
+                                 static_cast<dvoid *>(anGType + iRow),
                                  (uword)sizeof(int), OCI_NUMBER_SIGNED,
                                  &(poGeom->sdo_gtype)),
                 "OCINumberFromInt"))
             exit(1);
 
         if (oSession.Failed(
-                OCINumberFromInt(oSession.hError, (dvoid *)(anSRID + iRow),
-                                 (uword)sizeof(int), OCI_NUMBER_SIGNED,
-                                 &(poGeom->sdo_srid)),
+                OCINumberFromInt(
+                    oSession.hError, static_cast<dvoid *>(anSRID + iRow),
+                    (uword)sizeof(int), OCI_NUMBER_SIGNED, &(poGeom->sdo_srid)),
                 "OCINumberFromInt"))
             exit(1);
 

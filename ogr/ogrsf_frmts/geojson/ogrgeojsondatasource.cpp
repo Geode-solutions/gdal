@@ -8,28 +8,13 @@
  * Copyright (c) 2007, Mateusz Loskot
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "ogr_geojson.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -50,10 +35,13 @@
 #include "ogr_feature.h"
 #include "ogr_geometry.h"
 #include "ogr_spatialref.h"
+#include "ogrlibjsonutils.h"
 #include "ogrgeojsonreader.h"
 #include "ogrgeojsonutils.h"
 #include "ogrgeojsonwriter.h"
 #include "ogrsf_frmts.h"
+#include "ogr_schema_override.h"
+
 // #include "symbol_renames.h"
 
 /************************************************************************/
@@ -98,6 +86,125 @@ CPLErr OGRGeoJSONDataSource::Close()
             eErr = CE_Failure;
     }
     return eErr;
+}
+
+/************************************************************************/
+/*                 DealWithOgrSchemaOpenOption()                       */
+/************************************************************************/
+
+bool OGRGeoJSONDataSource::DealWithOgrSchemaOpenOption(
+    const GDALOpenInfo *poOpenInfo)
+{
+
+    std::string osFieldsSchemaOverrideParam =
+        CSLFetchNameValueDef(poOpenInfo->papszOpenOptions, "OGR_SCHEMA", "");
+
+    if (!osFieldsSchemaOverrideParam.empty())
+    {
+
+        if (poOpenInfo->eAccess == GA_Update)
+        {
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "OGR_SCHEMA open option is not supported in update mode.");
+            return false;
+        }
+
+        OGRSchemaOverride osSchemaOverride;
+        if (!osSchemaOverride.LoadFromJSON(osFieldsSchemaOverrideParam) ||
+            !osSchemaOverride.IsValid())
+        {
+            return false;
+        }
+
+        const auto &oLayerOverrides = osSchemaOverride.GetLayerOverrides();
+        for (const auto &oLayer : oLayerOverrides)
+        {
+            const auto &oLayerName = oLayer.first;
+            const auto &oLayerFieldOverride = oLayer.second;
+            const bool bIsFullOverride{oLayerFieldOverride.IsFullOverride()};
+            auto oFieldOverrides = oLayerFieldOverride.GetFieldOverrides();
+            std::vector<OGRFieldDefn *> aoFields;
+
+            CPLDebug("GeoJSON", "Applying schema override for layer %s",
+                     oLayerName.c_str());
+
+            // Fail if the layer name does not exist
+            auto poLayer = GetLayerByName(oLayerName.c_str());
+            if (poLayer == nullptr)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Layer %s not found in GeoJSON file",
+                         oLayerName.c_str());
+                return false;
+            }
+
+            // Patch field definitions
+            auto poLayerDefn = poLayer->GetLayerDefn();
+            for (int i = 0; i < poLayerDefn->GetFieldCount(); i++)
+            {
+                auto poFieldDefn = poLayerDefn->GetFieldDefn(i);
+                auto oFieldOverride =
+                    oFieldOverrides.find(poFieldDefn->GetNameRef());
+                if (oFieldOverride != oFieldOverrides.cend())
+                {
+                    if (oFieldOverride->second.GetFieldType().has_value())
+                        whileUnsealing(poFieldDefn)
+                            ->SetType(
+                                oFieldOverride->second.GetFieldType().value());
+                    if (oFieldOverride->second.GetFieldWidth().has_value())
+                        whileUnsealing(poFieldDefn)
+                            ->SetWidth(
+                                oFieldOverride->second.GetFieldWidth().value());
+                    if (oFieldOverride->second.GetFieldPrecision().has_value())
+                        whileUnsealing(poFieldDefn)
+                            ->SetPrecision(
+                                oFieldOverride->second.GetFieldPrecision()
+                                    .value());
+                    if (oFieldOverride->second.GetFieldSubType().has_value())
+                        whileUnsealing(poFieldDefn)
+                            ->SetSubType(
+                                oFieldOverride->second.GetFieldSubType()
+                                    .value());
+                    if (oFieldOverride->second.GetFieldName().has_value())
+                        whileUnsealing(poFieldDefn)
+                            ->SetName(oFieldOverride->second.GetFieldName()
+                                          .value()
+                                          .c_str());
+
+                    if (bIsFullOverride)
+                    {
+                        aoFields.push_back(poFieldDefn);
+                    }
+                    oFieldOverrides.erase(oFieldOverride);
+                }
+            }
+
+            // Error if any field override is not found
+            if (!oFieldOverrides.empty())
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Field %s not found in layer %s",
+                         oFieldOverrides.cbegin()->first.c_str(),
+                         oLayerName.c_str());
+                return false;
+            }
+
+            // Remove fields not in the override
+            if (bIsFullOverride)
+            {
+                for (int i = poLayerDefn->GetFieldCount() - 1; i >= 0; i--)
+                {
+                    auto poFieldDefn = poLayerDefn->GetFieldDefn(i);
+                    if (std::find(aoFields.begin(), aoFields.end(),
+                                  poFieldDefn) == aoFields.end())
+                    {
+                        whileUnsealing(poLayerDefn)->DeleteFieldDefn(i);
+                    }
+                }
+            }
+        }
+    }
+    return true;
 }
 
 /************************************************************************/
@@ -188,13 +295,21 @@ int OGRGeoJSONDataSource::Open(GDALOpenInfo *poOpenInfo,
 
     SetDescription(poOpenInfo->pszFilename);
     LoadLayers(poOpenInfo, nSrcType, pszUnprefixed, pszJSonFlavor);
+
+    if (!DealWithOgrSchemaOpenOption(poOpenInfo))
+    {
+        Clear();
+        return FALSE;
+    }
+
     if (nLayers_ == 0)
     {
         bool bEmitError = true;
         if (eGeoJSONSourceService == nSrcType)
         {
-            const CPLString osTmpFilename = CPLSPrintf(
-                "/vsimem/%p/%s", this, CPLGetFilename(poOpenInfo->pszFilename));
+            const CPLString osTmpFilename =
+                VSIMemGenerateHiddenFilename(CPLSPrintf(
+                    "geojson_%s", CPLGetFilename(poOpenInfo->pszFilename)));
             VSIFCloseL(VSIFileFromMemBuffer(osTmpFilename, (GByte *)pszGeoData_,
                                             nGeoDataLen_, TRUE));
             pszGeoData_ = nullptr;
@@ -213,15 +328,6 @@ int OGRGeoJSONDataSource::Open(GDALOpenInfo *poOpenInfo,
     }
 
     return TRUE;
-}
-
-/************************************************************************/
-/*                           GetName()                                  */
-/************************************************************************/
-
-const char *OGRGeoJSONDataSource::GetName()
-{
-    return pszName_ ? pszName_ : "";
 }
 
 /************************************************************************/
@@ -254,10 +360,10 @@ OGRLayer *OGRGeoJSONDataSource::GetLayer(int nLayer)
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *OGRGeoJSONDataSource::ICreateLayer(const char *pszNameIn,
-                                             OGRSpatialReference *poSRS,
-                                             OGRwkbGeometryType eGType,
-                                             char **papszOptions)
+OGRLayer *
+OGRGeoJSONDataSource::ICreateLayer(const char *pszNameIn,
+                                   const OGRGeomFieldDefn *poSrcGeomFieldDefn,
+                                   CSLConstList papszOptions)
 {
     if (nullptr == fpOut_)
     {
@@ -274,7 +380,72 @@ OGRLayer *OGRGeoJSONDataSource::ICreateLayer(const char *pszNameIn,
         return nullptr;
     }
 
+    const auto eGType =
+        poSrcGeomFieldDefn ? poSrcGeomFieldDefn->GetType() : wkbNone;
+    const auto poSRS =
+        poSrcGeomFieldDefn ? poSrcGeomFieldDefn->GetSpatialRef() : nullptr;
+
+    const char *pszForeignMembersCollection =
+        CSLFetchNameValue(papszOptions, "FOREIGN_MEMBERS_COLLECTION");
+    if (pszForeignMembersCollection)
+    {
+        if (pszForeignMembersCollection[0] != '{' ||
+            pszForeignMembersCollection[strlen(pszForeignMembersCollection) -
+                                        1] != '}')
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Value of FOREIGN_MEMBERS_COLLECTION should start with { "
+                     "and end with }");
+            return nullptr;
+        }
+        json_object *poTmp = nullptr;
+        if (!OGRJSonParse(pszForeignMembersCollection, &poTmp, false))
+        {
+            pszForeignMembersCollection = nullptr;
+        }
+        json_object_put(poTmp);
+        if (!pszForeignMembersCollection)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Value of FOREIGN_MEMBERS_COLLECTION is invalid JSON");
+            return nullptr;
+        }
+    }
+
+    std::string osForeignMembersFeature =
+        CSLFetchNameValueDef(papszOptions, "FOREIGN_MEMBERS_FEATURE", "");
+    if (!osForeignMembersFeature.empty())
+    {
+        if (osForeignMembersFeature.front() != '{' ||
+            osForeignMembersFeature.back() != '}')
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Value of FOREIGN_MEMBERS_FEATURE should start with { and "
+                     "end with }");
+            return nullptr;
+        }
+        json_object *poTmp = nullptr;
+        if (!OGRJSonParse(osForeignMembersFeature.c_str(), &poTmp, false))
+        {
+            osForeignMembersFeature.clear();
+        }
+        json_object_put(poTmp);
+        if (osForeignMembersFeature.empty())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Value of FOREIGN_MEMBERS_FEATURE is invalid JSON");
+            return nullptr;
+        }
+    }
+
     VSIFPrintfL(fpOut_, "{\n\"type\": \"FeatureCollection\",\n");
+
+    if (pszForeignMembersCollection)
+    {
+        VSIFWriteL(pszForeignMembersCollection + 1, 1,
+                   strlen(pszForeignMembersCollection) - 2, fpOut_);
+        VSIFWriteL(",\n", 2, 1, fpOut_);
+    }
 
     bool bWriteFC_BBOX =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "WRITE_BBOX", "FALSE"));
@@ -343,6 +514,12 @@ OGRLayer *OGRGeoJSONDataSource::ICreateLayer(const char *pszNameIn,
                 // DESCRIPTION option has been provided.
                 if (strcmp(it.key, "description") == 0 &&
                     CSLFetchNameValue(papszOptions, "DESCRIPTION"))
+                {
+                    continue;
+                }
+
+                if (strcmp(it.key, "xy_coordinate_resolution") == 0 ||
+                    strcmp(it.key, "z_coordinate_resolution") == 0)
                 {
                     continue;
                 }
@@ -468,6 +645,60 @@ OGRLayer *OGRGeoJSONDataSource::ICreateLayer(const char *pszNameIn,
         CPLFree(pszOGCURN);
     }
 
+    CPLStringList aosOptions(papszOptions);
+
+    double dfXYResolution = OGRGeomCoordinatePrecision::UNKNOWN;
+    double dfZResolution = OGRGeomCoordinatePrecision::UNKNOWN;
+
+    if (const char *pszCoordPrecision =
+            CSLFetchNameValue(papszOptions, "COORDINATE_PRECISION"))
+    {
+        dfXYResolution = std::pow(10.0, -CPLAtof(pszCoordPrecision));
+        dfZResolution = dfXYResolution;
+        VSIFPrintfL(fpOut_, "\"xy_coordinate_resolution\": %g,\n",
+                    dfXYResolution);
+        if (poSRS && poSRS->GetAxesCount() == 3)
+        {
+            VSIFPrintfL(fpOut_, "\"z_coordinate_resolution\": %g,\n",
+                        dfZResolution);
+        }
+    }
+    else if (poSrcGeomFieldDefn)
+    {
+        const auto &oCoordPrec = poSrcGeomFieldDefn->GetCoordinatePrecision();
+        OGRSpatialReference oSRSWGS84;
+        oSRSWGS84.SetWellKnownGeogCS("WGS84");
+        const auto oCoordPrecWGS84 =
+            oCoordPrec.ConvertToOtherSRS(poSRS, &oSRSWGS84);
+
+        if (oCoordPrec.dfXYResolution != OGRGeomCoordinatePrecision::UNKNOWN)
+        {
+            dfXYResolution = poSRS && bRFC7946 ? oCoordPrecWGS84.dfXYResolution
+                                               : oCoordPrec.dfXYResolution;
+
+            aosOptions.SetNameValue(
+                "XY_COORD_PRECISION",
+                CPLSPrintf("%d",
+                           OGRGeomCoordinatePrecision::ResolutionToPrecision(
+                               dfXYResolution)));
+            VSIFPrintfL(fpOut_, "\"xy_coordinate_resolution\": %g,\n",
+                        dfXYResolution);
+        }
+        if (oCoordPrec.dfZResolution != OGRGeomCoordinatePrecision::UNKNOWN)
+        {
+            dfZResolution = poSRS && bRFC7946 ? oCoordPrecWGS84.dfZResolution
+                                              : oCoordPrec.dfZResolution;
+
+            aosOptions.SetNameValue(
+                "Z_COORD_PRECISION",
+                CPLSPrintf("%d",
+                           OGRGeomCoordinatePrecision::ResolutionToPrecision(
+                               dfZResolution)));
+            VSIFPrintfL(fpOut_, "\"z_coordinate_resolution\": %g,\n",
+                        dfZResolution);
+        }
+    }
+
     if (bFpOutputIsSeekable_ && bWriteFC_BBOX)
     {
         nBBOXInsertLocation_ = static_cast<int>(VSIFTellL(fpOut_));
@@ -479,7 +710,27 @@ OGRLayer *OGRGeoJSONDataSource::ICreateLayer(const char *pszNameIn,
     VSIFPrintfL(fpOut_, "\"features\": [\n");
 
     OGRGeoJSONWriteLayer *poLayer = new OGRGeoJSONWriteLayer(
-        pszNameIn, eGType, papszOptions, bWriteFC_BBOX, poCT, this);
+        pszNameIn, eGType, aosOptions.List(), bWriteFC_BBOX, poCT, this);
+
+    if (eGType != wkbNone &&
+        dfXYResolution != OGRGeomCoordinatePrecision::UNKNOWN)
+    {
+        auto poGeomFieldDefn = poLayer->GetLayerDefn()->GetGeomFieldDefn(0);
+        OGRGeomCoordinatePrecision oCoordPrec(
+            poGeomFieldDefn->GetCoordinatePrecision());
+        oCoordPrec.dfXYResolution = dfXYResolution;
+        poGeomFieldDefn->SetCoordinatePrecision(oCoordPrec);
+    }
+
+    if (eGType != wkbNone &&
+        dfZResolution != OGRGeomCoordinatePrecision::UNKNOWN)
+    {
+        auto poGeomFieldDefn = poLayer->GetLayerDefn()->GetGeomFieldDefn(0);
+        OGRGeomCoordinatePrecision oCoordPrec(
+            poGeomFieldDefn->GetCoordinatePrecision());
+        oCoordPrec.dfZResolution = dfZResolution;
+        poGeomFieldDefn->SetCoordinatePrecision(oCoordPrec);
+    }
 
     /* -------------------------------------------------------------------- */
     /*      Add layer to data source layer list.                            */
@@ -501,9 +752,10 @@ int OGRGeoJSONDataSource::TestCapability(const char *pszCap)
 {
     if (EQUAL(pszCap, ODsCCreateLayer))
         return fpOut_ != nullptr && nLayers_ == 0;
-    else if (EQUAL(pszCap, ODsCZGeometries) ||
-             EQUAL(pszCap, ODsCMeasuredGeometries))
-        return TRUE;
+    else if (EQUAL(pszCap, ODsCMeasuredGeometries))
+        return m_bSupportsMGeometries;
+    else if (EQUAL(pszCap, ODsCZGeometries))
+        return m_bSupportsZGeometries;
 
     return FALSE;
 }
@@ -667,9 +919,11 @@ int OGRGeoJSONDataSource::ReadFromService(GDALOpenInfo *poOpenInfo,
     char *pszStoredContent = OGRGeoJSONDriverStealStoredContent(pszSource);
     if (pszStoredContent != nullptr)
     {
-        if ((osJSonFlavor_ == "ESRIJSON" &&
-             ESRIJSONIsObject(pszStoredContent)) ||
-            (osJSonFlavor_ == "TopoJSON" && TopoJSONIsObject(pszStoredContent)))
+        if (!EQUAL(pszStoredContent, INVALID_CONTENT_FOR_JSON_LIKE) &&
+            ((osJSonFlavor_ == "ESRIJSON" &&
+              ESRIJSONIsObject(pszStoredContent, poOpenInfo)) ||
+             (osJSonFlavor_ == "TopoJSON" &&
+              TopoJSONIsObject(pszStoredContent, poOpenInfo))))
         {
             pszGeoData_ = pszStoredContent;
             nGeoDataLen_ = strlen(pszGeoData_);
@@ -685,27 +939,9 @@ int OGRGeoJSONDataSource::ReadFromService(GDALOpenInfo *poOpenInfo,
     /* -------------------------------------------------------------------- */
     /*      Fetch the GeoJSON result.                                        */
     /* -------------------------------------------------------------------- */
-    char *papsOptions[] = {
-        const_cast<char *>("HEADERS=Accept: text/plain, application/json"),
-        nullptr};
-
-    CPLHTTPResult *pResult = CPLHTTPFetch(pszSource, papsOptions);
-
-    /* -------------------------------------------------------------------- */
-    /*      Try to handle CURL/HTTP errors.                                 */
-    /* -------------------------------------------------------------------- */
-    if (nullptr == pResult || 0 == pResult->nDataLen ||
-        0 != CPLGetLastErrorNo())
+    CPLHTTPResult *pResult = GeoJSONHTTPFetchWithContentTypeHeader(pszSource);
+    if (!pResult)
     {
-        CPLHTTPDestroyResult(pResult);
-        return FALSE;
-    }
-
-    if (0 != pResult->nStatus)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "Curl reports error: %d: %s",
-                 pResult->nStatus, pResult->pszErrBuf);
-        CPLHTTPDestroyResult(pResult);
         return FALSE;
     }
 
@@ -735,15 +971,21 @@ int OGRGeoJSONDataSource::ReadFromService(GDALOpenInfo *poOpenInfo,
     /* -------------------------------------------------------------------- */
     if (EQUAL(pszSource, poOpenInfo->pszFilename) && osJSonFlavor_ == "GeoJSON")
     {
-        if (!GeoJSONIsObject(pszGeoData_))
+        if (!GeoJSONIsObject(pszGeoData_, poOpenInfo))
         {
-            if (ESRIJSONIsObject(pszGeoData_) ||
-                TopoJSONIsObject(pszGeoData_) ||
-                GeoJSONSeqIsObject(pszGeoData_))
+            if (ESRIJSONIsObject(pszGeoData_, poOpenInfo) ||
+                TopoJSONIsObject(pszGeoData_, poOpenInfo) ||
+                GeoJSONSeqIsObject(pszGeoData_, poOpenInfo) ||
+                JSONFGIsObject(pszGeoData_, poOpenInfo))
             {
                 OGRGeoJSONDriverStoreContent(pszSource, pszGeoData_);
                 pszGeoData_ = nullptr;
                 nGeoDataLen_ = 0;
+            }
+            else
+            {
+                OGRGeoJSONDriverStoreContent(
+                    pszSource, CPLStrdup(INVALID_CONTENT_FOR_JSON_LIKE));
             }
             return false;
         }
@@ -856,7 +1098,7 @@ void OGRGeoJSONDataSource::LoadLayers(GDALOpenInfo *poOpenInfo,
         oOpenInfo.fpL = nullptr;
     }
 
-    if (!GeoJSONIsObject(pszGeoData_))
+    if (!GeoJSONIsObject(pszGeoData_, poOpenInfo))
     {
         CPLDebug(pszJSonFlavor, "No valid %s data found in source '%s'",
                  pszJSonFlavor, pszName_);
@@ -885,12 +1127,12 @@ void OGRGeoJSONDataSource::LoadLayers(GDALOpenInfo *poOpenInfo,
         if (pszStr)
         {
             pszStr += strlen("\"features\"");
-            while (*pszStr && isspace(*pszStr))
+            while (*pszStr && isspace(static_cast<unsigned char>(*pszStr)))
                 pszStr++;
             if (*pszStr == ':')
             {
                 pszStr++;
-                while (*pszStr && isspace(*pszStr))
+                while (*pszStr && isspace(static_cast<unsigned char>(*pszStr)))
                     pszStr++;
                 if (*pszStr == '[')
                 {
@@ -984,6 +1226,29 @@ void OGRGeoJSONDataSource::SetOptionsOnReader(GDALOpenInfo *poOpenInfo,
     poReader->SetDateAsString(CPLTestBool(CSLFetchNameValueDef(
         poOpenInfo->papszOpenOptions, "DATE_AS_STRING",
         CPLGetConfigOption("OGR_GEOJSON_DATE_AS_STRING", "NO"))));
+
+    const char *pszForeignMembers = CSLFetchNameValueDef(
+        poOpenInfo->papszOpenOptions, "FOREIGN_MEMBERS", "AUTO");
+    if (EQUAL(pszForeignMembers, "AUTO"))
+    {
+        poReader->SetForeignMemberProcessing(
+            OGRGeoJSONBaseReader::ForeignMemberProcessing::AUTO);
+    }
+    else if (EQUAL(pszForeignMembers, "ALL"))
+    {
+        poReader->SetForeignMemberProcessing(
+            OGRGeoJSONBaseReader::ForeignMemberProcessing::ALL);
+    }
+    else if (EQUAL(pszForeignMembers, "NONE"))
+    {
+        poReader->SetForeignMemberProcessing(
+            OGRGeoJSONBaseReader::ForeignMemberProcessing::NONE);
+    }
+    else if (EQUAL(pszForeignMembers, "STAC"))
+    {
+        poReader->SetForeignMemberProcessing(
+            OGRGeoJSONBaseReader::ForeignMemberProcessing::STAC);
+    }
 }
 
 /************************************************************************/
@@ -1041,7 +1306,10 @@ void OGRGeoJSONDataSource::AddLayer(OGRGeoJSONLayer *poLayer)
 CPLErr OGRGeoJSONDataSource::FlushCache(bool /*bAtClosing*/)
 {
     if (papoLayersWriter_ != nullptr)
-        return CE_None;
+    {
+        return papoLayersWriter_[0]->SyncToDisk() == OGRERR_NONE ? CE_None
+                                                                 : CE_Failure;
+    }
 
     CPLErr eErr = CE_None;
     for (int i = 0; i < nLayers_; i++)
@@ -1114,7 +1382,7 @@ CPLErr OGRGeoJSONDataSource::FlushCache(bool /*bAtClosing*/)
                 {
                     const bool bOverwrite = CPLTestBool(
                         CPLGetConfigOption("OGR_GEOJSON_REWRITE_IN_PLACE",
-#ifdef WIN32
+#ifdef _WIN32
                                            "YES"
 #else
                                            "NO"

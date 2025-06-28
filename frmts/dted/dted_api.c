@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  DTED Translator
  * Purpose:  Implementation of DTED/CDED access functions.
@@ -9,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2007-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "dted_api.h"
@@ -40,6 +23,7 @@ static void DTEDDetectVariantWithMissingColumns(DTEDInfo *psDInfo);
 CPL_INLINE static void CPL_IGNORE_RET_VAL_INT(CPL_UNUSED int unused)
 {
 }
+
 CPL_INLINE static void CPL_IGNORE_RET_VAL_SIZET(CPL_UNUSED size_t unused)
 {
 }
@@ -339,6 +323,9 @@ DTEDInfo *DTEDOpenEx(VSILFILE *fp, const char *pszFilename,
 
     DTEDDetectVariantWithMissingColumns(psDInfo);
 
+    psDInfo->bAssumeConformant =
+        CPLTestBool(CPLGetConfigOption("DTED_ASSUME_CONFORMANT", "NO"));
+
     return psDInfo;
 }
 
@@ -547,7 +534,8 @@ int DTEDReadPoint(DTEDInfo *psDInfo, int nXOff, int nYOff, GInt16 *panVal)
         ** complement form for negatives.  For these, redo the job
         ** in twos complement.  eg. w_069_s50.dt0
         */
-        if ((*panVal < -16000) && (*panVal != DTED_NODATA_VALUE))
+        if (!psDInfo->bAssumeConformant && (*panVal < -16000) &&
+            (*panVal != DTED_NODATA_VALUE))
         {
             *panVal = (pabyData[0] << 8) | pabyData[1];
 
@@ -563,9 +551,13 @@ int DTEDReadPoint(DTEDInfo *psDInfo, int nXOff, int nYOff, GInt16 *panVal)
 #endif
                     "The DTED driver found values less than -16000, and has "
                     "adjusted\n"
-                    "them assuming they are improperly two-complemented.  No "
-                    "more warnings\n"
-                    "will be issued in this session about this operation.");
+                    "them assuming they are improperly two-complemented.  If "
+                    "you wish to\n"
+                    "disable this behavior, set the DTED_ASSUME_CONFORMANT "
+                    "configuration\n"
+                    "option to YES. No more warnings will be issued in this "
+                    "session\n"
+                    "about this operation.");
             }
         }
     }
@@ -1006,6 +998,16 @@ static void DTEDGetMetadataLocation(DTEDInfo *psDInfo, DTEDMetaDataCode eCode,
             else
                 *ppszLocation = psDInfo->pachDSIRecord + 289;
             *pnLength = 2;
+            break;
+
+        case DTEDMD_SECURITYCONTROL:
+            *ppszLocation = psDInfo->pachDSIRecord + 4;
+            *pnLength = 2;
+            break;
+
+        case DTEDMD_SECURITYHANDLING:
+            *ppszLocation = psDInfo->pachDSIRecord + 6;
+            *pnLength = 27;
             break;
 
         default:

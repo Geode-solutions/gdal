@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL algorithms
  * Purpose:  Tests for the marching squares algorithm
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018, Hugo Mercier, <hugo dot mercier at oslandia dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_unit_test.h"
@@ -34,13 +17,21 @@
 #include "marching_squares/square.h"
 #include "marching_squares/level_generator.h"
 #include <vector>
+#include <limits>
 #include <map>
 #include <fstream>
 
 #include "gtest_include.h"
 
-namespace marching_squares
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
+
+namespace test_marching_squares_square
 {
+using namespace marching_squares;
+
 struct Writer
 {
     typedef std::pair<Point, Point> Segment;
@@ -60,12 +51,6 @@ struct Writer
     const bool polygonize = true;
 };
 
-}  // namespace marching_squares
-
-namespace
-{
-using namespace marching_squares;
-
 // Common fixture with test data
 struct test_ms_square : public ::testing::Test
 {
@@ -76,7 +61,9 @@ TEST_F(test_ms_square, dummy)
 {
     {
         const double levels[] = {0, 4};
-        FixedLevelRangeIterator levelGenerator(levels, 2);
+        FixedLevelRangeIterator levelGenerator(
+            levels, 2, -std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity());
         auto r = levelGenerator.range(0, 5.0);
         auto b = r.begin();
         EXPECT_EQ((*b).first, 1);
@@ -86,7 +73,8 @@ TEST_F(test_ms_square, dummy)
         EXPECT_EQ((*e).second, Inf);
     }
     {
-        IntervalLevelRangeIterator levelGenerator(0, 4);
+        IntervalLevelRangeIterator levelGenerator(
+            0, 4, -std::numeric_limits<double>::infinity());
         auto r = levelGenerator.range(0, 5.0);
         auto b = r.begin();
         EXPECT_EQ((*b).first, 1);
@@ -96,7 +84,8 @@ TEST_F(test_ms_square, dummy)
         EXPECT_EQ((*e).second, 8.0);
     }
     {
-        IntervalLevelRangeIterator levelGenerator(0, 10);
+        IntervalLevelRangeIterator levelGenerator(
+            0, 10, -std::numeric_limits<double>::infinity());
         auto r = levelGenerator.range(-18, 5.0);
         auto b = r.begin();
         EXPECT_EQ((*b).first, -1);
@@ -106,7 +95,8 @@ TEST_F(test_ms_square, dummy)
         EXPECT_EQ((*e).second, 10.0);
     }
     {
-        ExponentialLevelRangeIterator levelGenerator(2);
+        ExponentialLevelRangeIterator levelGenerator(
+            2, -std::numeric_limits<double>::infinity());
         auto r = levelGenerator.range(0, 5.0);
         auto b = r.begin();
         EXPECT_EQ((*b).first, 1);
@@ -128,7 +118,8 @@ TEST_F(test_ms_square, only_zero)
     // Square with only 0, level = 0.1
     Square square(ValuedPoint(0, 1, 0), ValuedPoint(1, 1, 0),
                   ValuedPoint(0, 0, 0), ValuedPoint(1, 0, 0));
-    Square::Segments segments(square.segments(.1));
+    Square::Segments segments(
+        square.segments(.1, -std::numeric_limits<double>::infinity()));
     //
     //   0                    0
     //    +------------------+
@@ -161,7 +152,8 @@ TEST_F(test_ms_square, only_one)
     //    |                  |
     //    +------------------+
     //   1                    1
-    Square::Segments segments(square.segments(.1));
+    Square::Segments segments(
+        square.segments(.1, -std::numeric_limits<double>::infinity()));
     EXPECT_EQ(segments.size(), size_t(0));
 }
 
@@ -182,7 +174,8 @@ TEST_F(test_ms_square, only_zero_level_1)
     //    |                  |
     //    +------------------+
     //   1                    1
-    Square::Segments segments(square.segments(1.0));
+    Square::Segments segments(
+        square.segments(1.0, -std::numeric_limits<double>::infinity()));
     EXPECT_EQ(segments.size(), size_t(0));
 }
 
@@ -203,7 +196,8 @@ TEST_F(test_ms_square, one_segment)
     //    | \                |
     //    +---o--------------+
     //   1                    0
-    Square::Segments segments(square.segments(.1));
+    Square::Segments segments(
+        square.segments(.1, -std::numeric_limits<double>::infinity()));
     EXPECT_EQ(segments.size(), size_t(1));
     EXPECT_TRUE(segments[0].first == Point(.9, 1));
     EXPECT_TRUE(segments[0].second == Point(0, .1));
@@ -228,11 +222,13 @@ TEST_F(test_ms_square, fudge_test_1)
     //   1                    1
     //  (0,0)
     {
-        Square::Segments segments(square.segments(0.0));
+        Square::Segments segments(
+            square.segments(0.0, -std::numeric_limits<double>::infinity()));
         EXPECT_EQ(segments.size(), size_t(0));
     }
     {
-        Square::Segments segments(square.segments(1.0));
+        Square::Segments segments(
+            square.segments(1.0, -std::numeric_limits<double>::infinity()));
         EXPECT_EQ(segments.size(), size_t(1));
         EXPECT_NEAR(segments[0].first.x, 0.0, 0.001);
         EXPECT_NEAR(segments[0].first.y, 0.0, 0.001);
@@ -260,7 +256,8 @@ TEST_F(test_ms_square, fudge_test_2)
     //   0                    0
     // (0,0)
     {
-        Square::Segments segments(square.segments(1.0));
+        Square::Segments segments(
+            square.segments(1.0, -std::numeric_limits<double>::infinity()));
         EXPECT_EQ(segments.size(), 1);
         EXPECT_NEAR(segments[0].first.x, 0.0, 0.001);
         EXPECT_NEAR(segments[0].first.y, 1.0, 0.001);
@@ -268,7 +265,8 @@ TEST_F(test_ms_square, fudge_test_2)
         EXPECT_NEAR(segments[0].second.y, 1.0, 0.001);
     }
     {
-        Square::Segments segments(square.segments(0.0));
+        Square::Segments segments(
+            square.segments(0.0, -std::numeric_limits<double>::infinity()));
         EXPECT_EQ(segments.size(), 0);
     }
 }
@@ -324,8 +322,10 @@ TEST_F(test_ms_square, nan)
     EXPECT_EQ(ul.lowerRight.y, ll.upperRight.y);
     EXPECT_EQ(ul.lowerRight.value, ll.upperRight.value);
 
-    const Square::Segments segments_up(ul.segments(225));
-    const Square::Segments segments_down(ll.segments(225));
+    const Square::Segments segments_up(
+        ul.segments(225, -std::numeric_limits<double>::infinity()));
+    const Square::Segments segments_down(
+        ll.segments(225, -std::numeric_limits<double>::infinity()));
 
     // segments on 225
     //
@@ -382,8 +382,10 @@ TEST_F(test_ms_square, border_test_1)
     //    +--------+---------+
     // 272.87   272.90000 272.93
 
-    Square::Segments segments_l(ll.segments(272.9));
-    Square::Segments segments_r(lr.segments(272.9));
+    Square::Segments segments_l(
+        ll.segments(272.9, -std::numeric_limits<double>::infinity()));
+    Square::Segments segments_r(
+        lr.segments(272.9, -std::numeric_limits<double>::infinity()));
 
     // the level falls exactly on corners
     // thanks to the fudge, each corner should be shifted away a bit
@@ -447,7 +449,8 @@ TEST_F(test_ms_square, multiple_levels)
 
     Writer writer;
     // levels starting at min and increasing by 0.1
-    IntervalLevelRangeIterator levelGenerator(0, .1);
+    IntervalLevelRangeIterator levelGenerator(
+        0, .1, -std::numeric_limits<double>::infinity());
 
     ul.process(levelGenerator, writer);
 
@@ -509,7 +512,8 @@ TEST_F(test_ms_square, border_test_3)
     {
         // ... with a level interval
         Writer writer;
-        IntervalLevelRangeIterator levelGenerator(7, 5);
+        IntervalLevelRangeIterator levelGenerator(
+            7, 5, -std::numeric_limits<double>::infinity());
         ul.process(levelGenerator, writer);
 
         // we have one contour at 7 and 12
@@ -550,7 +554,9 @@ TEST_F(test_ms_square, border_test_3)
     {
         Writer writer;
         std::vector<double> levels = {7.0};
-        FixedLevelRangeIterator levelGenerator(&levels[0], 1);
+        FixedLevelRangeIterator levelGenerator(
+            &levels[0], 1, -std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity());
         ul.process(levelGenerator, writer);
 
         // we have one contour at 7 and 12
@@ -608,7 +614,9 @@ TEST_F(test_ms_square, level_value_below_square_values)
     {
         Writer writer;
         std::vector<double> levels = {2.0};
-        FixedLevelRangeIterator levelGenerator(&levels[0], 1);
+        FixedLevelRangeIterator levelGenerator(
+            &levels[0], 1, -std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity());
         square.process(levelGenerator, writer);
         EXPECT_TRUE((writer.borders.size() == 0));
         EXPECT_TRUE((writer.contours.size() == 0));
@@ -634,7 +642,8 @@ TEST_F(test_ms_square, full_border_test_1)
     //   NaN                 5
     {
         Writer writer;
-        IntervalLevelRangeIterator levelGenerator(0, 10.0);
+        IntervalLevelRangeIterator levelGenerator(
+            0, 10.0, -std::numeric_limits<double>::infinity());
         square.process(levelGenerator, writer);
         EXPECT_TRUE((writer.borders.size() == 1));
         EXPECT_TRUE((writer.borders[1].size() == 2));
@@ -676,7 +685,8 @@ TEST_F(test_ms_square, full_border_test_2)
     //   NaN                 5
     {
         Writer writer;
-        IntervalLevelRangeIterator levelGenerator(5.0, 5.0);
+        IntervalLevelRangeIterator levelGenerator(
+            5.0, 5.0, -std::numeric_limits<double>::infinity());
         square.process(levelGenerator, writer);
         EXPECT_TRUE((writer.borders.size() == 1));
         EXPECT_TRUE((writer.borders[1].size() == 2));
@@ -700,7 +710,9 @@ TEST_F(test_ms_square, full_border_test_2)
     {
         Writer writer;
         std::vector<double> levels = {5.0};
-        FixedLevelRangeIterator levelGenerator(&levels[0], 1);
+        FixedLevelRangeIterator levelGenerator(
+            &levels[0], 1, -std::numeric_limits<double>::infinity(),
+            std::numeric_limits<double>::infinity());
         square.process(levelGenerator, writer);
         EXPECT_TRUE((writer.borders.size() == 1));
         EXPECT_TRUE((writer.borders[1].size() == 2));
@@ -722,4 +734,8 @@ TEST_F(test_ms_square, full_border_test_2)
                       writer.borders[1][1].second.y == 0.5)));
     }
 }
-}  // namespace
+}  // namespace test_marching_squares_square
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif

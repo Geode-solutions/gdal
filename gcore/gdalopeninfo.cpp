@@ -8,23 +8,7 @@
  * Copyright (c) 2002, Frank Warmerdam
  * Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_priv.h"  // Must be included first for mingw VSIStatBufL.
@@ -106,7 +90,7 @@ void GDALOpenInfoDeclareFileNotToOpen(const char *pszFilename,
         memcpy(fnto.pabyHeader, pabyHeader, nHeaderBytes);
         fnto.pabyHeader[nHeaderBytes] = 0;
         fnto.nHeaderBytes = nHeaderBytes;
-        (*pMapFNTO)[pszFilename] = fnto;
+        (*pMapFNTO)[pszFilename] = std::move(fnto);
     }
 }
 
@@ -167,13 +151,10 @@ static GByte *GDALOpenInfoGetFileNotToOpen(const char *pszFilename,
  */
 GDALOpenInfo::GDALOpenInfo(const char *pszFilenameIn, int nOpenFlagsIn,
                            const char *const *papszSiblingsIn)
-    : bHasGotSiblingFiles(false), papszSiblingFiles(nullptr),
-      nHeaderBytesTried(0), pszFilename(CPLStrdup(pszFilenameIn)),
-      papszOpenOptions(nullptr),
+    : pszFilename(CPLStrdup(pszFilenameIn)),
+      osExtension(CPLGetExtensionSafe(pszFilenameIn)),
       eAccess(nOpenFlagsIn & GDAL_OF_UPDATE ? GA_Update : GA_ReadOnly),
-      nOpenFlags(nOpenFlagsIn), bStatOK(FALSE), bIsDirectory(FALSE),
-      fpL(nullptr), nHeaderBytes(0), pabyHeader(nullptr),
-      papszAllowedDrivers(nullptr)
+      nOpenFlags(nOpenFlagsIn)
 {
     if (STARTS_WITH(pszFilename, "MVT:/vsi"))
         return;
@@ -182,7 +163,7 @@ GDALOpenInfo::GDALOpenInfo(const char *pszFilenameIn, int nOpenFlagsIn,
 /*      Ensure that C: is treated as C:\ so we can stat it on           */
 /*      Windows.  Similar to what is done in CPLStat().                 */
 /* -------------------------------------------------------------------- */
-#ifdef WIN32
+#ifdef _WIN32
     if (strlen(pszFilenameIn) == 2 && pszFilenameIn[1] == ':')
     {
         char szAltPath[10];
@@ -221,7 +202,7 @@ retry:  // TODO(schwehr): Stop using goto.
         STARTS_WITH(pszFilename, "/vsi7z/") ||
         STARTS_WITH(pszFilename, "/vsirar/"))
     {
-        const char *pszExt = CPLGetExtension(pszFilename);
+        const char *pszExt = osExtension.c_str();
         if (EQUAL(pszExt, "zip") || EQUAL(pszExt, "tar") ||
             EQUAL(pszExt, "gz") || EQUAL(pszExt, "7z") ||
             EQUAL(pszExt, "rar") ||
@@ -329,6 +310,7 @@ retry:  // TODO(schwehr): Stop using goto.
                 szPointerFilename[std::min(nBytes, nBufSize - 1)] = 0;
                 CPLFree(pszFilename);
                 pszFilename = CPLStrdup(szPointerFilename);
+                osExtension = CPLGetExtensionSafe(pszFilename);
                 papszSiblingsIn = nullptr;
                 bHasRetried = true;
                 goto retry;
@@ -404,7 +386,12 @@ GDALOpenInfo::~GDALOpenInfo()
 /************************************************************************/
 
 /** Return sibling files.
- * @return sibling files. Ownership below to the object.
+ *
+ * If the list of sibling files has not already been established, it will be,
+ * unless the GDAL_DISABLE_READDIR_ON_OPEN configuration option has been set to
+ * YES or EMPTY_DIR when this instance was constructed.
+ *
+ * @return sibling files. Ownership belongs to "this".
  */
 char **GDALOpenInfo::GetSiblingFiles()
 {
@@ -418,7 +405,7 @@ char **GDALOpenInfo::GetSiblingFiles()
         return papszSiblingFiles;
     }
 
-    CPLString osDir = CPLGetDirname(pszFilename);
+    const CPLString osDir = CPLGetDirnameSafe(pszFilename);
     const int nMaxFiles = atoi(VSIGetPathSpecificOption(
         pszFilename, "GDAL_READDIR_LIMIT_ON_OPEN", "1000"));
     papszSiblingFiles = VSIReadDirEx(osDir, nMaxFiles);
@@ -486,4 +473,23 @@ int GDALOpenInfo::TryToIngest(int nBytes)
     VSIRewindL(fpL);
 
     return TRUE;
+}
+
+/************************************************************************/
+/*                       IsSingleAllowedDriver()                        */
+/************************************************************************/
+
+/** Returns true if the driver name is the single in the list of allowed
+ * drivers.
+ *
+ * @param pszDriverName Driver name to test.
+ * @return true if the driver name is the single in the list of allowed
+ * drivers.
+ * @since GDAL 3.10
+ */
+bool GDALOpenInfo::IsSingleAllowedDriver(const char *pszDriverName) const
+{
+    return papszAllowedDrivers && papszAllowedDrivers[0] &&
+           !papszAllowedDrivers[1] &&
+           EQUAL(papszAllowedDrivers[0], pszDriverName);
 }

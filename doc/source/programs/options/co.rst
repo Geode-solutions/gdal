@@ -1,4 +1,6 @@
-.. option:: -co <NAME=VALUE>
+.. WARNING: if modifying that file, please edit gdal_translate.rst too
+
+.. option:: -co <NAME>=<VALUE>
 
     Many formats have one or more optional creation options that can be
     used to control particulars about the file created. For instance,
@@ -8,7 +10,7 @@
     The creation options available vary by format driver, and some
     simple formats have no creation options at all. A list of options
     supported for a format can be listed with the
-    :ref:`--formats <raster_common_options_formats>`
+    :ref:`--format <raster_common_options_format>`
     command line option but the documentation for the format is the
     definitive source of information on driver creation options.
     See :ref:`raster_drivers` format

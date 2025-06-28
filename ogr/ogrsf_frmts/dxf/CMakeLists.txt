@@ -21,5 +21,26 @@ add_gdal_driver(
           ogrdxf_leader.cpp
           ogrdxfwriterlayer.cpp
           ogrdxf_ocstransformer.cpp
-  BUILTIN)
+  BUILTIN
+  NO_CXX_WFLAGS_EFFCXX
+  NO_WFLAG_OLD_STYLE_CAST
+)
 gdal_standard_includes(ogr_DXF)
+
+if (NOT USE_ONLY_EMBEDDED_RESOURCE_FILES)
+    set(GDAL_DATA_FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/data/header.dxf
+        ${CMAKE_CURRENT_SOURCE_DIR}/data/trailer.dxf
+    )
+    set_property(
+      TARGET ${GDAL_LIB_TARGET_NAME}
+      APPEND
+      PROPERTY RESOURCE "${GDAL_DATA_FILES}")
+endif()
+
+if (EMBED_RESOURCE_FILES)
+    add_driver_embedded_resources(ogr_DXF OGR_ENABLE_DRIVER_DXF_PLUGIN embedded_resources.c)
+endif()
+if (USE_ONLY_EMBEDDED_RESOURCE_FILES)
+    target_compile_definitions(ogr_DXF PRIVATE USE_ONLY_EMBEDDED_RESOURCE_FILES)
+endif()

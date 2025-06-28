@@ -8,23 +8,7 @@
  * Copyright (c) 2010, 2011, Martin Lambers <marlam@marlam.de>
  * Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 /*
@@ -90,6 +74,7 @@
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
 #include "gta_headers.h"
+#include "gtadrivercore.h"
 
 /************************************************************************/
 /* Helper functions                                                     */
@@ -241,7 +226,7 @@ class GTADataset final : public GDALPamDataset
     vsi_l_offset DataOffset = 0;
     // Metadata
     bool bHaveGeoTransform = false;
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     int nGCPs = 0;
     mutable OGRSpatialReference m_oSRS{};
     OGRSpatialReference m_oGCPSRS{};
@@ -262,8 +247,8 @@ class GTADataset final : public GDALPamDataset
 
     static GDALDataset *Open(GDALOpenInfo *);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
-    CPLErr SetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
@@ -444,7 +429,7 @@ char **GTARasterBand::GetCategoryNames()
 {
     if (!papszCategoryNames)
     {
-        GTADataset *poGDS = (GTADataset *)poDS;
+        GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
         const char *pszCatCount =
             poGDS->oHeader.component_taglist(nBand - 1).get(
                 "GDAL/CATEGORY_COUNT");
@@ -487,7 +472,7 @@ CPLErr GTARasterBand::SetCategoryNames(char **)
 double GTARasterBand::GetMinimum(int *pbSuccess)
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
     const char *pszValue =
         poGDS->oHeader.component_taglist(nBand - 1).get("MIN_VALUE");
     if (pszValue)
@@ -509,7 +494,7 @@ double GTARasterBand::GetMinimum(int *pbSuccess)
 double GTARasterBand::GetMaximum(int *pbSuccess)
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
     const char *pszValue =
         poGDS->oHeader.component_taglist(nBand - 1).get("MAX_VALUE");
     if (pszValue)
@@ -531,7 +516,7 @@ double GTARasterBand::GetMaximum(int *pbSuccess)
 double GTARasterBand::GetNoDataValue(int *pbSuccess)
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
     const char *pszValue =
         poGDS->oHeader.component_taglist(nBand - 1).get("NO_DATA_VALUE");
     if (pszValue)
@@ -565,7 +550,7 @@ CPLErr GTARasterBand::SetNoDataValue(double)
 double GTARasterBand::GetOffset(int *pbSuccess)
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
     const char *pszValue =
         poGDS->oHeader.component_taglist(nBand - 1).get("GDAL/OFFSET");
     if (pszValue)
@@ -599,7 +584,7 @@ CPLErr GTARasterBand::SetOffset(double)
 double GTARasterBand::GetScale(int *pbSuccess)
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
     const char *pszValue =
         poGDS->oHeader.component_taglist(nBand - 1).get("GDAL/SCALE");
     if (pszValue)
@@ -633,7 +618,7 @@ CPLErr GTARasterBand::SetScale(double)
 const char *GTARasterBand::GetUnitType()
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
     const char *pszValue =
         poGDS->oHeader.component_taglist(nBand - 1).get("UNIT");
     return pszValue ? pszValue : "";
@@ -658,7 +643,7 @@ CPLErr GTARasterBand::SetUnitType(const char *)
 GDALColorInterp GTARasterBand::GetColorInterpretation()
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
     const char *pszColorInterpretation =
         poGDS->oHeader.component_taglist(nBand - 1).get("INTERPRETATION");
     if (pszColorInterpretation)
@@ -716,7 +701,7 @@ CPLErr GTARasterBand::SetColorInterpretation(GDALColorInterp)
 CPLErr GTARasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
 
     // Read and cache block containing all bands at once
     if (poGDS->ReadBlock(nBlockXOff, nBlockYOff) != CE_None)
@@ -752,7 +737,7 @@ CPLErr GTARasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 CPLErr GTARasterBand::IWriteBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 
 {
-    GTADataset *poGDS = (GTADataset *)poDS;
+    GTADataset *poGDS = cpl::down_cast<GTADataset *>(poDS);
 
     if (poGDS->oHeader.compression() != gta::none)
     {
@@ -801,7 +786,6 @@ GTADataset::GTADataset()
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     m_oGCPSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    memset(adfGeoTransform, 0, sizeof(adfGeoTransform));
 }
 
 /************************************************************************/
@@ -928,12 +912,12 @@ CPLErr GTADataset::WriteBlock()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GTADataset::GetGeoTransform(double *padfTransform)
+CPLErr GTADataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (bHaveGeoTransform)
     {
-        memcpy(padfTransform, adfGeoTransform, 6 * sizeof(double));
+        gt = m_gt;
         return CE_None;
     }
     else
@@ -946,7 +930,7 @@ CPLErr GTADataset::GetGeoTransform(double *padfTransform)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GTADataset::SetGeoTransform(double *)
+CPLErr GTADataset::SetGeoTransform(const GDALGeoTransform &)
 
 {
     CPLError(CE_Warning, CPLE_NotSupported,
@@ -1030,10 +1014,7 @@ CPLErr GTADataset::SetGCPs(int, const GDAL_GCP *, const OGRSpatialReference *)
 GDALDataset *GTADataset::Open(GDALOpenInfo *poOpenInfo)
 
 {
-    if (poOpenInfo->nHeaderBytes < 5)
-        return nullptr;
-
-    if (!STARTS_WITH_CI((char *)poOpenInfo->pabyHeader, "GTA"))
+    if (GTADriverIdentify(poOpenInfo) == GDAL_IDENTIFY_FALSE)
         return nullptr;
 
     /* -------------------------------------------------------------------- */
@@ -1142,7 +1123,7 @@ GDALDataset *GTADataset::Open(GDALOpenInfo *poOpenInfo)
     {
         poDS->bHaveGeoTransform = true;
         ScanDoubles(poDS->oHeader.global_taglist().get("GDAL/GEO_TRANSFORM"),
-                    poDS->adfGeoTransform, 6);
+                    poDS->m_gt.data(), 6);
     }
     else
     {
@@ -1488,11 +1469,11 @@ static GDALDataset *GTACreateCopy(const char *pszFilename, GDALDataset *poSrcDS,
         {
             oHeader.global_taglist().set("GDAL/PROJECTION", pszWKT);
         }
-        double adfTransform[6];
-        if (poSrcDS->GetGeoTransform(adfTransform) == CE_None)
+        GDALGeoTransform gt;
+        if (poSrcDS->GetGeoTransform(gt) == CE_None)
         {
             oHeader.global_taglist().set("GDAL/GEO_TRANSFORM",
-                                         PrintDoubles(adfTransform, 6).c_str());
+                                         PrintDoubles(gt.data(), 6).c_str());
         }
         // GCPs
         if (poSrcDS->GetGCPCount() > 0)
@@ -1757,41 +1738,11 @@ static GDALDataset *GTACreateCopy(const char *pszFilename, GDALDataset *poSrcDS,
 void GDALRegister_GTA()
 
 {
-    if (GDALGetDriverByName("GTA") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
-
-    poDriver->SetDescription("GTA");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                              "Generic Tagged Arrays (.gta)");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/gta.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "gta");
-    poDriver->SetMetadataItem(
-        GDAL_DMD_CREATIONDATATYPES,
-        "Byte Int8 UInt16 Int16 UInt32 Int32 Float32 Float64 "
-        "CInt16 CInt32 CFloat32 CFloat64");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONOPTIONLIST,
-                              "<CreationOptionList>"
-                              "  <Option name='COMPRESS' type='string-select'>"
-                              "    <Value>NONE</Value>"
-                              "    <Value>BZIP2</Value>"
-                              "    <Value>XZ</Value>"
-                              "    <Value>ZLIB</Value>"
-                              "    <Value>ZLIB1</Value>"
-                              "    <Value>ZLIB2</Value>"
-                              "    <Value>ZLIB3</Value>"
-                              "    <Value>ZLIB4</Value>"
-                              "    <Value>ZLIB5</Value>"
-                              "    <Value>ZLIB6</Value>"
-                              "    <Value>ZLIB7</Value>"
-                              "    <Value>ZLIB8</Value>"
-                              "    <Value>ZLIB9</Value>"
-                              "  </Option>"
-                              "</CreationOptionList>");
-
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
+    GTADriverSetCommonMetadata(poDriver);
 
     poDriver->pfnOpen = GTADataset::Open;
     poDriver->pfnCreateCopy = GTACreateCopy;

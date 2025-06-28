@@ -1,5 +1,4 @@
 /*
- * $Id$
  *
  * python specific code for ogr bindings.
  */
@@ -12,6 +11,8 @@
   if ( OGRGetDriverCount() == 0 ) {
     OGRRegisterAll();
   }
+  // Will be turned on for GDAL 4.0
+  // UseExceptions();
 
 %}
 #endif
@@ -25,14 +26,14 @@
 %}
 */
 
-%include "ogr_layer_docs.i"
 #ifndef FROM_GDAL_I
-%include "ogr_datasource_docs.i"
-%include "ogr_driver_docs.i"
+%include "ogr_docs.i"
 #endif
+%include "ogr_layer_docs.i"
 %include "ogr_feature_docs.i"
 %include "ogr_featuredef_docs.i"
 %include "ogr_fielddef_docs.i"
+%include "ogr_fielddomain_docs.i"
 %include "ogr_geometry_docs.i"
 
 %rename (GetDriverCount) OGRGetDriverCount;
@@ -44,104 +45,57 @@
 %{
 #define MODULE_NAME           "ogr"
 %}
+#endif
 
 %include "python_exceptions.i"
 %include "python_strings.i"
 
-%extend OGRDataSourceShadow {
-  %pythoncode {
-    def Destroy(self):
-      "Once called, self has effectively been destroyed.  Do not access. For backwards compatibility only"
-      _ogr.delete_DataSource(self)
-      self.thisown = 0
+// Start: to be removed in GDAL 4.0
 
-    def Release(self):
-      "Once called, self has effectively been destroyed.  Do not access. For backwards compatibility only"
-      _ogr.delete_DataSource(self)
-      self.thisown = 0
+// Issue a FutureWarning in a number of functions and methods that will
+// be impacted when exceptions are enabled by default
 
-    def Reference(self):
-      "For backwards compatibility only."
-      return self.Reference()
+%pythoncode %{
 
-    def Dereference(self):
-      "For backwards compatibility only."
-      self.Dereference()
+hasWarnedAboutUserHasNotSpecifiedIfUsingExceptions = False
 
-    def __len__(self):
-        """Returns the number of layers on the datasource"""
-        return self.GetLayerCount()
-
-    def __getitem__(self, value):
-        """Support dictionary, list, and slice -like access to the datasource.
-        ds[0] would return the first layer on the datasource.
-        ds['aname'] would return the layer named "aname".
-        ds[0:4] would return a list of the first four layers."""
-        if isinstance(value, slice):
-            output = []
-            step = value.step if value.step else 1
-            for i in range(value.start, value.stop, step):
-                lyr = self.GetLayer(i)
-                if lyr is None:
-                    return output
-                output.append(lyr)
-            return output
-        if isinstance(value, int):
-            if value > len(self) - 1:
-                raise IndexError
-            return self.GetLayer(value)
-        elif isinstance(value, str):
-            return self.GetLayer(value)
-        else:
-            raise TypeError('Input %s is not of String or Int type' % type(value))
-
-    def GetLayer(self, iLayer=0):
-        """Return the layer given an index or a name"""
-        if isinstance(iLayer, str):
-            return self.GetLayerByName(str(iLayer))
-        elif isinstance(iLayer, int):
-            return self.GetLayerByIndex(iLayer)
-        else:
-            raise TypeError("Input %s is not of String or Int type" % type(iLayer))
-  }
-
-%feature("shadow") DeleteLayer %{
-    def DeleteLayer(self, value) -> "OGRErr":
-        """
-        DeleteLayer(DataSource self, value) -> OGRErr
-
-        Delete the indicated layer from the datasource.
-
-        For more details: :c:func:`OGR_DS_DeleteLayer`
-
-        Parameters
-        -----------
-        value: str | int
-            index or name of the layer to delete.
-
-        Returns
-        -------
-        int:
-            :py:const:`osgeo.ogr.OGRERR_NONE` on success, or :py:const:`osgeo.ogr.OGRERR_UNSUPPORTED_OPERATION` if deleting
-            layers is not supported for this datasource.
-        """
-
-        if isinstance(value, str):
-            for i in range(self.GetLayerCount()):
-                name = self.GetLayer(i).GetName()
-                if name == value:
-                    return $action(self, i)
-            raise ValueError("Layer %s not found to delete" % value)
-        elif isinstance(value, int):
-            return $action(self, value)
-        else:
-            raise TypeError("Input %s is not of String or Int type" % type(value))
+def _WarnIfUserHasNotSpecifiedIfUsingExceptions():
+    from . import gdal
+    if not hasattr(gdal, "hasWarnedAboutUserHasNotSpecifiedIfUsingExceptions") and not _UserHasSpecifiedIfUsingExceptions():
+        gdal.hasWarnedAboutUserHasNotSpecifiedIfUsingExceptions = True
+        import warnings
+        warnings.warn(
+            "Neither ogr.UseExceptions() nor ogr.DontUseExceptions() has been explicitly called. " +
+            "In GDAL 4.0, exceptions will be enabled by default.", FutureWarning)
 %}
 
-}
+// Need to ensure that gdal module has been loaded
+// when calling an ogr function that returns a gdal type.
+%pythonprepend Open %{
+    _WarnIfUserHasNotSpecifiedIfUsingExceptions()
+    from . import gdal
+%}
 
-#endif
+%pythonprepend OpenShared %{
+    from . import gdal
+%}
 
+%pythonprepend GetDriverByName %{
+    from . import gdal
+%}
+
+%pythonprepend GetDriver %{
+    from . import gdal
+%}
+
+// End: to be removed in GDAL 4.0
+
+%pythonprepend GeneralCmdLineProcessor %{
+    import os
+    for i in range(len(args[0])):
+        if isinstance(args[0][i], (os.PathLike, int)):
+            args[0][i] = str(args[0][i])
+%}
 
 %extend OGRLayerShadow {
   %pythoncode %{
@@ -198,6 +152,21 @@
         for i in fields:
             self.CreateField(i)
 
+    def __enter__(self):
+        """Method called when using Dataset.ExecuteSQL() as a context manager"""
+        if hasattr(self, "_dataset_weak_ref"):
+            self._dataset_strong_ref = self._dataset_weak_ref()
+            assert self._dataset_strong_ref is not None
+            del self._dataset_weak_ref
+            return self
+        raise Exception("__enter__() called in unexpected situation")
+
+    def __exit__(self, *args):
+        """Method called when using Dataset.ExecuteSQL() as a context manager"""
+        if hasattr(self, "_dataset_strong_ref"):
+            self._dataset_strong_ref.ReleaseResultSet(self)
+            del self._dataset_strong_ref
+
     def __iter__(self):
         self.ResetReading()
         while True:
@@ -213,6 +182,90 @@
             output.append(defn.GetFieldDefn(n))
         return output
     schema = property(schema)
+
+
+    def __arrow_c_stream__(self, requested_schema=None):
+        """
+        Export to a C ArrowArrayStream PyCapsule, according to
+        https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html
+
+        Also note that only one active stream can be queried at a time for a
+        given layer.
+
+        To specify options how the ArrowStream should be generated, use
+        the GetArrowArrayStreamInterface(self, options) method
+
+        Parameters
+        ----------
+        requested_schema : PyCapsule, default None
+            The schema to which the stream should be casted, passed as a
+            PyCapsule containing a C ArrowSchema representation of the
+            requested schema.
+            Currently, this is not supported and will raise a
+            NotImplementedError if the schema is not None
+
+        Returns
+        -------
+        PyCapsule
+            A capsule containing a C ArrowArrayStream struct.
+        """
+
+        if requested_schema is not None:
+            raise NotImplementedError("requested_schema != None not implemented")
+
+        return self.ExportArrowArrayStreamPyCapsule()
+
+
+    def GetArrowArrayStreamInterface(self, options = []):
+        """
+        Return a proxy object that implements the __arrow_c_stream__() method,
+        but allows the user to pass options.
+
+        Parameters
+        ----------
+        options : List of strings or dict with options such as INCLUDE_FID=NO, MAX_FEATURES_IN_BATCH=<number>, etc.
+
+        Returns
+        -------
+        a proxy object which implements the __arrow_c_stream__() method
+        """
+
+        class ArrowArrayStreamInterface:
+            def __init__(self, lyr, options):
+                self.lyr = lyr
+                self.options = options
+
+            def __arrow_c_stream__(self, requested_schema=None):
+                """
+                Export to a C ArrowArrayStream PyCapsule, according to
+                https://arrow.apache.org/docs/format/CDataInterface/PyCapsuleInterface.html
+
+                Also note that only one active stream can be queried at a time for a
+                given layer.
+
+                To specify options how the ArrowStream should be generated, use
+                the GetArrowArrayStreamInterface(self, options) method
+
+                Parameters
+                ----------
+                requested_schema : PyCapsule, default None
+                    The schema to which the stream should be casted, passed as a
+                    PyCapsule containing a C ArrowSchema representation of the
+                    requested schema.
+                    Currently, this is not supported and will raise a
+                    NotImplementedError if the schema is not None
+
+                Returns
+                -------
+                PyCapsule
+                    A capsule containing a C ArrowArrayStream struct.
+                """
+                if requested_schema is not None:
+                    raise NotImplementedError("requested_schema != None not implemented")
+
+                return self.lyr.ExportArrowArrayStreamPyCapsule(self.options)
+
+        return ArrowArrayStreamInterface(self, options)
 
 
     def GetArrowStreamAsPyArrow(self, options = []):
@@ -341,6 +394,103 @@
 
         return Stream(stream, use_masked_arrays)
 
+
+    def IsPyArrowSchemaSupported(self, pa_schema, options=[]):
+        """Returns whether the passed pyarrow Schema is supported by the layer, as a tuple (success: bool, errorMsg: str).
+
+           This may be used as a preliminary check before calling WritePyArrowBatch()
+        """
+
+        import pyarrow as pa
+        schema = ArrowSchema()
+        pa_schema._export_to_c(schema._getPtr())
+        return self.IsArrowSchemaSupported(schema, options)
+
+
+    def CreateFieldFromPyArrowSchema(self, pa_schema, options=[]):
+        """Create a field from the passed pyarrow Schema."""
+
+        import pyarrow as pa
+        schema = ArrowSchema()
+        pa_schema._export_to_c(schema._getPtr())
+        return self.CreateFieldFromArrowSchema(schema, options)
+
+
+    def WriteArrow(self, obj, requested_schema=None, createFieldsFromSchema=None, options=[]):
+        """Write the content of the passed object, which must implement the
+           __arrow_c_stream__ or __arrow_c_array__ interface, into the layer.
+
+           Parameters
+           ----------
+           obj:
+               Object implementing the __arrow_c_stream__ or __arrow_c_array__ interface
+
+           requested_schema: PyCapsule, object implementing __arrow_c_schema__ or None. Default None
+               The schema to which the stream should be casted, passed as a
+               PyCapsule containing a C ArrowSchema representation of the
+               requested schema, or an object implementing the __arrow_c_schema__ interface.
+
+           createFieldsFromSchema: boolean or None. Default to None
+               Whether OGRLayer::CreateFieldFromArrowSchema() should be called. If None
+               specified, it is called if no fields have been created yet
+
+           options: list of strings
+               Options to pass to OGRLayer::CreateFieldFromArrowSchema() and OGRLayer::WriteArrowBatch()
+
+        """
+
+        if createFieldsFromSchema is None:
+            createFieldsFromSchema = -1
+        elif createFieldsFromSchema is True:
+            createFieldsFromSchema = 1
+        else:
+            createFieldsFromSchema = 0
+
+        if requested_schema is not None and hasattr(requested_schema, "__arrow_c_schema__"):
+            requested_schema = requested_schema.__arrow_c_schema__()
+
+        if hasattr(obj, "__arrow_c_stream__"):
+            if requested_schema:
+                stream_capsule = obj.__arrow_c_stream__(requested_schema=requested_schema)
+            else:
+                # DuckDB 1.1 doesn't support the requested_schema argument at all
+                stream_capsule = obj.__arrow_c_stream__()
+
+            return self.WriteArrowStreamCapsule(stream_capsule, createFieldsFromSchema, options)
+
+        if hasattr(obj, "__arrow_c_array__"):
+            schema_capsule, array_capsule = obj.__arrow_c_array__(requested_schema=requested_schema)
+            return self.WriteArrowSchemaAndArrowArrayCapsule(schema_capsule, array_capsule, createFieldsFromSchema, options)
+
+        raise Exception("Passed object does not implement the __arrow_c_stream__ or __arrow_c_array__ interface.")
+
+
+    def WritePyArrow(self, pa_batch, options=[]):
+        """Write the content of the passed PyArrow batch (either a pyarrow.Table, a pyarrow.RecordBatch or a pyarrow.StructArray) into the layer.
+
+           See also the WriteArrow() method to be independent of PyArrow
+        """
+
+        import pyarrow as pa
+
+        # Is it a pyarrow.Table ?
+        if hasattr(pa_batch, "to_batches"):
+            for batch in pa_batch.to_batches():
+                if self.WritePyArrow(batch, options=options) != OGRERR_NONE:
+                    return OGRERR_FAILURE
+            return OGRERR_NONE
+
+        # Is it a pyarrow.RecordBatch ?
+        if hasattr(pa_batch, "columns") and hasattr(pa_batch, "schema"):
+            array = pa.StructArray.from_arrays(pa_batch.columns, names=pa_batch.schema.names)
+            return self.WritePyArrow(array, options=options)
+
+        # Assume it is a pyarrow.StructArray
+        schema = ArrowSchema()
+        array = ArrowArray()
+        pa_batch._export_to_c(array._getPtr(), schema._getPtr())
+        return self.WriteArrowBatch(schema, array, options)
+
   %}
 
 }
@@ -363,7 +513,9 @@
     def Destroy(self):
       "Once called, self has effectively been destroyed.  Do not access. For backwards compatibility only"
       _ogr.delete_Feature(self)
+      self._invalidate_geom_refs()
       self.thisown = 0
+      self.this = None
 
     def __cmp__(self, other):
         """Compares a feature to another for equality"""
@@ -387,8 +539,8 @@
     # This has some risk of name collisions.
     def __getattr__(self, key):
         """Returns the values of fields by the given name"""
-        if key == 'this':
-            return self.__dict__[key]
+        if key in ('this', 'thisown', '_geom_references'):
+            return self.__getattribute__(key)
 
         idx = self._getfieldindex(key)
         if idx < 0:
@@ -404,8 +556,8 @@
     # This has some risk of name collisions.
     def __setattr__(self, key, value):
         """Set the values of fields by the given name"""
-        if key == 'this' or key == 'thisown':
-            self.__dict__[key] = value
+        if key in ('this', 'thisown', '_geom_references'):
+            super().__setattr__(key, value)
         else:
             idx = self._getfieldindex(key)
             if idx != -1:
@@ -456,6 +608,36 @@
             return self._SetField2(fld_index, value)
 
     def GetField(self, fld_index):
+        """
+        Get the value of a field in its native type.
+
+        Alternatively, the ``[]`` operator may be used.
+
+        Parameters
+        ----------
+        fld_index : int / str
+            Field name or 0-based numeric index. For repeated
+            access, use of the numeric index avoids a lookup
+            step.
+
+        Examples
+        --------
+        >>> with gdal.OpenEx("data/poly.shp") as ds:
+        ...     lyr = ds.GetLayer(0)
+        ...     feature = lyr.GetNextFeature()
+        ...     # name-based access
+        ...     feature.GetField("EAS_ID")
+        ...     feature["EAS_ID"]
+        ...     # index-based access
+        ...     index = feature.GetFieldIndex("EAS_ID")
+        ...     feature.GetField(index)
+        ...     feature[index]
+        ...
+        168
+        168
+        168
+        168
+        """
         if isinstance(fld_index, str):
             fld_index = self._getfieldindex(fld_index)
         if (fld_index < 0) or (fld_index > self.GetFieldCount()):
@@ -491,6 +673,28 @@
             # For Python3 on non-UTF8 strings
             return self.GetFieldAsBinary(fld_index)
 
+    def SetFieldBinary(self, field_index_or_name, value):
+        """
+        SetFieldBinary(Feature self, field_index_or_name: int | str, value: bytes)
+
+        Set field to binary data.
+        This function currently only has an effect on :py:const:`OFTBinary` fields.
+        This function is the same as the C++ method :cpp:func:`OGRFeature::SetField`.
+
+        Parameters
+        -----------
+        field_index_or_name:
+            the field to set, from 0 to GetFieldCount()-1. Or the field name
+        values:
+            the data to apply.
+        """
+
+        if isinstance(field_index_or_name, str):
+            fld_index = self._getfieldindex(field_index_or_name)
+        else:
+            fld_index = field_index_or_name
+        self._SetFieldBinary(fld_index, value)
+
     def _SetField2(self, fld_index, value):
         if isinstance(fld_index, str):
             fld_index = self._getfieldindex(fld_index)
@@ -516,6 +720,10 @@
                 return
             else:
                 raise TypeError('Unsupported type of list in _SetField2(). Type of element is %s' % str(type(value[0])))
+
+        if isinstance(value, (bytes, bytearray, memoryview)) and self.GetFieldType(fld_index) == OFTBinary:
+            self._SetFieldBinary(fld_index, value)
+            return
 
         try:
             self.SetField(fld_index, value)
@@ -557,12 +765,28 @@
 
         return self.GetGeometryRef()
 
-    def ExportToJson(self, as_object=False, options=None):
-        """Exports a GeoJSON object which represents the Feature. The
-           as_object parameter determines whether the returned value
-           should be a Python object instead of a string. Defaults to False.
-           The options parameter is passed to Geometry.ExportToJson()"""
+    def __del__(self):
+        self._invalidate_geom_refs()
 
+    def __repr__(self):
+        return self.DumpReadableAsString()
+
+
+    def ExportToJson(self, as_object=False, options=None):
+        """
+        Export a GeoJSON object which represents the Feature.
+
+        Parameters
+        ----------
+        as_object : bool, default = False
+            determines whether the returned value should be a Python object instead of a string.
+        options : dict/str
+            Options to pass to :py:func:`Geometry.ExportToJson`
+
+        Returns
+        -------
+        str / dict
+        """
         try:
             import simplejson
         except ImportError:
@@ -602,6 +826,99 @@
         return output
 
 
+    def _add_geom_ref(self, geom):
+        if geom is None:
+            return
+
+        if not hasattr(self, '_geom_references'):
+            import weakref
+
+            self._geom_references = weakref.WeakSet()
+
+        self._geom_references.add(geom)
+
+
+    def _invalidate_geom_refs(self):
+        if hasattr(self, '_geom_references'):
+            for geom in self._geom_references:
+                geom.this = None
+
+%}
+
+%feature("shadow") SetGeometryDirectly %{
+    def SetGeometryDirectly(self, geom):
+        """
+        Set feature geometry.
+
+        This function updates the features geometry, and operates exactly as
+        :py:meth:`SetGeometry`, except that this function assumes ownership of the
+        passed geometry (even in case of failure of that function).
+
+        See :cpp:func:`OGRFeature::SetGeometryDirectly`.
+
+        This method has only an effect on the in-memory feature object. If
+        this object comes from a layer and the modifications must be
+        serialized back to the datasource, :py:meth:`Layer.SetFeature` must be used
+        afterwards. Or if this is a new feature, :py:meth:`Layer.CreateFeature` must be
+        used afterwards.
+
+        Parameters
+        -----------
+        geom : Geometry
+            geometry to apply to feature.
+
+        Returns
+        --------
+        int:
+            :py:const:`OGRERR_NONE` if successful, or
+            :py:const:`OGR_UNSUPPORTED_GEOMETRY_TYPE` if the geometry type is illegal for
+            the :py:class:`FeatureDefn` (checking not yet implemented).
+        """
+        ret = $action(self, geom)
+        if ret == OGRERR_NONE:
+            self._add_geom_ref(geom)
+        return ret
+%}
+
+%feature("shadow") SetGeomFieldDirectly %{
+    def SetGeomFieldDirectly(self, field, geom):
+        """
+        Set feature geometry of a specified geometry field.
+
+        This function updates the features geometry, and operates exactly as
+        :py:meth:`SetGeomField`, except that this function assumes ownership of the
+        passed geometry (even in case of failure of that function).
+
+        See :cpp:func:`OGRFeature::SetGeomFieldDirectly`.
+
+        Parameters
+        -----------
+        fld_index : int / str
+            Geometry field name or 0-based numeric index. For repeated
+            access, use of the numeric index avoids a lookup
+            step.
+        geom : Geometry
+            handle to the new geometry to apply to feature.
+
+        Returns
+        --------
+        int:
+            :py:const:`OGRERR_NONE` if successful, or
+            :py:const:`OGR_UNSUPPORTED_GEOMETRY_TYPE` if the geometry type is illegal for
+            the :py:class:`FeatureDefn` (checking not yet implemented).
+        """
+        ret = $action(self, field, geom)
+        if ret == OGRERR_NONE:
+            self._add_geom_ref(geom)
+        return ret
+%}
+
+%feature("pythonappend") GetGeometryRef %{
+    self._add_geom_ref(val)
+%}
+
+%feature("pythonappend") GetGeomFieldRef %{
+    self._add_geom_ref(val)
 %}
 
 %feature("shadow") SetField %{
@@ -609,33 +926,39 @@
     # to the right implementation, so we have to do it at hand
     def SetField(self, *args) -> "OGRErr":
         """
-        SetField(self, int id, char value)
-        SetField(self, char name, char value)
-        SetField(self, int id, int value)
-        SetField(self, char name, int value)
-        SetField(self, int id, double value)
-        SetField(self, char name, double value)
-        SetField(self, int id, int year, int month, int day, int hour, int minute,
-            int second, int tzflag)
-        SetField(self, char name, int year, int month, int day, int hour,
-            int minute, int second, int tzflag)
+        SetField(self, fld_index, value: str)
+        SetField(self, fld_name, value: str)
+        SetField(self, fld_index, value: int)
+        SetField(self, fld_name, value: int)
+        SetField(self, fld_index, value: float)
+        SetField(self, fld_name, value: float)
+        SetField(self, fld_index, year: int, month: int, day: int, hour: int, minute: int, second: int|float, tzflag: int)
+        SetField(self, fld_name, year: int, month: int, day: int, hour: int, minute: int, second: int|float, tzflag: int)
+        SetField(self, fld_index, value: bytes)
+        SetField(self, fld_name, value: bytes)
         """
 
         if len(args) == 2 and args[1] is None:
             return _ogr.Feature_SetFieldNull(self, args[0])
 
-        if len(args) == 2 and (type(args[1]) == type(1) or type(args[1]) == type(12345678901234)):
+        if len(args) == 2 and isinstance(args[1], int):
             fld_index = args[0]
             if isinstance(fld_index, str):
                 fld_index = self._getfieldindex(fld_index)
             return _ogr.Feature_SetFieldInteger64(self, fld_index, args[1])
-
 
         if len(args) == 2 and isinstance(args[1], str):
             fld_index = args[0]
             if isinstance(fld_index, str):
                 fld_index = self._getfieldindex(fld_index)
             return _ogr.Feature_SetFieldString(self, fld_index, args[1])
+
+        if len(args) == 2 and isinstance(args[1], (bytes, bytearray, memoryview)):
+            fld_index = args[0]
+            if isinstance(fld_index, str):
+                fld_index = self._getfieldindex(fld_index)
+            if self.GetFieldType(fld_index) == OFTBinary:
+                return self._SetFieldBinary(fld_index, args[1])
 
         return $action(self, *args)
 %}
@@ -671,8 +994,13 @@
   def __iter__(self):
       for i in range(self.GetGeometryCount()):
           yield self.GetGeometryRef(i)
-
 %}
+
+%feature("pythonappend") GetGeometryRef %{
+    if val is not None:
+        val._parent_geom = self
+%}
+
 }
 
 
@@ -702,6 +1030,11 @@
     self.thisown = 0
 
 }
+
+%feature("pythonprepend") GetFieldDefn %{
+    if type(args[0]) is str:
+        args = (self.GetFieldIndex(args[0]), )
+%}
 }
 
 %extend OGRFieldDefnShadow {
@@ -728,112 +1061,3 @@
 %}
 }
 #endif
-
-#ifdef no_longer_defined_since_it_breaks_py2exe_pyinstaller_ticket_6364
-%pythoncode %{
-
-# Backup original dictionary before doing anything else
-_initial_dict = globals().copy()
-
-@property
-def wkb25Bit(module):
-    import warnings
-    warnings.warn("ogr.wkb25DBit deprecated: use ogr.GT_Flatten(), ogr.GT_HasZ() or ogr.GT_SetZ() instead", DeprecationWarning)
-    return module._initial_dict['wkb25DBit']
-
-@property
-def wkb25DBit(module):
-    import warnings
-    warnings.warn("ogr.wkb25DBit deprecated: use ogr.GT_Flatten(), ogr.GT_HasZ() or ogr.GT_SetZ() instead", DeprecationWarning)
-    return module._initial_dict['wkb25DBit']
-
-# Inspired from http://www.dr-josiah.com/2013/12/properties-on-python-modules.html
-class _Module(object):
-    def __init__(self):
-        self.__dict__ = globals()
-        self._initial_dict = _initial_dict
-
-        # Transfer properties from the object to the Class
-        for k, v in list(self.__dict__.items()):
-            if isinstance(v, property):
-                setattr(self.__class__, k, v)
-                #del self.__dict__[k]
-
-        # Replace original module by our object
-        import sys
-        self._original_module = sys.modules[self.__name__]
-        sys.modules[self.__name__] = self
-
-# Custom help() replacement to display the help of the original module
-# instead of the one of our instance object
-class _MyHelper(object):
-
-    def __init__(self, module):
-        self.module = module
-        self.original_help = help
-
-        # Replace builtin help by ours
-        import builtins
-        builtins.help = self
-
-    def __repr__(self):
-        return self.original_help.__repr__()
-
-    def __call__(self, *args, **kwds):
-
-        if args == (self.module,):
-            import sys
-
-            # Restore original module before calling help() otherwise
-            # we don't get methods or classes mentioned
-            sys.modules[self.module.__name__] = self.module._original_module
-
-            ret = self.original_help(self.module._original_module, **kwds)
-
-            # Reinstall our module
-            sys.modules[self.module.__name__] = self.module
-
-            return ret
-        elif args == (self,):
-            return self.original_help(self.original_help, **kwds)
-        else:
-            return self.original_help(*args, **kwds)
-
-_MyHelper(_Module())
-del _MyHelper
-del _Module
-
-%}
-#endif
-
-%pythoncode %{
-
-import contextlib
-@contextlib.contextmanager
-def enable_exceptions():
-    """Temporarily enable exceptions.
-
-       Note: this will only affect the osgeo.ogr module. For gdal or osr
-       modules, use respectively osgeo.gdal.enable_exceptions() and
-       osgeo.osr.enable_exceptions().
-
-       Returns
-       -------
-            A context manager
-
-       Example
-       -------
-
-           with ogr.enable_exceptions():
-               ogr.VectorTranslate("out.gpkg", "in.shp")
-    """
-    if GetUseExceptions():
-        yield
-    else:
-        UseExceptions()
-        try:
-            yield
-        finally:
-            DontUseExceptions()
-
-%}

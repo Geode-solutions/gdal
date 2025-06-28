@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2002, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_oci.h"
@@ -98,7 +82,7 @@ void OGROCIStatement::Clean()
 
     if (hStatement != nullptr)
     {
-        OCIHandleFree((dvoid *)hStatement, (ub4)OCI_HTYPE_STMT);
+        OCIHandleFree(static_cast<dvoid *>(hStatement), (ub4)OCI_HTYPE_STMT);
         hStatement = nullptr;
     }
 }
@@ -126,20 +110,22 @@ CPLErr OGROCIStatement::Prepare(const char *pszSQLStatement)
     /* -------------------------------------------------------------------- */
     /*      Allocate a statement handle.                                    */
     /* -------------------------------------------------------------------- */
-    if (poSession->Failed(OCIHandleAlloc(poSession->hEnv, (dvoid **)&hStatement,
-                                         (ub4)OCI_HTYPE_STMT, (size_t)0,
-                                         (dvoid **)nullptr),
-                          "OCIHandleAlloc(Statement)"))
+    if (poSession->Failed(
+            OCIHandleAlloc(poSession->hEnv,
+                           reinterpret_cast<dvoid **>(&hStatement),
+                           (ub4)OCI_HTYPE_STMT, 0, nullptr),
+            "OCIHandleAlloc(Statement)"))
         return CE_Failure;
 
     /* -------------------------------------------------------------------- */
     /*      Prepare the statement.                                          */
     /* -------------------------------------------------------------------- */
     if (poSession->Failed(
-            OCIStmtPrepare(hStatement, poSession->hError,
-                           (text *)pszSQLStatement,
-                           static_cast<unsigned int>(strlen(pszSQLStatement)),
-                           (ub4)OCI_NTV_SYNTAX, (ub4)OCI_DEFAULT),
+            OCIStmtPrepare(
+                hStatement, poSession->hError,
+                reinterpret_cast<text *>(const_cast<char *>(pszSQLStatement)),
+                static_cast<unsigned int>(strlen(pszSQLStatement)),
+                (ub4)OCI_NTV_SYNTAX, (ub4)OCI_DEFAULT),
             "OCIStmtPrepare"))
         return CE_Failure;
 
@@ -157,19 +143,19 @@ CPLErr OGROCIStatement::BindObject(const char *pszPlaceName, void *pahObjects,
     OCIBind *hBindOrd = nullptr;
 
     if (poSession->Failed(
-            OCIBindByName(hStatement, &hBindOrd, poSession->hError,
-                          (text *)pszPlaceName, (sb4)strlen(pszPlaceName),
-                          (dvoid *)nullptr, (sb4)0, SQLT_NTY, (dvoid *)nullptr,
-                          (ub2 *)nullptr, (ub2 *)nullptr, (ub4)0,
-                          (ub4 *)nullptr, (ub4)OCI_DEFAULT),
+            OCIBindByName(
+                hStatement, &hBindOrd, poSession->hError,
+                reinterpret_cast<text *>(const_cast<char *>(pszPlaceName)),
+                (sb4)strlen(pszPlaceName), nullptr, 0, SQLT_NTY, nullptr,
+                nullptr, nullptr, (ub4)0, nullptr, (ub4)OCI_DEFAULT),
             "OCIBindByName()"))
         return CE_Failure;
 
-    if (poSession->Failed(OCIBindObject(hBindOrd, poSession->hError, hTDO,
-                                        (dvoid **)pahObjects, (ub4 *)nullptr,
-                                        (dvoid **)papIndicators,
-                                        (ub4 *)nullptr),
-                          "OCIBindObject()"))
+    if (poSession->Failed(
+            OCIBindObject(hBindOrd, poSession->hError, hTDO,
+                          reinterpret_cast<dvoid **>(pahObjects), nullptr,
+                          reinterpret_cast<dvoid **>(papIndicators), nullptr),
+            "OCIBindObject()"))
         return CE_Failure;
 
     return CE_None;
@@ -186,11 +172,12 @@ CPLErr OGROCIStatement::BindScalar(const char *pszPlaceName, void *pData,
     OCIBind *hBindOrd = nullptr;
 
     if (poSession->Failed(
-            OCIBindByName(hStatement, &hBindOrd, poSession->hError,
-                          (text *)pszPlaceName, (sb4)strlen(pszPlaceName),
-                          (dvoid *)pData, (sb4)nDataLen, (ub2)nSQLType,
-                          (dvoid *)paeInd, (ub2 *)nullptr, (ub2 *)nullptr,
-                          (ub4)0, (ub4 *)nullptr, (ub4)OCI_DEFAULT),
+            OCIBindByName(
+                hStatement, &hBindOrd, poSession->hError,
+                reinterpret_cast<text *>(const_cast<char *>(pszPlaceName)),
+                (sb4)strlen(pszPlaceName), static_cast<dvoid *>(pData),
+                (sb4)nDataLen, (ub2)nSQLType, static_cast<dvoid *>(paeInd),
+                nullptr, nullptr, 0, nullptr, (ub4)OCI_DEFAULT),
             "OCIBindByName()"))
         return CE_Failure;
     else
@@ -291,7 +278,7 @@ CPLErr OGROCIStatement::Execute(const char *pszSQLStatement, int nMode)
         OCIParam *hParamDesc;
 
         if (OCIParamGet(hStatement, OCI_HTYPE_STMT, poSession->hError,
-                        (dvoid **)&hParamDesc,
+                        reinterpret_cast<dvoid **>(&hParamDesc),
                         (ub4)nRawColumnCount + 1) != OCI_SUCCESS)
             break;
     }
@@ -323,7 +310,8 @@ CPLErr OGROCIStatement::Execute(const char *pszSQLStatement, int nMode)
          */
         if (poSession->Failed(
                 OCIParamGet(hStatement, OCI_HTYPE_STMT, poSession->hError,
-                            (dvoid **)&hParamDesc, (ub4)iParam + 1),
+                            reinterpret_cast<dvoid **>(&hParamDesc),
+                            (ub4)iParam + 1),
                 "OCIParamGet"))
             return CE_Failure;
 
@@ -376,10 +364,11 @@ CPLErr OGROCIStatement::Execute(const char *pszSQLStatement, int nMode)
         CPLAssert(((long)papszCurColumn[nOGRField]) % 2 == 0);
 
         if (poSession->Failed(
-                OCIDefineByPos(hStatement, &hDefn, poSession->hError,
-                               iParam + 1, (ub1 *)papszCurColumn[nOGRField],
-                               nBufWidth, SQLT_STR, panCurColumnInd + nOGRField,
-                               nullptr, nullptr, OCI_DEFAULT),
+                OCIDefineByPos(
+                    hStatement, &hDefn, poSession->hError, iParam + 1,
+                    reinterpret_cast<ub1 *>(papszCurColumn[nOGRField]),
+                    nBufWidth, SQLT_STR, panCurColumnInd + nOGRField, nullptr,
+                    nullptr, OCI_DEFAULT),
                 "OCIDefineByPos"))
             return CE_Failure;
     }

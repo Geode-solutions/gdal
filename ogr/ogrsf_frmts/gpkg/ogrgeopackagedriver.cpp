@@ -7,31 +7,24 @@
  ******************************************************************************
  * Copyright (c) 2013, Paul Ramsey <pramsey@boundlessgeo.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_geopackage.h"
 
 #include "tilematrixset.hpp"
+#include "gdalalgorithm.h"
+
+#include <cctype>
+#include <mutex>
 
 // g++ -g -Wall -fPIC -shared -o ogr_geopackage.so -Iport -Igcore -Iogr
 // -Iogr/ogrsf_frmts -Iogr/ogrsf_frmts/gpkg ogr/ogrsf_frmts/gpkg/*.c* -L. -lgdal
+
+static inline bool ENDS_WITH_CI(const char *a, const char *b)
+{
+    return strlen(a) >= strlen(b) && EQUAL(a + strlen(a) - strlen(b), b);
+}
 
 /************************************************************************/
 /*                       OGRGeoPackageDriverIdentify()                  */
@@ -90,7 +83,7 @@ static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo,
     /* http://opengis.github.io/geopackage/#_file_extension_name */
     /* But be tolerant, if the GPKG application id is found, because some */
     /* producers don't necessarily honour that requirement (#6396) */
-    const char *pszExt = CPLGetExtension(poOpenInfo->pszFilename);
+    const char *pszExt = poOpenInfo->osExtension.c_str();
     const bool bIsRecognizedExtension =
         EQUAL(pszExt, "GPKG") || EQUAL(pszExt, "GPKX");
 
@@ -148,7 +141,10 @@ static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo,
                 nUserVersion < GPKG_1_2_VERSION + 99) ||
                // Accept any 103XX version
                (nUserVersion >= GPKG_1_3_VERSION &&
-                nUserVersion < GPKG_1_3_VERSION + 99)))
+                nUserVersion < GPKG_1_3_VERSION + 99) ||
+               // Accept any 104XX version
+               (nUserVersion >= GPKG_1_4_VERSION &&
+                nUserVersion < GPKG_1_4_VERSION + 99)))
     {
 #ifdef DEBUG
         if (EQUAL(CPLGetFilename(poOpenInfo->pszFilename), ".cur_input"))
@@ -169,7 +165,7 @@ static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo,
                 "GPKG_WARN_UNRECOGNIZED_APPLICATION_ID", "YES"));
             if (bWarn)
             {
-                if (nUserVersion > GPKG_1_3_VERSION)
+                if (nUserVersion > GPKG_1_4_VERSION)
                 {
                     CPLError(CE_Warning, CPLE_AppDefined,
                              "This version of GeoPackage "
@@ -193,7 +189,7 @@ static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo,
             }
             else
             {
-                if (nUserVersion > GPKG_1_3_VERSION)
+                if (nUserVersion > GPKG_1_4_VERSION)
                 {
                     CPLDebug("GPKG",
                              "This version of GeoPackage "
@@ -222,7 +218,7 @@ static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo,
              && !EQUAL(CPLGetFilename(poOpenInfo->pszFilename), ".cur_input")
 #endif
              && !(STARTS_WITH(poOpenInfo->pszFilename, "/vsizip/") &&
-                  EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "zip")) &&
+                  poOpenInfo->IsExtensionEqualToCI("zip")) &&
              !STARTS_WITH(poOpenInfo->pszFilename, "/vsigzip/"))
     {
         if (bEmitWarning)
@@ -232,6 +228,13 @@ static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo,
                      "extension",
                      poOpenInfo->pszFilename);
         }
+    }
+
+    if ((poOpenInfo->nOpenFlags & GDAL_OF_RASTER) != 0 &&
+        ENDS_WITH_CI(poOpenInfo->pszFilename, ".gti.gpkg"))
+    {
+        // Most likely handled by GTI driver, but we can't be sure
+        return GDAL_IDENTIFY_UNKNOWN;
     }
 
     return TRUE;
@@ -244,13 +247,93 @@ static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
+/*                    OGRGeoPackageDriverGetSubdatasetInfo()            */
+/************************************************************************/
+
+struct OGRGeoPackageDriverSubdatasetInfo : public GDALSubdatasetInfo
+{
+  public:
+    explicit OGRGeoPackageDriverSubdatasetInfo(const std::string &fileName)
+        : GDALSubdatasetInfo(fileName)
+    {
+    }
+
+    // GDALSubdatasetInfo interface
+  private:
+    void parseFileName() override;
+};
+
+void OGRGeoPackageDriverSubdatasetInfo::parseFileName()
+{
+    if (!STARTS_WITH_CI(m_fileName.c_str(), "GPKG:"))
+    {
+        return;
+    }
+
+    CPLStringList aosParts{CSLTokenizeString2(m_fileName.c_str(), ":", 0)};
+    const int iPartsCount{CSLCount(aosParts)};
+
+    if (iPartsCount == 3 || iPartsCount == 4)
+    {
+
+        m_driverPrefixComponent = aosParts[0];
+
+        int subdatasetIndex{2};
+        const bool hasDriveLetter{
+            strlen(aosParts[1]) == 1 &&
+            std::isalpha(static_cast<unsigned char>(aosParts[1][0]))};
+
+        // Check for drive letter
+        if (iPartsCount == 4)
+        {
+            // Invalid
+            if (!hasDriveLetter)
+            {
+                return;
+            }
+            m_pathComponent = aosParts[1];
+            m_pathComponent.append(":");
+            m_pathComponent.append(aosParts[2]);
+            subdatasetIndex++;
+        }
+        else  // count is 3
+        {
+            if (hasDriveLetter)
+            {
+                return;
+            }
+            m_pathComponent = aosParts[1];
+        }
+
+        m_subdatasetComponent = aosParts[subdatasetIndex];
+    }
+}
+
+static GDALSubdatasetInfo *
+OGRGeoPackageDriverGetSubdatasetInfo(const char *pszFileName)
+{
+    if (STARTS_WITH_CI(pszFileName, "GPKG:"))
+    {
+        std::unique_ptr<GDALSubdatasetInfo> info =
+            std::make_unique<OGRGeoPackageDriverSubdatasetInfo>(pszFileName);
+        if (!info->GetSubdatasetComponent().empty() &&
+            !info->GetPathComponent().empty())
+        {
+            return info.release();
+        }
+    }
+    return nullptr;
+}
+
+/************************************************************************/
 /*                                Open()                                */
 /************************************************************************/
 
 static GDALDataset *OGRGeoPackageDriverOpen(GDALOpenInfo *poOpenInfo)
 {
     std::string osFilenameInGpkgZip;
-    if (!OGRGeoPackageDriverIdentify(poOpenInfo, osFilenameInGpkgZip, true))
+    if (OGRGeoPackageDriverIdentify(poOpenInfo, osFilenameInGpkgZip, true) ==
+        GDAL_IDENTIFY_FALSE)
         return nullptr;
 
     GDALGeoPackageDataset *poDS = new GDALGeoPackageDataset();
@@ -285,16 +368,16 @@ static GDALDataset *OGRGeoPackageDriverCreate(const char *pszFilename,
         }
         else
         {
-            const char *pszExt = CPLGetExtension(pszFilename);
+            const std::string osExt = CPLGetExtensionSafe(pszFilename);
             const bool bIsRecognizedExtension =
-                EQUAL(pszExt, "GPKG") || EQUAL(pszExt, "GPKX");
+                EQUAL(osExt.c_str(), "GPKG") || EQUAL(osExt.c_str(), "GPKX");
             if (!bIsRecognizedExtension)
             {
                 CPLError(
                     CE_Warning, CPLE_AppDefined,
                     "The filename extension should be 'gpkg' instead of '%s' "
                     "to conform to the GPKG specification.",
-                    pszExt);
+                    osExt.c_str());
             }
         }
     }
@@ -317,6 +400,12 @@ static GDALDataset *OGRGeoPackageDriverCreate(const char *pszFilename,
 static CPLErr OGRGeoPackageDriverDelete(const char *pszFilename)
 
 {
+    std::string osAuxXml(pszFilename);
+    osAuxXml += ".aux.xml";
+    VSIStatBufL sStat;
+    if (VSIStatL(osAuxXml.c_str(), &sStat) == 0)
+        CPL_IGNORE_RET_VAL(VSIUnlink(osAuxXml.c_str()));
+
     if (VSIUnlink(pszFilename) == 0)
         return CE_None;
     else
@@ -324,11 +413,12 @@ static CPLErr OGRGeoPackageDriverDelete(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                         RegisterOGRGeoPackage()                       */
+/*                          GDALGPKGDriver                              */
 /************************************************************************/
 
 class GDALGPKGDriver final : public GDALDriver
 {
+    std::mutex m_oMutex{};
     bool m_bInitialized = false;
 
     void InitializeCreationOptionList();
@@ -337,21 +427,26 @@ class GDALGPKGDriver final : public GDALDriver
     GDALGPKGDriver() = default;
 
     const char *GetMetadataItem(const char *pszName,
-                                const char *pszDomain) override
-    {
-        if (EQUAL(pszName, GDAL_DMD_CREATIONOPTIONLIST))
-        {
-            InitializeCreationOptionList();
-        }
-        return GDALDriver::GetMetadataItem(pszName, pszDomain);
-    }
+                                const char *pszDomain) override;
 
     char **GetMetadata(const char *pszDomain) override
     {
+        std::lock_guard oLock(m_oMutex);
         InitializeCreationOptionList();
         return GDALDriver::GetMetadata(pszDomain);
     }
 };
+
+const char *GDALGPKGDriver::GetMetadataItem(const char *pszName,
+                                            const char *pszDomain)
+{
+    std::lock_guard oLock(m_oMutex);
+    if (EQUAL(pszName, GDAL_DMD_CREATIONOPTIONLIST))
+    {
+        InitializeCreationOptionList();
+    }
+    return GDALDriver::GetMetadataItem(pszName, pszDomain);
+}
 
 #define COMPRESSION_OPTIONS                                                    \
     "  <Option name='TILE_FORMAT' type='string-select' scope='raster' "        \
@@ -406,6 +501,9 @@ void GDALGPKGDriver::InitializeCreationOptionList()
 
     const char *pszCOEnd =
         "  </Option>"
+        "  <Option name='ZOOM_LEVEL' type='integer' scope='raster' "
+        "description='Zoom level of full resolution. Only "
+        "used for TILING_SCHEME != CUSTOM' min='0' max='30'/>"
         "  <Option name='ZOOM_LEVEL_STRATEGY' type='string-select' "
         "scope='raster' description='Strategy to determine zoom level. Only "
         "used for TILING_SCHEME != CUSTOM' default='AUTO'>"
@@ -450,6 +548,7 @@ void GDALGPKGDriver::InitializeCreationOptionList()
         "     <Value>1.1</Value>"
         "     <Value>1.2</Value>"
         "     <Value>1.3</Value>"
+        "     <Value>1.4</Value>"
         "  </Option>"
         "  <Option name='DATETIME_FORMAT' type='string-select' "
         "description='How to encode DateTime not in UTC' default='WITH_TZ'>"
@@ -461,6 +560,11 @@ void GDALGPKGDriver::InitializeCreationOptionList()
         "description='Whether to add a gpkg_ogr_contents table to keep feature "
         "count' default='YES'/>"
 #endif
+        "  <Option name='CRS_WKT_EXTENSION' type='boolean' "
+        "description='Whether to create the database with the crs_wkt "
+        "extension'/>"
+        "  <Option name='METADATA_TABLES' type='boolean' "
+        "description='Whether to create the metadata related system tables'/>"
         "</CreationOptionList>";
 
     std::string osOptions(pszCOBegin);
@@ -483,6 +587,72 @@ void GDALGPKGDriver::InitializeCreationOptionList()
     SetMetadataItem(GDAL_DMD_CREATIONOPTIONLIST, osOptions.c_str());
 }
 
+/************************************************************************/
+/*                    OGRGeoPackageRepackAlgorithm                      */
+/************************************************************************/
+
+#ifndef _
+#define _(x) x
+#endif
+
+class OGRGeoPackageRepackAlgorithm final : public GDALAlgorithm
+{
+  public:
+    OGRGeoPackageRepackAlgorithm()
+        : GDALAlgorithm("repack", "Repack/vacuum in-place a GeoPackage dataset",
+                        "/drivers/vector/gpkg.html")
+    {
+        constexpr int type = GDAL_OF_RASTER | GDAL_OF_VECTOR | GDAL_OF_UPDATE;
+        auto &arg =
+            AddArg("dataset", 0, _("GeoPackage dataset"), &m_dataset, type)
+                .SetPositional()
+                .SetRequired();
+        SetAutoCompleteFunctionForFilename(arg, type);
+    }
+
+  protected:
+    bool RunImpl(GDALProgressFunc, void *) override;
+
+  private:
+    GDALArgDatasetValue m_dataset{};
+};
+
+bool OGRGeoPackageRepackAlgorithm::RunImpl(GDALProgressFunc, void *)
+{
+    auto poDS =
+        dynamic_cast<GDALGeoPackageDataset *>(m_dataset.GetDatasetRef());
+    if (!poDS)
+    {
+        ReportError(CE_Failure, CPLE_AppDefined, "%s is not a GeoPackage",
+                    m_dataset.GetName().c_str());
+        return false;
+    }
+    CPLErrorReset();
+    delete poDS->ExecuteSQL("VACUUM", nullptr, nullptr);
+    return CPLGetLastErrorType() == CE_None;
+}
+
+/************************************************************************/
+/*               OGRGeoPackageDriverInstantiateAlgorithm()              */
+/************************************************************************/
+
+static GDALAlgorithm *
+OGRGeoPackageDriverInstantiateAlgorithm(const std::vector<std::string> &aosPath)
+{
+    if (aosPath.size() == 1 && aosPath[0] == "repack")
+    {
+        return std::make_unique<OGRGeoPackageRepackAlgorithm>().release();
+    }
+    else
+    {
+        return nullptr;
+    }
+}
+
+/************************************************************************/
+/*                         RegisterOGRGeoPackage()                       */
+/************************************************************************/
+
 void RegisterOGRGeoPackage()
 {
     if (GDALGetDriverByName("GPKG") != nullptr)
@@ -502,6 +672,7 @@ void RegisterOGRGeoPackage()
     poDriver->SetMetadataItem(GDAL_DCAP_MEASURED_GEOMETRIES, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_Z_GEOMETRIES, "YES");
     poDriver->SetMetadataItem(GDAL_DMD_SUBDATASETS, "YES");
+    poDriver->SetMetadataItem(GDAL_DCAP_CREATE_SUBDATASETS, "YES");
     poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS,
                               "NATIVE OGRSQL SQLITE");
 
@@ -560,11 +731,23 @@ void RegisterOGRGeoPackage()
     poDriver->SetMetadataItem(
         GDAL_DS_LAYER_CREATIONOPTIONLIST,
         "<LayerCreationOptionList>"
+        "  <Option name='LAUNDER' type='boolean' description='Whether layer "
+        "and field names will be laundered.' default='NO'/>"
         "  <Option name='GEOMETRY_NAME' type='string' description='Name of "
         "geometry column.' default='geom' deprecated_alias='GEOMETRY_COLUMN'/>"
         "  <Option name='GEOMETRY_NULLABLE' type='boolean' "
         "description='Whether the values of the geometry column can be NULL' "
         "default='YES'/>"
+        "  <Option name='SRID' type='integer' description='Forced srs_id of "
+        "the "
+        "entry in the gpkg_spatial_ref_sys table to point to'/>"
+        "  <Option name='DISCARD_COORD_LSB' type='boolean' "
+        "description='Whether the geometry coordinate precision should be used "
+        "to set to zero non-significant least-significant bits of geometries. "
+        "Helps when further compression is used' default='NO'/>"
+        "  <Option name='UNDO_DISCARD_COORD_LSB_ON_READING' type='boolean' "
+        "description='Whether to ask GDAL to take into coordinate precision to "
+        "undo the effects of DISCARD_COORD_LSB' default='NO'/>"
         "  <Option name='FID' type='string' description='Name of the FID "
         "column to create' default='fid'/>"
         "  <Option name='OVERWRITE' type='boolean' description='Whether to "
@@ -586,16 +769,28 @@ void RegisterOGRGeoPackage()
         "     <Value>GPKG_ATTRIBUTES</Value>"
         "     <Value>NOT_REGISTERED</Value>"
         "  </Option>"
+        "  <Option name='DATETIME_PRECISION' type='string-select' "
+        "description='Number of components of datetime fields' "
+        "default='AUTO'>"
+        "     <Value>AUTO</Value>"
+        "     <Value>MILLISECOND</Value>"
+        "     <Value>SECOND</Value>"
+        "     <Value>MINUTE</Value>"
+        "  </Option>"
         "</LayerCreationOptionList>");
 
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATATYPES,
                               "Integer Integer64 Real String Date DateTime "
                               "Binary");
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES,
-                              "Boolean Int16 Float32");
-    poDriver->SetMetadataItem(
-        GDAL_DMD_ALTER_FIELD_DEFN_FLAGS,
-        "Name Type WidthPrecision Nullable Default Unique Domain");
+                              "Boolean Int16 Float32 JSON");
+    poDriver->SetMetadataItem(GDAL_DMD_CREATION_FIELD_DEFN_FLAGS,
+                              "WidthPrecision Nullable Default Unique "
+                              "Comment AlternativeName Domain");
+
+    poDriver->SetMetadataItem(GDAL_DMD_ALTER_FIELD_DEFN_FLAGS,
+                              "Name Type WidthPrecision Nullable Default "
+                              "Unique Domain AlternativeName Comment");
 
     poDriver->SetMetadataItem(GDAL_DCAP_NOTNULL_FIELDS, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_DEFAULT_FIELDS, "YES");
@@ -607,6 +802,8 @@ void RegisterOGRGeoPackage()
     poDriver->SetMetadataItem(GDAL_DCAP_CREATE_RELATIONSHIP, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_DELETE_RELATIONSHIP, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_UPDATE_RELATIONSHIP, "YES");
+    poDriver->SetMetadataItem(GDAL_DCAP_FLUSHCACHE_CONSISTENT_STATE, "YES");
+
     poDriver->SetMetadataItem(GDAL_DMD_RELATIONSHIP_FLAGS,
                               "ManyToMany Association");
 
@@ -621,6 +818,8 @@ void RegisterOGRGeoPackage()
         GDAL_DMD_RELATIONSHIP_RELATED_TABLE_TYPES,
         "features media simple_attributes attributes tiles");
 
+    poDriver->SetMetadataItem(GDAL_DCAP_HONOR_GEOM_COORDINATE_PRECISION, "YES");
+
 #ifdef ENABLE_SQL_GPKG_FORMAT
     poDriver->SetMetadataItem("ENABLE_SQL_GPKG_FORMAT", "YES");
 #endif
@@ -628,11 +827,20 @@ void RegisterOGRGeoPackage()
     poDriver->SetMetadataItem("SQLITE_HAS_COLUMN_METADATA", "YES");
 #endif
 
+    poDriver->SetMetadataItem(GDAL_DCAP_UPDATE, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_UPDATE_ITEMS,
+                              "DatasetMetadata BandMetadata RasterValues "
+                              "LayerMetadata Features");
+
     poDriver->pfnOpen = OGRGeoPackageDriverOpen;
     poDriver->pfnIdentify = OGRGeoPackageDriverIdentify;
     poDriver->pfnCreate = OGRGeoPackageDriverCreate;
     poDriver->pfnCreateCopy = GDALGeoPackageDataset::CreateCopy;
     poDriver->pfnDelete = OGRGeoPackageDriverDelete;
+    poDriver->pfnGetSubdatasetInfoFunc = OGRGeoPackageDriverGetSubdatasetInfo;
+
+    poDriver->pfnInstantiateAlgorithm = OGRGeoPackageDriverInstantiateAlgorithm;
+    poDriver->DeclareAlgorithm({"repack"});
 
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
 

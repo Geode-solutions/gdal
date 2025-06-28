@@ -48,7 +48,7 @@ default, it also builds on the fly a in-memory spatial index during
 the first sequential read of a layer. Following spatial filtering
 operations on that layer will then benefit from that spatial index. The
 building of this in-memory spatial index can be disabled by setting the
-:decl_configoption:`OPENFILEGDB_IN_MEMORY_SPI` configuration option to NO.
+:config:`OPENFILEGDB_IN_MEMORY_SPI` configuration option to NO.
 
 SQL support
 -----------
@@ -68,6 +68,7 @@ Geodatabases created with ArcGIS 10 or above)
 The "CREATE INDEX idx_name ON layer_name(field_name)" SQL request can be
 used to create an attribute index. idx_name must have 16 characters or less,
 start with a letter and contain only alphanumeric characters or underscore.
+Multiple column indices are not supported.
 
 The "RECOMPUTE EXTENT ON layer_name" SQL request can be used to trigger
 an update of the layer extent in layer metadata. This is useful when updating
@@ -79,11 +80,38 @@ compact the whole database or a given layer. This is useful when doing editions
 command causes the .gdbtable to be rewritten without holes. Note that compaction
 does not involve extent recomputation.
 
+Configuration options
+---------------------
+
+|about-config-options|
+The following configuration options are available:
+
+-  .. config:: OPENFILEGDB_IN_MEMORY_SPI
+      :choices: YES, NO
+
+      If ``YES``, an in-memory spatial index will be built instead of
+      using the native spatial index. See `Spatial filtering`_.
+
+
+-  .. config:: OPENFILEGDB_DEFAULT_STRING_WIDTH
+      :choices: <integer>
+
+      Width of string fields to use on creation, when the width specified to
+      CreateField() is the unspecified value 0. This defaults to 65536.
+
+
 Dataset open options
 --------------------
 
--  **LIST_ALL_TABLES**\ =YES/NO: This may be "YES" to force all tables,
-   including system and internal tables (such as the GDB_* tables) to be listed (since GDAL 3.4)
+|about-open-options|
+The following open options are supported:
+
+-  .. oo:: LIST_ALL_TABLES
+      :choices: YES, NO
+      :since: 3.4
+
+      This may be "YES" to force all tables,
+      including system and internal tables (such as the GDB_* tables) to be listed
 
 Dataset Creation Options
 ------------------------
@@ -93,16 +121,53 @@ None.
 Layer Creation Options
 ----------------------
 
--  **FEATURE_DATASET**\=string: When this option is set, the new layer will be
-   created inside the named FeatureDataset folder. If the folder does
-   not already exist, it will be created.
--  **LAYER_ALIAS**\=string: Set layer name alias.
--  **GEOMETRY_NAME**\=string: Set name of geometry column in new layer. Defaults
-   to "SHAPE".
--  **GEOMETRY_NULLABLE**\=YES/NO: Whether the values of the
-   geometry column can be NULL. Can be set to NO so that geometry is
-   required. Default to "YES"
--  **FID**: Name of the OID column to create. Defaults to "OBJECTID".
+|about-layer-creation-options|
+The following layer creation options are supported:
+
+-  .. lco:: TARGET_ARCGIS_VERSION
+      :choices: ALL, ARCGIS_PRO_3_2_OR_LATER
+      :default: ALL
+      :since: 3.9
+
+      ArcGIS version that the dataset must be compatible with.
+      If creation of Integer64, Date, Time field types is needed, the
+      ``ARCGIS_PRO_3_2_OR_LATER`` must be selected.
+      If set or let to the default value ``ALL``, those types will be
+      respectively be encoded to fallback types (Float64 instead of Integer64,
+      DateTime instead of Date or Time).
+
+-  .. lco:: FEATURE_DATASET
+      :choices: <string>
+
+      When this option is set, the new layer will be
+      created inside the named FeatureDataset folder. If the folder does
+      not already exist, it will be created.
+
+-  .. lco:: LAYER_ALIAS
+
+      Set layer name alias.
+
+      On reading, this information is exposed in the ALIAS_NAME layer metadata
+      item (GDAL >= 3.8).
+
+-  .. lco:: GEOMETRY_NAME
+      :default: SHAPE
+
+      Set name of geometry column in new layer.
+
+-  .. lco:: GEOMETRY_NULLABLE
+      :choices: YES, NO
+      :default: YES
+
+      Whether the values of the
+      geometry column can be NULL. Can be set to NO so that geometry is
+      required.
+
+-  .. lco:: FID
+      :default: OBJECTID
+
+      Name of the OID column to create.
+
 -  **XYTOLERANCE, ZTOLERANCE, MTOLERANCE**\=value: These parameters control the snapping
    tolerance used for advanced ArcGIS features like network and topology
    rules. They won't effect any OGR operations, but they will by used by
@@ -142,24 +207,46 @@ Layer Creation Options
    -  ZORIGIN and MORIGIN: -100000
    -  ZSCALE and MSCALE: 10000
 
--  **COLUMN_TYPES**\=string. A list of strings of format field_name=fgdb_field_type
-   (separated by comma) to force the FileGDB column type of fields to be created.
+-  .. lco:: COLUMN_TYPES
 
--  **DOCUMENTATION**\=string. XML documentation for the layer.
+      A list of strings of format field_name=fgdb_field_type
+      (separated by comma) to force the FileGDB column type of fields to be created.
 
--  **CONFIGURATION_KEYWORD**\=DEFAULTS/MAX_FILE_SIZE_4GB/MAX_FILE_SIZE_256TB:
-   Customize how data is stored. By default text in UTF-8 and data up to 1TB
+-  .. lco:: DOCUMENTATION
+      :choices: <string>
 
--  **CREATE_SHAPE_AREA_AND_LENGTH_FIELDS**\=YES/NO.
-   Defaults to NO (through CreateLayer() API). When this option is set,
-   a Shape_Area and Shape_Length special fields will be created for polygonal
-   layers (Shape_Length only for linear layers). These fields will automatically
-   be populated with the feature's area or length whenever a new feature is
-   added to the dataset or an existing feature is amended.
-   When using ogr2ogr with a source layer that has Shape_Area/Shape_Length
-   special fields, and this option is not explicitly specified, it will be
-   automatically set, so that the resulting FileGeodatabase has those fields
-   properly tagged.
+      XML documentation for the layer.
+
+-  .. lco:: CONFIGURATION_KEYWORD
+      :choices: DEFAULTS, MAX_FILE_SIZE_4GB, MAX_FILE_SIZE_256TB
+
+      Customize how data is stored. By default text in UTF-8 and data up to 1TB
+
+-  .. lco:: CREATE_SHAPE_AREA_AND_LENGTH_FIELDS
+      :choices: YES, NO
+      :default: NO
+
+      When this option is set,
+      a Shape_Area and Shape_Length special fields will be created for polygonal
+      layers (Shape_Length only for linear layers). These fields will automatically
+      be populated with the feature's area or length whenever a new feature is
+      added to the dataset or an existing feature is amended.
+      When using ogr2ogr with a source layer that has Shape_Area/Shape_Length
+      special fields, and this option is not explicitly specified, it will be
+      automatically set, so that the resulting FileGeodatabase has those fields
+      properly tagged.
+
+64-bit integer field support
+----------------------------
+
+.. versionadded:: 3.9
+
+On creation, 64-bit integer field support requires setting the :lco:`TARGET_ARCGIS_VERSION`
+layer creation option to ``ARCGIS_PRO_3_2_OR_LATER``.
+Note that Esri `recommends <https://pro.arcgis.com/en/pro-app/latest/help/data/geodatabases/overview/arcgis-field-data-types.htm#ESRI_SECTION2_8BF2454C879941258DC44AF6BB31F386>`__ to restrict the
+range of 64-bit integer values to [-9007199254740991, 9007199254740991] for the
+larger compatibility. GDAL will allow writing values outside of that range without
+warning, and can also read them fine.
 
 Field domains
 -------------
@@ -175,12 +262,12 @@ Relationships
 
 Relationship retrieval, creation, deletion and updating is supported.
 
-Hiearchical organization
-------------------------
+Hierarchical organization
+-------------------------
 
 .. versionadded:: 3.4
 
-The hiearchical organization of tables and feature classes as top-level
+The hierarchical organization of tables and feature classes as top-level
 element or within a feature dataset can be explored using the methods
 :cpp:func:`GDALDataset::GetRootGroup`,
 :cpp:func:`GDALGroup::GetGroupNames`, :cpp:func:`GDALGroup::OpenGroup`,
@@ -200,26 +287,59 @@ Note that this emulation has an unspecified behavior in case of
 concurrent updates (with different connections in the same or another
 process).
 
-Comparison with the FileGDB driver
-----------------------------------
+Geometry coordinate precision
+-----------------------------
 
-(Comparison done with a FileGDB driver using FileGDB API SDK 1.4)
+.. versionadded:: GDAL 3.9
 
-Advantages of the OpenFileGDB driver:
+The driver supports reading and writing the geometry coordinate
+precision, using the XYResolution, ZResolution and MResolution members of
+the :cpp:class:`OGRGeomCoordinatePrecision` settings of the
+:cpp:class:`OGRGeomFieldDefn`. ``XYScale`` is computed as 1.0 / ``XYResolution``
+(and similarly for the Z and M components). The tolerance setting is computed
+as being one tenth of the resolution
+
+On reading, the coordinate precision grid parameters are returned as format
+specific options of :cpp:class:`OGRGeomCoordinatePrecision` with the
+``FileGeodatabase`` format key, with the following option key names:
+``XYScale``, ``XYTolerance``, ``XYOrigin``,
+``ZScale``, ``ZTolerance``, ``ZOrigin``,
+``MScale``, ``MTolerance``, ``MOrigin``. On writing, they are also honored
+(they will have precedence over XYResolution, ZResolution and MResolution).
+
+On layer creation, the XORIGIN, YORIGIN, ZORIGIN, MORIGIN, XYSCALE, ZSCALE,
+ZORIGIN, XYTOLERANCE, ZTOLERANCE, MTOLERANCE layer creation options will be
+used in priority over the settings of :cpp:class:`OGRGeomCoordinatePrecision`.
+
+Advantages of the OpenFileGDB driver, compared to the FileGDB driver
+--------------------------------------------------------------------
 
 -  Can read ArcGIS 9.X Geodatabases, and not only 10 or above.
+
 -  Can open layers with any spatial reference system.
+
 -  Thread-safe (i.e. datasources can be processed in parallel).
+
 -  Uses the VSI Virtual File API, enabling the user to read a
    Geodatabase in a ZIP file or stored on a HTTP server.
+
 -  Faster on databases with a big number of fields.
+
 -  Does not depend on a third-party library.
+
 -  Robust against corrupted Geodatabase files.
 
-Drawbacks of the OpenFileGDB driver:
+Limitations
+-----------
 
--  Cannot read data from compressed data in CDF format (Compressed Data
-   Format).
+-  Reading data compressed in SDC format (Smart Data Compression) or in
+   CDF format (Compressed Data Format) is not supported. For CDF,
+   the :ref:`FileGDB driver <vector.filegdb>` can be used.
+
+-  Support for tables with 64-bit OBJECTIDs (which require GDAL >= 3.10), where
+   OBJECTIDs are sparse, is read-only and incomplete.
+   The driver will emit a warning if such situation occurs, and will attribute
+   non-faithful OBJECTIDs.
 
 Examples
 --------

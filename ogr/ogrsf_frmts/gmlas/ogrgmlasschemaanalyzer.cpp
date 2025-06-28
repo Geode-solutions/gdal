@@ -9,23 +9,7 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "xercesc_headers.h"
@@ -105,10 +89,10 @@ void GMLASPrefixMappingHander::startElement(const XMLCh *const uri,
     if (osURI == szXS_URI && osLocalname == "schema")
     {
         bool bIsGML = false;
-        CPLString osVersion;
+        std::string osVersion;
         for (unsigned int i = 0; i < attrs.getLength(); i++)
         {
-            CPLString osAttrLocalName(transcode(attrs.getLocalName(i)));
+            const std::string osAttrLocalName(transcode(attrs.getLocalName(i)));
             if (osAttrLocalName == "targetNamespace")
             {
                 bIsGML = transcode(attrs.getValue(i)) == szGML_URI;
@@ -120,7 +104,7 @@ void GMLASPrefixMappingHander::startElement(const XMLCh *const uri,
         }
         if (bIsGML && !osVersion.empty())
         {
-            m_osGMLVersionFound = osVersion;
+            m_osGMLVersionFound = std::move(osVersion);
         }
     }
 }
@@ -165,12 +149,12 @@ void GMLASPrefixMappingHander::startPrefixMapping(const XMLCh *const prefix,
 /************************************************************************/
 
 static void CollectNamespacePrefixes(
-    const char *pszXSDFilename, VSILFILE *fpXSD,
+    const char *pszXSDFilename, const std::shared_ptr<VSIVirtualHandle> &fpXSD,
     std::map<CPLString, CPLString> &oMapURIToPrefix,
     const std::map<CPLString, CPLString> &oMapDocNSURIToPrefix,
     CPLString &osGMLVersionFound)
 {
-    GMLASInputSource oSource(pszXSDFilename, fpXSD, false);
+    GMLASInputSource oSource(pszXSDFilename, fpXSD);
     // This is a bit silly but the startPrefixMapping() callback only gets
     // called when using SAX2XMLReader::parse(), and not when using
     // loadGrammar(), so we have to parse the doc twice.
@@ -182,6 +166,8 @@ static void CollectNamespacePrefixes(
 
     GMLASErrorHandler oErrorHandler;
     poReader->setErrorHandler(&oErrorHandler);
+
+    poReader->setFeature(XMLUni::fgXercesDisableDefaultEntityResolution, true);
 
     std::string osErrorMsg;
     try
@@ -235,8 +221,9 @@ class GMLASAnalyzerEntityResolver final : public GMLASBaseEntityResolver
     {
     }
 
-    virtual void DoExtraSchemaProcessing(const CPLString &osFilename,
-                                         VSILFILE *fp) override;
+    virtual void DoExtraSchemaProcessing(
+        const CPLString &osFilename,
+        const std::shared_ptr<VSIVirtualHandle> &fp) override;
 };
 
 /************************************************************************/
@@ -244,11 +231,11 @@ class GMLASAnalyzerEntityResolver final : public GMLASBaseEntityResolver
 /************************************************************************/
 
 void GMLASAnalyzerEntityResolver::DoExtraSchemaProcessing(
-    const CPLString &osFilename, VSILFILE *fp)
+    const CPLString &osFilename, const std::shared_ptr<VSIVirtualHandle> &fp)
 {
     CollectNamespacePrefixes(osFilename, fp, m_oMapURIToPrefix,
                              m_oMapDocNSURIToPrefix, m_osGMLVersionFound);
-    VSIFSeekL(fp, 0, SEEK_SET);
+    fp->Seek(0, SEEK_SET);
 }
 
 /************************************************************************/
@@ -304,7 +291,7 @@ CPLString GMLASSchemaAnalyzer::GetPrefix(const CPLString &osNamespaceURI)
             osPrefix = osNamespaceURI;
         for (size_t i = 0; i < osPrefix.size(); i++)
         {
-            if (!isalnum(osPrefix[i]))
+            if (!isalnum(static_cast<unsigned char>(osPrefix[i])))
                 osPrefix[i] = '_';
         }
         m_oMapURIToPrefix[osNamespaceURI] = osPrefix;
@@ -546,7 +533,7 @@ bool GMLASSchemaAnalyzer::LaunderFieldNames(GMLASFeatureClass &oClass)
         for (size_t i = 0; i < aoFields.size(); i++)
         {
             char *pszLaundered =
-                OGRPGCommonLaunderName(aoFields[i].GetName(), "GMLAS");
+                OGRPGCommonLaunderName(aoFields[i].GetName(), "GMLAS", false);
             aoFields[i].SetName(pszLaundered);
             CPLFree(pszLaundered);
         }
@@ -637,7 +624,7 @@ void GMLASSchemaAnalyzer::LaunderClassNames()
         for (size_t i = 0; i < aoClasses.size(); i++)
         {
             char *pszLaundered =
-                OGRPGCommonLaunderName(aoClasses[i]->GetName(), "GMLAS");
+                OGRPGCommonLaunderName(aoClasses[i]->GetName(), "GMLAS", false);
             aoClasses[i]->SetName(pszLaundered);
             CPLFree(pszLaundered);
         }
@@ -690,6 +677,7 @@ template <class T> class GMLASUniquePtr
     explicit GMLASUniquePtr(T *p) : m_p(p)
     {
     }
+
     ~GMLASUniquePtr()
     {
         delete m_p;
@@ -705,6 +693,7 @@ template <class T> class GMLASUniquePtr
     {
         return m_p;
     }
+
     T *release()
     {
         T *ret = m_p;
@@ -869,8 +858,10 @@ bool GMLASSchemaAnalyzer::Analyze(GMLASXSDCache &oCache,
         //
         poParser->setFeature(XMLUni::fgXercesSchema, true);
 
+#ifndef __COVERITY__
         // coverity[unsafe_xml_parse_config]
         poParser->setFeature(XMLUni::fgXercesValidationErrorAsFatal, false);
+#endif
 
         // Use the loaded grammar during parsing.
         //
@@ -880,6 +871,9 @@ bool GMLASSchemaAnalyzer::Analyze(GMLASXSDCache &oCache,
         // xsi:schemaLocation attributes).
         //
         poParser->setFeature(XMLUni::fgXercesLoadSchema, false);
+
+        poParser->setFeature(XMLUni::fgXercesDisableDefaultEntityResolution,
+                             true);
 
         Grammar *poGrammar = nullptr;
         if (!GMLASReader::LoadXSDInParser(
@@ -907,7 +901,7 @@ bool GMLASSchemaAnalyzer::Analyze(GMLASXSDCache &oCache,
             // namespace URI initially
             if (osURI.empty())
                 aoXSDs[i].first = osGrammarURI;
-            aoNamespaces.push_back(osGrammarURI);
+            aoNamespaces.push_back(std::move(osGrammarURI));
         }
     }
 
@@ -1118,7 +1112,7 @@ bool GMLASSchemaAnalyzer::Analyze(GMLASXSDCache &oCache,
                 XSComplexTypeDefinition *poCT = IsEltCompatibleOfFC(poEltDecl);
                 if (!poEltDecl->getAbstract() && poCT != nullptr)
                 {
-                    const CPLString osXPath(
+                    CPLString osXPath(
                         MakeXPath(transcode(poEltDecl->getNamespace()),
                                   transcode(poEltDecl->getName())));
                     if (!IsIgnoredXPath(osXPath))
@@ -1146,7 +1140,8 @@ bool GMLASSchemaAnalyzer::Analyze(GMLASXSDCache &oCache,
                             {
                                 m_oSetEltsForTopClass.insert(poEltDecl);
                                 oVectorEltsForTopClass.push_back(poEltDecl);
-                                aoSetXPathEltsForTopClass.insert(osXPath);
+                                aoSetXPathEltsForTopClass.insert(
+                                    std::move(osXPath));
                             }
                         }
                         else
@@ -1287,7 +1282,7 @@ static CPLString GetAnnotationDoc(const XSElementDeclaration *poEltDecl)
         osDoc += osDoc2;
     }
     else if (!osDoc2.empty())
-        osDoc = osDoc2;
+        osDoc = std::move(osDoc2);
     return osDoc;
 }
 
@@ -1376,7 +1371,7 @@ bool GMLASSchemaAnalyzer::InstantiateClassFromEltDeclaration(
         if (!LaunderFieldNames(oClass))
             return false;
 
-        m_aoClasses.push_back(oClass);
+        m_aoClasses.push_back(std::move(oClass));
         return true;
     }
     return false;
@@ -1564,23 +1559,30 @@ static bool IsAnyType(XSComplexTypeDefinition *poType)
 /*                       SetFieldFromAttribute()                        */
 /************************************************************************/
 
-void GMLASSchemaAnalyzer::SetFieldFromAttribute(GMLASField &oField,
+bool GMLASSchemaAnalyzer::SetFieldFromAttribute(GMLASField &oField,
                                                 XSAttributeUse *poAttr,
                                                 const CPLString &osXPathPrefix,
                                                 const CPLString &osNamePrefix)
 {
-    XSAttributeDeclaration *poAttrDecl = poAttr->getAttrDeclaration();
-    XSSimpleTypeDefinition *poAttrType = poAttrDecl->getTypeDefinition();
-
-    SetFieldTypeAndWidthFromDefinition(poAttrType, oField);
-
-    CPLString osNS(transcode(poAttrDecl->getNamespace()));
-    CPLString osName(transcode(poAttrDecl->getName()));
+    const XSAttributeDeclaration *poAttrDecl = poAttr->getAttrDeclaration();
+    const CPLString osNS(transcode(poAttrDecl->getNamespace()));
+    const CPLString osName(transcode(poAttrDecl->getName()));
 
     if (osNamePrefix.empty())
         oField.SetName(osName);
     else
         oField.SetName(osNamePrefix + "_" + osName);
+
+    XSSimpleTypeDefinition *poAttrType = poAttrDecl->getTypeDefinition();
+    if (!poAttrType)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Cannot get type definition for attribute %s",
+                 oField.GetName().c_str());
+        return false;
+    }
+
+    SetFieldTypeAndWidthFromDefinition(poAttrType, oField);
 
     oField.SetXPath(osXPathPrefix + "/@" + MakeXPath(osNS, osName));
     if (poAttr->getRequired())
@@ -1618,6 +1620,8 @@ void GMLASSchemaAnalyzer::SetFieldFromAttribute(GMLASField &oField,
     }
 
     oField.SetDocumentation(GetAnnotationDoc(poAttrDecl->getAnnotation()));
+
+    return true;
 }
 
 /************************************************************************/
@@ -1733,7 +1737,7 @@ static OGRwkbGeometryType GetOGRGeometryType(XSTypeDefinition *poTypeDef)
                    {"MultiSurfacePropertyType", wkbMultiSurface},
                    {"MultiSolidPropertyType", wkbUnknown},
                    // GeometryArrayPropertyType ?
-                   // GeometricPrimitivePropertyType ?
+                   {"GeometricPrimitivePropertyType", wkbUnknown},
                    {"CurvePropertyType", wkbCurve},
                    {"SurfacePropertyType", wkbSurface},
                    // SurfaceArrayPropertyType ?
@@ -1935,7 +1939,7 @@ void GMLASSchemaAnalyzer::CreateNonNestedRelationship(
                 BuildJunctionTableXPath(osElementXPath, osSubEltXPath));
             oJunctionTable.SetParentXPath(oClass.GetXPath());
             oJunctionTable.SetChildXPath(osSubEltXPath);
-            m_aoClasses.push_back(oJunctionTable);
+            m_aoClasses.push_back(std::move(oJunctionTable));
 
             // Add an abstract field
             GMLASField oField;
@@ -2067,7 +2071,7 @@ bool GMLASSchemaAnalyzer::FindElementsWithMustBeToLevel(
             XSTypeDefinition *poTypeDef = poElt->getTypeDefinition();
             const CPLString osEltName(transcode(poElt->getName()));
             const CPLString osEltNS(transcode(poElt->getNamespace()));
-            const CPLString osXPath(MakeXPath(osEltNS, osEltName));
+            CPLString osXPath(MakeXPath(osEltNS, osEltName));
             const CPLString osFullXPath(osParentXPath + "/" + osXPath);
 
 #ifdef DEBUG_SUPER_VERBOSE
@@ -2129,7 +2133,7 @@ bool GMLASSchemaAnalyzer::FindElementsWithMustBeToLevel(
             {
                 if (!apoChildrenElements.empty())
                 {
-                    apoImplEltList = apoChildrenElements;
+                    apoImplEltList = std::move(apoChildrenElements);
                 }
                 else if (!poElt->getAbstract())
                 {
@@ -2244,7 +2248,8 @@ bool GMLASSchemaAnalyzer::FindElementsWithMustBeToLevel(
 #endif
                                 m_oSetEltsForTopClass.insert(poElt);
                                 oVectorEltsForTopClass.push_back(poElt);
-                                aoSetXPathEltsForTopClass.insert(osXPath);
+                                aoSetXPathEltsForTopClass.insert(
+                                    std::move(osXPath));
                             }
                         }
                     }
@@ -2268,8 +2273,11 @@ bool GMLASSchemaAnalyzer::FindElementsWithMustBeToLevel(
                                 XSAttributeUse *poAttr =
                                     poAttrList->elementAt(j);
                                 GMLASField oField;
-                                SetFieldFromAttribute(oField, poAttr,
-                                                      osFullXPath);
+                                if (!SetFieldFromAttribute(oField, poAttr,
+                                                           osFullXPath))
+                                {
+                                    return false;
+                                }
                                 if (!IsIgnoredXPath(oField.GetXPath()) &&
                                     oField.GetFixedValue().empty())
                                 {
@@ -2335,7 +2343,11 @@ bool GMLASSchemaAnalyzer::FindElementsWithMustBeToLevel(
                         {
                             XSAttributeUse *poAttr = poAttrList->elementAt(j);
                             GMLASField oField;
-                            SetFieldFromAttribute(oField, poAttr, osFullXPath);
+                            if (!SetFieldFromAttribute(oField, poAttr,
+                                                       osFullXPath))
+                            {
+                                return false;
+                            }
                             if (!IsIgnoredXPath(oField.GetXPath()) &&
                                 oField.GetFixedValue().empty())
                             {
@@ -2598,7 +2610,10 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
         {
             GMLASField oField;
             XSAttributeUse *poAttr = poMainAttrList->elementAt(j);
-            SetFieldFromAttribute(oField, poAttr, oClass.GetXPath());
+            if (!SetFieldFromAttribute(oField, poAttr, oClass.GetXPath()))
+            {
+                return false;
+            }
 
             if (IsIgnoredXPath(oField.GetXPath()))
             {
@@ -2981,8 +2996,11 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                     CPLString osNamePrefix(bMoveNestedClassToTop
                                                ? osPrefixedEltName
                                                : CPLString());
-                    SetFieldFromAttribute(oField, poAttr, osElementXPath,
-                                          osNamePrefix);
+                    if (!SetFieldFromAttribute(oField, poAttr, osElementXPath,
+                                               osNamePrefix))
+                    {
+                        return false;
+                    }
                     if (nMinOccurs == 0 || bIsChoice)
                     {
                         oField.SetMinOccurs(0);
@@ -3006,7 +3024,7 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                         }
                     }
 
-                    aoFields.push_back(oField);
+                    aoFields.push_back(std::move(oField));
                 }
 
                 // Deal with anyAttributes (or any element that also imply it)
@@ -3028,7 +3046,7 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                     oField.SetDocumentation(
                         GetAnnotationDoc(poAttrWildcard->getAnnotation()));
 
-                    aoFields.push_back(oField);
+                    aoFields.push_back(std::move(oField));
                 }
 
                 XSSimpleTypeDefinition *poST = poEltCT->getSimpleType();
@@ -3086,7 +3104,7 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                             oFieldNil.SetType(GMLAS_FT_BOOLEAN, "boolean");
                             oFieldNil.SetMinOccurs(0);
                             oFieldNil.SetMaxOccurs(1);
-                            aoFields.push_back(oFieldNil);
+                            aoFields.push_back(std::move(oFieldNil));
                         }
                     }
                     oField.SetXPath(osElementXPath);
@@ -3128,7 +3146,7 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                     oField.SetXPath(osElementXPath);
                     oField.SetDocumentation(GetAnnotationDoc(poElt));
 
-                    aoFields.push_back(oField);
+                    aoFields.push_back(std::move(oField));
                 }
 
                 // Is it an element that we already visited ? (cycle)
@@ -3243,7 +3261,7 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                                                       "boolean");
                                     oFieldNil.SetMinOccurs(0);
                                     oFieldNil.SetMaxOccurs(1);
-                                    aoFields.push_back(oFieldNil);
+                                    aoFields.push_back(std::move(oFieldNil));
                                 }
 
                                 GMLASField oField;
@@ -3262,7 +3280,7 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                                     GMLASField::
                                         PATH_TO_CHILD_ELEMENT_WITH_LINK);
                                 oField.SetRelatedClassXPath(osTargetElement);
-                                aoFields.push_back(oField);
+                                aoFields.push_back(std::move(oField));
                             }
                         }
                         else if (poTargetElt != nullptr &&
@@ -3282,7 +3300,7 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                                 oFieldNil.SetType(GMLAS_FT_BOOLEAN, "boolean");
                                 oFieldNil.SetMinOccurs(0);
                                 oFieldNil.SetMaxOccurs(1);
-                                aoFields.push_back(oFieldNil);
+                                aoFields.push_back(std::move(oFieldNil));
                             }
 
                             // e.g importing
@@ -3338,7 +3356,7 @@ bool GMLASSchemaAnalyzer::ExploreModelGroup(
                                 oField.SetMinOccurs(0);
                                 oField.SetNotNullable(false);
                             }
-                            aoFields.push_back(oField);
+                            aoFields.push_back(std::move(oField));
                         }
 
                         aoNestedClasses = oNestedClass.GetNestedClasses();

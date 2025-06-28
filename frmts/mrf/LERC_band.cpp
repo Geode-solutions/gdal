@@ -24,6 +24,8 @@ Authors:  Lucian Plesea
 #include <vector>
 #include "LERCV1/Lerc1Image.h"
 
+#include "gdal_priv_templates.hpp"
+
 // Requires lerc at least 2v4, where the c_api changed, but there is no good way
 // to check
 #include <Lerc_c_api.h>
@@ -189,7 +191,10 @@ template <typename T>
 static bool Lerc1ImgUFill(Lerc1Image &zImg, T *dst, const ILImage &img,
                           GInt32 stride)
 {
-    const T ndv = static_cast<T>(img.hasNoData ? img.NoDataValue : 0);
+    const T ndv =
+        static_cast<T>(img.hasNoData && GDALIsValueInRange<T>(img.NoDataValue)
+                           ? img.NoDataValue
+                           : 0);
     if (img.pagesize.y != zImg.getHeight() || img.pagesize.x != zImg.getWidth())
         return false;
     int w = img.pagesize.x;
@@ -197,18 +202,37 @@ static bool Lerc1ImgUFill(Lerc1Image &zImg, T *dst, const ILImage &img,
     if (1 == stride)
     {
         for (int row = 0; row < h; row++)
+        {
             for (int col = 0; col < w; col++)
-                *dst++ = zImg.IsValid(row, col) ? static_cast<T>(zImg(row, col))
-                                                : ndv;
+            {
+                if (zImg.IsValid(row, col))
+                {
+                    GDALCopyWord(zImg(row, col), *dst);
+                }
+                else
+                {
+                    *dst = ndv;
+                }
+                ++dst;
+            }
+        }
         return true;
     }
     for (int row = 0; row < h; row++)
+    {
         for (int col = 0; col < w; col++)
         {
-            *dst =
-                zImg.IsValid(row, col) ? static_cast<T>(zImg(row, col)) : ndv;
+            if (zImg.IsValid(row, col))
+            {
+                GDALCopyWord(zImg(row, col), *dst);
+            }
+            else
+            {
+                *dst = ndv;
+            }
             dst += stride;
         }
+    }
     return true;
 }
 
@@ -267,7 +291,8 @@ static CPLErr CompressLERC1(buf_mgr &dst, buf_mgr &src, const ILImage &img,
 }
 
 // LERC 1 Decompression
-static CPLErr DecompressLERC1(buf_mgr &dst, buf_mgr &src, const ILImage &img)
+static CPLErr DecompressLERC1(buf_mgr &dst, const buf_mgr &src,
+                              const ILImage &img)
 {
     Lerc1Image zImg;
 
@@ -301,6 +326,9 @@ static CPLErr DecompressLERC1(buf_mgr &dst, buf_mgr &src, const ILImage &img)
         {
             case GDT_Byte:
                 UFILL(GByte);
+                break;
+            case GDT_Int8:
+                UFILL(GInt8);
                 break;
             case GDT_UInt16:
                 UFILL(GUInt16);
@@ -360,8 +388,11 @@ static GDALDataType L2toGDT(L2NS::DataType L2type)
         case L2NS::DataType::dt_double:
             dt = GDT_Float64;
             break;
-        default:
-            dt = GDT_Byte;  // GDAL doesn't have a signed char type
+        case L2NS::DataType::dt_char:
+            dt = GDT_Int8;
+            break;
+        default:  // Unsigned byte
+            dt = GDT_Byte;
     }
     return dt;
 }
@@ -706,6 +737,14 @@ CPLXMLNode *LERC_Band::GetMRFConfig(GDALOpenInfo *poOpenInfo)
 LERC_Band::LERC_Band(MRFDataset *pDS, const ILImage &image, int b, int level)
     : MRFRasterBand(pDS, image, b, level)
 {
+    // Lerc doesn't handle 64bit int types
+    if (image.dt == GDT_UInt64 || image.dt == GDT_Int64)
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "Lerc compression of 64 bit integers is not supported");
+        return;
+    }
+
     // Pick 1/1000 for floats and 0.5 losless for integers.
     if (eDataType == GDT_Float32 || eDataType == GDT_Float64)
         precision = strtod(GetOptionValue("LERC_PREC", ".001"), nullptr);

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test SRTMHGT support.
@@ -10,26 +9,9 @@
 # Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2010, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
-import os
 import struct
 
 import pytest
@@ -38,18 +20,34 @@ from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("SRTMHGT")
 
+
+def setup_and_cleanup():
+
+    yield
+
+    try:
+        gdal.GetDriverByName("SRTMHGT").Delete("/vsimem/n43w080.hgt")
+        gdal.Unlink("/vsimem/N43W080.SRTMGL1.hgt.zip")
+    except (RuntimeError, OSError):
+        pass
+
+
 ###############################################################################
 # Test a SRTMHGT Level 1 (made from a DTED Level 0)
 
 
-def test_srtmhgt_1():
+@pytest.fixture()
+def n43w080_hgt(tmp_path):
+
+    n43_dt1_tif = str(tmp_path / "n43.dt1.tif")
+    n43w080_hgt_fname = str(tmp_path / "n43w080.hgt")
 
     ds = gdal.Open("data/n43.dt0")
 
     bandSrc = ds.GetRasterBand(1)
 
     driver = gdal.GetDriverByName("GTiff")
-    dsDst = driver.Create("tmp/n43.dt1.tif", 1201, 1201, 1, gdal.GDT_Int16)
+    dsDst = driver.Create(n43_dt1_tif, 1201, 1201, 1, gdal.GDT_Int16)
     dsDst.SetProjection(
         'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
     )
@@ -75,23 +73,31 @@ def test_srtmhgt_1():
     ds = None
     dsDst = None
 
-    ds = gdal.Open("tmp/n43.dt1.tif")
+    ds = gdal.Open(n43_dt1_tif)
     driver = gdal.GetDriverByName("SRTMHGT")
-    dsDst = driver.CreateCopy("tmp/n43w080.hgt", ds)
+    dsDst = driver.CreateCopy(n43w080_hgt_fname, ds)
+    del dsDst
 
-    band = dsDst.GetRasterBand(1)
-    chksum = band.Checksum()
+    return n43w080_hgt_fname
 
-    assert chksum == 60918, "Wrong checksum. Checksum found %d" % chksum
+
+def test_srtmhgt_1(n43w080_hgt):
+
+    with gdal.Open(n43w080_hgt) as ds:
+
+        band = ds.GetRasterBand(1)
+        chksum = band.Checksum()
+
+        assert chksum == 60918, "Wrong checksum. Checksum found %d" % chksum
 
 
 ###############################################################################
 # Test creating an in memory copy.
 
 
-def test_srtmhgt_2():
+def test_srtmhgt_2(n43w080_hgt):
 
-    ds = gdal.Open("tmp/n43w080.hgt")
+    ds = gdal.Open(n43w080_hgt)
     driver = gdal.GetDriverByName("SRTMHGT")
     dsDst = driver.CreateCopy("/vsimem/n43w080.hgt", ds)
 
@@ -114,9 +120,9 @@ def test_srtmhgt_2():
 # Test reading from a .hgt.zip file
 
 
-def test_srtmhgt_3():
+def test_srtmhgt_3(n43w080_hgt):
 
-    ds = gdal.Open("tmp/n43w080.hgt")
+    ds = gdal.Open(n43w080_hgt)
     driver = gdal.GetDriverByName("SRTMHGT")
     driver.CreateCopy("/vsizip//vsimem/N43W080.SRTMGL1.hgt.zip/N43W080.hgt", ds)
 
@@ -171,14 +177,39 @@ def test_srtmhgt_hgts():
 
 
 ###############################################################################
-# Cleanup.
+# Test reading files of all supported sizes
 
 
-def test_srtmhgt_cleanup():
-    try:
-        gdal.GetDriverByName("SRTMHGT").Delete("tmp/n43w080.hgt")
-        gdal.GetDriverByName("SRTMHGT").Delete("/vsimem/n43w080.hgt")
-        gdal.Unlink("/vsimem/N43W080.SRTMGL1.hgt.zip")
-        os.remove("tmp/n43.dt1.tif")
-    except (RuntimeError, OSError):
-        pass
+@pytest.mark.parametrize(
+    "width,height,nb_bytes",
+    [
+        (1201, 1201, 2),
+        (1801, 3601, 2),
+        (3601, 3601, 1),
+        (3601, 3601, 2),
+        (3601, 3601, 4),
+        (7201, 7201, 2),
+    ],
+)
+def test_srtmhgt_all_supported_sizes(tmp_vsimem, width, height, nb_bytes):
+
+    filename = str(tmp_vsimem / "n00e000.hgt")
+    f = gdal.VSIFOpenL(filename, "wb")
+    if f is None:
+        pytest.skip()
+    gdal.VSIFTruncateL(f, width * height * nb_bytes)
+    gdal.VSIFCloseL(f)
+
+    ds = gdal.Open(filename)
+    assert ds is not None
+    assert ds.GetGeoTransform()[1] == pytest.approx(1.0 / (width - 1), rel=1e-8)
+    assert ds.GetRasterBand(1).DataType == (
+        gdal.GDT_Byte
+        if nb_bytes == 1
+        else gdal.GDT_Int16
+        if nb_bytes == 2
+        else gdal.GDT_Float32
+    )
+
+    out_filename = str(tmp_vsimem / "create" / "n00e000.hgt")
+    gdal.GetDriverByName("SRTMHGT").CreateCopy(out_filename, ds)

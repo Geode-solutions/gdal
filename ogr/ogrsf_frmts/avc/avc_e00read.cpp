@@ -1,5 +1,4 @@
 /**********************************************************************
- * $Id$
  *
  * Name:     avc_e00read.c
  * Project:  Arc/Info vector coverage (AVC)  BIN->E00 conversion library
@@ -12,23 +11,7 @@
  **********************************************************************
  * Copyright (c) 1999-2005, Daniel Morissette
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************
  *
  * $Log: avc_e00read.c,v $
@@ -128,7 +111,7 @@
 
 #include "avc.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <direct.h> /* getcwd() */
 #else
 #include <unistd.h> /* getcwd() */
@@ -211,7 +194,7 @@ AVCE00ReadPtr AVCE00ReadOpen(const char *pszCoverPath)
             psInfo->pszCoverPath = CPLStrdup(pszCoverPath);
         else
         {
-#ifdef WIN32
+#ifdef _WIN32
             psInfo->pszCoverPath = CPLStrdup(CPLSPrintf("%s\\", pszCoverPath));
 #else
             psInfo->pszCoverPath = CPLStrdup(CPLSPrintf("%s/", pszCoverPath));
@@ -308,7 +291,7 @@ AVCE00ReadPtr AVCE00ReadOpen(const char *pszCoverPath)
          *------------------------------------------------------------*/
         size_t nInfoPathLen = strlen(psInfo->pszCoverPath) + 9;
         psInfo->pszInfoPath = (char *)CPLMalloc(nInfoPathLen);
-#ifdef WIN32
+#ifdef _WIN32
 #define AVC_INFOPATH "..\\info\\"
 #else
 #define AVC_INFOPATH "../info/"
@@ -980,9 +963,10 @@ static int _AVCE00ReadBuildSqueleton(AVCE00ReadPtr psInfo, char **papszCoverDir)
      * extension.
      * We need also make sure cover path is all in uppercase.
      *----------------------------------------------------------------*/
-#ifdef WIN32
+#ifdef _WIN32
     if (psInfo->pszCoverPath[0] != '\\' &&
-        !(isalpha(psInfo->pszCoverPath[0]) && psInfo->pszCoverPath[1] == ':'))
+        !(isalpha((unsigned char)psInfo->pszCoverPath[0]) &&
+          psInfo->pszCoverPath[1] == ':'))
 #else
     if (psInfo->pszCoverPath[0] != '/')
 #endif
@@ -992,7 +976,7 @@ static int _AVCE00ReadBuildSqueleton(AVCE00ReadPtr psInfo, char **papszCoverDir)
 
         nLen = (int)strlen(szCWD);
 
-#ifdef WIN32
+#ifdef _WIN32
         if (nLen > 0 && szCWD[nLen - 1] != '\\')
             strcat(szCWD, "\\");
 #else
@@ -1002,12 +986,12 @@ static int _AVCE00ReadBuildSqueleton(AVCE00ReadPtr psInfo, char **papszCoverDir)
     }
 
     CPLString osCoverPathTruncated(psInfo->pszCoverPath);
-    osCoverPathTruncated.resize(osCoverPathTruncated.size() - 1);
+    osCoverPathTruncated.pop_back();
     pszEXPPath = CPLStrdup(
         CPLSPrintf("EXP  0 %s%s.E00", szCWD, osCoverPathTruncated.c_str()));
     pcTmp = pszEXPPath;
     for (; *pcTmp != '\0'; pcTmp++)
-        *pcTmp = (char)toupper(*pcTmp);
+        *pcTmp = (char)CPLToupper(static_cast<unsigned char>(*pcTmp));
 
     /*-----------------------------------------------------------------
      * EXP Header
@@ -1308,7 +1292,8 @@ static int _AVCE00ReadBuildSqueleton(AVCE00ReadPtr psInfo, char **papszCoverDir)
                                      papszCoverDir[iFile]);
                 pcTmp = (char *)szFname;
                 for (; *pcTmp != '\0'; pcTmp++)
-                    *pcTmp = (char)toupper(*pcTmp);
+                    *pcTmp =
+                        (char)CPLToupper(static_cast<unsigned char>(*pcTmp));
                 papszCoverDir[iFile][nLen - 4] = '.';
 
                 papszTables = CSLAddString(papszTables, szFname);

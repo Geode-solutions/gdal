@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  BSB Testing.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2008-2009, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -33,27 +16,17 @@ import pytest
 
 from osgeo import gdal, osr
 
-###############################################################################
-# Test driver availability
-
-
-def test_bsb_0():
-    gdaltest.bsb_dr = gdal.GetDriverByName("BSB")
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
-
+pytestmark = pytest.mark.require_driver("BSB")
 
 ###############################################################################
 # Test Read
 
 
 def test_bsb_1():
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("BSB", "bsb/rgbsmall.kap", 1, 30321)
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -61,16 +34,14 @@ def test_bsb_1():
 
 
 def test_bsb_2():
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
 
-    md = gdaltest.bsb_dr.GetMetadata()
+    md = gdal.GetDriverByName("BSB").GetMetadata()
     if "DMD_CREATIONDATATYPES" not in md:
         pytest.skip()
 
     tst = gdaltest.GDALTest("BSB", "bsb/rgbsmall.kap", 1, 30321)
 
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -81,12 +52,10 @@ def test_bsb_2():
 
 
 def test_bsb_3():
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("BSB", "bsb/rgbsmall_index.kap", 1, 30321)
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -96,12 +65,10 @@ def test_bsb_3():
 
 
 def test_bsb_4():
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("BSB", "bsb/rgbsmall_with_line_break.kap", 1, 30321)
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -109,16 +76,11 @@ def test_bsb_4():
 
 
 def test_bsb_5():
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("BSB", "bsb/rgbsmall_truncated.kap", 1, -1)
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ret = tst.testOpen()
-    gdal.PopErrorHandler()
-
-    return ret
+    with pytest.raises(Exception):
+        tst.testOpen()
 
 
 ###############################################################################
@@ -126,24 +88,17 @@ def test_bsb_5():
 
 
 def test_bsb_6():
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
 
     tst = gdaltest.GDALTest("BSB", "bsb/rgbsmall_truncated2.kap", 1, -1)
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ret = tst.testOpen()
-    gdal.PopErrorHandler()
-
-    return ret
+    with pytest.raises(Exception):
+        tst.testOpen()
 
 
 ###############################################################################
 
 
 def test_bsb_tmerc():
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
 
     ds = gdal.Open("data/bsb/transverse_mercator.kap")
     gt = ds.GetGeoTransform()
@@ -208,11 +163,18 @@ def test_bsb_tmerc():
 
 
 def test_bsb_cutline():
-    if gdaltest.bsb_dr is None:
-        pytest.skip()
 
     ds = gdal.Open("data/bsb/australia4c.kap")
     assert (
         ds.GetMetadataItem("BSB_CUTLINE")
         == "POLYGON ((112.72859333333334 -8.25404666666667,156.57827333333333 -7.66159166666667,164.28394166666666 -40.89653000000000,106.53042166666667 -41.14970000000000))"
     )
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/8765
+
+
+def test_bsb_with_errant_0x1A_character_in_header():
+
+    assert gdal.Open("data/bsb/NZ52201_truncated.KAP")

@@ -11,23 +11,7 @@
  * as represented by the Canadian Nuclear Safety Commission
  * Copyright (c) 2014-2015, NextGIS info@nextgis.ru
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -837,7 +821,7 @@ CPLErr GDALWriteRPCTXTFile(const char *pszFilename, char **papszMD)
 CPLErr GDALWriteRPBFile(const char *pszFilename, char **papszMD)
 
 {
-    CPLString osRPBFilename = CPLResetExtension(pszFilename, "RPB");
+    const CPLString osRPBFilename = CPLResetExtensionSafe(pszFilename, "RPB");
     if (papszMD == nullptr)
     {
         VSIUnlink(osRPBFilename);
@@ -1029,8 +1013,10 @@ static bool GDAL_IMD_AA2R(char ***ppapszIMD)
         {
             CPLString osValue = CSLFetchNameValue(papszIMD, osTarget);
             CPLString osLine;
-            osTarget.Printf("IMAGE_1.%c%s", tolower(keylist[iKey][0]),
-                            keylist[iKey] + 1);
+            osTarget.Printf(
+                "IMAGE_1.%c%s",
+                CPLTolower(static_cast<unsigned char>(keylist[iKey][0])),
+                keylist[iKey] + 1);
 
             osLine = osTarget + "=" + osValue;
 
@@ -1120,7 +1106,7 @@ static void GDALWriteIMDMultiLine(VSILFILE *fp, const char *pszValue)
 CPLErr GDALWriteIMDFile(const char *pszFilename, char **papszMD)
 
 {
-    CPLString osRPBFilename = CPLResetExtension(pszFilename, "IMD");
+    const CPLString osRPBFilename = CPLResetExtensionSafe(pszFilename, "IMD");
 
     /* -------------------------------------------------------------------- */
     /*      Read file and parse.                                            */
@@ -1183,7 +1169,7 @@ CPLErr GDALWriteIMDFile(const char *pszFilename, char **papszMD)
             bOK &=
                 VSIFPrintfL(fp, "BEGIN_GROUP = %s\n", osKeySection.c_str()) > 0;
 
-        osCurSection = osKeySection;
+        osCurSection = std::move(osKeySection);
 
         /* --------------------------------------------------------------------
          */

@@ -10,23 +10,7 @@
 # Copyright (c) 2012, Ari Jolma <ari.jolma@aalto.fi>
 # Copyright (c) 2012-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -40,32 +24,6 @@ pytestmark = pytest.mark.require_geos
 
 ###############################################################################
 # Common usage tests.
-
-ds = None
-A = None
-B = None
-C = None
-pointInB = None
-D1 = None
-D2 = None
-empty = None
-
-
-def recreate_layer_C():
-    global C
-
-    ds.DeleteLayer("C")
-    C = ds.CreateLayer("C")
-
-
-def print_layer(A):
-    A.ResetReading()
-    while True:
-        f = A.GetNextFeature()
-        if f is None:
-            return
-        g = f.GetGeometryRef()
-        print(g.ExportToWkt())
 
 
 def is_same(A, B):
@@ -85,81 +43,114 @@ def is_same(A, B):
             return False
 
 
-def test_algebra_setup():
+@pytest.fixture()
+def mem_ds(request):
 
-    global ds, A, B, C, pointInB, D1, D2, empty
+    ds = ogr.GetDriverByName("MEM").CreateDataSource(request.node.name)
 
-    # Create three memory layers for intersection.
+    return ds
 
-    ds = ogr.GetDriverByName("Memory").CreateDataSource("wrk")
 
-    A = ds.CreateLayer("A")
-    A.CreateField(ogr.FieldDefn("A", ogr.OFTInteger))
-    A.CreateField(ogr.FieldDefn("same_in_both_layers", ogr.OFTInteger))
+@pytest.fixture()
+def A(mem_ds):
 
-    B = ds.CreateLayer("B")
-    B.CreateField(ogr.FieldDefn("B", ogr.OFTString))
-    B.CreateField(ogr.FieldDefn("same_in_both_layers", ogr.OFTInteger))
-
-    pointInB = ds.CreateLayer("pointInB")
-
-    C = ds.CreateLayer("C")
-
-    # Add polygons.
+    lyr = mem_ds.CreateLayer("A")
+    lyr.CreateField(ogr.FieldDefn("A", ogr.OFTInteger))
+    lyr.CreateField(ogr.FieldDefn("same_in_both_layers", ogr.OFTInteger))
 
     a1 = "POLYGON((1 2, 1 3, 3 3, 3 2, 1 2))"
-    a2 = "POLYGON((5 2, 5 3, 7 3, 7 2, 5 2))"
-    b1 = "POLYGON((2 1, 2 4, 6 4, 6 1, 2 1))"
-    pointInB1 = "POINT(3 3)"
-
-    feat = ogr.Feature(A.GetLayerDefn())
+    feat = ogr.Feature(lyr.GetLayerDefn())
     feat.SetField("A", 1)
     feat.SetGeometryDirectly(ogr.Geometry(wkt=a1))
-    A.CreateFeature(feat)
+    lyr.CreateFeature(feat)
 
-    feat = ogr.Feature(A.GetLayerDefn())
+    a2 = "POLYGON((5 2, 5 3, 7 3, 7 2, 5 2))"
+    feat = ogr.Feature(lyr.GetLayerDefn())
     feat.SetField("A", 2)
     feat.SetGeometryDirectly(ogr.Geometry(wkt=a2))
-    A.CreateFeature(feat)
+    lyr.CreateFeature(feat)
 
-    feat = ogr.Feature(B.GetLayerDefn())
+    return lyr
+
+
+@pytest.fixture()
+def B(mem_ds):
+
+    lyr = mem_ds.CreateLayer("B")
+    lyr.CreateField(ogr.FieldDefn("B", ogr.OFTString))
+    lyr.CreateField(ogr.FieldDefn("same_in_both_layers", ogr.OFTInteger))
+
+    b1 = "POLYGON((2 1, 2 4, 6 4, 6 1, 2 1))"
+    feat = ogr.Feature(lyr.GetLayerDefn())
     feat.SetField("B", "first")
     feat.SetGeometryDirectly(ogr.Geometry(wkt=b1))
-    B.CreateFeature(feat)
+    lyr.CreateFeature(feat)
 
-    feat = ogr.Feature(pointInB.GetLayerDefn())
+    return lyr
+
+
+@pytest.fixture()
+def pointInB(mem_ds):
+
+    lyr = mem_ds.CreateLayer("pointInB")
+
+    pointInB1 = "POINT(3 3)"
+    feat = ogr.Feature(lyr.GetLayerDefn())
     feat.SetGeometryDirectly(ogr.Geometry(wkt=pointInB1))
-    pointInB.CreateFeature(feat)
+    lyr.CreateFeature(feat)
+
+    return lyr
+
+
+@pytest.fixture()
+def D1(mem_ds):
+
+    lyr = mem_ds.CreateLayer("D1")
 
     d1 = "POLYGON((1 2, 1 3, 3 3, 3 2, 1 2))"
+    feat = ogr.Feature(lyr.GetLayerDefn())
+    feat.SetGeometryDirectly(ogr.Geometry(wkt=d1))
+    lyr.CreateFeature(feat)
+
     d2 = "POLYGON((3 2, 3 3, 4 3, 4 2, 3 2))"
-
-    D1 = ds.CreateLayer("D1")
-
-    feat = ogr.Feature(D1.GetLayerDefn())
-    feat.SetGeometryDirectly(ogr.Geometry(wkt=d1))
-    D1.CreateFeature(feat)
-
-    feat = ogr.Feature(D1.GetLayerDefn())
+    feat = ogr.Feature(lyr.GetLayerDefn())
     feat.SetGeometryDirectly(ogr.Geometry(wkt=d2))
-    D1.CreateFeature(feat)
+    lyr.CreateFeature(feat)
 
-    D2 = ds.CreateLayer("D2")
+    return lyr
 
-    feat = ogr.Feature(D2.GetLayerDefn())
+
+@pytest.fixture()
+def D2(mem_ds):
+
+    lyr = mem_ds.CreateLayer("D1")
+
+    d1 = "POLYGON((1 2, 1 3, 3 3, 3 2, 1 2))"
+    feat = ogr.Feature(lyr.GetLayerDefn())
     feat.SetGeometryDirectly(ogr.Geometry(wkt=d1))
-    D2.CreateFeature(feat)
+    lyr.CreateFeature(feat)
 
-    feat = ogr.Feature(D2.GetLayerDefn())
+    d2 = "POLYGON((3 2, 3 3, 4 3, 4 2, 3 2))"
+    feat = ogr.Feature(lyr.GetLayerDefn())
     feat.SetGeometryDirectly(ogr.Geometry(wkt=d2))
-    D2.CreateFeature(feat)
+    lyr.CreateFeature(feat)
 
-    empty = ds.CreateLayer("empty")
+    return lyr
 
 
-def test_algebra_intersection():
+@pytest.fixture()
+def C(mem_ds):
 
-    recreate_layer_C()
+    return mem_ds.CreateLayer("C")
+
+
+@pytest.fixture()
+def empty(mem_ds):
+
+    return mem_ds.CreateLayer("empty")
+
+
+def test_algebra_intersection_1(A, B, C):
 
     # Intersection; this should return two rectangles
 
@@ -194,21 +185,22 @@ def test_algebra_intersection():
             break
 
         g = feat.GetGeometryRef()
-        if ogrtest.check_feature_geometry(g, f1[0]) == 0:
+
+        try:
+            ogrtest.check_feature_geometry(g, f1[0])
             assert (
                 feat.GetField("A") == f1[1] and feat.GetField("B") == f1[2]
             ), "Did not get expected field values."
-        elif ogrtest.check_feature_geometry(g, f2[0]) == 0:
+        except AssertionError:
+            ogrtest.check_feature_geometry(g, f2[0])
             assert (
                 feat.GetField("A") == f2[1] and feat.GetField("B") == f2[2]
             ), "Did not get expected field values."
-        else:
-            pytest.fail(
-                "Layer.Intersection returned wrong geometry: " + g.ExportToWkt()
-            )
+
+
+def test_algebra_intersection_2(A, B, C):
 
     # This time we test with PROMOTE_TO_MULTI and pre-created output fields.
-    recreate_layer_C()
     C.CreateField(ogr.FieldDefn("A", ogr.OFTInteger))
     C.CreateField(ogr.FieldDefn("B", ogr.OFTString))
 
@@ -230,20 +222,19 @@ def test_algebra_intersection():
             break
 
         g = feat.GetGeometryRef()
-        if ogrtest.check_feature_geometry(g, f1[0]) == 0:
+        try:
+            ogrtest.check_feature_geometry(g, f1[0])
             assert (
                 feat.GetField("A") == f1[1] and feat.GetField("B") == f1[2]
             ), "Did not get expected field values. (1)"
-        elif ogrtest.check_feature_geometry(g, f2[0]) == 0:
+        except AssertionError:
+            ogrtest.check_feature_geometry(g, f2[0])
             assert (
                 feat.GetField("A") == f2[1] and feat.GetField("B") == f2[2]
             ), "Did not get expected field values. (2)"
-        else:
-            pytest.fail(
-                "Layer.Intersection returned wrong geometry: " + g.ExportToWkt()
-            )
 
-    recreate_layer_C()
+
+def test_algebra_intersection_3(D1, D2, C):
 
     # Intersection with self ; this should return 2 polygons
 
@@ -252,6 +243,31 @@ def test_algebra_intersection():
     assert err == 0, "got non-zero result code " + str(err) + " from Layer.Intersection"
 
     assert is_same(D1, C), "D1 != C"
+
+
+def test_algebra_intersection_multipoint():
+
+    driver = ogr.GetDriverByName("MEMORY")
+    ds = driver.CreateDataSource("ds")
+    layer1 = ds.CreateLayer("layer1")
+    layer2 = ds.CreateLayer("layer2")
+
+    g1 = "LINESTRING (0 0, 1 1)"
+    geom1 = ogr.CreateGeometryFromWkt(g1)
+    feat1 = ogr.Feature(layer1.GetLayerDefn())
+    feat1.SetGeometry(geom1)
+    layer1.CreateFeature(feat1)
+
+    g2 = "LINESTRING (0 1, 1 0)"
+    geom2 = ogr.CreateGeometryFromWkt(g2)
+    feat2 = ogr.Feature(layer2.GetLayerDefn())
+    feat2.SetGeometry(geom2)
+    layer2.CreateFeature(feat2)
+
+    layer3 = ds.CreateLayer("layer3")
+    layer1.Intersection(layer2, layer3, ["PROMOTE_TO_MULTI=YES"])
+    f = layer3.GetNextFeature()
+    assert f.GetGeometryRef().ExportToIsoWkt() == "MULTIPOINT ((0.5 0.5))"
 
 
 def test_algebra_KEEP_LOWER_DIMENSION_GEOMETRIES():
@@ -320,11 +336,7 @@ def test_algebra_KEEP_LOWER_DIMENSION_GEOMETRIES():
     ), "Lower dimension geometries not kept in identity"
 
 
-def test_algebra_union():
-
-    recreate_layer_C()
-
-    # Union; this should return 5 polygons
+def test_algebra_union_1(A, B, C):
 
     err = A.Union(B, C)
 
@@ -334,7 +346,8 @@ def test_algebra_union():
         "Layer.Union returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_union_2(A, B, C):
 
     err = A.Union(B, C, options=["PROMOTE_TO_MULTI=YES"])
 
@@ -344,7 +357,8 @@ def test_algebra_union():
         "Layer.Union returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_union_3(D1, D2, C):
 
     # Union with self ; this should return 2 polygons
 
@@ -354,7 +368,8 @@ def test_algebra_union():
 
     assert is_same(D1, C), "D1 != C"
 
-    recreate_layer_C()
+
+def test_algebra_union_4(B, pointInB, C):
 
     # Union of a polygon and a point within : should return the point and the polygon (#4772)
 
@@ -367,9 +382,7 @@ def test_algebra_union():
     )
 
 
-def test_algebra_symdifference():
-
-    recreate_layer_C()
+def test_algebra_symdifference_1(A, B, C):
 
     # SymDifference; this should return 3 polygons
 
@@ -383,7 +396,8 @@ def test_algebra_symdifference():
         "Layer.SymDifference returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_symdifference_2(A, B, C):
 
     err = A.SymDifference(B, C, options=["PROMOTE_TO_MULTI=YES"])
 
@@ -395,7 +409,8 @@ def test_algebra_symdifference():
         "Layer.SymDifference returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_symdifference_3(D1, D2, C):
 
     # SymDifference with self ; this should return 0 features
 
@@ -410,9 +425,7 @@ def test_algebra_symdifference():
     )
 
 
-def test_algebra_identify():
-
-    recreate_layer_C()
+def test_algebra_identity_1(A, B, C):
 
     # Identity; this should return 4 polygons
 
@@ -424,7 +437,8 @@ def test_algebra_identify():
         "Layer.Identity returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_identity_2(A, B, C):
 
     err = A.Identity(B, C, options=["PROMOTE_TO_MULTI=YES"])
 
@@ -434,7 +448,8 @@ def test_algebra_identify():
         "Layer.Identity returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_identity_3(D1, D2, C):
 
     # Identity with self ; this should return 2 polygons
 
@@ -445,9 +460,7 @@ def test_algebra_identify():
     assert is_same(D1, C), "D1 != C"
 
 
-def test_algebra_update():
-
-    recreate_layer_C()
+def test_algebra_update_1(A, B, C):
 
     # Update; this should return 3 polygons
 
@@ -459,7 +472,8 @@ def test_algebra_update():
         "Layer.Update returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_update_2(A, B, C):
 
     err = A.Update(B, C, options=["PROMOTE_TO_MULTI=YES"])
 
@@ -469,7 +483,8 @@ def test_algebra_update():
         "Layer.Update returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_update_3(D1, D2, C):
 
     # Update with self ; this should return 2 polygons
 
@@ -480,9 +495,7 @@ def test_algebra_update():
     assert is_same(D1, C), "D1 != C"
 
 
-def test_algebra_clip():
-
-    recreate_layer_C()
+def test_algebra_clip_1(A, B, C):
 
     # Clip; this should return 2 polygons
 
@@ -494,7 +507,8 @@ def test_algebra_clip():
         "Layer.Clip returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_clip_2(A, B, C):
 
     err = A.Clip(B, C, options=["PROMOTE_TO_MULTI=YES"])
 
@@ -504,7 +518,8 @@ def test_algebra_clip():
         "Layer.Clip returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_clip_3(D1, D2, C):
 
     # Clip with self ; this should return 2 polygons
 
@@ -515,9 +530,7 @@ def test_algebra_clip():
     assert is_same(D1, C), "D1 != C"
 
 
-def test_algebra_erase():
-
-    recreate_layer_C()
+def test_algebra_erase_1(A, B, C):
 
     # Erase; this should return 2 polygons
 
@@ -529,7 +542,8 @@ def test_algebra_erase():
         "Layer.Erase returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_erase_2(A, B, C):
 
     err = A.Erase(B, C, options=["PROMOTE_TO_MULTI=YES"])
 
@@ -539,7 +553,8 @@ def test_algebra_erase():
         "Layer.Erase returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_erase_3(D1, D2, C):
 
     # Erase with self ; this should return 0 features
 
@@ -551,7 +566,8 @@ def test_algebra_erase():
         "Layer.Erase returned " + str(C.GetFeatureCount()) + " features"
     )
 
-    recreate_layer_C()
+
+def test_algebra_erase_4(A, empty, C):
 
     # Erase with empty layer (or no intersection)
 
@@ -569,26 +585,11 @@ def test_algebra_erase():
         feat_c.DumpReadable()
         pytest.fail("features not identical")
 
-    recreate_layer_C()
+
+def test_algebra_erase_5(A, empty, C):
 
     A.Erase(empty, C, options=["PROMOTE_TO_MULTI=YES"])
 
     assert C.GetFeatureCount() == A.GetFeatureCount(), (
         "Layer.Erase returned " + str(C.GetFeatureCount()) + " features"
     )
-
-    recreate_layer_C()
-
-
-def test_algebra_cleanup():
-
-    global ds, A, B, C, pointInB, D1, D2, empty
-
-    D2 = None
-    D1 = None
-    pointInB = None
-    C = None
-    B = None
-    A = None
-    empty = None
-    ds = None

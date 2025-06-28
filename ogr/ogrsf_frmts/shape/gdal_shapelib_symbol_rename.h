@@ -1,3 +1,6 @@
+/* This is a generated file by dump_symbols.h. *DO NOT EDIT MANUALLY !* */
+#ifndef GDAL_SHAPELIB_SYMBOL_RENAME_H_INCLUDED
+#define GDAL_SHAPELIB_SYMBOL_RENAME_H_INCLUDED
 #define compare_ints gdal_compare_ints
 #define DBFAddField gdal_DBFAddField
 #define DBFAddNativeFieldType gdal_DBFAddNativeFieldType
@@ -13,6 +16,7 @@
 #define DBFGetFieldCount gdal_DBFGetFieldCount
 #define DBFGetFieldIndex gdal_DBFGetFieldIndex
 #define DBFGetFieldInfo gdal_DBFGetFieldInfo
+#define DBFGetLenWithoutExtension gdal_DBFGetLenWithoutExtension
 #define DBFGetNativeFieldType gdal_DBFGetNativeFieldType
 #define DBFGetNullCharacter gdal_DBFGetNullCharacter
 #define DBFGetRecordCount gdal_DBFGetRecordCount
@@ -28,6 +32,7 @@
 #define DBFReadIntegerAttribute gdal_DBFReadIntegerAttribute
 #define DBFReadLogicalAttribute gdal_DBFReadLogicalAttribute
 #define DBFReadStringAttribute gdal_DBFReadStringAttribute
+#define DBFReadDateAttribute gdal_DBFReadDateAttribute
 #define DBFReadTuple gdal_DBFReadTuple
 #define DBFReorderFields gdal_DBFReorderFields
 #define DBFSetLastModifiedDate gdal_DBFSetLastModifiedDate
@@ -41,8 +46,10 @@
 #define DBFWriteLogicalAttribute gdal_DBFWriteLogicalAttribute
 #define DBFWriteNULLAttribute gdal_DBFWriteNULLAttribute
 #define DBFWriteStringAttribute gdal_DBFWriteStringAttribute
+#define DBFWriteDateAttribute gdal_DBFWriteDateAttribute
 #define DBFWriteTuple gdal_DBFWriteTuple
 #define frame_dummy gdal_frame_dummy
+#define SASetupDefaultHooks gdal_SASetupDefaultHooks
 #define SBNAddShapeId gdal_SBNAddShapeId
 #define SBNCloseDiskTree gdal_SBNCloseDiskTree
 #define SBNOpenDiskTree gdal_SBNOpenDiskTree
@@ -50,7 +57,6 @@
 #define SBNSearchDiskTree gdal_SBNSearchDiskTree
 #define SBNSearchDiskTreeInteger gdal_SBNSearchDiskTreeInteger
 #define SBNSearchFreeIds gdal_SBNSearchFreeIds
-#define SfRealloc gdal_SfRealloc
 #define SHPAllocBuffer gdal_SHPAllocBuffer
 #define SHPCheckBoundsOverlap gdal_SHPCheckBoundsOverlap
 #define SHPCheckObjectContained gdal_SHPCheckObjectContained
@@ -66,6 +72,8 @@
 #define SHPDestroyTree gdal_SHPDestroyTree
 #define SHPDestroyTreeNode gdal_SHPDestroyTreeNode
 #define SHPGetInfo gdal_SHPGetInfo
+#define SHPGetLenWithoutExtension gdal_SHPGetLenWithoutExtension
+#define SHPGetPartVertexCount gdal_SHPGetPartVertexCount
 #define SHPGetSubNodeOffset gdal_SHPGetSubNodeOffset
 #define SHPOpenDiskTree gdal_SHPOpenDiskTree
 #define SHPOpen gdal_SHPOpen
@@ -75,6 +83,7 @@
 #define SHPReadObject gdal_SHPReadObject
 #define SHPReallocObjectBufIfNecessary gdal_SHPReallocObjectBufIfNecessary
 #define SHPRestoreSHX gdal_SHPRestoreSHX
+#define SHPRewindIsInnerRing gdal_SHPRewindIsInnerRing
 #define SHPRewindObject gdal_SHPRewindObject
 #define SHPSearchDiskTreeEx gdal_SHPSearchDiskTreeEx
 #define SHPSearchDiskTree gdal_SHPSearchDiskTree
@@ -97,6 +106,5 @@
 #define SHPWriteTree gdal_SHPWriteTree
 #define SHPWriteTreeLL gdal_SHPWriteTreeLL
 #define SHPWriteTreeNode gdal_SHPWriteTreeNode
-#define str_to_upper gdal_str_to_upper
 #define SwapWord gdal_SwapWord
-/* This is a generated file by dump_symbols.h. *DO NOT EDIT MANUALLY !* */
+#endif /* GDAL_SHAPELIB_SYMBOL_RENAME_H_INCLUDED */

@@ -7,30 +7,13 @@
  ******************************************************************************
  * Copyright (c) 2017-2018, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_priv.h"
 #include "cpl_http.h"
 #include "cpl_conv.h"
-#include "ogrgeojsonreader.h"
-#include "ogrgeojsonwriter.h"
+#include "ogrlibjsonutils.h"
 #include "eeda.h"
 
 #include <algorithm>
@@ -70,7 +53,7 @@ class GDALEEDAIDataset final : public GDALEEDABaseDataset
     CPLString m_osPixelEncoding{};
     bool m_bQueryMultipleBands;
     OGRSpatialReference m_oSRS{};
-    double m_adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     std::vector<GDALEEDAIDataset *> m_apoOverviewDS{};
 
     GDALEEDAIDataset(GDALEEDAIDataset *poParentDS, int iOvrLevel);
@@ -84,12 +67,12 @@ class GDALEEDAIDataset final : public GDALEEDABaseDataset
     virtual ~GDALEEDAIDataset();
 
     const OGRSpatialReference *GetSpatialRef() const override;
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     virtual CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
                              int nXSize, int nYSize, void *pData, int nBufXSize,
                              int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, int *panBandMap,
+                             int nBandCount, BANDMAP_TYPE panBandMap,
                              GSpacing nPixelSpace, GSpacing nLineSpace,
                              GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg) override;
@@ -138,11 +121,13 @@ class GDALEEDAIRasterBand final : public GDALRasterBand
     virtual CPLErr IReadBlock(int, int, void *) CPL_OVERRIDE;
     virtual int GetOverviewCount() CPL_OVERRIDE;
     virtual GDALRasterBand *GetOverview(int) CPL_OVERRIDE;
+
     virtual CPLErr SetColorInterpretation(GDALColorInterp eInterp) CPL_OVERRIDE
     {
         m_eInterp = eInterp;
         return CE_None;
     }
+
     virtual GDALColorInterp GetColorInterpretation() CPL_OVERRIDE
     {
         return m_eInterp;
@@ -161,12 +146,6 @@ GDALEEDAIDataset::GDALEEDAIDataset()
       m_bQueryMultipleBands(false)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    m_adfGeoTransform[0] = 0.0;
-    m_adfGeoTransform[1] = 1.0;
-    m_adfGeoTransform[2] = 0.0;
-    m_adfGeoTransform[3] = 0.0;
-    m_adfGeoTransform[4] = 0.0;
-    m_adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -186,14 +165,12 @@ GDALEEDAIDataset::GDALEEDAIDataset(GDALEEDAIDataset *poParentDS, int iOvrLevel)
     m_osBaseURL = poParentDS->m_osBaseURL;
     nRasterXSize = m_poParentDS->nRasterXSize >> iOvrLevel;
     nRasterYSize = m_poParentDS->nRasterYSize >> iOvrLevel;
-    m_adfGeoTransform[0] = m_poParentDS->m_adfGeoTransform[0];
-    m_adfGeoTransform[1] = m_poParentDS->m_adfGeoTransform[1] *
-                           m_poParentDS->nRasterXSize / nRasterXSize;
-    m_adfGeoTransform[2] = m_poParentDS->m_adfGeoTransform[2];
-    m_adfGeoTransform[3] = m_poParentDS->m_adfGeoTransform[3];
-    m_adfGeoTransform[4] = m_poParentDS->m_adfGeoTransform[4];
-    m_adfGeoTransform[5] = m_poParentDS->m_adfGeoTransform[5] *
-                           m_poParentDS->nRasterYSize / nRasterYSize;
+    m_gt[0] = m_poParentDS->m_gt[0];
+    m_gt[1] = m_poParentDS->m_gt[1] * m_poParentDS->nRasterXSize / nRasterXSize;
+    m_gt[2] = m_poParentDS->m_gt[2];
+    m_gt[3] = m_poParentDS->m_gt[3];
+    m_gt[4] = m_poParentDS->m_gt[4];
+    m_gt[5] = m_poParentDS->m_gt[5] * m_poParentDS->nRasterYSize / nRasterYSize;
 }
 
 /************************************************************************/
@@ -417,6 +394,7 @@ bool GDALEEDAIRasterBand::DecodeNPYArray(const GByte *pabyData, int nDataLen,
     }
     return true;
 }
+
 /************************************************************************/
 /*                            DecodeGDALDataset()                         */
 /************************************************************************/
@@ -430,7 +408,7 @@ bool GDALEEDAIRasterBand::DecodeGDALDataset(const GByte *pabyData, int nDataLen,
 {
     GDALEEDAIDataset *poGDS = reinterpret_cast<GDALEEDAIDataset *>(poDS);
 
-    CPLString osTmpFilename(CPLSPrintf("/vsimem/eeai/%p", this));
+    const CPLString osTmpFilename(VSIMemGenerateHiddenFilename("eedai"));
     VSIFCloseL(VSIFileFromMemBuffer(
         osTmpFilename, const_cast<GByte *>(pabyData), nDataLen, false));
     const char *const apszDrivers[] = {"PNG", "JPEG", "GTIFF", nullptr};
@@ -519,7 +497,7 @@ bool GDALEEDAIRasterBand::DecodeGDALDataset(const GByte *pabyData, int nDataLen,
                     GF_Read, iXBlock * nBlockXSize, iYBlock * nBlockYSize,
                     nBlockActualXSize, nBlockActualYSize, pabyDstBuffer,
                     nBlockActualXSize, nBlockActualYSize, eDT, nDTSize,
-                    nDTSize * nBlockXSize, nullptr);
+                    static_cast<GSpacing>(nDTSize) * nBlockXSize, nullptr);
 
                 if (poBlock)
                     poBlock->DropLock();
@@ -566,10 +544,10 @@ CPLErr GDALEEDAIRasterBand::GetBlocks(int nBlockXOff, int nBlockYOff,
     int nReqYSize = nBlockYSize * nYBlocks;
     if ((nBlockYOff + nYBlocks) * nBlockYSize > nRasterYSize)
         nReqYSize = nRasterYSize - nBlockYOff * nBlockYSize;
-    const double dfX0 = poGDS->m_adfGeoTransform[0] +
-                        nBlockXOff * nBlockXSize * poGDS->m_adfGeoTransform[1];
-    const double dfY0 = poGDS->m_adfGeoTransform[3] +
-                        nBlockYOff * nBlockYSize * poGDS->m_adfGeoTransform[5];
+    const double dfX0 =
+        poGDS->m_gt[0] + nBlockXOff * nBlockXSize * poGDS->m_gt[1];
+    const double dfY0 =
+        poGDS->m_gt[3] + nBlockYOff * nBlockYSize * poGDS->m_gt[5];
 #ifdef DEBUG_VERBOSE
     CPLDebug("EEDAI",
              "nBlockYOff=%d nBlockYOff=%d "
@@ -586,12 +564,12 @@ CPLErr GDALEEDAIRasterBand::GetBlocks(int nBlockXOff, int nBlockYOff,
     json_object_object_add(
         poAffineTransform, "translateY",
         json_object_new_double_with_significant_figures(dfY0, 18));
-    json_object_object_add(poAffineTransform, "scaleX",
-                           json_object_new_double_with_significant_figures(
-                               poGDS->m_adfGeoTransform[1], 18));
-    json_object_object_add(poAffineTransform, "scaleY",
-                           json_object_new_double_with_significant_figures(
-                               poGDS->m_adfGeoTransform[5], 18));
+    json_object_object_add(
+        poAffineTransform, "scaleX",
+        json_object_new_double_with_significant_figures(poGDS->m_gt[1], 18));
+    json_object_object_add(
+        poAffineTransform, "scaleY",
+        json_object_new_double_with_significant_figures(poGDS->m_gt[5], 18));
     json_object_object_add(
         poAffineTransform, "shearX",
         json_object_new_double_with_significant_figures(0.0, 18));
@@ -945,13 +923,11 @@ CPLErr GDALEEDAIRasterBand::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
 /*                              IRasterIO()                             */
 /************************************************************************/
 
-CPLErr GDALEEDAIDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
-                                   int nXSize, int nYSize, void *pData,
-                                   int nBufXSize, int nBufYSize,
-                                   GDALDataType eBufType, int nBandCount,
-                                   int *panBandMap, GSpacing nPixelSpace,
-                                   GSpacing nLineSpace, GSpacing nBandSpace,
-                                   GDALRasterIOExtraArg *psExtraArg)
+CPLErr GDALEEDAIDataset::IRasterIO(
+    GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize, int nYSize,
+    void *pData, int nBufXSize, int nBufYSize, GDALDataType eBufType,
+    int nBandCount, BANDMAP_TYPE panBandMap, GSpacing nPixelSpace,
+    GSpacing nLineSpace, GSpacing nBandSpace, GDALRasterIOExtraArg *psExtraArg)
 {
 
     /* ==================================================================== */
@@ -1148,9 +1124,9 @@ const OGRSpatialReference *GDALEEDAIDataset::GetSpatialRef() const
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GDALEEDAIDataset::GetGeoTransform(double *adfGeoTransform)
+CPLErr GDALEEDAIDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    memcpy(adfGeoTransform, m_adfGeoTransform, 6 * sizeof(double));
+    gt = m_gt;
     return CE_None;
 }
 
@@ -1311,8 +1287,7 @@ bool GDALEEDAIDataset::Open(GDALOpenInfo *poOpenInfo)
                 iIdxFirstBand = i;
                 nRasterXSize = aoBandDesc[i].nWidth;
                 nRasterYSize = aoBandDesc[i].nHeight;
-                memcpy(m_adfGeoTransform, aoBandDesc[i].adfGeoTransform.data(),
-                       6 * sizeof(double));
+                m_gt = aoBandDesc[i].gt;
                 m_oSRS.importFromWkt(aoBandDesc[i].osWKT);
                 int iOvr = 0;
                 while ((nRasterXSize >> iOvr) > 256 ||
@@ -1557,6 +1532,10 @@ void GDALRegister_EEDAI()
         "   </Option>"
         "  <Option name='BLOCK_SIZE' type='integer' "
         "description='Size of a block' default='256'/>"
+        "  <Option name='VSI_PATH_FOR_AUTH' type='string' "
+        "description='/vsigs/... path onto which a "
+        "GOOGLE_APPLICATION_CREDENTIALS path specific "
+        "option is set'/>"
         "</OpenOptionList>");
     poDriver->SetMetadataItem(GDAL_DMD_SUBDATASETS, "YES");
 

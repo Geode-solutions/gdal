@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2010, Tamas Szekeres
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -45,10 +29,9 @@
 
 OGRMSSQLSpatialSelectLayer::OGRMSSQLSpatialSelectLayer(
     OGRMSSQLSpatialDataSource *poDSIn, CPLODBCStatement *poStmtIn)
+    : OGRMSSQLSpatialLayer(poDSIn)
 
 {
-    poDS = poDSIn;
-
     iNextShapeId = 0;
     nSRSId = 0;
     poFeatureDefn = nullptr;
@@ -66,14 +49,15 @@ OGRMSSQLSpatialSelectLayer::OGRMSSQLSpatialSelectLayer(
             SQLCHAR szTableName[256];
             SQLSMALLINT nTableNameLength = 0;
 
-            SQLColAttribute(poStmt->GetStatement(), (SQLSMALLINT)(iColumn + 1),
+            SQLColAttribute(poStmt->GetStatement(),
+                            static_cast<SQLSMALLINT>(iColumn + 1),
                             SQL_DESC_TABLE_NAME, szTableName,
                             sizeof(szTableName), &nTableNameLength, nullptr);
 
             if (nTableNameLength > 0)
             {
                 OGRLayer *poBaseLayer =
-                    poDS->GetLayerByName((const char *)szTableName);
+                    poDS->GetLayerByName(reinterpret_cast<char *>(szTableName));
                 if (poBaseLayer != nullptr &&
                     EQUAL(poBaseLayer->GetGeometryColumn(),
                           poStmt->GetColName(iColumn)))
@@ -106,20 +90,21 @@ OGRMSSQLSpatialSelectLayer::OGRMSSQLSpatialSelectLayer(
             SQLCHAR szUDTTypeName[256];
             SQLSMALLINT nUDTTypeNameLength = 0;
 
-            SQLColAttribute(poStmt->GetStatement(), (SQLSMALLINT)(iColumn + 1),
-                            SQL_CA_SS_UDT_TYPE_NAME, szUDTTypeName,
-                            sizeof(szUDTTypeName), &nUDTTypeNameLength,
-                            nullptr);
+            SQLColAttribute(
+                poStmt->GetStatement(), static_cast<SQLSMALLINT>(iColumn + 1),
+                SQL_CA_SS_UDT_TYPE_NAME, szUDTTypeName, sizeof(szUDTTypeName),
+                &nUDTTypeNameLength, nullptr);
 
             // For some reason on unixODBC, a UCS2 string is returned
-            if (EQUAL((char *)szUDTTypeName, "geometry") ||
+            if (EQUAL(reinterpret_cast<char *>(szUDTTypeName), "geometry") ||
                 (nUDTTypeNameLength == 16 &&
                  memcmp(szUDTTypeName, "g\0e\0o\0m\0e\0t\0r\0y", 16) == 0))
             {
                 nGeomColumnType = MSSQLCOLTYPE_GEOMETRY;
                 pszGeomColumn = CPLStrdup(poStmt->GetColName(iColumn));
             }
-            else if (EQUAL((char *)szUDTTypeName, "geography") ||
+            else if (EQUAL(reinterpret_cast<char *>(szUDTTypeName),
+                           "geography") ||
                      (nUDTTypeNameLength == 18 &&
                       memcmp(szUDTTypeName, "g\0e\0o\0g\0r\0a\0p\0h\0y", 18) ==
                           0))
@@ -195,19 +180,6 @@ int OGRMSSQLSpatialSelectLayer::TestCapability(const char *pszCap)
 
 {
     return OGRMSSQLSpatialLayer::TestCapability(pszCap);
-}
-
-/************************************************************************/
-/*                             GetExtent()                              */
-/*                                                                      */
-/*      Since SELECT layers currently cannot ever have geometry, we     */
-/*      can optimize the GetExtent() method!                            */
-/************************************************************************/
-
-OGRErr OGRMSSQLSpatialSelectLayer::GetExtent(OGREnvelope *, int)
-
-{
-    return OGRERR_FAILURE;
 }
 
 /************************************************************************/

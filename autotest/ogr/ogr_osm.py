@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for OGR OSM driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -37,32 +20,32 @@ import pytest
 
 from osgeo import gdal, ogr
 
+pytestmark = pytest.mark.require_driver("OSM")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def setup_driver():
+    with gdaltest.error_handler(), gdaltest.disable_exceptions():
+        ds = ogr.Open("data/osm/test.osm")
+        ogrtest.osm_drv_parse_osm = ds is not None
+        if (
+            ogrtest.osm_drv_parse_osm is None
+            and "OSM XML detected, but Expat parser not available"
+            not in gdal.GetLastErrorMsg()
+        ):
+            pytest.fail(
+                "Did not get 'OSM XML detected, but Expat parser not available'"
+            )
+    yield
+
+
 ###############################################################################
 # Test .pbf
 
 
 def test_ogr_osm_1(filename="data/osm/test.pbf"):
 
-    ogrtest.osm_drv = ogr.GetDriverByName("OSM")
-    if ogrtest.osm_drv is None:
-        pytest.skip()
-
     ds = ogr.Open(filename)
-    if ds is None:
-        if filename == "data/osm/test.osm":
-            ogrtest.osm_drv_parse_osm = False
-            if (
-                gdal.GetLastErrorMsg().find(
-                    "OSM XML detected, but Expat parser not available"
-                )
-                == 0
-            ):
-                pytest.skip()
-
-        pytest.fail()
-    else:
-        if filename == "data/osm/test.osm":
-            ogrtest.osm_drv_parse_osm = True
 
     # Test points
     lyr = ds.GetLayer("points")
@@ -86,14 +69,7 @@ def test_ogr_osm_1(filename="data/osm/test.pbf"):
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat, ogr.CreateGeometryFromWkt("POINT (3.0 49.5)")
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(feat, ogr.CreateGeometryFromWkt("POINT (3.0 49.5)"))
 
     feat = lyr.GetNextFeature()
     if feat is not None:
@@ -114,28 +90,18 @@ def test_ogr_osm_1(filename="data/osm/test.pbf"):
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat, ogr.CreateGeometryFromWkt("LINESTRING (2 49,3 50)")
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat, ogr.CreateGeometryFromWkt("LINESTRING (2 49,3 50)")
+    )
 
     feat = lyr.GetNextFeature()
     if feat.GetFieldAsString("osm_id") != "6":
         feat.DumpReadable()
         pytest.fail()
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat, ogr.CreateGeometryFromWkt("LINESTRING (2 49,3 49,3 50,2 50,2 49)")
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat, ogr.CreateGeometryFromWkt("LINESTRING (2 49,3 49,3 50,2 50,2 49)")
+    )
 
     feat = lyr.GetNextFeature()
     if feat is not None:
@@ -159,29 +125,15 @@ def test_ogr_osm_1(filename="data/osm/test.pbf"):
         pytest.fail()
 
     if filename == "tmp/ogr_osm_3":
-        if (
-            ogrtest.check_feature_geometry(
-                feat,
-                ogr.CreateGeometryFromWkt(
-                    "POLYGON ((2 49,2 50,3 50,3 49,2 49),(2.1 49.1,2.2 49.1,2.2 49.2,2.1 49.2,2.1 49.1))"
-                ),
-            )
-            != 0
-        ):
-            feat.DumpReadable()
-            pytest.fail()
+        ogrtest.check_feature_geometry(
+            feat,
+            "POLYGON ((2 49,2 50,3 50,3 49,2 49),(2.1 49.1,2.2 49.1,2.2 49.2,2.1 49.2,2.1 49.1))",
+        )
     else:
-        if (
-            ogrtest.check_feature_geometry(
-                feat,
-                ogr.CreateGeometryFromWkt(
-                    "MULTIPOLYGON (((2 49,3 49,3 50,2 50,2 49),(2.1 49.1,2.2 49.1,2.2 49.2,2.1 49.2,2.1 49.1)))"
-                ),
-            )
-            != 0
-        ):
-            feat.DumpReadable()
-            pytest.fail()
+        ogrtest.check_feature_geometry(
+            feat,
+            "MULTIPOLYGON (((2 49,3 49,3 50,2 50,2 49),(2.1 49.1,2.2 49.1,2.2 49.2,2.1 49.2,2.1 49.1)))",
+        )
 
     feat = lyr.GetNextFeature()
     if (
@@ -221,23 +173,9 @@ def test_ogr_osm_1(filename="data/osm/test.pbf"):
         pytest.fail()
 
     if filename == "tmp/ogr_osm_3":
-        if (
-            ogrtest.check_feature_geometry(
-                feat, ogr.CreateGeometryFromWkt("LINESTRING (2 49,3 50)")
-            )
-            != 0
-        ):
-            feat.DumpReadable()
-            pytest.fail()
+        ogrtest.check_feature_geometry(feat, "LINESTRING (2 49,3 50)")
     else:
-        if (
-            ogrtest.check_feature_geometry(
-                feat, ogr.CreateGeometryFromWkt("MULTILINESTRING ((2 49,3 50))")
-            )
-            != 0
-        ):
-            feat.DumpReadable()
-            pytest.fail()
+        ogrtest.check_feature_geometry(feat, "MULTILINESTRING ((2 49,3 50))")
 
     feat = lyr.GetNextFeature()
     if feat is not None:
@@ -259,17 +197,9 @@ def test_ogr_osm_1(filename="data/osm/test.pbf"):
             feat.DumpReadable()
             pytest.fail()
 
-        if (
-            ogrtest.check_feature_geometry(
-                feat,
-                ogr.CreateGeometryFromWkt(
-                    "GEOMETRYCOLLECTION (POINT (2 49),LINESTRING (2 49,3 50))"
-                ),
-            )
-            != 0
-        ):
-            feat.DumpReadable()
-            pytest.fail()
+        ogrtest.check_feature_geometry(
+            feat, "GEOMETRYCOLLECTION (POINT (2 49),LINESTRING (2 49,3 50))"
+        )
 
         feat = lyr.GetNextFeature()
         if feat is not None:
@@ -298,6 +228,10 @@ def test_ogr_osm_1(filename="data/osm/test.pbf"):
 
 
 def test_ogr_osm_2():
+
+    if not ogrtest.osm_drv_parse_osm:
+        pytest.skip("Expat support missing")
+
     return test_ogr_osm_1("data/osm/test.osm")
 
 
@@ -306,6 +240,10 @@ def test_ogr_osm_2():
 
 
 def test_ogr_osm_limit_keys():
+
+    if not ogrtest.osm_drv_parse_osm:
+        pytest.skip("Expat support missing")
+
     with gdaltest.config_option("OSM_MAX_INDEXED_KEYS", "0"):
         return test_ogr_osm_1("data/osm/test.osm")
 
@@ -315,6 +253,10 @@ def test_ogr_osm_limit_keys():
 
 
 def test_ogr_osm_limit_values_per_key():
+
+    if not ogrtest.osm_drv_parse_osm:
+        pytest.skip("Expat support missing")
+
     with gdaltest.config_option("OSM_MAX_INDEXED_VALUES_PER_KEY", "0"):
         return test_ogr_osm_1("data/osm/test.osm")
 
@@ -324,9 +266,6 @@ def test_ogr_osm_limit_values_per_key():
 
 
 def test_ogr_osm_3(options=None, all_layers=False):
-
-    if ogrtest.osm_drv is None:
-        pytest.skip()
 
     filepath = "tmp/ogr_osm_3"
     if os.path.exists(filepath):
@@ -340,16 +279,14 @@ def test_ogr_osm_3(options=None, all_layers=False):
         layers = ""
     else:
         layers = "points lines multipolygons multilinestrings "
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.VectorTranslate(
             "tmp/ogr_osm_3", "data/osm/test.pbf", options=layers + options
         )
 
-    ret = test_ogr_osm_1(filepath)
+    test_ogr_osm_1(filepath)
 
     ogr.GetDriverByName("ESRI Shapefile").DeleteDataSource(filepath)
-
-    return ret
 
 
 ###############################################################################
@@ -357,10 +294,8 @@ def test_ogr_osm_3(options=None, all_layers=False):
 
 
 def test_ogr_osm_3_sqlite_nodes():
-    gdal.SetConfigOption("OSM_USE_CUSTOM_INDEXING", "NO")
-    ret = test_ogr_osm_3(options="-skip")
-    gdal.SetConfigOption("OSM_USE_CUSTOM_INDEXING", None)
-    return ret
+    with gdal.config_option("OSM_USE_CUSTOM_INDEXING", "NO"):
+        test_ogr_osm_3(options="-skip")
 
 
 ###############################################################################
@@ -368,10 +303,8 @@ def test_ogr_osm_3_sqlite_nodes():
 
 
 def test_ogr_osm_3_custom_compress_nodes():
-    gdal.SetConfigOption("OSM_COMPRESS_NODES", "YES")
-    ret = test_ogr_osm_3()
-    gdal.SetConfigOption("OSM_COMPRESS_NODES", None)
-    return ret
+    with gdal.config_option("OSM_COMPRESS_NODES", "YES"):
+        test_ogr_osm_3()
 
 
 ###############################################################################
@@ -387,9 +320,6 @@ def test_ogr_osm_3_all_layers():
 
 
 def test_ogr_osm_4():
-
-    if ogrtest.osm_drv is None:
-        pytest.skip()
 
     ds = ogr.Open("data/osm/test.pbf")
     assert ds is not None
@@ -411,7 +341,7 @@ def test_ogr_osm_4():
     feat = lyr.GetNextFeature()
     assert feat is None, "Zero filter "
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         lyr.SetSpatialFilter(None)
 
         # Change layer
@@ -440,9 +370,6 @@ def test_ogr_osm_4():
 
 
 def test_ogr_osm_5():
-
-    if ogrtest.osm_drv is None:
-        pytest.skip()
 
     ds = ogr.Open("data/osm/test.pbf")
     assert ds is not None
@@ -484,9 +411,6 @@ def test_ogr_osm_5():
 
 def test_ogr_osm_6():
 
-    if ogrtest.osm_drv is None:
-        pytest.skip()
-
     import test_cli_utilities
 
     if test_cli_utilities.get_ogr2ogr_path() is None:
@@ -520,9 +444,6 @@ def test_ogr_osm_6():
 
 def test_ogr_osm_7():
 
-    if ogrtest.osm_drv is None:
-        pytest.skip()
-
     ds = ogr.Open("data/osm/test.pbf")
     assert ds is not None
 
@@ -544,9 +465,6 @@ def test_ogr_osm_7():
 
 def test_ogr_osm_8():
 
-    if ogrtest.osm_drv is None:
-        pytest.skip()
-
     ds = ogr.Open("data/osm/base-64.osm.pbf")
     assert ds is not None
 
@@ -554,30 +472,18 @@ def test_ogr_osm_8():
     lyr.SetAttributeFilter("osm_id = '4294967934'")
     feat = lyr.GetNextFeature()
 
-    if (
-        feat.GetField("name") != "Treetops"
-        or ogrtest.check_feature_geometry(
-            feat, ogr.CreateGeometryFromWkt("POINT (-61.7964321 17.1498319)")
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    assert feat.GetField("name") == "Treetops"
+    ogrtest.check_feature_geometry(
+        feat, ogr.CreateGeometryFromWkt("POINT (-61.7964321 17.1498319)")
+    )
 
     lyr = ds.GetLayerByName("multipolygons")
     feat = lyr.GetFeature(1113)
 
-    if (
-        ogrtest.check_feature_geometry(
-            feat,
-            ogr.CreateGeometryFromWkt(
-                "MULTIPOLYGON (((-61.7780345 17.140634,-61.7777002 17.1406069,-61.7776854 17.1407739,-61.7779131 17.1407923,-61.7779158 17.1407624,-61.7780224 17.140771,-61.7780345 17.140634)))"
-            ),
-        )
-        != 0
-    ):
-        feat.DumpReadable()
-        pytest.fail()
+    ogrtest.check_feature_geometry(
+        feat,
+        "MULTIPOLYGON (((-61.7780345 17.140634,-61.7777002 17.1406069,-61.7776854 17.1407739,-61.7779131 17.1407923,-61.7779158 17.1407624,-61.7780224 17.140771,-61.7780345 17.140634)))",
+    )
 
 
 ###############################################################################
@@ -586,25 +492,19 @@ def test_ogr_osm_8():
 
 def test_ogr_osm_9():
 
-    if ogrtest.osm_drv is None:
-        pytest.skip()
-
-    old_val = gdal.GetConfigOption("OSM_USE_CUSTOM_INDEXING")
-    gdal.SetConfigOption("OSM_USE_CUSTOM_INDEXING", "NO")
-    ret = test_ogr_osm_8()
-    gdal.SetConfigOption("OSM_USE_CUSTOM_INDEXING", old_val)
-
-    return ret
+    with gdal.config_option("OSM_USE_CUSTOM_INDEXING", "NO"):
+        test_ogr_osm_8()
 
 
 ###############################################################################
 # Some error conditions
 
 
+@gdaltest.disable_exceptions()
 def test_ogr_osm_10():
 
-    if ogrtest.osm_drv is None:
-        pytest.skip()
+    if not ogrtest.osm_drv_parse_osm:
+        pytest.skip("Expat support missing")
 
     # A file that does not exist.
     ds = ogr.Open("/nonexistent/foo.osm")
@@ -638,9 +538,8 @@ def test_ogr_osm_10():
         ds = ogr.Open("/vsimem/foo.osm")
         lyr = ds.GetLayer(0)
         gdal.ErrorReset()
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        feat = lyr.GetNextFeature()
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            feat = lyr.GetNextFeature()
         assert gdal.GetLastErrorMsg() != ""
         ds = None
 
@@ -655,9 +554,8 @@ def test_ogr_osm_10():
     ds = ogr.Open("/vsimem/foo.pbf")
     lyr = ds.GetLayer(0)
     gdal.ErrorReset()
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    feat = lyr.GetNextFeature()
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        feat = lyr.GetNextFeature()
     assert gdal.GetLastErrorMsg() != ""
     ds = None
 
@@ -668,9 +566,8 @@ def test_ogr_osm_10():
         ds = ogr.Open("data/osm/billionlaugh.osm")
         lyr = ds.GetLayer(0)
         gdal.ErrorReset()
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        feat = lyr.GetNextFeature()
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            feat = lyr.GetNextFeature()
         assert feat is None and gdal.GetLastErrorMsg() != ""
 
 
@@ -680,12 +577,8 @@ def test_ogr_osm_10():
 
 def test_ogr_osm_11():
 
-    if ogrtest.osm_drv is None:
-        pytest.skip()
-
-    gdal.SetConfigOption("OSM_CONFIG_FILE", "data/osm/osmconf_alltags.ini")
-    ds = ogr.Open("data/osm/test.pbf")
-    gdal.SetConfigOption("OSM_CONFIG_FILE", None)
+    with gdal.config_option("OSM_CONFIG_FILE", "data/osm/osmconf_alltags.ini"):
+        ds = ogr.Open("data/osm/test.pbf")
     lyr = ds.GetLayerByName("points")
     feat = lyr.GetNextFeature()
     if (
@@ -710,9 +603,6 @@ def test_ogr_osm_11():
 
 
 def test_ogr_osm_12():
-
-    if ogrtest.osm_drv is None:
-        pytest.skip()
 
     ds = ogr.Open("data/osm/test.pbf")
     for i in range(2):
@@ -751,15 +641,15 @@ def test_ogr_osm_test_uncompressed_dense_false_pbf():
 
 def test_ogr_osm_13():
 
-    if ogrtest.osm_drv is None or not ogrtest.osm_drv_parse_osm:
-        pytest.skip()
+    if not ogrtest.osm_drv_parse_osm:
+        pytest.skip("Expat support missing")
 
     gdal.FileFromMemBuffer(
         "/vsimem/ogr_osm_13.osm",
         """<osm><node id="123" lon="2" lat="49"><tag k="osm_id" v="0"/></node></osm>""",
     )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = ogr.Open("/vsimem/ogr_osm_13.osm")
     if ds is None:
         gdal.Unlink("/vsimem/ogr_osm_13.osm")
@@ -780,8 +670,8 @@ def test_ogr_osm_13():
 
 def test_ogr_osm_14():
 
-    if ogrtest.osm_drv is None or not ogrtest.osm_drv_parse_osm:
-        pytest.skip()
+    if not ogrtest.osm_drv_parse_osm:
+        pytest.skip("Expat support missing")
 
     gdal.FileFromMemBuffer(
         "/vsimem/ogr_osm_14.osm",
@@ -804,7 +694,7 @@ def test_ogr_osm_14():
 </osm>""",
     )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = ogr.Open("/vsimem/ogr_osm_14.osm")
     if ds is None:
         gdal.Unlink("/vsimem/ogr_osm_14.osm")
@@ -839,9 +729,6 @@ def ogr_osm_15_progresscbk_return_false(pct, msg, user_data):
 
 
 def test_ogr_osm_15():
-
-    if ogrtest.osm_drv is None:
-        pytest.skip()
 
     ds = gdal.OpenEx("data/osm/test.pbf")
 
@@ -903,8 +790,8 @@ def test_ogr_osm_15():
 
 def test_ogr_osm_16():
 
-    if ogrtest.osm_drv is None or not ogrtest.osm_drv_parse_osm:
-        pytest.skip()
+    if not ogrtest.osm_drv_parse_osm:
+        pytest.skip("Expat support missing")
 
     gdal.FileFromMemBuffer(
         "/vsimem/ogr_osm_16.osm",
@@ -948,10 +835,10 @@ attributes=foo:baar,foo:bar
 
 def test_ogr_osm_17():
 
-    if ogrtest.osm_drv is None or not ogrtest.osm_drv_parse_osm:
-        pytest.skip()
+    if not ogrtest.osm_drv_parse_osm:
+        pytest.skip("Expat support missing")
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.VectorTranslate(
             "/vsimem/ogr_osm_17", "data/osm/empty.osm", options="-skip"
         )
@@ -972,9 +859,6 @@ def test_ogr_osm_17():
 
 def test_ogr_osm_18():
 
-    if ogrtest.osm_drv is None:
-        pytest.skip()
-
     ds = ogr.Open("data/osm/two_points.pbf")
     lyr = ds.GetLayerByName("points")
     count = 0
@@ -983,3 +867,73 @@ def test_ogr_osm_18():
     ds = None
 
     assert count == 2
+
+
+###############################################################################
+# Test TAGS_FORMAT=JSON
+
+
+def test_ogr_osm_tags_json():
+
+    ds = gdal.OpenEx("data/osm/test.pbf", open_options=["TAGS_FORMAT=JSON"])
+
+    lyr = ds.GetLayerByName("points")
+    lyr_defn = lyr.GetLayerDefn()
+    other_tags_idx = lyr_defn.GetFieldIndex("other_tags")
+    assert other_tags_idx >= 0
+    assert lyr_defn.GetFieldDefn(other_tags_idx).GetType() == ogr.OFTString
+    assert lyr_defn.GetFieldDefn(other_tags_idx).GetSubType() == ogr.OFSTJSON
+    f = lyr.GetNextFeature()
+    assert f["other_tags"] == '{"foo":"bar","bar":"baz"}'
+
+    lyr = ds.GetLayerByName("lines")
+    lyr_defn = lyr.GetLayerDefn()
+    other_tags_idx = lyr_defn.GetFieldIndex("other_tags")
+    assert other_tags_idx >= 0
+    assert lyr_defn.GetFieldDefn(other_tags_idx).GetType() == ogr.OFTString
+    assert lyr_defn.GetFieldDefn(other_tags_idx).GetSubType() == ogr.OFSTJSON
+    f = lyr.GetNextFeature()
+    assert f["other_tags"] == '{"foo":"bar"}'
+
+
+###############################################################################
+# Test TAGS_FORMAT=JSON
+
+
+def test_ogr_osm_tags_json_special_characters():
+
+    ds = gdal.OpenEx("data/osm/test_json.pbf", open_options=["TAGS_FORMAT=JSON"])
+
+    lyr = ds.GetLayerByName("points")
+    lyr_defn = lyr.GetLayerDefn()
+    other_tags_idx = lyr_defn.GetFieldIndex("other_tags")
+    assert other_tags_idx >= 0
+    assert lyr_defn.GetFieldDefn(other_tags_idx).GetType() == ogr.OFTString
+    assert lyr_defn.GetFieldDefn(other_tags_idx).GetSubType() == ogr.OFSTJSON
+    f = lyr.GetNextFeature()
+    assert f["other_tags"] == """{"foo":"x'\\\\\\"\\t\\n\\ry"}"""
+
+
+###############################################################################
+# Test that osmconf.ini can be parsed with Python's configparser
+
+
+def test_ogr_osmconf_ini():
+
+    if "EMBED_RESOURCE_FILES=YES" in gdal.VersionInfo(
+        "BUILD_INFO"
+    ) or "USE_ONLY_EMBEDDED_RESOURCE_FILES=YES" in gdal.VersionInfo("BUILD_INFO"):
+        pytest.skip(
+            "Test cannot work with EMBED_RESOURCE_FILES=YES/USE_ONLY_EMBEDDED_RESOURCE_FILES=YES"
+        )
+
+    import configparser
+
+    with ogr.Open("data/osm/test_json.pbf") as ds:
+        with ds.ExecuteSQL("SHOW config_file_path") as sql_lyr:
+            f = sql_lyr.GetNextFeature()
+            osmconf_ini_filename = f.GetField(0)
+            config = configparser.ConfigParser()
+            config.read_file(open(osmconf_ini_filename))
+            assert "general" in config
+            assert "closed_ways_are_polygons" in config["general"]

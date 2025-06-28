@@ -6,24 +6,7 @@
  *
  *  This file is part of LibKEA.
  *
- *  Permission is hereby granted, free of charge, to any person
- *  obtaining a copy of this software and associated documentation
- *  files (the "Software"), to deal in the Software without restriction,
- *  including without limitation the rights to use, copy, modify,
- *  merge, publish, distribute, sublicense, and/or sell copies of the
- *  Software, and to permit persons to whom the Software is furnished
- *  to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be
- *  included in all copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *  OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- *  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
- *  ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
- *  CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
- *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *
  */
 
@@ -321,8 +304,8 @@ void KEARasterBand::CreateOverviews(int nOverviews, const int *panOverviewList)
 
         // create one of our objects to represent it
         m_panOverviewBands[nCount] = new KEAOverview(
-            (KEADataset *)this->poDS, this->nBand, GA_Update, this->m_pImageIO,
-            this->m_pRefCount, nCount + 1, nXSize, nYSize);
+            cpl::down_cast<KEADataset *>(poDS), this->nBand, GA_Update,
+            this->m_pImageIO, this->m_pRefCount, nCount + 1, nXSize, nYSize);
     }
 }
 
@@ -399,7 +382,7 @@ void KEARasterBand::SetDescription(const char *pszDescription)
     try
     {
         this->m_pImageIO->setImageBandDescription(this->nBand, pszDescription);
-        GDALPamRasterBand::SetDescription(pszDescription);
+        GDALRasterBand::SetDescription(pszDescription);
     }
     catch (const kealib::KEAIOException &)
     {
@@ -721,9 +704,9 @@ CPLErr KEARasterBand::GetDefaultHistogram(double *pdfMin, double *pdfMax,
 {
     if (bForce)
     {
-        return GDALPamRasterBand::GetDefaultHistogram(pdfMin, pdfMax, pnBuckets,
-                                                      ppanHistogram, bForce, fn,
-                                                      pProgressData);
+        return GDALRasterBand::GetDefaultHistogram(pdfMin, pdfMax, pnBuckets,
+                                                   ppanHistogram, bForce, fn,
+                                                   pProgressData);
     }
     else
     {
@@ -859,7 +842,7 @@ CPLErr KEARasterBand::SetDefaultRAT(const GDALRasterAttributeTable *poRAT)
     try
     {
         KEARasterAttributeTable *pKEATable =
-            (KEARasterAttributeTable *)this->GetDefaultRAT();
+            cpl::down_cast<KEARasterAttributeTable *>(GetDefaultRAT());
         if (pKEATable == nullptr)
             return CE_Failure;
 
@@ -1319,7 +1302,7 @@ void KEARasterBand::readExistingOverviews()
         this->m_pImageIO->getOverviewSize(this->nBand, nCount + 1, &nXSize,
                                           &nYSize);
         m_panOverviewBands[nCount] = new KEAOverview(
-            (KEADataset *)this->poDS, this->nBand, GA_ReadOnly,
+            cpl::down_cast<KEADataset *>(poDS), this->nBand, GA_ReadOnly,
             this->m_pImageIO, this->m_pRefCount, nCount + 1, nXSize, nYSize);
     }
 }
@@ -1379,7 +1362,7 @@ GDALRasterBand *KEARasterBand::GetMaskBand()
             {
                 // use the base class implementation - GDAL will delete
                 // fprintf( stderr, "returning base GetMaskBand()\n" );
-                m_pMaskBand = GDALPamRasterBand::GetMaskBand();
+                m_pMaskBand = GDALRasterBand::GetMaskBand();
             }
         }
         catch (const kealib::KEAException &)
@@ -1399,7 +1382,7 @@ int KEARasterBand::GetMaskFlags()
             // need to return the base class one since we are using
             // the base class implementation of GetMaskBand()
             // fprintf( stderr, "returning base GetMaskFlags()\n" );
-            return GDALPamRasterBand::GetMaskFlags();
+            return GDALRasterBand::GetMaskFlags();
         }
     }
     catch (const kealib::KEAException &)
@@ -1415,6 +1398,7 @@ kealib::KEALayerType KEARasterBand::getLayerType() const
 {
     return m_pImageIO->getImageBandLayerType(nBand);
 }
+
 void KEARasterBand::setLayerType(kealib::KEALayerType eLayerType)
 {
     m_pImageIO->setImageBandLayerType(nBand, eLayerType);

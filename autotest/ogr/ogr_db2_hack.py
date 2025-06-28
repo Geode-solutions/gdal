@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test DB2 V7.2 WKB support. DB2 7.2 had a corrupt WKB format
@@ -44,23 +43,17 @@ def test_ogr_db2_hack_1():
     # XDR Case.
     geom = ogr.CreateGeometryFromWkt("POINT(10 20)")
     wkb = geom.ExportToWkb(byte_order=ogr.wkbXDR).decode("latin1")
-    geom.Destroy()
 
     assert wkb[0] == "0", "WKB wkbXDR point geometry has wrong byte order"
 
     # NDR Case.
     geom = ogr.CreateGeometryFromWkt("POINT(10 20)")
     wkb = geom.ExportToWkb(byte_order=ogr.wkbNDR).decode("latin1")
-    geom.Destroy()
 
     assert wkb[0] == "1", "WKB wkbNDR point geometry has wrong byte order"
 
-
-###############################################################################
-# Verify that we can turn DB2 V7.2 mode back off!
-
-
-def test_ogr_db2_hack_2():
+    ###############################################################################
+    # Verify that we can turn DB2 V7.2 mode back off!
 
     assert (
         ogr.SetGenerate_DB2_V72_BYTE_ORDER(0) == 0
@@ -69,14 +62,12 @@ def test_ogr_db2_hack_2():
     # XDR Case.
     geom = ogr.CreateGeometryFromWkt("POINT(10 20)")
     wkb = geom.ExportToWkb(byte_order=ogr.wkbXDR).decode("latin1")
-    geom.Destroy()
 
     assert wkb[0] == chr(0), "WKB wkbXDR point geometry has wrong byte order"
 
     # NDR Case.
     geom = ogr.CreateGeometryFromWkt("POINT(10 20)")
     wkb = geom.ExportToWkb(byte_order=ogr.wkbNDR).decode("latin1")
-    geom.Destroy()
 
     assert wkb[0] == chr(1), "WKB wkbNDR point geometry has wrong byte order"
 
@@ -94,7 +85,6 @@ def test_ogr_db2_hack_3():
 
     geom = ogr.CreateGeometryFromWkt(wkt)
     wkb = geom.ExportToWkb()
-    geom.Destroy()
 
     # Check primary byte order value.
     assert (
@@ -110,7 +100,5 @@ def test_ogr_db2_hack_3():
     assert geom.ExportToWkt() == wkt, (
         "Conversion to/from DB2 format seems to have " "corrupted geometry."
     )
-
-    geom.Destroy()
 
     ogr.SetGenerate_DB2_V72_BYTE_ORDER(0)

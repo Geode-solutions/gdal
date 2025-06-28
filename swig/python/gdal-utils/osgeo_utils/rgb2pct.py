@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # ******************************************************************************
-#  $Id$
 #
 #  Name:     rgb2pct
 #  Project:  GDAL Python Interface
@@ -11,23 +10,7 @@
 #  Copyright (c) 2001, Frank Warmerdam
 #  Copyright (c) 2020-2021, Idan Miara <idan@miara.com>
 #
-#  Permission is hereby granted, free of charge, to any person obtaining a
-#  copy of this software and associated documentation files (the "Software"),
-#  to deal in the Software without restriction, including without limitation
-#  the rights to use, copy, modify, merge, publish, distribute, sublicense,
-#  and/or sell copies of the Software, and to permit persons to whom the
-#  Software is furnished to do so, subject to the following conditions:
-#
-#  The above copyright notice and this permission notice shall be included
-#  in all copies or substantial portions of the Software.
-#
-#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-#  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-#  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-#  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-#  DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 # ******************************************************************************
 
 import os.path
@@ -39,15 +22,21 @@ from osgeo import gdal
 from osgeo_utils.auxiliary.base import PathLikeOrStr
 from osgeo_utils.auxiliary.color_table import get_color_table
 from osgeo_utils.auxiliary.gdal_argparse import GDALArgumentParser, GDALScript
-from osgeo_utils.auxiliary.util import GetOutputDriverFor, open_ds
+from osgeo_utils.auxiliary.util import (
+    GetOutputDriverFor,
+    enable_gdal_exceptions,
+    open_ds,
+)
 
 
+@enable_gdal_exceptions
 def rgb2pct(
     src_filename: PathLikeOrStr,
     pct_filename: Optional[PathLikeOrStr] = None,
     dst_filename: Optional[PathLikeOrStr] = None,
     color_count: int = 256,
     driver_name: Optional[str] = None,
+    creation_options: Optional[list] = None,
 ):
     # Open source file
     src_ds = open_ds(src_filename)
@@ -93,8 +82,18 @@ def rgb2pct(
 
     gtiff_driver = gdal.GetDriverByName("GTiff")
 
+    # Convert options to list
+    if isinstance(creation_options, str):
+        creation_options = creation_options.split()
+    if not creation_options:
+        creation_options = []
+
     tif_ds = gtiff_driver.Create(
-        tif_filename, src_ds.RasterXSize, src_ds.RasterYSize, 1
+        tif_filename,
+        src_ds.RasterXSize,
+        src_ds.RasterYSize,
+        1,
+        options=creation_options,
     )
 
     tif_ds.GetRasterBand(1).SetRasterColorTable(ct)
@@ -185,6 +184,15 @@ class RGB2PCT(GDALScript):
             "Can be used to have a consistent color table for multiple files. "
             "The palette file must be either a raster file in a GDAL supported format with a "
             "palette or a color file in a supported format (txt, qml, qlr).",
+        )
+
+        parser.add_argument(
+            "--creation-option",
+            "--co",
+            dest="creation_options",
+            default=[],
+            action="append",
+            help="GeoTIFF creation options, e.g. COMPRESS=LZW",
         )
 
         parser.add_argument("src_filename", type=str, help="The input RGB file.")

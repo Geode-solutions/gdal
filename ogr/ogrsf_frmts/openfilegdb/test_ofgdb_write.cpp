@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "filegdbtable.h"
@@ -40,24 +24,33 @@ int main()
     const int nTablxOffsetSize = 4;
     oTable.Create("test_ofgdb.gdbtable", nTablxOffsetSize, eTableGeomType,
                   bGeomTypeHasZ, bGeomTypeHasM);
-    oTable.CreateField(std::unique_ptr<FileGDBField>(
-        new FileGDBField("OBJECTID", "OBJECTID", FGFT_OBJECTID, false, 0,
-                         FileGDBField::UNSET_FIELD)));
+    oTable.CreateField(std::unique_ptr<FileGDBField>(new FileGDBField(
+        "OBJECTID", "OBJECTID", FGFT_OBJECTID,
+        /* nullable = */ false,
+        /* required = */ true,
+        /* editable = */ false, 0, FileGDBField::UNSET_FIELD)));
 
-    oTable.CreateField(std::unique_ptr<FileGDBField>(new FileGDBField(
-        "int16", "", FGFT_INT16, true, 0, FileGDBField::UNSET_FIELD)));
-    oTable.CreateField(std::unique_ptr<FileGDBField>(new FileGDBField(
-        "int32", "", FGFT_INT32, true, 0, FileGDBField::UNSET_FIELD)));
-    oTable.CreateField(std::unique_ptr<FileGDBField>(new FileGDBField(
-        "float32", "", FGFT_FLOAT32, true, 0, FileGDBField::UNSET_FIELD)));
-    oTable.CreateField(std::unique_ptr<FileGDBField>(new FileGDBField(
-        "float64", "", FGFT_FLOAT64, true, 0, FileGDBField::UNSET_FIELD)));
-    oTable.CreateField(std::unique_ptr<FileGDBField>(new FileGDBField(
-        "str", "", FGFT_STRING, true, 0, FileGDBField::UNSET_FIELD)));
-    oTable.CreateField(std::unique_ptr<FileGDBField>(new FileGDBField(
-        "datetime", "", FGFT_DATETIME, true, 0, FileGDBField::UNSET_FIELD)));
-    oTable.CreateField(std::unique_ptr<FileGDBField>(new FileGDBField(
-        "binary", "", FGFT_BINARY, true, 0, FileGDBField::UNSET_FIELD)));
+    oTable.CreateField(std::unique_ptr<FileGDBField>(
+        new FileGDBField("int16", "", FGFT_INT16, true, false, true, 0,
+                         FileGDBField::UNSET_FIELD)));
+    oTable.CreateField(std::unique_ptr<FileGDBField>(
+        new FileGDBField("int32", "", FGFT_INT32, true, false, true, 0,
+                         FileGDBField::UNSET_FIELD)));
+    oTable.CreateField(std::unique_ptr<FileGDBField>(
+        new FileGDBField("float32", "", FGFT_FLOAT32, true, false, true, 0,
+                         FileGDBField::UNSET_FIELD)));
+    oTable.CreateField(std::unique_ptr<FileGDBField>(
+        new FileGDBField("float64", "", FGFT_FLOAT64, true, false, true, 0,
+                         FileGDBField::UNSET_FIELD)));
+    oTable.CreateField(std::unique_ptr<FileGDBField>(
+        new FileGDBField("str", "", FGFT_STRING, true, false, true, 0,
+                         FileGDBField::UNSET_FIELD)));
+    oTable.CreateField(std::unique_ptr<FileGDBField>(
+        new FileGDBField("datetime", "", FGFT_DATETIME, true, false, true, 0,
+                         FileGDBField::UNSET_FIELD)));
+    oTable.CreateField(std::unique_ptr<FileGDBField>(
+        new FileGDBField("binary", "", FGFT_BINARY, true, false, true, 0,
+                         FileGDBField::UNSET_FIELD)));
 
     auto poGeomField = std::unique_ptr<FileGDBGeomField>(new FileGDBGeomField(
         "SHAPE", "", true, "{B286C06B-0879-11D2-AACA-00C04FA33C20}", -400, -400,

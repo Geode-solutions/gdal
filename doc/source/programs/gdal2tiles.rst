@@ -1,7 +1,7 @@
 .. _gdal2tiles:
 
 ================================================================================
-gdal2tiles.py
+gdal2tiles
 ================================================================================
 
 .. only:: html
@@ -16,12 +16,16 @@ Synopsis
 .. code-block::
 
 
-    gdal2tiles.py [-p profile] [-r resampling] [-s srs] [-z zoom]
-                  [-e] [-a nodata] [-v] [-q] [-h] [-k] [-n] [-u url]
-                  [-w webviewer] [-t title] [-c copyright]
-                  [--processes=NB_PROCESSES] [--mpi] [--xyz]
-                  [--tilesize=PIXELS] [--tmscompatible]
-                  [-g googlekey] [-b bingkey] input_file [output_dir] [COMMON_OPTIONS]
+    gdal2tiles [--help] [--help-general]
+                  [-p <profile>] [-r resampling] [-s <srs>] [-z <zoom>]
+                  [-e] [-a nodata] [-v] [-q] [-h] [-k] [-n] [-u <url>]
+                  [-w <webviewer>] [-t <title>] [-c <copyright>]
+                  [--processes=<NB_PROCESSES>] [--mpi] [--xyz]
+                  [--tilesize=<PIXELS>] --tiledriver=<DRIVER> [--tmscompatible]
+                  [--excluded-values=<EXCLUDED_VALUES>]
+                  [--excluded-values-pct-threshold=<EXCLUDED_VALUES_PCT_THRESHOLD>]
+                  [--nodata-values-pct-threshold=<NODATA_VALUES_PCT_THRESHOLD>]
+                  [-g <googlekey] [-b <bingkey>] <input_file> [<output_dir>] [<COMMON_OPTIONS>]
 
 Description
 -----------
@@ -49,8 +53,14 @@ can publish a picture without proper georeferencing too.
 
     Config options of the input drivers may have an effect on the output of gdal2tiles. An example driver config option is GDAL_PDF_DPI, which can be found at :ref:`configoptions`
 
+.. note::
+
+    gdal2tiles is a Python utility, and is only available if GDAL Python bindings are available.
+
 
 .. program:: gdal2tiles
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: -p <PROFILE>, --profile=<PROFILE>
 
@@ -62,7 +72,7 @@ can publish a picture without proper georeferencing too.
 
 .. option:: -r <RESAMPLING>, --resampling=<RESAMPLING>
 
-  Resampling method (average, near, bilinear, cubic, cubicspline, lanczos, antialias, mode, max, min, med, q1, q3) - default 'average'.
+  Resampling method (average, near, bilinear, cubic, cubicspline, lanczos, mode, max, min, med, q1, q3) - default 'average'.
 
 .. option:: -s <SRS>, --s_srs=<SRS>
 
@@ -75,9 +85,9 @@ can publish a picture without proper georeferencing too.
   in XYZ mode (used by OGC WMTS too), tiles at y=0 are the northern-most tiles.
 
   .. versionadded:: 3.1
-  
+
 .. option:: -d, --tmscompatible
-  
+
   When using the geodetic profile, specifies the base resolution as 0.703125
   or 2 tiles at zoom level 0.
 
@@ -97,6 +107,9 @@ can publish a picture without proper georeferencing too.
 .. option:: -v, --verbose
 
   Generate verbose output of tile generation.
+
+  Starting with GDAL 3.7, that verbose output is emitted through the
+  ``logging.getLogger("gdal2tiles")`` object.
 
 .. option:: -x, --exclude
 
@@ -132,11 +145,40 @@ can publish a picture without proper georeferencing too.
 .. option:: --tiledriver=<DRIVER>
 
   Which output driver to use for the tiles, determines the file format of the tiles.
-  Currently PNG and WEBP are supported. Default is PNG.
-  Additional configuration for the WEBP driver are documented below.
+  Currently PNG, WEBP and JPEG (JPEG added in GDAL 3.9) are supported. Default is PNG.
+  Additional configuration for the WEBP and JPEG drivers are documented below.
 
   .. versionadded:: 3.6
 
+.. option:: --excluded-values=<EXCLUDED_VALUES>
+
+  Comma-separated tuple of values (thus typically "R,G,B"), that are ignored
+  as contributing source pixels during resampling. The number of values in
+  the tuple must be the same as the number of bands, excluding the alpha band.
+  Several tuples of excluded values may be specified using the "(R1,G1,B2),(R2,G2,B2)" syntax.
+  Only taken into account by Average currently.
+  This concept is a bit similar to nodata/alpha, but the main difference is
+  that pixels matching one of the excluded value tuples are still considered
+  as valid, when determining the target pixel validity/density.
+
+  .. versionadded:: 3.9
+
+.. option:: --excluded-values-pct-threshold=EXCLUDED_VALUES_PCT_THRESHOLD
+
+  Minimum percentage of source pixels that must be set at one of the --excluded-values to cause the excluded
+  value, that is in majority among source pixels, to be used as the target pixel value. Default value is 50(%)
+
+  .. versionadded:: 3.9
+
+.. option:: --nodata-values-pct-threshold=<NODATA_VALUES_PCT_THRESHOLD>
+
+  Minimum percentage of source pixels that must be at nodata (or alpha=0 or any
+  other way to express transparent pixel) to cause the target pixel value to
+  be transparent. Default value is 100 (%), which means that a target pixel is
+  transparent only if all contributing source pixels are transparent.
+  Only taken into account for average resampling.
+
+  .. versionadded:: 3.9
 
 .. option:: -h, --help
 
@@ -191,10 +233,6 @@ Options for generated HTML viewers a la Google Maps
   Bing Maps API key from https://www.bingmapsportal.com/
 
 
-.. note::
-
-    gdal2tiles.py is a Python script that needs to be run against Python GDAL binding.
-
 MapML options
 +++++++++++++
 
@@ -207,7 +245,7 @@ The following profiles are supported:
 - geodetic: mapped to WGS84 MapML tiling scheme
 - APSTILE: from the tms_MapML_APSTILE.json data file
 
-The generated MapML file in the output directory is ``mapml.mapl``
+The generated MapML file in the output directory is ``mapml.mapml``
 
 Available options are:
 
@@ -226,7 +264,7 @@ WEBP options
 WEBP tiledriver support is new to GDAL 3.6. It is enabled by using --tiledriver=WEBP.
 
 
-The following configuration options are available to further customize the webp output:
+The following configuration options are available to further customize the WebP output:
 
 .. option:: --webp-quality=<QUALITY>
 
@@ -242,27 +280,43 @@ The following configuration options are available to further customize the webp 
     GDAL :ref:`WEBP driver <raster.webp>` documentation can be consulted
 
 
+JPEG options
++++++++++++++
+
+JPEG tiledriver support is new to GDAL 3.9. It is enabled by using --tiledriver=JPEG.
+
+Note that JPEG does not support transparency, hence edge tiles will display black
+pixels in areas not covered by the source raster.
+
+The following configuration options are available to further customize the JPEG output:
+
+.. option:: ---jpeg-quality=JPEG_QUALITY
+
+    QUALITY is a integer between 1-100. Default is 75.
 
 
 Examples
 --------
 
-Basic example:
+.. example::
+   :title: Basic example
 
-.. code-block::
+   .. code-block:: bash
 
-  gdal2tiles.py --zoom=2-5 input.tif output_folder
-
-
-MapML generation:
-
-.. code-block::
-
-  gdal2tiles.py --zoom=16-18 -w mapml -p APSTILE --url "https://example.com" input.tif output_folder
+      gdal2tiles --zoom=2-5 input.tif output_folder
 
 
-MPI example:
+.. example::
+   :title: MapML generation
 
-.. code-block::
+   .. code-block:: bash
 
-  mpiexec -n $NB_PROCESSES gdal2tiles.py --mpi --config GDAL_CACHEMAX 500 --zoom=2-5 input.tif output_folder
+      gdal2tiles --zoom=16-18 -w mapml -p APSTILE --url "https://example.com" input.tif output_folder
+
+
+.. example::
+   :title: MPI example
+
+    .. code-block:: bash
+
+       mpiexec -n $NB_PROCESSES gdal2tiles --mpi --config GDAL_CACHEMAX 500 --zoom=2-5 input.tif output_folder

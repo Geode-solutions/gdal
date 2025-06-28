@@ -7,29 +7,21 @@
  ******************************************************************************
  * Copyright (c) 2018-2019, Björn Harrtell <bjorn at wololo dot org>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef FLATGEOBUF_GEOMETRYREADER_H_INCLUDED
 #define FLATGEOBUF_GEOMETRYREADER_H_INCLUDED
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
 #include "feature_generated.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
 #include "ogr_p.h"
 
 namespace ogr_flatgeobuf
@@ -67,6 +59,7 @@ class GeometryReader
     {
         return GeometryReader(part, m_hasZ, m_hasM).read();
     }
+
     OGRGeometry *readPart(const FlatGeobuf::Geometry *part,
                           const FlatGeobuf::GeometryType geometryType)
     {
@@ -94,12 +87,14 @@ class GeometryReader
           m_hasM(hasM)
     {
     }
+
     GeometryReader(const FlatGeobuf::Geometry *geometry, const bool hasZ,
                    const bool hasM)
         : m_geometry(geometry), m_geometryType(geometry->type()), m_hasZ(hasZ),
           m_hasM(hasM)
     {
     }
+
     OGRGeometry *read();
 };
 

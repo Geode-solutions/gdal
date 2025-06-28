@@ -9,23 +9,7 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_gmlas.h"
@@ -52,7 +36,7 @@ CPLString OGRGMLASTruncateIdentifier(const CPLString &osName,
         const char *pszToken = papszTokens[j];
         bool bIsCamelCase = false;
         // Split parts like camelCase or CamelCase into several tokens
-        if (pszToken[0] != '\0' && islower(pszToken[1]))
+        if (pszToken[0] != '\0' && pszToken[1] >= 'a' && pszToken[1] <= 'z')
         {
             bIsCamelCase = true;
             bool bLastIsLower = true;
@@ -62,7 +46,7 @@ CPLString OGRGMLASTruncateIdentifier(const CPLString &osName,
             osCurrentPart += pszToken[1];
             for (int k = 2; pszToken[k]; ++k)
             {
-                if (isupper(pszToken[k]))
+                if (pszToken[k] >= 'A' && pszToken[k] <= 'Z')
                 {
                     if (!bLastIsLower)
                     {
@@ -82,7 +66,7 @@ CPLString OGRGMLASTruncateIdentifier(const CPLString &osName,
             if (bIsCamelCase)
             {
                 if (!osCurrentPart.empty())
-                    aoParts.push_back(osCurrentPart);
+                    aoParts.push_back(std::move(osCurrentPart));
                 for (size_t k = 0; k < aoParts.size(); ++k)
                 {
                     achDelimiters.push_back((j > 0 && k == 0) ? '_' : '\0');
@@ -111,7 +95,7 @@ CPLString OGRGMLASTruncateIdentifier(const CPLString &osName,
     {
         if (nLastTokenSize > nExtra)
         {
-            aosTokens[aosTokens.size() - 1].resize(nLastTokenSize - nExtra);
+            aosTokens.back().resize(nLastTokenSize - nExtra);
             nExtra = 0;
         }
     }
@@ -127,7 +111,7 @@ CPLString OGRGMLASTruncateIdentifier(const CPLString &osName,
             // than previous ones.
             if (nLastTokenSize > 2 * iter->first)
             {
-                aosTokens[aosTokens.size() - 1].resize(nLastTokenSize - 1);
+                aosTokens.back().resize(nLastTokenSize - 1);
                 nLastTokenSize--;
                 bHasDoneSomething = true;
                 nExtra--;
@@ -201,7 +185,10 @@ CPLString OGRGMLASAddSerialNumber(const CPLString &osNameIn, int iOccurrence,
         }
         else
         {
-            osName.resize(osName.size() - nDigitsSize);
+            const int nTruncatedSize =
+                static_cast<int>(osName.size()) - nDigitsSize;
+            if (nTruncatedSize >= 0)
+                osName.resize(nTruncatedSize);
             osName += szDigits;
         }
     }

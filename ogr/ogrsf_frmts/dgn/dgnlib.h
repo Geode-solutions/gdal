@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Microstation DGN Access Library
  * Purpose:  Definitions of public structures and API of DGN Library.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2000, Avenza Systems Inc, http://www.avenza.com/
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef DGNLIB_H_INCLUDED
@@ -798,7 +781,7 @@ int CPL_DLL DGNGetAssocID(DGNHandle, DGNElemCore *);
 int CPL_DLL DGNGetElementExtents(DGNHandle, DGNElemCore *, DGNPoint *,
                                  DGNPoint *);
 
-void CPL_DLL DGNDumpElement(DGNHandle, DGNElemCore *, FILE *);
+void CPL_DLL DGNDumpElement(DGNHandle, const DGNElemCore *, FILE *);
 const char CPL_DLL *DGNTypeToName(int);
 
 void CPL_DLL DGNRotationToQuaternion(double, int *);
@@ -807,11 +790,11 @@ int CPL_DLL DGNStrokeArc(DGNHandle, DGNElemArc *, int, DGNPoint *);
 int CPL_DLL DGNStrokeCurve(DGNHandle, DGNElemMultiPoint *, int, DGNPoint *);
 void CPL_DLL DGNSetSpatialFilter(DGNHandle hDGN, double dfXMin, double dfYMin,
                                  double dfXMax, double dfYMax);
-int CPL_DLL DGNGetAttrLinkSize(DGNHandle, DGNElemCore *, int);
-unsigned char CPL_DLL *DGNGetLinkage(DGNHandle hDGN, DGNElemCore *psElement,
-                                     int iIndex, int *pnLinkageType,
-                                     int *pnEntityNum, int *pnMSLink,
-                                     int *pnLinkSize);
+int CPL_DLL DGNGetAttrLinkSize(DGNHandle, const DGNElemCore *, int);
+unsigned char CPL_DLL *DGNGetLinkage(DGNHandle hDGN,
+                                     const DGNElemCore *psElement, int iIndex,
+                                     int *pnLinkageType, int *pnEntityNum,
+                                     int *pnMSLink, int *pnLinkSize);
 
 /* Write API */
 
@@ -824,7 +807,7 @@ DGNHandle CPL_DLL DGNCreate(const char *pszNewFilename, const char *pszSeedFile,
                             const char *pszMasterUnits,
                             const char *pszSubUnits);
 DGNElemCore CPL_DLL *DGNCloneElement(DGNHandle hDGNSrc, DGNHandle hDGNDst,
-                                     DGNElemCore *psSrcElement);
+                                     const DGNElemCore *psSrcElement);
 int CPL_DLL DGNUpdateElemCore(DGNHandle hDGN, DGNElemCore *psElement,
                               int nLevel, int nGraphicGroup, int nColor,
                               int nWeight, int nStyle);

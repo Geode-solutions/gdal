@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -46,19 +30,21 @@ class NGSGEOIDDataset final : public GDALPamDataset
 {
     friend class NGSGEOIDRasterBand;
 
-    VSILFILE *fp;
-    double adfGeoTransform[6];
-    int bIsLittleEndian;
+    VSILFILE *fp{};
+    GDALGeoTransform m_gt{};
+    int bIsLittleEndian{};
     mutable OGRSpatialReference m_oSRS{};
 
-    static int GetHeaderInfo(const GByte *pBuffer, double *padfGeoTransform,
+    static int GetHeaderInfo(const GByte *pBuffer, GDALGeoTransform &gt,
                              int *pnRows, int *pnCols, int *pbIsLittleEndian);
+
+    CPL_DISALLOW_COPY_ASSIGN(NGSGEOIDDataset)
 
   public:
     NGSGEOIDDataset();
     virtual ~NGSGEOIDDataset();
 
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 
     static GDALDataset *Open(GDALOpenInfo *);
@@ -79,6 +65,7 @@ class NGSGEOIDRasterBand final : public GDALPamRasterBand
     explicit NGSGEOIDRasterBand(NGSGEOIDDataset *);
 
     virtual CPLErr IReadBlock(int, int, void *) override;
+
     virtual const char *GetUnitType() override
     {
         return "m";
@@ -147,12 +134,6 @@ CPLErr NGSGEOIDRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
 NGSGEOIDDataset::NGSGEOIDDataset() : fp(nullptr), bIsLittleEndian(TRUE)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0;
-    adfGeoTransform[1] = 1;
-    adfGeoTransform[2] = 0;
-    adfGeoTransform[3] = 0;
-    adfGeoTransform[4] = 0;
-    adfGeoTransform[5] = 1;
 }
 
 /************************************************************************/
@@ -171,9 +152,9 @@ NGSGEOIDDataset::~NGSGEOIDDataset()
 /*                            GetHeaderInfo()                           */
 /************************************************************************/
 
-int NGSGEOIDDataset::GetHeaderInfo(const GByte *pBuffer,
-                                   double *padfGeoTransform, int *pnRows,
-                                   int *pnCols, int *pbIsLittleEndian)
+int NGSGEOIDDataset::GetHeaderInfo(const GByte *pBuffer, GDALGeoTransform &gt,
+                                   int *pnRows, int *pnCols,
+                                   int *pbIsLittleEndian)
 {
     /* First check IKIND marker to determine if the file */
     /* is in little or big-endian order, and if it is a valid */
@@ -279,16 +260,17 @@ int NGSGEOIDDataset::GetHeaderInfo(const GByte *pBuffer,
         return FALSE;
 
     /* Grids go over +180 in longitude */
-    if (dfSLAT < -90.0 || dfSLAT + nNLAT * dfDLAT > 90.0 || dfWLON < -180.0 ||
-        dfWLON + nNLON * dfDLON > 360.0)
+    // Test written that way to be robust to NaN values
+    if (!(dfSLAT >= -90.0 && dfSLAT + nNLAT * dfDLAT <= 90.0 &&
+          dfWLON >= -180.0 && dfWLON + nNLON * dfDLON <= 360.0))
         return FALSE;
 
-    padfGeoTransform[0] = dfWLON - dfDLON / 2;
-    padfGeoTransform[1] = dfDLON;
-    padfGeoTransform[2] = 0.0;
-    padfGeoTransform[3] = dfSLAT + nNLAT * dfDLAT - dfDLAT / 2;
-    padfGeoTransform[4] = 0.0;
-    padfGeoTransform[5] = -dfDLAT;
+    gt[0] = dfWLON - dfDLON / 2;
+    gt[1] = dfDLON;
+    gt[2] = 0.0;
+    gt[3] = dfSLAT + nNLAT * dfDLAT - dfDLAT / 2;
+    gt[4] = 0.0;
+    gt[5] = -dfDLAT;
 
     *pnRows = nNLAT;
     *pnCols = nNLON;
@@ -305,10 +287,10 @@ int NGSGEOIDDataset::Identify(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->nHeaderBytes < HEADER_SIZE)
         return FALSE;
 
-    double adfGeoTransform[6];
+    GDALGeoTransform gt;
     int nRows, nCols;
     int bIsLittleEndian;
-    if (!GetHeaderInfo(poOpenInfo->pabyHeader, adfGeoTransform, &nRows, &nCols,
+    if (!GetHeaderInfo(poOpenInfo->pabyHeader, gt, &nRows, &nCols,
                        &bIsLittleEndian))
         return FALSE;
 
@@ -327,10 +309,7 @@ GDALDataset *NGSGEOIDDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(
-            CE_Failure, CPLE_NotSupported,
-            "The NGSGEOID driver does not support update access to existing"
-            " datasets.\n");
+        ReportUpdateNotSupportedByDriver("NGSGEOID");
         return nullptr;
     }
 
@@ -342,7 +321,7 @@ GDALDataset *NGSGEOIDDataset::Open(GDALOpenInfo *poOpenInfo)
     poOpenInfo->fpL = nullptr;
 
     int nRows = 0, nCols = 0;
-    GetHeaderInfo(poOpenInfo->pabyHeader, poDS->adfGeoTransform, &nRows, &nCols,
+    GetHeaderInfo(poOpenInfo->pabyHeader, poDS->m_gt, &nRows, &nCols,
                   &poDS->bIsLittleEndian);
     poDS->nRasterXSize = nCols;
     poDS->nRasterYSize = nRows;
@@ -370,10 +349,10 @@ GDALDataset *NGSGEOIDDataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr NGSGEOIDDataset::GetGeoTransform(double *padfTransform)
+CPLErr NGSGEOIDDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, 6 * sizeof(double));
+    gt = m_gt;
 
     return CE_None;
 }
@@ -389,8 +368,8 @@ const OGRSpatialReference *NGSGEOIDDataset::GetSpatialRef() const
         return &m_oSRS;
     }
 
-    CPLString osFilename(CPLGetBasename(GetDescription()));
-    osFilename.tolower();
+    const CPLString osFilename =
+        CPLString(CPLGetBasenameSafe(GetDescription())).tolower();
 
     // See https://www.ngs.noaa.gov/GEOID/GEOID12B/faq_2012B.shtml
 

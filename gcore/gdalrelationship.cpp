@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Nyall Dawson <nyall dot dawson at gmail dot comg>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -240,14 +224,9 @@ char **GDALRelationshipGetLeftTableFields(GDALRelationshipH hRelationship)
     VALIDATE_POINTER1(hRelationship, "GDALRelationshipGetLeftTableFields",
                       nullptr);
 
-    auto fields =
+    const auto &fields =
         GDALRelationship::FromHandle(hRelationship)->GetLeftTableFields();
-    CPLStringList res;
-    for (const auto &field : fields)
-    {
-        res.AddString(field.c_str());
-    }
-    return res.StealList();
+    return CPLStringList(fields).StealList();
 }
 
 /************************************************************************/
@@ -271,14 +250,9 @@ char **GDALRelationshipGetRightTableFields(GDALRelationshipH hRelationship)
     VALIDATE_POINTER1(hRelationship, "GDALRelationshipGetRightTableFields",
                       nullptr);
 
-    auto fields =
+    const auto &fields =
         GDALRelationship::FromHandle(hRelationship)->GetRightTableFields();
-    CPLStringList res;
-    for (const auto &field : fields)
-    {
-        res.AddString(field.c_str());
-    }
-    return res.StealList();
+    return CPLStringList(fields).StealList();
 }
 
 /************************************************************************/
@@ -302,15 +276,8 @@ char **GDALRelationshipGetRightTableFields(GDALRelationshipH hRelationship)
 void GDALRelationshipSetLeftTableFields(GDALRelationshipH hRelationship,
                                         CSLConstList papszFields)
 {
-    std::vector<std::string> aosFields;
-    if (papszFields)
-    {
-        for (auto papszIter = papszFields; *papszIter; ++papszIter)
-        {
-            aosFields.emplace_back(*papszIter);
-        }
-    }
-    GDALRelationship::FromHandle(hRelationship)->SetLeftTableFields(aosFields);
+    GDALRelationship::FromHandle(hRelationship)
+        ->SetLeftTableFields(cpl::ToVector(papszFields));
 }
 
 /************************************************************************/
@@ -334,15 +301,8 @@ void GDALRelationshipSetLeftTableFields(GDALRelationshipH hRelationship,
 void GDALRelationshipSetRightTableFields(GDALRelationshipH hRelationship,
                                          CSLConstList papszFields)
 {
-    std::vector<std::string> aosFields;
-    if (papszFields)
-    {
-        for (auto papszIter = papszFields; *papszIter; ++papszIter)
-        {
-            aosFields.emplace_back(*papszIter);
-        }
-    }
-    GDALRelationship::FromHandle(hRelationship)->SetRightTableFields(aosFields);
+    GDALRelationship::FromHandle(hRelationship)
+        ->SetRightTableFields(cpl::ToVector(papszFields));
 }
 
 /************************************************************************/
@@ -367,14 +327,9 @@ GDALRelationshipGetLeftMappingTableFields(GDALRelationshipH hRelationship)
     VALIDATE_POINTER1(hRelationship,
                       "GDALRelationshipGetLeftMappingTableFields", nullptr);
 
-    auto fields = GDALRelationship::FromHandle(hRelationship)
-                      ->GetLeftMappingTableFields();
-    CPLStringList res;
-    for (const auto &field : fields)
-    {
-        res.AddString(field.c_str());
-    }
-    return res.StealList();
+    const auto &fields = GDALRelationship::FromHandle(hRelationship)
+                             ->GetLeftMappingTableFields();
+    return CPLStringList(fields).StealList();
 }
 
 /************************************************************************/
@@ -399,14 +354,9 @@ GDALRelationshipGetRightMappingTableFields(GDALRelationshipH hRelationship)
     VALIDATE_POINTER1(hRelationship,
                       "GDALRelationshipGetRightMappingTableFields", nullptr);
 
-    auto fields = GDALRelationship::FromHandle(hRelationship)
-                      ->GetRightMappingTableFields();
-    CPLStringList res;
-    for (const auto &field : fields)
-    {
-        res.AddString(field.c_str());
-    }
-    return res.StealList();
+    const auto &fields = GDALRelationship::FromHandle(hRelationship)
+                             ->GetRightMappingTableFields();
+    return CPLStringList(fields).StealList();
 }
 
 /************************************************************************/
@@ -430,16 +380,8 @@ GDALRelationshipGetRightMappingTableFields(GDALRelationshipH hRelationship)
 void GDALRelationshipSetLeftMappingTableFields(GDALRelationshipH hRelationship,
                                                CSLConstList papszFields)
 {
-    std::vector<std::string> aosFields;
-    if (papszFields)
-    {
-        for (auto papszIter = papszFields; *papszIter; ++papszIter)
-        {
-            aosFields.emplace_back(*papszIter);
-        }
-    }
     GDALRelationship::FromHandle(hRelationship)
-        ->SetLeftMappingTableFields(aosFields);
+        ->SetLeftMappingTableFields(cpl::ToVector(papszFields));
 }
 
 /************************************************************************/
@@ -463,16 +405,8 @@ void GDALRelationshipSetLeftMappingTableFields(GDALRelationshipH hRelationship,
 void GDALRelationshipSetRightMappingTableFields(GDALRelationshipH hRelationship,
                                                 CSLConstList papszFields)
 {
-    std::vector<std::string> aosFields;
-    if (papszFields)
-    {
-        for (auto papszIter = papszFields; *papszIter; ++papszIter)
-        {
-            aosFields.emplace_back(*papszIter);
-        }
-    }
     GDALRelationship::FromHandle(hRelationship)
-        ->SetRightMappingTableFields(aosFields);
+        ->SetRightMappingTableFields(cpl::ToVector(papszFields));
 }
 
 /************************************************************************/

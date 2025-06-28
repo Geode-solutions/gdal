@@ -10,23 +10,7 @@
  *  Copyright (c) 2016 Alexandr Borzykh
  *  Copyright (c) 2016, NextGIS <info@nextgis.com>
  *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to
- *deal in the Software without restriction, including without limitation the
- *rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
- *sell copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in
- *all copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- *IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *******************************************************************************/
 #include "cpl_conv.h"
 #include "gdal_pam.h"
@@ -40,10 +24,7 @@ class CADWrapperRasterBand : public GDALProxyRasterBand
 
   protected:
     virtual GDALRasterBand *
-    RefUnderlyingRasterBand(bool /* bForceOpen */) const override
-    {
-        return poBaseBand;
-    }
+    RefUnderlyingRasterBand(bool /* bForceOpen */) const override;
 
   public:
     explicit CADWrapperRasterBand(GDALRasterBand *poBaseBandIn)
@@ -52,21 +33,22 @@ class CADWrapperRasterBand : public GDALProxyRasterBand
         eDataType = poBaseBand->GetRasterDataType();
         poBaseBand->GetBlockSize(&nBlockXSize, &nBlockYSize);
     }
+
     virtual ~CADWrapperRasterBand()
     {
     }
 };
 
+GDALRasterBand *
+CADWrapperRasterBand::RefUnderlyingRasterBand(bool /* bForceOpen */) const
+{
+    return poBaseBand;
+}
+
 GDALCADDataset::GDALCADDataset()
     : poCADFile(nullptr), papoLayers(nullptr), nLayers(0), poRasterDS(nullptr),
       poSpatialReference(nullptr)
 {
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 GDALCADDataset::~GDALCADDataset()
@@ -109,14 +91,13 @@ void GDALCADDataset::FillTransform(CADImage *pImage, double dfUnits)
     CADVector oSizePt = pImage->getImageSizeInPx();
     CADVector oInsPt = pImage->getVertInsertionPoint();
     CADVector oSizeUnitsPt = pImage->getPixelSizeInACADUnits();
-    adfGeoTransform[0] = oInsPt.getX();
-    adfGeoTransform[3] =
-        oInsPt.getY() + oSizePt.getY() * oSizeUnitsPt.getX() * dfMultiply;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[4] = 0.0;
+    m_gt[0] = oInsPt.getX();
+    m_gt[3] = oInsPt.getY() + oSizePt.getY() * oSizeUnitsPt.getX() * dfMultiply;
+    m_gt[2] = 0.0;
+    m_gt[4] = 0.0;
 
-    adfGeoTransform[1] = oSizeUnitsPt.getX() * dfMultiply;
-    adfGeoTransform[5] = -oSizeUnitsPt.getY() * dfMultiply;
+    m_gt[1] = oSizeUnitsPt.getX() * dfMultiply;
+    m_gt[5] = -oSizeUnitsPt.getY() * dfMultiply;
 }
 
 int GDALCADDataset::Open(GDALOpenInfo *poOpenInfo, CADFileIO *pFileIO,
@@ -204,7 +185,7 @@ int GDALCADDataset::Open(GDALOpenInfo *poOpenInfo, CADFileIO *pFileIO,
                 OGRSpatialReference *poSRS =
                     poSpatialRef ? poSpatialRef->Clone() : nullptr;
                 papoLayers[nLayers++] =
-                    new OGRCADLayer(oLayer, poSRS, nEncoding);
+                    new OGRCADLayer(this, oLayer, poSRS, nEncoding);
                 if (poSRS)
                     poSRS->Release();
             }
@@ -241,11 +222,12 @@ int GDALCADDataset::Open(GDALOpenInfo *poOpenInfo, CADFileIO *pFileIO,
         {
             // TODO: Add support clipping region in neatline
             CPLString osImgFilename = pImage->getFilePath();
-            CPLString osImgPath = CPLGetPath(osImgFilename);
+            CPLString osImgPath = CPLGetPathSafe(osImgFilename);
             if (osImgPath.empty())
             {
-                osImgFilename = CPLFormFilename(CPLGetPath(osCADFilename),
-                                                osImgFilename, nullptr);
+                osImgFilename =
+                    CPLFormFilenameSafe(CPLGetPathSafe(osCADFilename).c_str(),
+                                        osImgFilename, nullptr);
             }
 
             if (!CPLCheckForFile(const_cast<char *>(osImgFilename.c_str()),
@@ -266,7 +248,7 @@ int GDALCADDataset::Open(GDALOpenInfo *poOpenInfo, CADFileIO *pFileIO,
                 return poOpenInfo->nOpenFlags & GDAL_OF_VECTOR;
             }
 
-            if (poRasterDS->GetGeoTransform(adfGeoTransform) != CE_None)
+            if (poRasterDS->GetGeoTransform(m_gt) != CE_None)
             {
                 // The external world file have priority
                 double dfUnits = 1.0;
@@ -338,9 +320,9 @@ char **GDALCADDataset::GetFileList()
 
     /* duplicated papszFileList = CSLAddString( papszFileList, osCADFilename
      * );*/
-    const char *pszPRJFilename = GetPrjFilePath();
-    if (nullptr != pszPRJFilename)
-        papszFileList = CSLAddString(papszFileList, pszPRJFilename);
+    const std::string osPRJFilename = GetPrjFilePath();
+    if (!osPRJFilename.empty())
+        papszFileList = CSLAddString(papszFileList, osPRJFilename.c_str());
 
     for (size_t i = 0; i < poCADFile->GetLayersCount(); ++i)
     {
@@ -409,11 +391,11 @@ const OGRSpatialReference *GDALCADDataset::GetSpatialRef() const
         }
         else
         {
-            const char *pszPRJFilename = GetPrjFilePath();
-            if (pszPRJFilename && pszPRJFilename[0])  // check if path exists
+            const std::string osPRJFilename = GetPrjFilePath();
+            if (!osPRJFilename.empty())  // check if path exists
             {
                 CPLPushErrorHandler(CPLQuietErrorHandler);
-                char **papszPRJData = CSLLoad(pszPRJFilename);
+                char **papszPRJData = CSLLoad(osPRJFilename.c_str());
                 CPLPopErrorHandler();
 
                 if (poSpatialReference->importFromESRI(papszPRJData) !=
@@ -434,22 +416,22 @@ const OGRSpatialReference *GDALCADDataset::GetSpatialRef() const
     return poSpatialReference;
 }
 
-const char *GDALCADDataset::GetPrjFilePath() const
+const std::string GDALCADDataset::GetPrjFilePath() const
 {
-    const char *pszPRJFilename = CPLResetExtension(osCADFilename, "prj");
-    if (CPLCheckForFile((char *)pszPRJFilename, nullptr) == TRUE)
-        return pszPRJFilename;
+    std::string osPRJFilename = CPLResetExtensionSafe(osCADFilename, "prj");
+    if (CPLCheckForFile(osPRJFilename.data(), nullptr) == TRUE)
+        return osPRJFilename;
 
-    pszPRJFilename = CPLResetExtension(osCADFilename, "PRJ");
-    if (CPLCheckForFile((char *)pszPRJFilename, nullptr) == TRUE)
-        return pszPRJFilename;
+    osPRJFilename = CPLResetExtensionSafe(osCADFilename, "PRJ");
+    if (CPLCheckForFile(osPRJFilename.data(), nullptr) == TRUE)
+        return osPRJFilename;
 
-    return "";
+    return std::string();
 }
 
-CPLErr GDALCADDataset::GetGeoTransform(double *padfGeoTransform)
+CPLErr GDALCADDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    memcpy(padfGeoTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 

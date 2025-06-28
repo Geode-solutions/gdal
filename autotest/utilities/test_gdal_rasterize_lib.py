@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  gdal_rasterize testing
@@ -11,25 +10,10 @@
 # Copyright (c) 2015, Even Rouault <even dot rouault at spatialys dot com>
 # Copyright (c) 2008, Frank Warmerdam <warmerdam@pobox.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import collections
 import struct
 
 import gdaltest
@@ -58,7 +42,7 @@ def test_gdal_rasterize_lib_1():
 
     # Create a layer to rasterize from.
 
-    vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
     rast_lyr = vector_ds.CreateLayer("rast1", srs=sr)
 
     rast_lyr.GetLayerDefn()
@@ -108,25 +92,26 @@ def test_gdal_rasterize_lib_1():
 # Test creating an output file
 
 
-def test_gdal_rasterize_lib_3():
+def test_gdal_rasterize_lib_3(tmp_path, tmp_vsimem):
 
     import test_cli_utilities
 
     if test_cli_utilities.get_gdal_contour_path() is None:
         pytest.skip()
 
+    dst_shp = tmp_path / "n43dt0.shp"
+
     gdaltest.runexternal(
         test_cli_utilities.get_gdal_contour_path()
-        + " ../gdrivers/data/n43.tif tmp/n43dt0.shp -i 10 -3d"
+        + f" ../gdrivers/data/n43.tif {dst_shp} -i 10 -3d"
     )
 
-    with gdaltest.error_handler():
-        ds = gdal.Rasterize("/vsimem/bogus.tif", "tmp/n43dt0.shp")
-    assert ds is None, "did not expected success"
+    with pytest.raises(Exception):
+        gdal.Rasterize(tmp_vsimem / "bogus.tif", dst_shp)
 
     ds = gdal.Rasterize(
         "",
-        "tmp/n43dt0.shp",
+        dst_shp,
         format="MEM",
         outputType=gdal.GDT_Byte,
         useZ=True,
@@ -135,8 +120,6 @@ def test_gdal_rasterize_lib_3():
         height=121,
         noData=0,
     )
-
-    ogr.GetDriverByName("ESRI Shapefile").DeleteDataSource("tmp/n43dt0.shp")
 
     ds_ref = gdal.Open("../gdrivers/data/n43.tif")
 
@@ -169,7 +152,7 @@ def test_gdal_rasterize_lib_100():
 
     # Create a layer to rasterize from.
 
-    vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
     rast_lyr = vector_ds.CreateLayer("rast1")
 
     wkt_geom = "POLYGON((20 20,20 80,80 80,80 20,20 20))"
@@ -200,7 +183,7 @@ def test_gdal_rasterize_lib_101():
 
     # Create a layer to rasterize from.
 
-    vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
     rast_lyr = vector_ds.CreateLayer("rast1")
 
     # polygon with empty exterior ring
@@ -247,7 +230,7 @@ def test_gdal_rasterize_lib_102():
     }
     target_ds.SetMetadata(md, "RPC")
 
-    vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
     sr = osr.SpatialReference()
     sr.ImportFromEPSG(4326)
     rast_lyr = vector_ds.CreateLayer("", srs=sr)
@@ -303,7 +286,7 @@ def test_gdal_rasterize_lib_4():
 
         # Create a layer to rasterize from.
 
-        vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+        vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
         rast_lyr = vector_ds.CreateLayer("rast1", srs=sr)
 
         rast_lyr.GetLayerDefn()
@@ -359,7 +342,7 @@ def test_gdal_rasterize_lib_multipolygon():
     sr = osr.SpatialReference(sr_wkt)
 
     # Try rasterizing a multipolygon
-    vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
     layer = vector_ds.CreateLayer("", sr)
     feature = ogr.Feature(layer.GetLayerDefn())
     feature.SetGeometryDirectly(
@@ -377,7 +360,7 @@ def test_gdal_rasterize_lib_multipolygon():
     cs1 = target_ds.GetRasterBand(1).Checksum()
 
     # And now each of its parts
-    vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
     layer = vector_ds.CreateLayer("", sr)
     feature = ogr.Feature(layer.GetLayerDefn())
     feature.SetGeometryDirectly(
@@ -407,7 +390,7 @@ def test_gdal_rasterize_lib_inverse():
     sr = osr.SpatialReference(sr_wkt)
 
     # Try rasterizing a multipolygon
-    vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
     layer = vector_ds.CreateLayer("", sr)
 
     feature = ogr.Feature(layer.GetLayerDefn())
@@ -433,7 +416,7 @@ def test_gdal_rasterize_lib_inverse():
     target_ds.SetGeoTransform((-0.5, 1, 0, 10.5, 0, -1))
     target_ds.SetSpatialRef(sr)
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ret = gdal.Rasterize(target_ds, vector_ds, burnValues=[9], inverse=True)
     assert ret == 1
 
@@ -564,13 +547,143 @@ def test_gdal_rasterize_lib_inverse():
 
 
 ###############################################################################
+
+
+@pytest.mark.require_geos
+def test_gdal_rasterize_lib_inverse_nested_polygons():
+
+    # Create a memory raster to rasterize into.
+    target_ds = gdal.GetDriverByName("MEM").Create("", 10, 10, 1, gdal.GDT_Byte)
+    target_ds.SetGeoTransform((0, 1, 0, 10, 0, -1))
+
+    # Create a memory layer to rasterize from.
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    rast_mem_lyr = vector_ds.CreateLayer("poly")
+
+    # Add a multi polygon with nested polygons
+    feat = ogr.Feature(rast_mem_lyr.GetLayerDefn())
+    wkt = "MULTIPOLYGON(((0 0,0 10,10 10,10 0,0 0),(2 2,2 8,8 8,8 2,2 2)),((4 4,4 6,6 6,6 4,4 4)))"
+    feat.SetGeometryDirectly(ogr.Geometry(wkt=wkt))
+
+    rast_mem_lyr.CreateFeature(feat)
+
+    gdal.Rasterize(target_ds, vector_ds, burnValues=[1], inverse=True)
+
+    expected = (
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,  ################################
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,  ################################
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,  ################################
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,  ################################
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,  ################################
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,  ################################
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,  ################################
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,  ################################
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,  ################################
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+
+    got = struct.unpack("B" * (10 * 10), target_ds.ReadRaster())
+    assert got == expected
+
+
+###############################################################################
 # Test rasterization of a 64 bit integer attribute
 
 
 def test_gdal_rasterize_lib_int64_attribute():
 
     # Try rasterizing a multipolygon
-    vector_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0)
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
     layer = vector_ds.CreateLayer("")
     layer.CreateField(ogr.FieldDefn("val", ogr.OFTInteger64))
 
@@ -582,9 +695,158 @@ def test_gdal_rasterize_lib_int64_attribute():
     feature["val"] = val
     layer.CreateFeature(feature)
 
+    noData = -(1 << 63)
     target_ds = gdal.Rasterize(
-        "", vector_ds, format="MEM", attribute="val", width=2, height=2
+        "", vector_ds, format="MEM", attribute="val", width=2, height=3, noData=noData
     )
     assert target_ds is not None
+    assert target_ds.RasterXSize == 2
+    assert target_ds.RasterYSize == 3
     assert target_ds.GetRasterBand(1).DataType == gdal.GDT_Int64
-    assert struct.unpack("Q" * 4, target_ds.ReadRaster())[0] == val
+    assert target_ds.GetRasterBand(1).GetNoDataValue() == noData
+    assert struct.unpack("Q", target_ds.ReadRaster(0, 0, 1, 1))[0] == val
+
+
+###############################################################################
+# Test invalid layer name
+
+
+def test_gdal_rasterize_lib_invalid_layers():
+
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
+    layer = vector_ds.CreateLayer("layer")
+    layer.CreateField(ogr.FieldDefn("val", ogr.OFTInteger64))
+
+    with pytest.raises(Exception, match="Unable to find layer"):
+        gdal.Rasterize(
+            "", vector_ds, format="MEM", layers=["invalid"], width=2, height=2
+        )
+
+
+###############################################################################
+# Test rasterizing empty layer
+
+
+def test_gdal_rasterize_lib_empty_layer():
+
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
+    layer = vector_ds.CreateLayer("layer")
+    layer.CreateField(ogr.FieldDefn("val", ogr.OFTInteger64))
+
+    with pytest.raises(Exception, match="Cannot get layer extent"):
+        gdal.Rasterize("", vector_ds, format="MEM", width=2, height=2)
+
+
+###############################################################################
+# Test too small target resolution
+
+
+def test_gdal_rasterize_lib_too_small_resolution():
+
+    vector_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
+    layer = vector_ds.CreateLayer("layer")
+    layer.CreateField(ogr.FieldDefn("val", ogr.OFTInteger64))
+
+    feature = ogr.Feature(layer.GetLayerDefn())
+    feature.SetGeometryDirectly(
+        ogr.CreateGeometryFromWkt("POLYGON ((0 0,0 1,1 1,1 0,0 0))")
+    )
+    feature["val"] = 0
+    layer.CreateFeature(feature)
+
+    with pytest.raises(Exception, match="Invalid computed output raster size"):
+        gdal.Rasterize("", vector_ds, format="MEM", xRes=1e-20, yRes=1)
+
+    with pytest.raises(Exception, match="Invalid computed output raster size"):
+        gdal.Rasterize("", vector_ds, format="MEM", xRes=1, yRes=1e-20)
+
+
+###############################################################################
+# Test option argument handling
+
+
+def test_gdal_rasterize_lib_dict_arguments():
+
+    opt = gdal.RasterizeOptions(
+        "__RETURN_OPTION_LIST__",
+        creationOptions=collections.OrderedDict(
+            (("COMPRESS", "DEFLATE"), ("LEVEL", 4))
+        ),
+    )
+
+    ind = opt.index("-co")
+
+    assert opt[ind : ind + 4] == ["-co", "COMPRESS=DEFLATE", "-co", "LEVEL=4"]
+
+
+###############################################################################
+# Test doesn't crash without options
+
+
+@pytest.mark.require_driver("GeoJSON")
+def test_gdal_rasterize_no_options(tmp_vsimem):
+    """Test doesn't crash without options"""
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.json",
+        r"""{
+                "type": "FeatureCollection",
+                "name": "test",
+                "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::4326" } },
+                "features": [
+                    { "type": "Feature", "properties": { "id": 1 }, "geometry": { "type": "Polygon", "coordinates": [ [ [ 0, 0 ], [ 0, 1 ], [ 1, 1 ], [ 1, 0 ], [ 0, 0 ] ] ] } }
+                ]
+            }""",
+    )
+
+    # Open the dataset
+    ds = gdal.OpenEx(tmp_vsimem / "test.json", gdal.OF_VECTOR)
+    assert ds
+
+    # Create a raster to rasterize into.
+    target_ds = gdal.GetDriverByName("GTiff").Create(
+        tmp_vsimem / "out.tif", 10, 10, 1, gdal.GDT_Byte
+    )
+
+    assert target_ds
+
+    # Call rasterize
+    ds = gdal.Rasterize(target_ds, ds)
+
+
+###############################################################################
+# Error cases
+
+
+@gdaltest.enable_exceptions()
+def test_gdal_rasterize_bad_output_format(tmp_vsimem):
+
+    if gdal.GetDriverByName("PNG"):
+        with pytest.raises(
+            RuntimeError, match="does not support direct output file creation"
+        ):
+            gdal.Rasterize(
+                tmp_vsimem / "out.png",
+                "../ogr/data/poly.shp",
+                width=100,
+                height=100,
+                format="PNG",
+            )
+
+    with pytest.raises(RuntimeError, match="driver .* not recognised"):
+        gdal.Rasterize(
+            tmp_vsimem / "out.pngg",
+            "../ogr/data/poly.shp",
+            width=100,
+            height=100,
+            format="DOES_NOT_EXIST",
+        )
+
+    with pytest.raises(RuntimeError, match="not a raster driver"):
+        gdal.Rasterize(
+            tmp_vsimem / "out.pngg",
+            "../ogr/data/poly.shp",
+            width=100,
+            height=100,
+            format="ESRI Shapefile",
+        )

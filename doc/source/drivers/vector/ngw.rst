@@ -41,8 +41,8 @@ Driver
 ------
 
 The driver can connect to the services implementing the NextGIS Web REST API.
-NGW driver requires cURL support in GDAL. The driver supports read and write
-operations.
+NGW driver requires cURL support in GDAL and WMS driver. The driver supports 
+read and write operations.
 
 Dataset name syntax
 -------------------
@@ -64,23 +64,45 @@ if identifier is resource group. In other case this will be a separate layer.
 Configuration options
 ---------------------
 
-The following :ref:`configuration options <configoptions>` are 
-available:
+|about-config-options|
+The following configuration options are available:
 
--  :decl_configoption:`NGW_USERPWD`: User name and password separated with colon.
-   Optional and can be set using open options.
--  :decl_configoption:`NGW_BATCH_SIZE`: Size of feature insert and update operations
-   cache before send to server. If batch size is -1 batch mode is
-   disabled. Delete operation will execute immediately.
--  :decl_configoption:`NGW_PAGE_SIZE`: If supported by server, fetch features from remote
-   server will use paging. The -1 value disables paging even it
-   supported by server.
--  :decl_configoption:`NGW_NATIVE_DATA`: Whether to store the json *extensions* key in
-   feature native data.
--  :decl_configoption:`NGW_JSON_DEPTH`: The depth of json response that can be parsed. If
-   depth is greater than this value, parse error occurs.
--  :decl_configoption:`NGW_EXTENSIONS`: Comma separated extensions list. Available values are 
-   `description` and `attachment`. This needed to fill native data.
+-  :copy-config:`NGW_USERPWD`
+
+-  .. config:: NGW_BATCH_SIZE
+
+      Size of feature insert and update operations
+      cache before send to server. If batch size is -1 batch mode is
+      disabled. Delete operation will execute immediately.
+
+-  .. config:: NGW_PAGE_SIZE
+
+      If supported by server, fetch features from remote
+      server will use paging. The -1 value disables paging even it
+      supported by server.
+
+-  .. config:: NGW_NATIVE_DATA
+
+      Whether to store the json *extensions* key in
+      feature native data.
+
+-  :copy-config:`NGW_JSON_DEPTH`
+
+      The depth of json response that can be parsed. If
+      depth is greater than this value, parse error occurs.
+
+-  .. config:: NGW_EXTENSIONS
+
+      Comma separated extensions list. Available values are
+      `description` and `attachment`. This needed to fill native data.
+      
+-  :copy-config:`NGW_CONNECTTIMEOUT`
+
+-  :copy-config:`NGW_TIMEOUT`
+
+-  :copy-config:`NGW_MAX_RETRY`
+
+-  :copy-config:`NGW_RETRY_DELAY`
 
 Authentication
 --------------
@@ -93,7 +115,7 @@ options.
 Feature
 -------
 
-If the NATIVE_DATA open option is set to YES, the *extensions* json
+If the :oo:`NATIVE_DATA` open option is set to YES, the *extensions* json
 object will store as a serialized json object in the NativeData
 property of the OGRFeature object (and "application/json" in the
 NativeMediaType property). If writing OGRFeature has NativeMediaType property
@@ -102,7 +124,7 @@ object the new NGW feature *extensions* json object will fill from this json
 object.
 
 Extensions json object structure see in `NextGIS Web API
-documentation <http://docs.nextgis.comu/docs_ngweb_dev/doc/developer/resource.html#feature>`__
+documentation <https://docs.nextgis.com/docs_ngweb_dev/doc/developer/resource.html#feature>`__
 
 Geometry
 --------
@@ -122,7 +144,7 @@ Geometry with Z value also supported.
 Field data types
 ----------------
 
-NextWeb supports only following field types:
+NextGIS Web supports only following field types:
 
 -  OFTInteger
 -  OFTInteger64
@@ -132,12 +154,26 @@ NextWeb supports only following field types:
 -  OFTTime
 -  OFTDateTime
 
+Driver stores additional field data in comment as JSON string:
+
+-  field identifier in NGW
+-  check if this is label field
+-  check to show field in grid view
+-  check to use field in text search
+
+Driver supports alter field:
+
+-  name
+-  alternative name
+-  field domain
+-  comment
+
 Paging
 ------
 
 Features can retrieved from NextGIS Web by chunks if supported by server
 (available since NextGIS Web 3.1). The chunk size can be altered with
-the :decl_configoption:`NGW_PAGE_SIZE` configuration option or PAGE_SIZE 
+the :config:`NGW_PAGE_SIZE` configuration option or :oo:`PAGE_SIZE`
 open option.
 
 Write support
@@ -146,60 +182,158 @@ Write support
 Datasource and layers creation and deletion is possible. Write support
 is only enabled when the datasource is opened in update mode and user
 has appropriate permissions. Vector and PostGIS layers insert and update operations
-are cached if BATCH_SIZE is greater 0. Delete operation executes
+are cached if :oo:`BATCH_SIZE` is greater 0. Delete operation executes
 immediately.
 
 Open options
 ------------
 
+|about-open-options|
 The following open options are available:
 
--  USERPWD - Username and password, separated by colon.
--  PAGE_SIZE=-1 - Limit feature count while fetching from server.
-   Default value is -1 - no limit.
--  BATCH_SIZE=-1 - Size of feature insert and update operations cache
-   before send to server. If batch size is -1 batch mode is disabled.
-   Default value is -1.
--  NATIVE_DATA=NO - Whether to store the json *extensions* key in
-   feature native data. Default value is NO.
--  JSON_DEPTH=32 - The depth of json response that can be parsed. If
-   depth is greater than this value, parse error occurs.
--  EXTENSIONS - Comma separated extensions list. Available values are 
-   `description` and `attachment`. This needed to fill native data.
+-  .. oo:: USERPWD
+
+      Username and password, separated by colon.
+
+-  .. oo:: PAGE_SIZE
+      :default: -1
+
+      Limit feature count while fetching from server.
+      Default value is -1 - no limit.
+
+-  .. oo:: BATCH_SIZE
+      :default: -1
+
+      Size of feature insert and update operations cache
+      before send to server. If batch size is -1 batch mode is disabled.
+
+-  .. oo:: NATIVE_DATA
+      :choices: YES, NO
+      :default: NO
+
+      Whether to store the json *extensions* key in
+      feature native data.
+
+-  .. oo:: JSON_DEPTH
+      :default: 32
+
+      The depth of json response that can be parsed. If
+      depth is greater than this value, parse error occurs.
+
+-  .. oo:: EXTENSIONS
+
+      Comma separated extensions list. Available values are
+      `description` and `attachment`. This needed to fill native data.
+
+-  .. oo:: CONNECTTIMEOUT
+
+      Maximum delay for the connection to be established before being aborted in 
+      seconds.
+
+-  .. oo:: TIMEOUT
+
+      Maximum delay for the whole request to complete before being aborted in 
+      seconds.
+
+-  .. oo:: MAX_RETRY
+
+      Maximum number of retry attempts if a 429, 502, 503 or 504 HTTP error 
+      occurs.
+
+-  .. oo:: RETRY_DELAY
+
+      Number of seconds between retry attempts.
 
 Dataset creation options
 ------------------------
 
-The following dataset/datasource creation options are available:
+|about-dataset-creation-options|
+The following dataset creation options are available:
 
--  KEY - Key value. Must be unique in whole NextGIS Web instance.
-   Optional.
--  DESCRIPTION - Resource description. Optional.
--  USERPWD - Username and password, separated by colon.
--  PAGE_SIZE=-1 - Limit feature count while fetching from server.
-   Default value is -1 - no limit.
--  BATCH_SIZE=-1 - Size of feature insert and update operations cache
-   before send to server. If batch size is -1 batch mode is disable.
-   Default value is -1.
--  NATIVE_DATA=NO - Whether to store the json *extensions* key in
-   feature native data. Default value is NO.
--  JSON_DEPTH=32 - The depth of json response that can be parsed. If
-   depth is greater than this value, parse error occurs.
--  EXTENSIONS - Comma separated extensions list. Available values are 
-   `description` and `attachment`. This needed to fill native data.
+-  .. dsco:: KEY
+
+      Key value. Must be unique in whole NextGIS Web instance.
+      Optional.
+
+-  .. dsco:: DESCRIPTION
+
+      Resource description. Optional.
+
+-  .. dsco:: USERPWD
+
+      Username and password, separated by colon.
+
+-  .. dsco:: PAGE_SIZE
+      :default: -1
+
+      Limit feature count while fetching from server.
+      Default value is -1 - no limit.
+
+-  .. dsco:: BATCH_SIZE
+      :default: -1
+
+      Size of feature insert and update operations cache
+      before send to server. If batch size is -1 batch mode is disable.
+
+-  .. dsco:: NATIVE_DATA
+      :choices: YES, NO
+      :default: NO
+
+       Whether to store the json *extensions* key in
+       feature native data.
+
+-  .. dsco:: JSON_DEPTH
+      :default: 32
+
+      The depth of json response that can be parsed. If
+      depth is greater than this value, parse error occurs.
+
+-  .. dsco:: EXTENSIONS
+
+      Comma separated extensions list. Available values are
+      `description` and `attachment`. This needed to fill native data.
+
+-  .. dsco:: CONNECTTIMEOUT
+
+      Maximum delay for the connection to be established before being aborted in 
+      seconds.
+
+-  .. dsco:: TIMEOUT
+
+      Maximum delay for the whole request to complete before being aborted in 
+      seconds.
+
+-  .. dsco:: MAX_RETRY
+
+      Maximum number of retry attempts if a 429, 502, 503 or 504 HTTP error 
+      occurs.
+
+-  .. dsco:: RETRY_DELAY
+
+      Number of seconds between retry attempts.      
 
 Layer creation options
 ----------------------
 
+|about-layer-creation-options|
 The following layer creation options are available:
 
--  OVERWRITE - Whether to overwrite an existing table with the layer
-   name to be created. The resource will delete and new one will
-   created. This leads that resource identifier will change. Defaults to
-   NO. Optional.
--  KEY - Key value. Must be unique in whole NextGIS Web instance.
-   Optional.
--  DESCRIPTION - Resource description. Optional.
+-  .. lco:: OVERWRITE
+      :choices: YES, NO
+      :default: NO
+
+      Whether to overwrite an existing table with the layer
+      name to be created. The resource will delete and new one will
+      created. This leads that resource identifier will change. Defaults to
+
+-  .. lco:: KEY
+
+      Key value. Must be unique in whole NextGIS Web instance.
+      Optional.
+
+-  .. lco:: DESCRIPTION
+
+      Resource description. Optional.
 
 Metadata
 --------
@@ -221,18 +355,29 @@ Resource creation date, type and parent identifier map to appropriate
 read-only metadata items *creation_date*, *resource_type* and
 *parent_id* in default domain.
 
-Vector layer field properties (alias, identifier, label field, grid
-visibility) map to layer metadata the following way:
-
--  field alias -> FIELD_{field number}_ALIAS (for example FIELD_0_ALIAS)
--  identifier -> FIELD_{field number}_ID (for example FIELD_0_ID)
--  label field -> FIELD_{field number}_LABEL_FIELD (for example
-   FIELD_0_LABEL_FIELD)
--  grid visibility -> FIELD_{field number}_GRID_VISIBILITY (for example
-   FIELD_0_GRID_VISIBILITY)
+Vector layer field properties (identifier, label field, grid
+visibility, text search) saved as json string in field comment.
 
 Starting from GDAL 3.3 field alias can be set/get via `SetAlternativeName`
 and `GetAlternativeNameRef`.
+
+
+Domains
+-------
+
+Driver supports only coded field domain. Since NGW does not support field types 
+in domains, three domains are created for each domain where keys can be 
+represented as numbers:
+
+-  domain_name with field type OFTString
+-  domain_name + " (number)" with field type OFTInteger
+-  domain_name + " (bigint)" with field type OFTString64
+
+Deleting any of the three domains will delete the others.
+
+Also NGW does not support null as coded values. So the null will represent as 
+empty string.
+
 
 Filters
 -------
@@ -244,14 +389,14 @@ Vector and PostGIS layers support SetAttributeFilter and
 SetSpatialFilter methods. The attribute filter will evaluate at server side
 if condition is one of following comparison operators:
 
- - greater (>)
- - lower (<)
- - greater or equal (>=)
- - lower or equal (<=)
- - equal (=)
- - not equal (!=)
- - LIKE SQL statement (for strings compare)
- - ILIKE SQL statement (for strings compare)
+- greater (>)
+- lower (<)
+- greater or equal (>=)
+- lower or equal (<=)
+- equal (=)
+- not equal (!=)
+- LIKE SQL statement (for strings compare)
+- ILIKE SQL statement (for strings compare)
 
 Also only AND operator without brackets supported between comparison. For example,
 
@@ -281,6 +426,8 @@ supported:
 -  DELLAYER: layer_name; - delete layer with layer_name.
 -  DELETE FROM layer_name; - delete any features from layer with
    layer_name.
+-  DELETE FROM layer_name WHERE field = value; - delete features from layer with
+   layer_name and where clause.
 -  DROP TABLE layer_name; - delete layer with layer_name.
 -  ALTER TABLE src_layer RENAME TO dst_layer; - rename layer.
 -  SELECT field_1,field_2 FROM src_layer WHERE field_1 = 'Value 1' AND
@@ -333,6 +480,6 @@ See also
 
 -  :ref:`Raster side of the driver <raster.ngw>`
 -  `NextGIS Web
-   documentation <http://docs.nextgis.com/docs_ngweb/source/toc.html>`__
+   documentation <https://docs.nextgis.com/docs_ngweb/source/toc.html>`__
 -  `NextGIS Web for
-   developers <http://docs.nextgis.com/docs_ngweb_dev/doc/toc.html>`__
+   developers <https://docs.nextgis.com/docs_ngweb_dev/doc/toc.html>`__

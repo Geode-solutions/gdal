@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OGR ODBC Driver
  * Purpose:  Declarations for ODBC Access Cover API.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2003, Frank Warmerdam
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_ODBC_H_INCLUDED
@@ -32,7 +15,7 @@
 
 #include "cpl_port.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #endif
 
@@ -74,7 +57,7 @@ class CPL_DLL CPLODBCDriverInstaller
 
     /**
      * Installs ODBC driver or updates definition of already installed driver.
-     * Interanally, it calls ODBC's SQLInstallDriverEx function.
+     * Internally, it calls ODBC's SQLInstallDriverEx function.
      *
      * @param pszDriver - The driver definition as a list of keyword-value
      * pairs describing the driver (See ODBC API Reference).
@@ -209,6 +192,7 @@ class CPL_DLL CPLODBCSession
     int BeginTransaction();
     int CommitTransaction();
     int RollbackTransaction();
+
     /** Returns whether a transaction is active */
     int IsInTransaction()
     {
@@ -220,11 +204,13 @@ class CPL_DLL CPLODBCSession
     int CloseSession();
 
     int Failed(int, HSTMT = nullptr);
+
     /** Return connection handle */
     HDBC GetConnection()
     {
         return m_hDBC;
     }
+
     /** Return GetEnvironment handle */
     HENV GetEnvironment()
     {
@@ -320,10 +306,13 @@ class CPL_DLL CPLODBCStatement
     void Clear();
     void AppendEscaped(const char *);
     void Append(const char *);
+    void Append(const std::string &);
+    // cppcheck-suppress functionStatic
     void Append(int);
     void Append(double);
     int Appendf(CPL_FORMAT_STRING(const char *), ...)
         CPL_PRINT_FUNC_FORMAT(2, 3);
+
     /** Return statement string */
     const char *GetCommand()
     {

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  CPL - Common Portability Library
  * Author:   Frank Warmerdam, warmerdam@pobox.com
@@ -10,23 +9,7 @@
  * Copyright (c) 1998, Frank Warmerdam
  * Copyright (c) 2008-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_VSI_H_INCLUDED
@@ -42,10 +25,10 @@
  *
  * Standard C Covers
  *
- * The VSI functions are intended to be hookable aliases for Standard C
- * I/O, memory allocation and other system functions. They are intended
- * to allow virtualization of disk I/O so that non file data sources
- * can be made to appear as files, and so that additional error trapping
+ * The VSI (Virtual System Interface) functions are intended to be hookable
+ * aliases for Standard C I/O, memory allocation and other system functions.
+ * They are intended to allow virtualization of disk I/O so that non file data
+ * sources can be made to appear as files, and so that additional error trapping
  * and reporting can be interested.  The memory access API is aliased
  * so that special application memory management services can be used.
  *
@@ -148,7 +131,7 @@ typedef GUIntBig vsi_l_offset;
 #define VSI_L_OFFSET_MAX GUINTBIG_MAX
 
 /** Opaque type for a FILE that implements the VSIVirtualHandle API */
-typedef struct _VSILFILE VSILFILE;
+typedef struct VSIVirtualHandle VSILFILE;
 
 VSILFILE CPL_DLL *VSIFOpenL(const char *, const char *) CPL_WARN_UNUSED_RESULT;
 VSILFILE CPL_DLL *VSIFOpenExL(const char *, const char *,
@@ -168,6 +151,8 @@ int CPL_DLL VSIFReadMultiRangeL(int nRanges, void **ppData,
                                 VSILFILE *) EXPERIMENTAL_CPL_WARN_UNUSED_RESULT;
 size_t CPL_DLL VSIFWriteL(const void *, size_t, size_t,
                           VSILFILE *) EXPERIMENTAL_CPL_WARN_UNUSED_RESULT;
+void CPL_DLL VSIFClearErrL(VSILFILE *);
+int CPL_DLL VSIFErrorL(VSILFILE *) CPL_WARN_UNUSED_RESULT;
 int CPL_DLL VSIFEofL(VSILFILE *) EXPERIMENTAL_CPL_WARN_UNUSED_RESULT;
 int CPL_DLL VSIFTruncateL(VSILFILE *,
                           vsi_l_offset) EXPERIMENTAL_CPL_WARN_UNUSED_RESULT;
@@ -226,6 +211,8 @@ int CPL_DLL VSIIsCaseSensitiveFS(const char *pszFilename);
 int CPL_DLL VSISupportsSparseFiles(const char *pszPath);
 
 bool CPL_DLL VSIIsLocal(const char *pszPath);
+
+char CPL_DLL *VSIGetCanonicalFilename(const char *pszPath);
 
 bool CPL_DLL VSISupportsSequentialWrite(const char *pszPath,
                                         bool bAllowLocalTempFile);
@@ -289,6 +276,22 @@ void CPL_DLL *VSIMalloc(size_t) CPL_WARN_UNUSED_RESULT;
 void CPL_DLL VSIFree(void *);
 void CPL_DLL *VSIRealloc(void *, size_t) CPL_WARN_UNUSED_RESULT;
 char CPL_DLL *VSIStrdup(const char *) CPL_WARN_UNUSED_RESULT;
+
+#if defined(__cplusplus) && defined(GDAL_COMPILATION)
+extern "C++"
+{
+    /*! @cond Doxygen_Suppress */
+    struct CPL_DLL VSIFreeReleaser
+    {
+        void operator()(void *p) const
+        {
+            VSIFree(p);
+        }
+    };
+
+    /*! @endcond */
+}
+#endif
 
 void CPL_DLL *VSIMallocAligned(size_t nAlignment,
                                size_t nSize) CPL_WARN_UNUSED_RESULT;
@@ -377,6 +380,10 @@ char CPL_DLL **VSIReadDir(const char *);
 char CPL_DLL **VSIReadDirRecursive(const char *pszPath);
 char CPL_DLL **VSIReadDirEx(const char *pszPath, int nMaxFiles);
 char CPL_DLL **VSISiblingFiles(const char *pszPath);
+char CPL_DLL **VSIGlob(const char *pszPattern, const char *const *papszOptions,
+                       GDALProgressFunc pProgressFunc, void *pProgressData);
+
+const char CPL_DLL *VSIGetDirectorySeparator(const char *pszPath);
 
 /** Opaque type for a directory iterator */
 typedef struct VSIDIR VSIDIR;
@@ -386,6 +393,7 @@ VSIDIR CPL_DLL *VSIOpenDir(const char *pszPath, int nRecurseDepth,
 
 /*! @cond Doxygen_Suppress */
 typedef struct VSIDIREntry VSIDIREntry;
+
 /*! @endcond */
 
 /** Directory entry. */
@@ -428,14 +436,46 @@ int CPL_DLL VSIRmdirRecursive(const char *pszDirname);
 int CPL_DLL VSIUnlink(const char *pszFilename);
 int CPL_DLL *VSIUnlinkBatch(CSLConstList papszFiles);
 int CPL_DLL VSIRename(const char *oldpath, const char *newpath);
+int CPL_DLL VSIMove(const char *oldpath, const char *newpath,
+                    const char *const *papszOptions,
+                    GDALProgressFunc pProgressFunc, void *pProgressData);
 int CPL_DLL VSICopyFile(const char *pszSource, const char *pszTarget,
                         VSILFILE *fpSource, vsi_l_offset nSourceSize,
                         const char *const *papszOptions,
                         GDALProgressFunc pProgressFunc, void *pProgressData);
+int CPL_DLL VSICopyFileRestartable(const char *pszSource, const char *pszTarget,
+                                   const char *pszInputPayload,
+                                   char **ppszOutputPayload,
+                                   const char *const *papszOptions,
+                                   GDALProgressFunc pProgressFunc,
+                                   void *pProgressData);
 int CPL_DLL VSISync(const char *pszSource, const char *pszTarget,
                     const char *const *papszOptions,
                     GDALProgressFunc pProgressFunc, void *pProgressData,
                     char ***ppapszOutputs);
+
+int CPL_DLL VSIMultipartUploadGetCapabilities(
+    const char *pszFilename, int *pbNonSequentialUploadSupported,
+    int *pbParallelUploadSupported, int *pbAbortSupported,
+    size_t *pnMinPartSize, size_t *pnMaxPartSize, int *pnMaxPartCount);
+
+char CPL_DLL *VSIMultipartUploadStart(const char *pszFilename,
+                                      CSLConstList papszOptions);
+char CPL_DLL *VSIMultipartUploadAddPart(const char *pszFilename,
+                                        const char *pszUploadId,
+                                        int nPartNumber,
+                                        vsi_l_offset nFileOffset,
+                                        const void *pData, size_t nDataLength,
+                                        CSLConstList papszOptions);
+int CPL_DLL VSIMultipartUploadEnd(const char *pszFilename,
+                                  const char *pszUploadId, size_t nPartIdsCount,
+                                  const char *const *apszPartIds,
+                                  vsi_l_offset nTotalSize,
+                                  CSLConstList papszOptions);
+int CPL_DLL VSIMultipartUploadAbort(const char *pszFilename,
+                                    const char *pszUploadId,
+                                    CSLConstList papszOptions);
+
 int CPL_DLL VSIAbortPendingUploads(const char *pszFilename);
 
 char CPL_DLL *VSIStrerror(int);
@@ -476,7 +516,8 @@ void VSIInstallHdfsHandler(void);     /* No reason to export that */
 void VSIInstallWebHdfsHandler(void);  /* No reason to export that */
 void VSIInstallStdoutHandler(void);   /* No reason to export that */
 void CPL_DLL VSIInstallSparseFileHandler(void);
-void VSIInstallTarFileHandler(void); /* No reason to export that */
+void VSIInstallTarFileHandler(void);    /* No reason to export that */
+void VSIInstallCachedFileHandler(void); /* No reason to export that */
 void CPL_DLL VSIInstallCryptFileHandler(void);
 void CPL_DLL VSISetCryptKey(const GByte *pabyKey, int nKeySize);
 /*! @cond Doxygen_Suppress */
@@ -493,6 +534,8 @@ VSIFileFromMemBuffer(const char *pszFilename, GByte *pabyData,
 GByte CPL_DLL *VSIGetMemFileBuffer(const char *pszFilename,
                                    vsi_l_offset *pnDataLength,
                                    int bUnlinkAndSeize);
+
+const char CPL_DLL *VSIMemGenerateHiddenFilename(const char *pszFilename);
 
 /** Callback used by VSIStdoutSetRedirection() */
 typedef size_t (*VSIWriteFunction)(const void *ptr, size_t size, size_t nmemb,
@@ -640,6 +683,18 @@ typedef void (*VSIFilesystemPluginAdviseReadCallback)(
     const size_t *panSizes);
 
 /**
+ * Has a read error (non end-of-file related) has occurred?
+ * @since GDAL 3.10
+ */
+typedef int (*VSIFilesystemPluginErrorCallback)(void *pFile);
+
+/**
+ * Clear error and end-of-file flags.
+ * @since GDAL 3.10
+ */
+typedef void (*VSIFilesystemPluginClearErrCallback)(void *pFile);
+
+/**
  * struct containing callbacks to used by the handler.
  * (rw), (r), (w) or () at the end indicate whether the given callback is
  * mandatory for reading and or writing handlers. A (?) indicates that the
@@ -684,6 +739,9 @@ typedef struct
 
     /** The following optional member has been added in GDAL 3.7: */
     VSIFilesystemPluginAdviseReadCallback advise_read; /**< AdviseRead() */
+
+    VSIFilesystemPluginErrorCallback error; /**< has read error occurred (r) */
+    VSIFilesystemPluginClearErrCallback clear_err; /**< clear error flags(r) */
     /*
         Callbacks are defined as a struct allocated by a call to
        VSIAllocFilesystemPluginCallbacksStruct in order to try to maintain ABI
@@ -715,6 +773,17 @@ void CPL_DLL VSIFreeFilesystemPluginCallbacksStruct(
  */
 int CPL_DLL VSIInstallPluginHandler(
     const char *pszPrefix, const VSIFilesystemPluginCallbacksStruct *poCb);
+
+/**
+ * Unregister a handler previously installed with VSIInstallPluginHandler() on
+ * the given prefix.
+ * Note: it is generally unsafe to remove a handler while there are still file
+ * handles opened that are managed by that handler. It is the responsibility of
+ * the caller to ensure that it calls this function in a situation where it is
+ * safe to do so.
+ * @since GDAL 3.9
+ */
+int CPL_DLL VSIRemovePluginHandler(const char *pszPrefix);
 
 /* ==================================================================== */
 /*      Time querying.                                                  */

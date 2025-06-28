@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  FlatGeobuf driver test suite.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2018-2019, Björn Harrtell <bjorn@wololo.org>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -41,6 +24,7 @@ from osgeo import gdal, ogr, osr
 
 pytestmark = pytest.mark.require_driver("FlatGeobuf")
 
+
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
 def startup_and_cleanup():
@@ -53,33 +37,21 @@ def startup_and_cleanup():
 
 def verify_flatgeobuf_copy(name, fids, names):
 
-    if gdaltest.features is None:
-        print("Missing features collection")
-        return False
+    assert gdaltest.features is not None, "Missing features collection"
 
     fname = os.path.join("tmp", name + ".fgb")
     ds = ogr.Open(fname)
-    if ds is None:
-        print("Can not open '" + fname + "'")
-        return False
+    assert ds is not None, f"Can not open '{fname}'"
 
     lyr = ds.GetLayer(0)
-    if lyr is None:
-        print("Missing layer")
-        return False
+    assert lyr is not None, "Missing layer"
 
     ######################################################
     # Test attributes
-    ret = ogrtest.check_features_against_list(lyr, "FID", fids)
-    if ret != 1:
-        print("Wrong values in 'FID' field")
-        return False
+    ogrtest.check_features_against_list(lyr, "FID", fids)
 
     lyr.ResetReading()
-    ret = ogrtest.check_features_against_list(lyr, "NAME", names)
-    if ret != 1:
-        print("Wrong values in 'NAME' field")
-        return False
+    ogrtest.check_features_against_list(lyr, "NAME", names)
 
     ######################################################
     # Test geometries
@@ -89,25 +61,15 @@ def verify_flatgeobuf_copy(name, fids, names):
         orig_feat = gdaltest.features[i]
         feat = lyr.GetNextFeature()
 
-        if feat is None:
-            print("Failed trying to read feature")
-            return False
+        assert feat is not None, "Failed trying to read feature"
 
-        if (
-            ogrtest.check_feature_geometry(
-                feat, orig_feat.GetGeometryRef(), max_error=0.001
-            )
-            != 0
-        ):
-            print("Geometry test failed")
-            gdaltest.features = None
-            return False
+        ogrtest.check_feature_geometry(
+            feat, orig_feat.GetGeometryRef(), max_error=0.001
+        )
 
     gdaltest.features = None
 
     lyr = None
-
-    return True
 
 
 def copy_shape_to_flatgeobuf(name, wkbType, compress=None, options=[]):
@@ -326,8 +288,7 @@ def test_ogr_flatgeobuf_9():
         rc = copy_shape_to_flatgeobuf(test[0], test[3])
         assert rc, "Failed making copy of " + test[0] + ".shp"
 
-        rc = verify_flatgeobuf_copy(test[0], test[1], test[2])
-        assert rc, "Verification of copy of " + test[0] + ".shp failed"
+        verify_flatgeobuf_copy(test[0], test[1], test[2])
 
     for i in range(len(gdaltest.tests)):
         test = gdaltest.tests[i]
@@ -335,8 +296,7 @@ def test_ogr_flatgeobuf_9():
         rc = copy_shape_to_flatgeobuf(test[0], test[3], None, ["SPATIAL_INDEX=NO"])
         assert rc, "Failed making copy of " + test[0] + ".shp"
 
-        rc = verify_flatgeobuf_copy(test[0], test[1], test[2])
-        assert rc, "Verification of copy of " + test[0] + ".shp failed"
+        verify_flatgeobuf_copy(test[0], test[1], test[2])
 
 
 # Test support for multiple layers in a directory
@@ -345,7 +305,7 @@ def test_ogr_flatgeobuf_9():
 def test_ogr_flatgeobuf_directory():
 
     ds = ogr.GetDriverByName("FlatGeobuf").CreateDataSource("/vsimem/multi_layer")
-    with gdaltest.error_handler():  # name will be laundered
+    with gdal.quiet_errors():  # name will be laundered
         ds.CreateLayer("foo<", geom_type=ogr.wkbPoint)
     ds.CreateLayer("bar", geom_type=ogr.wkbPoint)
     ds = None
@@ -553,40 +513,29 @@ def test_ogr_wfs_fake_wfs_server():
     if port == 0:
         pytest.skip()
 
-    gdal.SetConfigOption("OGR_WFS_LOAD_MULTIPLE_LAYER_DEFN", "NO")
-    ds = ogr.Open(
-        "WFS:http://127.0.0.1:%d/fakewfs?OUTPUTFORMAT=application/flatgeobuf" % port
-    )
-    gdal.SetConfigOption("OGR_WFS_LOAD_MULTIPLE_LAYER_DEFN", None)
-    if ds is None:
-        webserver.server_stop(process, port)
-        pytest.fail("did not managed to open WFS datastore")
+    try:
+        with gdal.config_option("OGR_WFS_LOAD_MULTIPLE_LAYER_DEFN", "NO"):
+            ds = ogr.Open(
+                "WFS:http://127.0.0.1:%d/fakewfs?OUTPUTFORMAT=application/flatgeobuf"
+                % port
+            )
+        assert ds is not None
 
-    lyr = ds.GetLayerByName("topp:tasmania_water_bodies")
-    if lyr == None:
-        webserver.server_stop(process, port)
-        pytest.fail("did not get expected layer")
-    name = lyr.GetName()
-    if name != "topp:tasmania_water_bodies":
-        print(name)
-        webserver.server_stop(process, port)
-        pytest.fail("did not get expected layer name (got %s)" % name)
+        lyr = ds.GetLayerByName("topp:tasmania_water_bodies")
+        assert lyr is not None
 
-    feat = lyr.GetNextFeature()
-    if (
-        feat.GetField("CONTINENT") != "Australia"
-        or ogrtest.check_feature_geometry(
+        assert lyr.GetName() == "topp:tasmania_water_bodies"
+
+        feat = lyr.GetNextFeature()
+        assert feat.GetField("CONTINENT") == "Australia"
+        ogrtest.check_feature_geometry(
             feat,
             "MULTIPOLYGON (((146.232727 -42.157501,146.238007 -42.16111,146.24411 -42.169724,146.257202 -42.193329,146.272217 -42.209442,146.274689 -42.214165,146.27832 -42.21833,146.282471 -42.228882,146.282745 -42.241943,146.291351 -42.255836,146.290253 -42.261948,146.288025 -42.267502,146.282471 -42.269997,146.274994 -42.271111,146.266663 -42.270279,146.251373 -42.262505,146.246918 -42.258057,146.241333 -42.256111,146.23468 -42.257782,146.221344 -42.269165,146.210785 -42.274445,146.20163 -42.27417,146.196075 -42.271385,146.186646 -42.258057,146.188568 -42.252785,146.193298 -42.249443,146.200806 -42.248055,146.209137 -42.249168,146.217468 -42.248611,146.222473 -42.245277,146.22525 -42.240555,146.224121 -42.22805,146.224396 -42.221382,146.228302 -42.217216,146.231354 -42.212502,146.231628 -42.205559,146.219421 -42.186943,146.21637 -42.17028,146.216644 -42.16333,146.219696 -42.158607,146.225525 -42.156105,146.232727 -42.157501)))",
             max_error=0.00001,
         )
-        != 0
-    ):
-        feat.DumpReadable()
-        webserver.server_stop(process, port)
-        pytest.fail("did not get expected feature")
 
-    webserver.server_stop(process, port)
+    finally:
+        webserver.server_stop(process, port)
 
 
 def test_ogr_flatgeobuf_bool_short_float_binary():
@@ -611,13 +560,13 @@ def test_ogr_flatgeobuf_bool_short_float_binary():
     f["bool"] = True
     f["short"] = -32768
     f["float"] = 1.5
-    f.SetFieldBinaryFromHexString("bin", "01FF")
+    f["bin"] = b"\x01\xFF"
     f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (0 0)"))
     lyr.CreateFeature(f)
 
     # Field of size 0
     f = ogr.Feature(lyr.GetLayerDefn())
-    f.SetFieldBinaryFromHexString("bin", "")
+    f["bin"] = b""
     f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (0 0)"))
     lyr.CreateFeature(f)
     ds = None
@@ -676,11 +625,10 @@ def test_ogr_flatgeobuf_huge_number_of_columns():
             lyr.CreateField(ogr.FieldDefn("col%d" % i, ogr.OFTInteger))
             == ogr.OGRERR_NONE
         ), i
-    with gdaltest.error_handler():
-        assert (
-            lyr.CreateField(ogr.FieldDefn("col65536", ogr.OFTInteger))
-            == ogr.OGRERR_FAILURE
-        )
+    with pytest.raises(
+        Exception, match="Cannot create features with more than 65536 columns"
+    ):
+        lyr.CreateField(ogr.FieldDefn("col65536", ogr.OFTInteger))
     f = ogr.Feature(lyr.GetLayerDefn())
     f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (0 0)"))
     for i in range(65536):
@@ -707,6 +655,7 @@ def test_ogr_flatgeobuf_column_metadata():
     lyr.CreateField(fld_defn)
 
     fld_defn = ogr.FieldDefn("str1", ogr.OFTString)
+    fld_defn.SetComment("a comment")
     lyr.CreateField(fld_defn)
 
     fld_defn = ogr.FieldDefn("str2", ogr.OFTString)
@@ -742,6 +691,7 @@ def test_ogr_flatgeobuf_column_metadata():
     assert lyr.GetLayerDefn().GetFieldDefn(1).GetWidth() == 0
     assert lyr.GetLayerDefn().GetFieldDefn(1).IsNullable() == 1
     assert lyr.GetLayerDefn().GetFieldDefn(1).IsUnique() == 0
+    assert lyr.GetLayerDefn().GetFieldDefn(1).GetComment() == "a comment"
     assert lyr.GetLayerDefn().GetFieldDefn(2).GetType() == ogr.OFTString
     assert lyr.GetLayerDefn().GetFieldDefn(2).GetWidth() == 2
     assert lyr.GetLayerDefn().GetFieldDefn(2).IsNullable() == 0
@@ -791,7 +741,8 @@ def test_ogr_flatgeobuf_editing():
 
     assert lyr.TestCapability(ogr.OLCDeleteFeature) == 1
     assert lyr.DeleteFeature(1) == 0
-    assert lyr.DeleteFeature(1) == ogr.OGRERR_NON_EXISTING_FEATURE
+    with pytest.raises(Exception, match="Non existing feature"):
+        lyr.DeleteFeature(1)
     assert lyr.TestCapability(ogr.OLCReorderFields) == 1
     # assert lyr.ReorderFields([0, 1]) == 0
     assert lyr.DeleteField(1) == 0
@@ -823,8 +774,8 @@ def test_ogr_flatgeobuf_editing():
 
     f = ogr.Feature(lyr.GetLayerDefn())
     f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (1 1)"))
-    with gdaltest.error_handler():
-        assert lyr.CreateFeature(f) != ogr.OGRERR_NONE
+    with pytest.raises(Exception, match="not supported on read-only layer"):
+        lyr.CreateFeature(f)
 
     ogr.GetDriverByName("FlatGeobuf").DeleteDataSource("/vsimem/test.fgb")
     assert not gdal.VSIStatL("/vsimem/test.fgb")
@@ -894,11 +845,30 @@ def test_ogr_flatgeobuf_ossfuzz_bug_29462():
     ],
 )
 def test_ogr_flatgeobuf_read_invalid_geometries(filename):
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx(filename)
         lyr = ds.GetLayer(0)
-        for f in lyr:
-            pass
+        with pytest.raises(Exception, match="Fatal error parsing feature"):
+            for f in lyr:
+                pass
+
+
+###############################################################################
+# Check that we can read multilinestrings with a single part, without the
+# "ends" array (cf https://github.com/OSGeo/gdal/issues/10774)
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "data/flatgeobuf/test_ogr_flatgeobuf_singlepart_mls_new.fgb",
+    ],
+)
+def test_ogr_flatgeobuf_read_singlepart_mls_new(filename):
+    with gdal.OpenEx(filename) as ds:
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        ogrtest.check_feature_geometry(f, "MULTILINESTRING ((0 0,1 1))")
 
 
 ###############################################################################
@@ -985,19 +955,24 @@ def test_ogr_flatgeobuf_coordinate_epoch_custom_wkt():
 def test_ogr_flatgeobuf_invalid_output_filename():
 
     ds = ogr.GetDriverByName("FlatGeobuf").CreateDataSource("/i_do/not_exist/my.fgb")
-    with gdaltest.error_handler():
-        assert ds.CreateLayer("foo") is None
+    with pytest.raises(Exception, match="Failed to create"):
+        ds.CreateLayer("foo")
 
 
 ###############################################################################
 
 
-def test_ogr_flatgeobuf_arrow_stream_numpy():
-    pytest.importorskip("osgeo.gdal_array")
+@pytest.mark.parametrize(
+    "layer_creation_options",
+    [[], ["SPATIAL_INDEX=NO"]],
+    ids=["regular", "no_spatial_index"],
+)
+def test_ogr_flatgeobuf_arrow_stream_numpy(layer_creation_options):
+    gdaltest.importorskip_gdal_array()
     numpy = pytest.importorskip("numpy")
 
     ds = ogr.GetDriverByName("FlatGeoBuf").CreateDataSource("/vsimem/test.fgb")
-    lyr = ds.CreateLayer("test", geom_type=ogr.wkbPoint)
+    lyr = ds.CreateLayer("test", geom_type=ogr.wkbPoint, options=layer_creation_options)
     assert lyr.TestCapability(ogr.OLCFastGetArrowStream) == 1
 
     field = ogr.FieldDefn("str", ogr.OFTString)
@@ -1039,7 +1014,7 @@ def test_ogr_flatgeobuf_arrow_stream_numpy():
     f.SetField("float64", 1.250123)
     f.SetField("str", "abc")
     f.SetField("datetime", "2022-05-31T12:34:56.789Z")
-    f.SetFieldBinaryFromHexString("binary", "DEAD")
+    f.SetField("binary", b"\xDE\xAD")
     f.SetGeometryDirectly(ogr.CreateGeometryFromWkt("POINT(1 2)"))
     lyr.CreateFeature(f)
 
@@ -1095,23 +1070,63 @@ def test_ogr_flatgeobuf_arrow_stream_numpy():
     assert batch["OGC_FID"][1] == 1
     assert batch["bool"][1] == False
 
-    # Test attribute filter
-    lyr.SetAttributeFilter("int16 = -123")
-    stream = lyr.GetArrowStreamAsNumPy()
+    for options in ([], ["MAX_FEATURES_IN_BATCH=1"]):
+        # Test attribute filter
+        lyr.SetAttributeFilter("int16 = -123")
+        stream = lyr.GetArrowStreamAsNumPy(options)
+        batches = [batch for batch in stream]
+        lyr.SetAttributeFilter(None)
+        assert len(batches) == 1
+        assert len(batches[0]["OGC_FID"]) == 1
+        assert batches[0]["OGC_FID"][0] == 1
+        assert batches[0]["int16"][0] == -123
+
+        # Test spatial filter
+        lyr.SetSpatialFilterRect(0, 0, 10, 10)
+        stream = lyr.GetArrowStreamAsNumPy(options)
+        batches = [batch for batch in stream]
+        lyr.SetSpatialFilter(None)
+        assert len(batches) == 1
+        assert len(batches[0]["OGC_FID"]) == 1
+        assert batches[0]["OGC_FID"][0] == 0
+        assert batches[0]["int16"][0] == -12345
+
+        # Test attribute + spatial filter: no result
+        lyr.SetAttributeFilter("int16 = -123")
+        lyr.SetSpatialFilterRect(0, 0, 10, 10)
+        stream = lyr.GetArrowStreamAsNumPy(options)
+        batches = [batch for batch in stream]
+        lyr.SetAttributeFilter(None)
+        lyr.SetSpatialFilter(None)
+        assert len(batches) == 0
+
+        # Test attribute + spatial filter: result
+        lyr.SetAttributeFilter("int16 = -123")
+        lyr.SetSpatialFilterRect(-1, 2, -1, 2)
+        stream = lyr.GetArrowStreamAsNumPy(options)
+        batches = [batch for batch in stream]
+        lyr.SetAttributeFilter(None)
+        lyr.SetSpatialFilter(None)
+        assert len(batches) == 1
+        assert len(batches[0]["int16"]) == 1
+        assert batches[0]["OGC_FID"][0] == 1
+        assert batches[0]["int16"][0] == -123
+
+    # Test fast FID filtering
+    lyr.SetAttributeFilter("FID IN (1, -2, 0)")
+    stream = lyr.GetArrowStreamAsNumPy(options=["USE_MASKED_ARRAYS=NO"])
     batches = [batch for batch in stream]
     lyr.SetAttributeFilter(None)
     assert len(batches) == 1
-    assert len(batches[0]["OGC_FID"]) == 1
-    assert batches[0]["OGC_FID"][0] == 1
+    batch = batches[0]
+    assert len(batch["OGC_FID"]) == 2
+    assert set(batch["OGC_FID"]) == set([0, 1])
 
-    # Test spatial filter
-    lyr.SetSpatialFilterRect(0, 0, 10, 10)
-    stream = lyr.GetArrowStreamAsNumPy()
+    lyr.SetAttributeFilter("FID = 2")
+    stream = lyr.GetArrowStreamAsNumPy(options=["USE_MASKED_ARRAYS=NO"])
     batches = [batch for batch in stream]
-    lyr.SetSpatialFilter(None)
-    assert len(batches) == 1
-    assert len(batches[0]["OGC_FID"]) == 1
-    assert batches[0]["OGC_FID"][0] == 0
+    lyr.SetAttributeFilter(None)
+    assert len(batches) == 0
 
     # Test ignored fields
     assert lyr.SetIgnoredFields(["OGR_GEOMETRY", "int16"]) == ogr.OGRERR_NONE
@@ -1133,3 +1148,505 @@ def test_ogr_flatgeobuf_arrow_stream_numpy():
     ds = None
 
     ogr.GetDriverByName("FlatGeobuf").DeleteDataSource("/vsimem/test.fgb")
+
+
+###############################################################################
+# Test reading an empty file with GetArrowStream()
+
+
+def test_ogr_flatgeobuf_arrow_stream_empty_file():
+
+    ds = ogr.GetDriverByName("FlatGeoBuf").CreateDataSource("/vsimem/test.fgb")
+    lyr = ds.CreateLayer("test", geom_type=ogr.wkbPoint)
+    assert lyr.TestCapability(ogr.OLCFastGetArrowStream) == 1
+    stream = lyr.GetArrowStream()
+    assert stream.GetNextRecordBatch() is None
+    del stream
+    ds = None
+
+    ogr.GetDriverByName("FlatGeobuf").DeleteDataSource("/vsimem/test.fgb")
+
+
+def test_ogr_flatgeobuf_issue_7401():
+    # Verify null geom handling without spatial index
+    ds = ogr.GetDriverByName("FlatGeobuf").CreateDataSource("/vsimem/test.fgb")
+    lyr = ds.CreateLayer("test", geom_type=ogr.wkbPoint, options=["SPATIAL_INDEX=NO"])
+
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (0 0)"))
+    lyr.CreateFeature(f)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    lyr.CreateFeature(f)
+
+    ds = None
+
+    ds = gdal.OpenEx("/vsimem/test.fgb", open_options=["VERIFY_BUFFERS=YES"])
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    g = f.GetGeometryRef()
+    assert f is not None
+    assert g is not None
+    f = lyr.GetNextFeature()
+    g = f.GetGeometryRef()
+    assert f is not None
+    assert g is None
+
+    ds = None
+
+    ogr.GetDriverByName("FlatGeobuf").DeleteDataSource("/vsimem/test.fgb")
+    assert not gdal.VSIStatL("/vsimem/test.fgb")
+
+    # Verify null geom handling with spatial index (not supported should error)
+    ds = ogr.GetDriverByName("FlatGeobuf").CreateDataSource("/vsimem/test.fgb")
+    lyr = ds.CreateLayer("test", geom_type=ogr.wkbPoint, options=["SPATIAL_INDEX=YES"])
+
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (0 0)"))
+    lyr.CreateFeature(f)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    with pytest.raises(
+        Exception, match="NULL geometry not supported with spatial index"
+    ):
+        lyr.CreateFeature(f)
+    ds = None
+
+    ogr.GetDriverByName("FlatGeobuf").DeleteDataSource("/vsimem/test.fgb")
+    assert not gdal.VSIStatL("/vsimem/test.fgb")
+
+
+###############################################################################
+# Test reading and writing layer title, description and metadata
+
+
+def test_ogr_flatgeobuf_title_description_metadata(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "test.fgb")
+    ds = ogr.GetDriverByName("FlatGeobuf").CreateDataSource(filename)
+    lyr = ds.CreateLayer(
+        "test",
+        geom_type=ogr.wkbPoint,
+        options=["SPATIAL_INDEX=NO", "TITLE=title", "DESCRIPTION=description"],
+    )
+    lyr.SetMetadata({"foo": "bar", "bar": "baz"})
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (0 0)"))
+    lyr.CreateFeature(f)
+    ds = None
+
+    ds = ogr.Open(filename)
+    lyr = ds.GetLayer(0)
+    assert lyr.GetMetadata_Dict() == {
+        "TITLE": "title",
+        "DESCRIPTION": "description",
+        "foo": "bar",
+        "bar": "baz",
+    }
+
+    # Test that on FlatGeoBuf -> FlatGeoBuf TITLE and DESCRIPTION get properly propagated.
+    filename2 = str(tmp_vsimem / "test2.fgb")
+    ds = gdal.VectorTranslate(filename2, filename)
+    lyr = ds.GetLayer(0)
+    assert lyr.GetMetadata_Dict() == {
+        "TITLE": "title",
+        "DESCRIPTION": "description",
+        "foo": "bar",
+        "bar": "baz",
+    }
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_flatgeobuf_write_arrow(tmp_vsimem):
+
+    ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+    src_lyr = ds.CreateLayer("src_lyr")
+
+    field_def = ogr.FieldDefn("field_bool", ogr.OFTInteger)
+    field_def.SetSubType(ogr.OFSTBoolean)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_integer", ogr.OFTInteger)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_int16", ogr.OFTInteger)
+    field_def.SetSubType(ogr.OFSTInt16)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_integer64", ogr.OFTInteger64)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_float32", ogr.OFTReal)
+    field_def.SetSubType(ogr.OFSTFloat32)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_real", ogr.OFTReal)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_string", ogr.OFTString)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_binary", ogr.OFTBinary)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_date", ogr.OFTDate)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_time", ogr.OFTTime)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_datetime", ogr.OFTDateTime)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_boollist", ogr.OFTIntegerList)
+    field_def.SetSubType(ogr.OFSTBoolean)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_integerlist", ogr.OFTIntegerList)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_int16list", ogr.OFTIntegerList)
+    field_def.SetSubType(ogr.OFSTInt16)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_integer64list", ogr.OFTInteger64List)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_float32list", ogr.OFTRealList)
+    field_def.SetSubType(ogr.OFSTFloat32)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_reallist", ogr.OFTRealList)
+    src_lyr.CreateField(field_def)
+
+    field_def = ogr.FieldDefn("field_stringlist", ogr.OFTStringList)
+    src_lyr.CreateField(field_def)
+
+    src_feature = ogr.Feature(src_lyr.GetLayerDefn())
+    src_feature.SetField("field_bool", True)
+    src_feature.SetField("field_integer", 17)
+    src_feature.SetField("field_int16", -17)
+    src_feature.SetField("field_integer64", 9876543210)
+    src_feature.SetField("field_float32", 1.5)
+    src_feature.SetField("field_real", 18.4)
+    src_feature.SetField("field_string", "abc def")
+    src_feature.SetFieldBinary("field_binary", b"\x00\x01")
+    src_feature.SetField("field_binary", b"\x01\x23\x46\x57\x89\xAB\xCD\xEF")
+    src_feature.SetField("field_date", "2011/11/11")
+    src_feature.SetField("field_time", "14:10:35")
+    src_feature.SetField("field_datetime", 2011, 11, 11, 14, 10, 35.123, 0)
+    src_feature.field_boollist = [False, True]
+    src_feature.field_integerlist = [10, 20, 30]
+    src_feature.field_int16list = [10, -20, 30]
+    src_feature.field_integer64list = [9876543210]
+    src_feature.field_float32list = [1.5, -1.5]
+    src_feature.field_reallist = [123.5, 567.0]
+    src_feature.field_stringlist = ["abc", "def"]
+    src_feature.SetGeometry(ogr.CreateGeometryFromWkt("POINT (1 2)"))
+
+    src_lyr.CreateFeature(src_feature)
+
+    filename = str(tmp_vsimem / "temp.fgb")
+    dst_ds = ogr.GetDriverByName("FlatGeoBuf").CreateDataSource(filename)
+    dst_lyr = dst_ds.CreateLayer("dst_lyr")
+
+    stream = src_lyr.GetArrowStream(["INCLUDE_FID=NO"])
+    schema = stream.GetSchema()
+
+    success, error_msg = dst_lyr.IsArrowSchemaSupported(schema)
+    assert success, error_msg
+
+    for i in range(schema.GetChildrenCount()):
+        if schema.GetChild(i).GetName() != "wkb_geometry":
+            dst_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
+
+    while True:
+        array = stream.GetNextRecordBatch()
+        if array is None:
+            break
+        assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
+
+    dst_ds.Close()
+    dst_ds = ogr.Open(filename)
+    dst_lyr = dst_ds.GetLayer(0)
+    dst_feature = dst_lyr.GetNextFeature()
+    assert (
+        str(dst_feature)
+        == """OGRFeature(dst_lyr):0
+  field_bool (Integer(Boolean)) = 1
+  field_integer (Integer) = 17
+  field_int16 (Integer(Int16)) = -17
+  field_integer64 (Integer64) = 9876543210
+  field_float32 (Real(Float32)) = 1.5
+  field_real (Real) = 18.4
+  field_string (String) = abc def
+  field_binary (Binary) = 0123465789ABCDEF
+  field_date (DateTime) = 2011/11/11 00:00:00
+  field_time (String) = 14:10:35
+  field_datetime (DateTime) = 2011/11/11 14:10:35.123
+  field_boollist (String) = [ 0, 1 ]
+  field_integerlist (String) = [ 10, 20, 30 ]
+  field_int16list (String) = [ 10, -20, 30 ]
+  field_integer64list (String) = [ 9876543210 ]
+  field_float32list (String) = [ 1.5, -1.5 ]
+  field_reallist (String) = [ 123.5, 567.0 ]
+  field_stringlist (String) = [ "abc", "def" ]
+  POINT (1 2)
+
+"""
+    )
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_flatgeobuf_write_mismatch_geom_type(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "temp.fgb")
+    ds = ogr.GetDriverByName("FlatGeoBuf").CreateDataSource(filename)
+    lyr = ds.CreateLayer("src_lyr", geom_type=ogr.wkbPoint)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt("LINESTRING (1 2,3 4)"))
+    with pytest.raises(
+        Exception,
+        match="ICreateFeature: Mismatched geometry type. Feature geometry type is Line String, expected layer geometry type is Point",
+    ):
+        lyr.CreateFeature(f)
+
+
+###############################################################################
+# Test OGRGenSQLResultLayer::GetArrowStream() implementation.
+# There isn't much specific of the FlatGeoBuf driver, except it is the
+# only one in a default build that implements OLCFastGetArrowStream and doesn't
+# have a specialized ExecuteSQL() implementation.
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_flatgeobuf_sql_arrow(tmp_vsimem):
+
+    filename = str(tmp_vsimem / "temp.fgb")
+    with ogr.GetDriverByName("FlatGeoBuf").CreateDataSource(filename) as ds:
+        lyr = ds.CreateLayer("test", geom_type=ogr.wkbPoint)
+        lyr.CreateField(ogr.FieldDefn("foo"))
+        lyr.CreateField(ogr.FieldDefn("bar"))
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f["foo"] = "bar"
+        f["bar"] = "baz"
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (1 2)"))
+        lyr.CreateFeature(f)
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f["foo"] = "bar2"
+        f["bar"] = "baz2"
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (3 4)"))
+        lyr.CreateFeature(f)
+
+    with ogr.Open(filename) as ds:
+        with ds.ExecuteSQL("SELECT 'a' FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+            tmp_ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+            tmp_lyr = tmp_ds.CreateLayer("test")
+            tmp_lyr.WriteArrow(lyr)
+            f = tmp_lyr.GetNextFeature()
+            assert f["FIELD_1"] == "a"
+
+        with ds.ExecuteSQL("SELECT foo, foo FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT CONCAT(foo, 'x') FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT foo AS renamed, foo FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT bar, foo FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT CAST(foo AS float) FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT MIN(foo) FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT COUNT(*) FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT * FROM test a JOIN test b ON a.foo = b.foo") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT * FROM test OFFSET 1") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT * FROM test ORDER BY foo") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT *, OGR_STYLE HIDDEN FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT DISTINCT foo FROM test") as lyr:
+            assert not lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+        with ds.ExecuteSQL("SELECT * FROM test") as lyr:
+            try:
+                stream = lyr.GetArrowStreamAsNumPy()
+            except ImportError:
+                stream = None
+        if stream:
+            with pytest.raises(
+                Exception,
+                match=r"Calling get_next\(\) on a freed OGRLayer is not supported",
+            ):
+                [batch for batch in stream]
+
+        sql = "SELECT foo, bar AS bar_renamed FROM test"
+        with ds.ExecuteSQL(sql) as lyr:
+            assert lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+            tmp_ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+            tmp_lyr = tmp_ds.CreateLayer("test")
+            tmp_lyr.WriteArrow(lyr)
+            assert tmp_lyr.GetLayerDefn().GetFieldCount() == 2
+            assert tmp_lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "foo"
+            assert tmp_lyr.GetLayerDefn().GetFieldDefn(1).GetName() == "bar_renamed"
+            assert tmp_lyr.GetFeatureCount() == 2
+            f = tmp_lyr.GetNextFeature()
+            assert f["foo"] == "bar2"
+            assert f["bar_renamed"] == "baz2"
+            assert f.GetGeometryRef().ExportToWkt() == "POINT (3 4)"
+            f = tmp_lyr.GetNextFeature()
+            assert f["foo"] == "bar"
+            assert f["bar_renamed"] == "baz"
+            assert f.GetGeometryRef().ExportToWkt() == "POINT (1 2)"
+
+        sql = "SELECT bar FROM test LIMIT 1"
+        with ds.ExecuteSQL(sql) as lyr:
+            assert lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+            tmp_ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+            tmp_lyr = tmp_ds.CreateLayer("test")
+            tmp_lyr.WriteArrow(lyr)
+            assert tmp_lyr.GetLayerDefn().GetFieldCount() == 1
+            assert tmp_lyr.GetFeatureCount() == 1
+            f = tmp_lyr.GetNextFeature()
+            assert f["bar"] == "baz2"
+            assert f.GetGeometryRef().ExportToWkt() == "POINT (3 4)"
+
+        sql = "SELECT * EXCLUDE (\"_ogr_geometry_\") FROM test WHERE foo = 'bar'"
+        with ds.ExecuteSQL(sql) as lyr:
+            assert lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+            tmp_ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+            tmp_lyr = tmp_ds.CreateLayer("test")
+            tmp_lyr.WriteArrow(lyr)
+            assert tmp_lyr.GetFeatureCount() == 1
+            f = tmp_lyr.GetNextFeature()
+            assert f["foo"] == "bar"
+            assert f["bar"] == "baz"
+            assert f.GetGeometryRef() is None
+
+        sql = "SELECT * FROM test"
+        with ds.ExecuteSQL(sql) as lyr:
+            lyr.SetSpatialFilterRect(1, 2, 1, 2)
+            assert lyr.TestCapability(ogr.OLCFastGetArrowStream)
+
+            tmp_ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+            tmp_lyr = tmp_ds.CreateLayer("test")
+            tmp_lyr.WriteArrow(lyr)
+            assert tmp_lyr.GetLayerDefn().GetFieldCount() == 2
+            assert tmp_lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "foo"
+            assert tmp_lyr.GetLayerDefn().GetFieldDefn(1).GetName() == "bar"
+            assert tmp_lyr.GetFeatureCount() == 1
+            f = tmp_lyr.GetNextFeature()
+            assert f["foo"] == "bar"
+            assert f["bar"] == "baz"
+            assert f.GetGeometryRef().ExportToWkt() == "POINT (1 2)"
+            f = tmp_lyr.GetNextFeature()
+
+
+###############################################################################
+# Test DATETIME_AS_STRING=YES GetArrowStream() option
+
+
+def test_ogr_flatgeobuf_arrow_stream_numpy_datetime_as_string(tmp_vsimem):
+    gdaltest.importorskip_gdal_array()
+    pytest.importorskip("numpy")
+
+    filename = str(tmp_vsimem / "datetime_as_string.fgb")
+    with ogr.GetDriverByName("FlatGeoBuf").CreateDataSource(filename) as ds:
+        lyr = ds.CreateLayer("test")
+
+        field = ogr.FieldDefn("datetime", ogr.OFTDateTime)
+        lyr.CreateField(field)
+
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (1 2)"))
+        lyr.CreateFeature(f)
+
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f.SetField("datetime", "2022-05-31T12:34:56.789Z")
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (1 2)"))
+        lyr.CreateFeature(f)
+
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f.SetField("datetime", "2022-05-31T12:34:56")
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (1 2)"))
+        lyr.CreateFeature(f)
+
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f.SetField("datetime", "2022-05-31T12:34:56+12:30")
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT (1 2)"))
+        lyr.CreateFeature(f)
+
+    with ogr.Open(filename) as ds:
+        lyr = ds.GetLayer(0)
+        stream = lyr.GetArrowStreamAsNumPy(
+            options=["USE_MASKED_ARRAYS=NO", "DATETIME_AS_STRING=YES"]
+        )
+        batches = [batch for batch in stream]
+        assert len(batches) == 1
+        batch = batches[0]
+        assert len(batch["datetime"]) == 4
+        assert batch["datetime"][0] == b""
+        assert batch["datetime"][1] == b"2022-05-31T12:34:56.789Z"
+        assert batch["datetime"][2] == b"2022-05-31T12:34:56"
+        assert batch["datetime"][3] == b"2022-05-31T12:34:56+12:30"
+
+
+def test_ogr_flatgeobuf_write_empty_geometries_no_spatial_index(tmp_vsimem):
+    # Verify empty geom handling without spatial index
+    out_filename = str(tmp_vsimem / "out.fgb")
+    with ogr.GetDriverByName("FlatGeobuf").CreateDataSource(out_filename) as ds:
+        lyr = ds.CreateLayer(
+            "test", geom_type=ogr.wkbPolygon, options=["SPATIAL_INDEX=NO"]
+        )
+
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POLYGON EMPTY"))
+        lyr.CreateFeature(f)
+        f = ogr.Feature(lyr.GetLayerDefn())
+        lyr.CreateFeature(f)
+
+    with gdal.OpenEx(out_filename) as ds:
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        g = f.GetGeometryRef()
+        assert g is None
+
+
+def test_ogr_flatgeobuf_write_empty_file_no_spatial_index(tmp_vsimem):
+    # Verify empty geom handling without spatial index
+    out_filename = str(tmp_vsimem / "out.fgb")
+    with ogr.GetDriverByName("FlatGeobuf").CreateDataSource(out_filename) as ds:
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(32631)
+        ds.CreateLayer(
+            "test", geom_type=ogr.wkbPolygon, srs=srs, options=["SPATIAL_INDEX=NO"]
+        )
+
+    with gdal.OpenEx(out_filename) as ds:
+        lyr = ds.GetLayer(0)
+        assert lyr.GetFeatureCount() == 0
+        assert lyr.GetExtent(can_return_null=True) is None
+        assert lyr.GetSpatialRef().GetAuthorityCode(None) == "32631"

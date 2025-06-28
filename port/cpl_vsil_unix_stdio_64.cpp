@@ -9,23 +9,7 @@
  * Copyright (c) 2001, Frank Warmerdam
  * Copyright (c) 2010-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************
  *
  * NB: Note that in wrappers we are always saving the error state (errno
@@ -57,7 +41,7 @@
 
 #include "cpl_port.h"
 
-#if !defined(WIN32)
+#if !defined(_WIN32)
 
 #include "cpl_vsi.h"
 #include "cpl_vsi_virtual.h"
@@ -80,6 +64,13 @@
 #endif
 #ifdef HAVE_PREAD_BSD
 #include <sys/uio.h>
+#endif
+
+#if defined(__MACH__) && defined(__APPLE__)
+#define HAS_CASE_INSENSITIVE_FILE_SYSTEM
+#include <stdio.h>
+#include <stdlib.h>
+#include <limits.h>
 #endif
 
 #include <limits>
@@ -138,7 +129,7 @@
 
 #ifndef BUILD_WITHOUT_64BIT_OFFSET
 // Ensure we have working 64 bit API
-static_assert(sizeof(VSI_FTELL64(nullptr)) == sizeof(vsi_l_offset),
+static_assert(sizeof(VSI_FTELL64(stdout)) == sizeof(vsi_l_offset),
               "File API does not seem to support 64-bit offset. "
               "If you still want to build GDAL without > 4GB file support, "
               "add the -DBUILD_WITHOUT_64BIT_OFFSET define");
@@ -153,6 +144,8 @@ static_assert(sizeof(VSIStatBufL::st_size) == sizeof(vsi_l_offset),
 /*                       VSIUnixStdioFilesystemHandler                  */
 /* ==================================================================== */
 /************************************************************************/
+
+struct VSIDIRUnixStdio;
 
 class VSIUnixStdioFilesystemHandler final : public VSIFilesystemHandler
 {
@@ -175,7 +168,8 @@ class VSIUnixStdioFilesystemHandler final : public VSIFilesystemHandler
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
     int Unlink(const char *pszFilename) override;
-    int Rename(const char *oldpath, const char *newpath) override;
+    int Rename(const char *oldpath, const char *newpath, GDALProgressFunc,
+               void *) override;
     int Mkdir(const char *pszDirname, long nMode) override;
     int Rmdir(const char *pszDirname) override;
     char **ReadDirEx(const char *pszDirname, int nMaxFiles) override;
@@ -190,6 +184,15 @@ class VSIUnixStdioFilesystemHandler final : public VSIFilesystemHandler
 
     VSIDIR *OpenDir(const char *pszPath, int nRecurseDepth,
                     const char *const *papszOptions) override;
+
+    static std::unique_ptr<VSIDIRUnixStdio>
+    OpenDirInternal(const char *pszPath, int nRecurseDepth,
+                    const char *const *papszOptions);
+
+#ifdef HAS_CASE_INSENSITIVE_FILE_SYSTEM
+    std::string
+    GetCanonicalFilename(const std::string &osFilename) const override;
+#endif
 
 #ifdef VSI_COUNT_BYTES_READ
     void AddToTotal(vsi_l_offset nBytes);
@@ -212,6 +215,7 @@ class VSIUnixStdioHandle final : public VSIVirtualHandle
     bool bLastOpWrite = false;
     bool bLastOpRead = false;
     bool bAtEOF = false;
+    bool bError = false;
     // In a+ mode, disable any optimization since the behavior of the file
     // pointer on Mac and other BSD system is to have a seek() to the end of
     // file and thus a call to our Seek(0, SEEK_SET) before a read will be a
@@ -229,14 +233,18 @@ class VSIUnixStdioHandle final : public VSIVirtualHandle
     vsi_l_offset Tell() override;
     size_t Read(void *pBuffer, size_t nSize, size_t nMemb) override;
     size_t Write(const void *pBuffer, size_t nSize, size_t nMemb) override;
+    void ClearErr() override;
     int Eof() override;
+    int Error() override;
     int Flush() override;
     int Close() override;
     int Truncate(vsi_l_offset nNewSize) override;
+
     void *GetNativeFileDescriptor() override
     {
         return reinterpret_cast<void *>(static_cast<uintptr_t>(fileno(fp)));
     }
+
     VSIRangeStatus GetRangeStatus(vsi_l_offset nOffset,
                                   vsi_l_offset nLength) override;
 #if defined(HAVE_PREAD64) || (defined(HAVE_PREAD_BSD) && SIZEOF_OFF_T == 8)
@@ -272,13 +280,18 @@ VSIUnixStdioHandle::VSIUnixStdioHandle(
 int VSIUnixStdioHandle::Close()
 
 {
+    if (!fp)
+        return 0;
+
     VSIDebug1("VSIUnixStdioHandle::Close(%p)", fp);
 
 #ifdef VSI_COUNT_BYTES_READ
     poFS->AddToTotal(nTotalBytesRead);
 #endif
 
-    return fclose(fp);
+    int ret = fclose(fp);
+    fp = nullptr;
+    return ret;
 }
 
 /************************************************************************/
@@ -465,13 +478,20 @@ size_t VSIUnixStdioHandle::Read(void *pBuffer, size_t nSize, size_t nCount)
 
     if (nResult != nCount)
     {
+        if (ferror(fp))
+            bError = true;
+        else
+        {
+            CPLAssert(feof(fp));
+            bAtEOF = true;
+        }
+
         errno = 0;
         vsi_l_offset nNewOffset = VSI_FTELL64(fp);
         if (errno == 0)  // ftell() can fail if we are end of file with a pipe.
             m_nOffset = nNewOffset;
         else
             CPLDebug("VSI", "%s", VSIStrerror(errno));
-        bAtEOF = CPL_TO_BOOL(feof(fp));
     }
 
     return nResult;
@@ -523,6 +543,28 @@ size_t VSIUnixStdioHandle::Write(const void *pBuffer, size_t nSize,
     bLastOpRead = false;
 
     return nResult;
+}
+
+/************************************************************************/
+/*                             ClearErr()                               */
+/************************************************************************/
+
+void VSIUnixStdioHandle::ClearErr()
+
+{
+    clearerr(fp);
+    bAtEOF = false;
+    bError = false;
+}
+
+/************************************************************************/
+/*                              Error()                                 */
+/************************************************************************/
+
+int VSIUnixStdioHandle::Error()
+
+{
+    return bError ? TRUE : FALSE;
 }
 
 /************************************************************************/
@@ -747,7 +789,8 @@ int VSIUnixStdioFilesystemHandler::Unlink(const char *pszFilename)
 /************************************************************************/
 
 int VSIUnixStdioFilesystemHandler::Rename(const char *oldpath,
-                                          const char *newpath)
+                                          const char *newpath, GDALProgressFunc,
+                                          void *)
 
 {
     return rename(oldpath, newpath);
@@ -971,7 +1014,7 @@ bool VSIUnixStdioFilesystemHandler::SupportsSequentialWrite(
     VSIStatBufL sStat;
     if (VSIStatL(pszPath, &sStat) == 0)
         return access(pszPath, W_OK) == 0;
-    return access(CPLGetDirname(pszPath), W_OK) == 0;
+    return access(CPLGetDirnameSafe(pszPath).c_str(), W_OK) == 0;
 }
 
 /************************************************************************/
@@ -990,40 +1033,48 @@ bool VSIUnixStdioFilesystemHandler::SupportsRandomWrite(
 
 struct VSIDIRUnixStdio final : public VSIDIR
 {
+    struct DIRCloser
+    {
+        void operator()(DIR *d)
+        {
+            if (d)
+                closedir(d);
+        }
+    };
+
     CPLString osRootPath{};
     CPLString osBasePath{};
-    DIR *m_psDir = nullptr;
+    std::unique_ptr<DIR, DIRCloser> m_psDir{};
     int nRecurseDepth = 0;
     VSIDIREntry entry{};
-    std::vector<VSIDIRUnixStdio *> aoStackSubDir{};
-    VSIUnixStdioFilesystemHandler *poFS = nullptr;
+    std::vector<std::unique_ptr<VSIDIR>> aoStackSubDir{};
     std::string m_osFilterPrefix{};
     bool m_bNameAndTypeOnly = false;
 
-    explicit VSIDIRUnixStdio(VSIUnixStdioFilesystemHandler *poFSIn)
-        : poFS(poFSIn)
-    {
-    }
-    ~VSIDIRUnixStdio();
-
     const VSIDIREntry *NextDirEntry() override;
-
-    VSIDIRUnixStdio(const VSIDIRUnixStdio &) = delete;
-    VSIDIRUnixStdio &operator=(const VSIDIRUnixStdio &) = delete;
 };
 
 /************************************************************************/
-/*                        ~VSIDIRUnixStdio()                            */
+/*                        OpenDirInternal()                             */
 /************************************************************************/
 
-VSIDIRUnixStdio::~VSIDIRUnixStdio()
+/* static */
+std::unique_ptr<VSIDIRUnixStdio> VSIUnixStdioFilesystemHandler::OpenDirInternal(
+    const char *pszPath, int nRecurseDepth, const char *const *papszOptions)
 {
-    while (!aoStackSubDir.empty())
+    std::unique_ptr<DIR, VSIDIRUnixStdio::DIRCloser> psDir(opendir(pszPath));
+    if (psDir == nullptr)
     {
-        delete aoStackSubDir.back();
-        aoStackSubDir.pop_back();
+        return nullptr;
     }
-    closedir(m_psDir);
+    auto dir = std::make_unique<VSIDIRUnixStdio>();
+    dir->osRootPath = pszPath;
+    dir->nRecurseDepth = nRecurseDepth;
+    dir->m_psDir = std::move(psDir);
+    dir->m_osFilterPrefix = CSLFetchNameValueDef(papszOptions, "PREFIX", "");
+    dir->m_bNameAndTypeOnly = CPLTestBool(
+        CSLFetchNameValueDef(papszOptions, "NAME_AND_TYPE_ONLY", "NO"));
+    return dir;
 }
 
 /************************************************************************/
@@ -1034,19 +1085,7 @@ VSIDIR *VSIUnixStdioFilesystemHandler::OpenDir(const char *pszPath,
                                                int nRecurseDepth,
                                                const char *const *papszOptions)
 {
-    DIR *psDir = opendir(pszPath);
-    if (psDir == nullptr)
-    {
-        return nullptr;
-    }
-    VSIDIRUnixStdio *dir = new VSIDIRUnixStdio(this);
-    dir->osRootPath = pszPath;
-    dir->nRecurseDepth = nRecurseDepth;
-    dir->m_psDir = psDir;
-    dir->m_osFilterPrefix = CSLFetchNameValueDef(papszOptions, "PREFIX", "");
-    dir->m_bNameAndTypeOnly = CPLTestBool(
-        CSLFetchNameValueDef(papszOptions, "NAME_AND_TYPE_ONLY", "NO"));
-    return dir;
+    return OpenDirInternal(pszPath, nRecurseDepth, papszOptions).release();
 }
 
 /************************************************************************/
@@ -1062,16 +1101,15 @@ begin:
         if (!osCurFile.empty())
             osCurFile += '/';
         osCurFile += entry.pszName;
-        auto subdir = static_cast<VSIDIRUnixStdio *>(
-            poFS->VSIUnixStdioFilesystemHandler::OpenDir(
-                osCurFile, nRecurseDepth - 1, nullptr));
+        auto subdir = VSIUnixStdioFilesystemHandler::OpenDirInternal(
+            osCurFile, nRecurseDepth - 1, nullptr);
         if (subdir)
         {
             subdir->osRootPath = osRootPath;
             subdir->osBasePath = entry.pszName;
             subdir->m_osFilterPrefix = m_osFilterPrefix;
             subdir->m_bNameAndTypeOnly = m_bNameAndTypeOnly;
-            aoStackSubDir.push_back(subdir);
+            aoStackSubDir.push_back(std::move(subdir));
         }
         entry.nMode = 0;
     }
@@ -1083,17 +1121,11 @@ begin:
         {
             return l_entry;
         }
-        delete aoStackSubDir.back();
         aoStackSubDir.pop_back();
     }
 
-    while (true)
+    while (const auto *psEntry = readdir(m_psDir.get()))
     {
-        const auto *psEntry = readdir(m_psDir);
-        if (psEntry == nullptr)
-        {
-            return nullptr;
-        }
         // Skip . and ..entries
         if (psEntry->d_name[0] == '.' &&
             (psEntry->d_name[1] == '\0' ||
@@ -1179,11 +1211,11 @@ begin:
                 StatFile();
             }
 
-            break;
+            return &(entry);
         }
     }
 
-    return &(entry);
+    return nullptr;
 }
 
 #ifdef VSI_COUNT_BYTES_READ
@@ -1197,6 +1229,34 @@ void VSIUnixStdioFilesystemHandler::AddToTotal(vsi_l_offset nBytes)
     nTotalBytesRead += nBytes;
 }
 
+#endif
+
+/************************************************************************/
+/*                      GetCanonicalFilename()                          */
+/************************************************************************/
+
+#ifdef HAS_CASE_INSENSITIVE_FILE_SYSTEM
+std::string VSIUnixStdioFilesystemHandler::GetCanonicalFilename(
+    const std::string &osFilename) const
+{
+    char szResolvedPath[PATH_MAX];
+    const char *pszFilename = osFilename.c_str();
+    if (realpath(pszFilename, szResolvedPath))
+    {
+        const char *pszFilenameLastPart = strrchr(pszFilename, '/');
+        const char *pszResolvedFilenameLastPart = strrchr(szResolvedPath, '/');
+        if (pszFilenameLastPart && pszResolvedFilenameLastPart &&
+            EQUAL(pszFilenameLastPart, pszResolvedFilenameLastPart))
+        {
+            std::string osRet;
+            osRet.assign(pszFilename, pszFilenameLastPart - pszFilename);
+            osRet += pszResolvedFilenameLastPart;
+            return osRet;
+        }
+        return szResolvedPath;
+    }
+    return osFilename;
+}
 #endif
 
 /************************************************************************/

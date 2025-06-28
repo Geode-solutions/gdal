@@ -7,29 +7,10 @@
  ****************************************************************************
  * Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gifabstractdataset.h"
-
-constexpr int InterlacedOffset[] = {0, 4, 2, 1};
-constexpr int InterlacedJumps[] = {8, 8, 4, 2};
 
 /************************************************************************/
 /* ==================================================================== */
@@ -45,12 +26,6 @@ GIFAbstractDataset::GIFAbstractDataset()
     : fp(nullptr), hGifFile(nullptr), bGeoTransformValid(FALSE), nGCPCount(0),
       pasGCPList(nullptr), bHasReadXMPMetadata(FALSE)
 {
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -185,13 +160,14 @@ void GIFAbstractDataset::CollectXMPMetadata()
     if (!osXMP.empty())
     {
         /* Avoid setting the PAM dirty bit just for that */
-        int nOldPamFlags = nPamFlags;
+        const int nOldPamFlags = nPamFlags;
 
         char *apszMDList[2];
         apszMDList[0] = (char *)osXMP.c_str();
         apszMDList[1] = nullptr;
         SetMetadata(apszMDList, "xml:XMP");
 
+        // cppcheck-suppress redundantAssignment
         nPamFlags = nOldPamFlags;
     }
 
@@ -226,16 +202,16 @@ char **GIFAbstractDataset::GetMetadata(const char *pszDomain)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GIFAbstractDataset::GetGeoTransform(double *padfTransform)
+CPLErr GIFAbstractDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (bGeoTransformValid)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
-    return GDALPamDataset::GetGeoTransform(padfTransform);
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -265,23 +241,6 @@ const GDAL_GCP *GIFAbstractDataset::GetGCPs()
 }
 
 /************************************************************************/
-/*                             Identify()                               */
-/************************************************************************/
-
-int GIFAbstractDataset::Identify(GDALOpenInfo *poOpenInfo)
-
-{
-    if (poOpenInfo->nHeaderBytes < 8)
-        return FALSE;
-
-    if (!STARTS_WITH((const char *)poOpenInfo->pabyHeader, "GIF87a") &&
-        !STARTS_WITH((const char *)poOpenInfo->pabyHeader, "GIF89a"))
-        return FALSE;
-
-    return TRUE;
-}
-
-/************************************************************************/
 /*                            GetFileList()                             */
 /************************************************************************/
 
@@ -308,12 +267,12 @@ void GIFAbstractDataset::DetectGeoreferencing(GDALOpenInfo *poOpenInfo)
     char *pszWldFilename = nullptr;
 
     bGeoTransformValid =
-        GDALReadWorldFile2(poOpenInfo->pszFilename, nullptr, adfGeoTransform,
+        GDALReadWorldFile2(poOpenInfo->pszFilename, nullptr, m_gt,
                            poOpenInfo->GetSiblingFiles(), &pszWldFilename);
     if (!bGeoTransformValid)
     {
         bGeoTransformValid =
-            GDALReadWorldFile2(poOpenInfo->pszFilename, ".wld", adfGeoTransform,
+            GDALReadWorldFile2(poOpenInfo->pszFilename, ".wld", m_gt,
                                poOpenInfo->GetSiblingFiles(), &pszWldFilename);
     }
 

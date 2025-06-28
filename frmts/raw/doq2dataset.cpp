@@ -8,28 +8,15 @@
  * Copyright (c) 2000, Derrick J Brashear
  * Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
 #include "rawdataset.h"
+
+#ifndef UTM_FORMAT_defined
+#define UTM_FORMAT_defined
 
 static const char UTM_FORMAT[] =
     "PROJCS[\"%s / UTM zone %dN\",GEOGCS[%s,PRIMEM[\"Greenwich\",0],"
@@ -51,6 +38,8 @@ static const char NAD27_DATUM[] =
 static const char NAD83_DATUM[] =
     "\"NAD83\",DATUM[\"North_American_Datum_1983\","
     "SPHEROID[\"GRS 1980\",6378137,298.257222101]]";
+
+#endif
 
 /************************************************************************/
 /* ==================================================================== */
@@ -77,7 +66,8 @@ class DOQ2Dataset final : public RawDataset
     DOQ2Dataset();
     ~DOQ2Dataset();
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+
     const OGRSpatialReference *GetSpatialRef() const override
     {
         return m_oSRS.IsEmpty() ? nullptr : &m_oSRS;
@@ -136,15 +126,15 @@ CPLErr DOQ2Dataset::Close()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr DOQ2Dataset::GetGeoTransform(double *padfTransform)
+CPLErr DOQ2Dataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    padfTransform[0] = dfULX;
-    padfTransform[1] = dfXPixelSize;
-    padfTransform[2] = 0.0;
-    padfTransform[3] = dfULY;
-    padfTransform[4] = 0.0;
-    padfTransform[5] = -1 * dfYPixelSize;
+    gt[0] = dfULX;
+    gt[1] = dfXPixelSize;
+    gt[2] = 0.0;
+    gt[3] = dfULY;
+    gt[4] = 0.0;
+    gt[5] = -1 * dfYPixelSize;
 
     return CE_None;
 }
@@ -171,9 +161,7 @@ GDALDataset *DOQ2Dataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The DOQ2 driver does not support update access to existing "
-                 "datasets.");
+        ReportUpdateNotSupportedByDriver("DOQ2");
         return nullptr;
     }
 
@@ -366,15 +354,13 @@ GDALDataset *DOQ2Dataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         CSLDestroy(papszMetadata);
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The DOQ2 driver does not support update access to existing"
-                 " datasets.");
+        ReportUpdateNotSupportedByDriver("DOQ2");
         return nullptr;
     }
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    DOQ2Dataset *poDS = new DOQ2Dataset();
+    auto poDS = std::make_unique<DOQ2Dataset>();
 
     poDS->nRasterXSize = nWidth;
     poDS->nRasterYSize = nHeight;
@@ -394,7 +380,6 @@ GDALDataset *DOQ2Dataset::Open(GDALOpenInfo *poOpenInfo)
         nBandCount = nBytesPerPixel;
         if (!GDALCheckBandCount(nBandCount, FALSE))
         {
-            delete poDS;
             return nullptr;
         }
     }
@@ -402,7 +387,6 @@ GDALDataset *DOQ2Dataset::Open(GDALOpenInfo *poOpenInfo)
     {
         if (nBytesPerPixel > INT_MAX / nBandCount)
         {
-            delete poDS;
             return nullptr;
         }
         nBytesPerPixel *= nBandCount;
@@ -410,7 +394,6 @@ GDALDataset *DOQ2Dataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (nBytesPerPixel > INT_MAX / nWidth)
     {
-        delete poDS;
         return nullptr;
     }
     const int nBytesPerLine = nBytesPerPixel * nWidth;
@@ -418,18 +401,16 @@ GDALDataset *DOQ2Dataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create band information objects.                                */
     /* -------------------------------------------------------------------- */
-    CPLErrorReset();
     for (int i = 0; i < nBandCount; i++)
     {
-        poDS->SetBand(i + 1, new RawRasterBand(poDS, i + 1, poDS->fpImage,
-                                               nSkipBytes + i, nBytesPerPixel,
-                                               nBytesPerLine, GDT_Byte, TRUE,
-                                               RawRasterBand::OwnFP::NO));
-        if (CPLGetLastErrorType() != CE_None)
-        {
-            delete poDS;
+        auto poBand = RawRasterBand::Create(
+            poDS.get(), i + 1, poDS->fpImage, nSkipBytes + i, nBytesPerPixel,
+            nBytesPerLine, GDT_Byte,
+            RawRasterBand::ByteOrder::ORDER_LITTLE_ENDIAN,
+            RawRasterBand::OwnFP::NO);
+        if (!poBand)
             return nullptr;
-        }
+        poDS->SetBand(i + 1, std::move(poBand));
     }
 
     if (nProjType == 1)
@@ -456,9 +437,9 @@ GDALDataset *DOQ2Dataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  CPL - Common Portability Library
  * Author:   Frank Warmerdam, warmerdam@pobox.com
@@ -10,23 +9,7 @@
  * Copyright (c) 1998, 2005, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_BASE_H_INCLUDED
@@ -38,17 +21,6 @@
  * Core portability definitions for CPL.
  *
  */
-
-/* ==================================================================== */
-/*      We will use WIN32 as a standard windows define.                 */
-/* ==================================================================== */
-#if defined(_WIN32) && !defined(WIN32)
-#define WIN32
-#endif
-
-#if defined(_WINDOWS) && !defined(WIN32)
-#define WIN32
-#endif
 
 /* -------------------------------------------------------------------- */
 /*      The following apparently allow you to use strcpy() and other    */
@@ -114,15 +86,6 @@
 /*      MinGW stuff                                                     */
 /* ==================================================================== */
 
-/* We need __MSVCRT_VERSION__ >= 0x0700 to have "_aligned_malloc" */
-/* Latest versions of mingw32 define it, but with older ones, */
-/* we need to define it manually */
-#if defined(__MINGW32__)
-#ifndef __MSVCRT_VERSION__
-#define __MSVCRT_VERSION__ 0x0700
-#endif
-#endif
-
 /* Needed for std=c11 on Solaris to have strcasecmp() */
 #if defined(GDAL_COMPILATION) && defined(__sun__) &&                           \
     (__STDC_VERSION__ + 0) >= 201112L && (_XOPEN_SOURCE + 0) < 600
@@ -156,8 +119,15 @@
 #include <direct.h>
 #endif
 
-#if !defined(WIN32)
+#if !defined(_WIN32)
 #include <strings.h>
+#endif
+
+#ifdef __cplusplus
+extern "C++"
+{
+#include <cmath>
+}
 #endif
 
 /* ==================================================================== */
@@ -286,7 +256,7 @@ typedef uintptr_t GUIntptr_t;
 #endif
 
 #if (defined(__MSVCRT__) && !(defined(__MINGW64__) && __GNUC__ >= 10)) ||      \
-    (defined(WIN32) && defined(_MSC_VER))
+    (defined(_WIN32) && defined(_MSC_VER))
 #define CPL_FRMT_GB_WITHOUT_PREFIX "I64"
 #else
 /** Printf formatting suffix for GIntBig */
@@ -556,7 +526,7 @@ static inline char *CPL_afl_friendly_strstr(const char *haystack,
 
 #endif /* defined(AFL_FRIENDLY) && defined(__GNUC__) */
 
-#if defined(WIN32)
+#if defined(_WIN32)
 #define STRCASECMP(a, b) (_stricmp(a, b))
 #define STRNCASECMP(a, b, n) (_strnicmp(a, b, n))
 #else
@@ -588,6 +558,8 @@ static inline char *CPL_afl_friendly_strstr(const char *haystack,
 #endif
 /*! @endcond */
 
+/*! @cond Doxygen_Suppress */
+#ifndef __cplusplus
 /* -------------------------------------------------------------------- */
 /*      Handle isnan() and isinf().  Note that isinf() and isnan()      */
 /*      are supposed to be macros according to C99, defined in math.h   */
@@ -609,87 +581,25 @@ static inline char *CPL_afl_friendly_strstr(const char *haystack,
 #define CPLIsNan(x) __builtin_isnan(x)
 #define CPLIsInf(x) __builtin_isinf(x)
 #define CPLIsFinite(x) __builtin_isfinite(x)
-#elif defined(__cplusplus) && defined(HAVE_STD_IS_NAN) && HAVE_STD_IS_NAN
-extern "C++"
-{
-#ifndef DOXYGEN_SKIP
-#include <cmath>
-#endif
-    static inline int CPLIsNan(float f)
-    {
-        return std::isnan(f);
-    }
-    static inline int CPLIsNan(double f)
-    {
-        return std::isnan(f);
-    }
-    static inline int CPLIsInf(float f)
-    {
-        return std::isinf(f);
-    }
-    static inline int CPLIsInf(double f)
-    {
-        return std::isinf(f);
-    }
-    static inline int CPLIsFinite(float f)
-    {
-        return std::isfinite(f);
-    }
-    static inline int CPLIsFinite(double f)
-    {
-        return std::isfinite(f);
-    }
-}
-#else
-/** Return whether a floating-pointer number is NaN */
-#if defined(__cplusplus) && defined(__GNUC__) && defined(__linux) &&           \
-    !defined(__ANDROID__) && !defined(CPL_SUPRESS_CPLUSPLUS)
-/* so to not get warning about conversion from double to float with */
-/* gcc -Wfloat-conversion when using isnan()/isinf() macros */
-extern "C++"
-{
-    static inline int CPLIsNan(float f)
-    {
-        return __isnanf(f);
-    }
-    static inline int CPLIsNan(double f)
-    {
-        return __isnan(f);
-    }
-    static inline int CPLIsInf(float f)
-    {
-        return __isinff(f);
-    }
-    static inline int CPLIsInf(double f)
-    {
-        return __isinf(f);
-    }
-    static inline int CPLIsFinite(float f)
-    {
-        return !__isnanf(f) && !__isinff(f);
-    }
-    static inline int CPLIsFinite(double f)
-    {
-        return !__isnan(f) && !__isinf(f);
-    }
-}
-#else
+#elif defined(isinf) || defined(__FreeBSD__)
+/** Return whether a floating-pointer number is nan */
 #define CPLIsNan(x) isnan(x)
-#if defined(isinf) || defined(__FreeBSD__)
 /** Return whether a floating-pointer number is +/- infinity */
 #define CPLIsInf(x) isinf(x)
 /** Return whether a floating-pointer number is finite */
 #define CPLIsFinite(x) (!isnan(x) && !isinf(x))
 #elif defined(__sun__)
 #include <ieeefp.h>
+#define CPLIsNan(x) isnan(x)
 #define CPLIsInf(x) (!finite(x) && !isnan(x))
 #define CPLIsFinite(x) finite(x)
 #else
+#define CPLIsNan(x) ((x) != (x))
 #define CPLIsInf(x) (0)
 #define CPLIsFinite(x) (!isnan(x))
 #endif
 #endif
-#endif
+/*! @endcond */
 
 /*! @cond Doxygen_Suppress */
 /*---------------------------------------------------------------------
@@ -723,6 +633,7 @@ extern "C++"
     template <bool b> struct CPLStaticAssert
     {
     };
+
     template <> struct CPLStaticAssert<true>
     {
         static void my_function()
@@ -1054,7 +965,9 @@ extern "C++"
 
 #endif /* __cplusplus */
 
-#if !defined(DOXYGEN_SKIP) && !defined(CPL_WARN_DEPRECATED)
+#ifdef CPL_DISABLE_WARN_DEPRECATED
+#define CPL_WARN_DEPRECATED(x)
+#elif !defined(DOXYGEN_SKIP) && !defined(CPL_WARN_DEPRECATED)
 #if defined(__has_extension)
 #if __has_extension(attribute_deprecated_with_message)
 /* Clang extension */
@@ -1086,14 +999,6 @@ int sprintf(char *str, const char *fmt, ...) CPL_PRINT_FUNC_FORMAT(2, 3)
 CPL_C_END
 #endif /* !defined(_MSC_VER) && !defined(__APPLE__) */
 
-#if defined(MAKE_SANITIZE_HAPPY) ||                                            \
-    !(defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) ||          \
-      defined(_M_X64))
-/*! @cond Doxygen_Suppress */
-#define CPL_CPU_REQUIRES_ALIGNED_ACCESS
-/*! @endcond */
-#endif
-
 #if defined(__cplusplus)
 #ifndef CPPCHECK
 /** Returns the size of C style arrays. */
@@ -1110,6 +1015,7 @@ extern "C++"
     template <class T> static void CPL_IGNORE_RET_VAL(const T &)
     {
     }
+
     inline static bool CPL_TO_BOOL(int x)
     {
         return x != 0;
@@ -1127,17 +1033,6 @@ extern "C++"
 #if ((__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 2)) &&               \
      !defined(_MSC_VER))
 #define HAVE_GCC_SYSTEM_HEADER
-#endif
-
-#if ((defined(__clang__) &&                                                    \
-      (__clang_major__ > 3 ||                                                  \
-       (__clang_major__ == 3 && __clang_minor__ >= 7))) ||                     \
-     __GNUC__ >= 7)
-/** Macro for fallthrough in a switch case construct */
-#define CPL_FALLTHROUGH [[clang::fallthrough]];
-#else
-/** Macro for fallthrough in a switch case construct */
-#define CPL_FALLTHROUGH
 #endif
 
 /*! @cond Doxygen_Suppress */
@@ -1174,6 +1069,32 @@ extern "C++"
 #else
 #define CPL_NULLPTR NULL
 #endif
+
+#if defined(__cplusplus) && defined(GDAL_COMPILATION)
+extern "C++"
+{
+    namespace cpl
+    {
+    /** Function to indicate that the result of an arithmetic operation
+         * does fit on the specified type. Typically used to avoid warnings
+         * about potentially overflowing multiplications by static analyzers.
+         */
+    template <typename T> inline T fits_on(T t)
+    {
+        return t;
+    }
+
+    /** Emulates the C++20 .contains() method */
+    template <typename C, typename V>
+    inline bool contains(const C &container, const V &value)
+    {
+        return container.find(value) != container.end();
+    }
+
+    }  // namespace cpl
+}
+#endif
+
 /*! @endcond */
 
 /* This typedef is for C functions that take char** as argument, but */
@@ -1190,6 +1111,17 @@ typedef const char *const *CSLConstList;
 /** Type of a constant null-terminated list of nul terminated strings.
  * Seen as char** from C and const char* const* from C++ */
 typedef char **CSLConstList;
+#endif
+
+#if defined(__cplusplus) && defined(GDAL_COMPILATION)
+#if defined(__GNUC__) && !defined(DOXYGEN_SKIP)
+/** Macro that evaluates to (cond), and possibly gives a hint to the compiler
+ * than (cond) is unlikely to be true.
+ */
+#define CPL_UNLIKELY(cond) __builtin_expect(static_cast<bool>(cond), 0)
+#else
+#define CPL_UNLIKELY(cond) (cond)
+#endif
 #endif
 
 #endif /* ndef CPL_BASE_H_INCLUDED */

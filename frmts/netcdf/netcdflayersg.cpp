@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Winor Chen <wchen329 at wisc.edu>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #include "netcdfsg.h"
 #include "netcdfdataset.h"
@@ -132,7 +116,7 @@ bool OGRHasZandSupported(OGRwkbGeometryType type)
 
 }  // namespace nccfdriver
 
-CPLErr netCDFDataset::DetectAndFillSGLayers(int ncid)
+bool netCDFDataset::DetectAndFillSGLayers(int ncid)
 {
     // Discover simple geometry variables
     int var_count;
@@ -160,7 +144,7 @@ CPLErr netCDFDataset::DetectAndFillSGLayers(int ncid)
         }
     }
 
-    return CE_None;
+    return !vidList.empty();
 }
 
 CPLErr netCDFDataset::LoadSGVarIntoLayer(int ncid, int nc_basevarId)
@@ -177,7 +161,7 @@ CPLErr netCDFDataset::LoadSGVarIntoLayer(int ncid, int nc_basevarId)
     if (sg->getGridMappingVarID() != nccfdriver::INVALID_VAR_ID)
         SetProjectionFromVar(ncid, nc_basevarId, true,
                              sg->getGridMappingName().c_str(), &return_gm,
-                             sg.get());
+                             sg.get(), /*paosRemovedMDItems=*/nullptr);
 
     // Geometry Type invalid, avoid further processing
     if (owgt == wkbNone)
@@ -409,5 +393,5 @@ OGRFeature *netCDFLayer::buildSGeometryFeature(size_t featureInd)
 
 std::string netCDFDataset::generateLogName()
 {
-    return std::string(CPLGenerateTempFilename(nullptr));
+    return std::string(CPLGenerateTempFilenameSafe(nullptr));
 }

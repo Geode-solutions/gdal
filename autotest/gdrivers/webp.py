@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test WEBP driver
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -74,7 +57,7 @@ def test_webp_3():
 # CreateCopy() on RGBA
 
 
-@gdaltest.require_creation_option("WEBP", "LOSSLESS")
+@pytest.mark.require_creation_option("WEBP", "LOSSLESS")
 def test_webp_4():
 
     src_ds = gdal.Open("../gcore/data/stefan_full_rgba.tif")
@@ -108,8 +91,11 @@ def test_webp_4():
 # CreateCopy() on RGBA with lossless compression
 
 
-@gdaltest.require_creation_option("WEBP", "LOSSLESS")
+@pytest.mark.require_creation_option("WEBP", "LOSSLESS")
 def test_webp_5():
+
+    if gdaltest.is_travis_branch("alpine_32bit"):
+        pytest.skip()
 
     src_ds = gdal.Open("../gcore/data/stefan_full_rgba.tif")
     out_ds = gdaltest.webp_drv.CreateCopy(
@@ -136,8 +122,8 @@ def test_webp_5():
 # CreateCopy() on RGBA with lossless compression and exact rgb values
 
 
-@gdaltest.require_creation_option("WEBP", "LOSSLESS")
-@gdaltest.require_creation_option("WEBP", "EXACT")
+@pytest.mark.require_creation_option("WEBP", "LOSSLESS")
+@pytest.mark.require_creation_option("WEBP", "EXACT")
 def test_webp_6():
 
     src_ds = gdal.Open("../gcore/data/stefan_full_rgba.tif")

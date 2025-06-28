@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  CPL - Common Portability Library
  * Purpose:  Convenience functions declarations.
@@ -10,23 +9,7 @@
  * Copyright (c) 1998, Frank Warmerdam
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_CONV_H_INCLUDED
@@ -35,6 +18,10 @@
 #include "cpl_port.h"
 #include "cpl_vsi.h"
 #include "cpl_error.h"
+
+#if defined(__cplusplus) && !defined(CPL_SUPRESS_CPLUSPLUS)
+#include <cstdint>
+#endif
 
 /**
  * \file cpl_conv.h
@@ -52,13 +39,30 @@ CPL_C_START
 void CPL_DLL CPLVerifyConfiguration(void);
 /*! @endcond */
 
+bool CPL_DLL CPLIsDebugEnabled(void);
+
 const char CPL_DLL *CPL_STDCALL CPLGetConfigOption(const char *, const char *)
     CPL_WARN_UNUSED_RESULT;
 const char CPL_DLL *CPL_STDCALL CPLGetThreadLocalConfigOption(
     const char *, const char *) CPL_WARN_UNUSED_RESULT;
+const char CPL_DLL *CPL_STDCALL
+CPLGetGlobalConfigOption(const char *, const char *) CPL_WARN_UNUSED_RESULT;
 void CPL_DLL CPL_STDCALL CPLSetConfigOption(const char *, const char *);
 void CPL_DLL CPL_STDCALL CPLSetThreadLocalConfigOption(const char *pszKey,
                                                        const char *pszValue);
+void CPL_DLL CPLDeclareKnownConfigOption(const char *pszKey,
+                                         const char *pszDefinition);
+char CPL_DLL **CPLGetKnownConfigOptions(void);
+
+/** Callback for CPLSubscribeToSetConfigOption() */
+typedef void (*CPLSetConfigOptionSubscriber)(const char *pszKey,
+                                             const char *pszValue,
+                                             bool bThreadLocal,
+                                             void *pUserData);
+int CPL_DLL CPLSubscribeToSetConfigOption(
+    CPLSetConfigOptionSubscriber pfnCallback, void *pUserData);
+void CPL_DLL CPLUnsubscribeToSetConfigOption(int nSubscriberId);
+
 /*! @cond Doxygen_Suppress */
 void CPL_DLL CPL_STDCALL CPLFreeConfig(void);
 /*! @endcond */
@@ -101,6 +105,7 @@ const char CPL_DLL *CPLReadLine3L(VSILFILE *, int, int *, CSLConstList);
 double CPL_DLL CPLAtof(const char *);
 double CPL_DLL CPLAtofDelim(const char *, char);
 double CPL_DLL CPLStrtod(const char *, char **);
+double CPL_DLL CPLStrtodM(const char *, char **);
 double CPL_DLL CPLStrtodDelim(const char *, char **, char);
 float CPL_DLL CPLStrtof(const char *, char **);
 float CPL_DLL CPLStrtofDelim(const char *, char **, char);
@@ -136,6 +141,14 @@ int CPL_DLL CPLPrintTime(char *, int, const char *, const struct tm *,
                          const char *);
 int CPL_DLL CPLPrintPointer(char *, void *, int);
 
+#if defined(__cplusplus) && !defined(CPL_SUPRESS_CPLUSPLUS)
+extern "C++"
+{
+    std::string CPL_DLL CPLFormatReadableFileSize(uint64_t nSizeInBytes);
+    std::string CPL_DLL CPLFormatReadableFileSize(double dfSizeInBytes);
+}
+#endif
+
 /* -------------------------------------------------------------------- */
 /*      Fetch a function from DLL / so.                                 */
 /* -------------------------------------------------------------------- */
@@ -150,17 +163,18 @@ int CPL_DLL CPLGetExecPath(char *pszPathBuf, int nMaxLength);
 /* -------------------------------------------------------------------- */
 /*      Filename handling functions.                                    */
 /* -------------------------------------------------------------------- */
+
+#if defined(DOXYGEN_SKIP) || !defined(__cplusplus) ||                          \
+    !defined(GDAL_COMPILATION) ||                                              \
+    (defined(__cplusplus) && defined(ALLOW_DEPRECATED_CPL_PATH_FUNCTIONS))
 const char CPL_DLL *
 CPLGetPath(const char *) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
 const char CPL_DLL *
 CPLGetDirname(const char *) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
 const char CPL_DLL *
-CPLGetFilename(const char *) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
-const char CPL_DLL *
 CPLGetBasename(const char *) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
 const char CPL_DLL *
 CPLGetExtension(const char *) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
-char CPL_DLL *CPLGetCurrentDir(void);
 const char CPL_DLL *CPLFormFilename(
     const char *pszPath, const char *pszBasename,
     const char *pszExtension) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
@@ -172,24 +186,61 @@ const char CPL_DLL *CPLResetExtension(const char *, const char *)
 const char CPL_DLL *CPLProjectRelativeFilename(const char *pszProjectDir,
                                                const char *pszSecondaryFilename)
     CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
+const char CPL_DLL *
+CPLCleanTrailingSlash(const char *) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
+const char CPL_DLL *CPLGenerateTempFilename(const char *pszStem)
+    CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
+const char CPL_DLL *CPLExpandTilde(const char *pszFilename)
+    CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
+const char CPL_DLL *
+CPLLaunderForFilename(const char *pszName,
+                      const char *pszOutputPath) CPL_WARN_UNUSED_RESULT;
+#endif
+
+char CPL_DLL *CPLGetCurrentDir(void);
+const char CPL_DLL *
+CPLGetFilename(const char *) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
 int CPL_DLL CPLIsFilenameRelative(const char *pszFilename);
 const char CPL_DLL *CPLExtractRelativePath(const char *, const char *, int *)
     CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
-const char CPL_DLL *
-CPLCleanTrailingSlash(const char *) CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
 char CPL_DLL **
 CPLCorrespondingPaths(const char *pszOldFilename, const char *pszNewFilename,
                       char **papszFileList) CPL_WARN_UNUSED_RESULT;
 int CPL_DLL CPLCheckForFile(char *pszFilename, char **papszSiblingList);
 
-const char CPL_DLL *CPLGenerateTempFilename(const char *pszStem)
-    CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
-const char CPL_DLL *CPLExpandTilde(const char *pszFilename)
-    CPL_WARN_UNUSED_RESULT CPL_RETURNS_NONNULL;
 const char CPL_DLL *CPLGetHomeDir(void) CPL_WARN_UNUSED_RESULT;
-const char CPL_DLL *
-CPLLaunderForFilename(const char *pszName,
-                      const char *pszOutputPath) CPL_WARN_UNUSED_RESULT;
+
+#if defined(__cplusplus) && !defined(CPL_SUPRESS_CPLUSPLUS)
+
+extern "C++"
+{
+    std::string CPL_DLL CPLGetPathSafe(const char *) CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLGetDirnameSafe(const char *) CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLGetBasenameSafe(const char *) CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLGetExtensionSafe(const char *)
+        CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLFormFilenameSafe(
+        const char *pszPath, const char *pszBasename,
+        const char *pszExtension = nullptr) CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLFormCIFilenameSafe(
+        const char *pszPath, const char *pszBasename,
+        const char *pszExtension = nullptr) CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLResetExtensionSafe(const char *, const char *)
+        CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLProjectRelativeFilenameSafe(
+        const char *pszProjectDir,
+        const char *pszSecondaryFilename) CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLCleanTrailingSlashSafe(const char *pszPath)
+        CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLGenerateTempFilenameSafe(const char *pszStem)
+        CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLExpandTildeSafe(const char *pszFilename)
+        CPL_WARN_UNUSED_RESULT;
+    std::string CPL_DLL CPLLaunderForFilenameSafe(
+        const char *pszName, const char *pszOutputPath) CPL_WARN_UNUSED_RESULT;
+}
+
+#endif  // defined(__cplusplus) && !defined(CPL_SUPRESS_CPLUSPLUS)
 
 /* -------------------------------------------------------------------- */
 /*      Find File Function                                              */
@@ -244,8 +295,8 @@ const char CPL_DLL *CPLDecToDMS(double dfAngle, const char *pszAxis,
 double CPL_DLL CPLPackedDMSToDec(double);
 double CPL_DLL CPLDecToPackedDMS(double dfDec);
 
-void CPL_DLL CPLStringToComplex(const char *pszString, double *pdfReal,
-                                double *pdfImag);
+CPLErr CPL_DLL CPLStringToComplex(const char *pszString, double *pdfReal,
+                                  double *pdfImag);
 
 /* -------------------------------------------------------------------- */
 /*      Misc other functions.                                           */
@@ -256,6 +307,29 @@ int CPL_DLL CPLCopyTree(const char *pszNewPath, const char *pszOldPath);
 int CPL_DLL CPLMoveFile(const char *pszNewPath, const char *pszOldPath);
 int CPL_DLL CPLSymlink(const char *pszOldPath, const char *pszNewPath,
                        CSLConstList papszOptions);
+
+/* -------------------------------------------------------------------- */
+/*      Lock related functions.                                         */
+/* -------------------------------------------------------------------- */
+
+/** Return code of CPLLockFileEx(). */
+typedef enum
+{
+    CLFS_OK,                     /**< CPLLockFileEx() succeeded. */
+    CLFS_CANNOT_CREATE_LOCK,     /**< Lock file creation failed. */
+    CLFS_LOCK_BUSY,              /**< Lock already taken (and still alive). */
+    CLFS_API_MISUSE,             /**< API misuse. */
+    CLFS_THREAD_CREATION_FAILED, /**< Thread creation failed. */
+} CPLLockFileStatus;
+
+/** Handle type returned by CPLLockFileEx(). */
+typedef struct CPLLockFileStruct *CPLLockFileHandle;
+
+CPLLockFileStatus CPL_DLL CPLLockFileEx(const char *pszLockFileName,
+                                        CPLLockFileHandle *phLockFileHandle,
+                                        CSLConstList papszOptions);
+
+void CPL_DLL CPLUnlockFileEx(CPLLockFileHandle hLockFileHandle);
 
 /* -------------------------------------------------------------------- */
 /*      ZIP Creation.                                                   */
@@ -286,6 +360,9 @@ void CPL_DLL *CPLZLibDeflate(const void *ptr, size_t nBytes, int nLevel,
                              size_t *pnOutBytes);
 void CPL_DLL *CPLZLibInflate(const void *ptr, size_t nBytes, void *outptr,
                              size_t nOutAvailableBytes, size_t *pnOutBytes);
+void CPL_DLL *CPLZLibInflateEx(const void *ptr, size_t nBytes, void *outptr,
+                               size_t nOutAvailableBytes,
+                               bool bAllowResizeOutptr, size_t *pnOutBytes);
 
 /* -------------------------------------------------------------------- */
 /*      XML validation.                                                 */
@@ -308,6 +385,12 @@ void CPLCleanupSetlocaleMutex(void);
     @return TRUE if i is power of two otherwise return FALSE
 */
 int CPL_DLL CPLIsPowerOfTwo(unsigned int i);
+
+/* -------------------------------------------------------------------- */
+/*      Terminal related                                                */
+/* -------------------------------------------------------------------- */
+
+bool CPL_DLL CPLIsInteractive(FILE *f);
 
 CPL_C_END
 
@@ -336,6 +419,7 @@ extern "C++"
     // setlocale(LC_NUMERIC, NULL) returning "C", such as current proj.4
     // versions, will not work depending on the actual implementation
     class CPLThreadLocaleCPrivate;
+
     class CPL_DLL CPLThreadLocaleC
     {
         CPL_DISALLOW_COPY_ASSIGN(CPLThreadLocaleC)
@@ -408,24 +492,13 @@ extern "C++"
         CPLAssert(f == nullptr || dynamic_cast<To>(f) != nullptr);
         return static_cast<To>(f);
     }
-    }  // namespace cpl
-}  // extern "C++"
 
-#endif /* def __cplusplus */
-
-#if defined(__cplusplus) && defined(GDAL_COMPILATION)
-
-extern "C++"
-{
-#include <memory>  // for std::unique_ptr
-    namespace cpl
+    /** Computes ceil(a/b) where a and b are integers */
+    template <class T, class U> inline T div_round_up(T a, U b)
     {
-    /** std::make_unique<> implementation borrowed from C++14 */
-    template <typename T, typename... Args>
-    std::unique_ptr<T> make_unique(Args &&...args)
-    {
-        return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
+        return a / b + (((a % b) == 0) ? 0 : 1);
     }
+
     }  // namespace cpl
 }  // extern "C++"
 

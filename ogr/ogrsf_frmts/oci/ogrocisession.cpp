@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2002, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_oci.h"
@@ -82,7 +66,7 @@ OGROCISession::~OGROCISession()
 
 {
     if (hDescribe != nullptr)
-        OCIHandleFree((dvoid *)hDescribe, (ub4)OCI_HTYPE_DESCRIBE);
+        OCIHandleFree(static_cast<dvoid *>(hDescribe), (ub4)OCI_HTYPE_DESCRIBE);
 
     if (hSvcCtx != nullptr)
     {
@@ -92,19 +76,20 @@ OGROCISession::~OGROCISession()
             OCIServerDetach(hServer, hError, (ub4)OCI_DEFAULT);
 
         if (hServer)
-            OCIHandleFree((dvoid *)hServer, (ub4)OCI_HTYPE_SERVER);
+            OCIHandleFree(static_cast<dvoid *>(hServer), (ub4)OCI_HTYPE_SERVER);
 
         if (hSvcCtx)
-            OCIHandleFree((dvoid *)hSvcCtx, (ub4)OCI_HTYPE_SVCCTX);
+            OCIHandleFree(static_cast<dvoid *>(hSvcCtx), (ub4)OCI_HTYPE_SVCCTX);
 
         if (hError)
-            OCIHandleFree((dvoid *)hError, (ub4)OCI_HTYPE_ERROR);
+            OCIHandleFree(static_cast<dvoid *>(hError), (ub4)OCI_HTYPE_ERROR);
 
         if (hSession)
-            OCIHandleFree((dvoid *)hSession, (ub4)OCI_HTYPE_SESSION);
+            OCIHandleFree(static_cast<dvoid *>(hSession),
+                          (ub4)OCI_HTYPE_SESSION);
 
         if (hEnv)
-            OCIHandleFree((dvoid *)hEnv, (ub4)OCI_HTYPE_ENV);
+            OCIHandleFree(static_cast<dvoid *>(hEnv), (ub4)OCI_HTYPE_ENV);
     }
 
     CPLFree(pszUserid);
@@ -144,14 +129,16 @@ int OGROCISession::EstablishSession(const char *pszUseridIn,
     /*      Initialize Environment handler                                  */
     /* -------------------------------------------------------------------- */
 
-    if (Failed(OCIEnvCreate((OCIEnv **)&hEnv, OCI_THREADED | OCI_OBJECT,
-                            nullptr, nullptr, nullptr, nullptr, 0, nullptr)))
+    if (Failed(OCIEnvCreate(static_cast<OCIEnv **>(&hEnv),
+                            OCI_THREADED | OCI_OBJECT, nullptr, nullptr,
+                            nullptr, nullptr, 0, nullptr)))
     {
         return FALSE;
     }
 
-    if (Failed(OCIHandleAlloc((dvoid *)hEnv, (dvoid **)&hError, OCI_HTYPE_ERROR,
-                              (size_t)0, (dvoid **)nullptr)))
+    if (Failed(OCIHandleAlloc(static_cast<dvoid *>(hEnv),
+                              reinterpret_cast<dvoid **>(&hError),
+                              OCI_HTYPE_ERROR, 0, nullptr)))
     {
         return FALSE;
     }
@@ -160,21 +147,24 @@ int OGROCISession::EstablishSession(const char *pszUseridIn,
     /*      Initialize Server Context                                       */
     /* -------------------------------------------------------------------- */
 
-    if (Failed(OCIHandleAlloc((dvoid *)hEnv, (dvoid **)&hServer,
-                              OCI_HTYPE_SERVER, (size_t)0, (dvoid **)nullptr)))
+    if (Failed(OCIHandleAlloc(static_cast<dvoid *>(hEnv),
+                              reinterpret_cast<dvoid **>(&hServer),
+                              OCI_HTYPE_SERVER, 0, nullptr)))
     {
         return FALSE;
     }
 
-    if (Failed(OCIHandleAlloc((dvoid *)hEnv, (dvoid **)&hSvcCtx,
-                              OCI_HTYPE_SVCCTX, (size_t)0, (dvoid **)nullptr)))
+    if (Failed(OCIHandleAlloc(static_cast<dvoid *>(hEnv),
+                              reinterpret_cast<dvoid **>(&hSvcCtx),
+                              OCI_HTYPE_SVCCTX, 0, nullptr)))
     {
         return FALSE;
     }
 
-    if (Failed(OCIServerAttach(hServer, hError, (text *)pszDatabaseIn,
-                               static_cast<int>(strlen((char *)pszDatabaseIn)),
-                               0)))
+    if (Failed(OCIServerAttach(
+            hServer, hError,
+            reinterpret_cast<text *>(const_cast<char *>(pszDatabaseIn)),
+            static_cast<int>(strlen(pszDatabaseIn)), 0)))
     {
         return FALSE;
     }
@@ -183,30 +173,32 @@ int OGROCISession::EstablishSession(const char *pszUseridIn,
     /*      Initialize Service Context                                      */
     /* -------------------------------------------------------------------- */
 
-    if (Failed(OCIAttrSet((dvoid *)hSvcCtx, OCI_HTYPE_SVCCTX, (dvoid *)hServer,
-                          (ub4)0, OCI_ATTR_SERVER, (OCIError *)hError)))
+    if (Failed(OCIAttrSet(static_cast<dvoid *>(hSvcCtx), OCI_HTYPE_SVCCTX,
+                          static_cast<dvoid *>(hServer), (ub4)0,
+                          OCI_ATTR_SERVER, static_cast<OCIError *>(hError))))
     {
         return FALSE;
     }
 
-    if (Failed(OCIHandleAlloc((dvoid *)hEnv, (dvoid **)&hSession,
-                              (ub4)OCI_HTYPE_SESSION, (size_t)0,
-                              (dvoid **)nullptr)))
+    if (Failed(OCIHandleAlloc(static_cast<dvoid *>(hEnv),
+                              reinterpret_cast<dvoid **>(&hSession),
+                              (ub4)OCI_HTYPE_SESSION, 0, nullptr)))
     {
         return FALSE;
     }
 
-    if (Failed(OCIAttrSet((dvoid *)hSession, (ub4)OCI_HTYPE_SESSION,
-                          (dvoid *)pszUser, (ub4)strlen((char *)pszUser),
-                          (ub4)OCI_ATTR_USERNAME, hError)))
+    if (Failed(
+            OCIAttrSet(static_cast<dvoid *>(hSession), (ub4)OCI_HTYPE_SESSION,
+                       static_cast<dvoid *>(const_cast<char *>(pszUser)),
+                       (ub4)strlen(pszUser), (ub4)OCI_ATTR_USERNAME, hError)))
     {
         return FALSE;
     }
 
-    if (Failed(OCIAttrSet((dvoid *)hSession, (ub4)OCI_HTYPE_SESSION,
-                          (dvoid *)pszPasswordIn,
-                          (ub4)strlen((char *)pszPasswordIn),
-                          (ub4)OCI_ATTR_PASSWORD, hError)))
+    if (Failed(OCIAttrSet(
+            static_cast<dvoid *>(hSession), (ub4)OCI_HTYPE_SESSION,
+            static_cast<dvoid *>(const_cast<char *>(pszPasswordIn)),
+            (ub4)strlen(pszPasswordIn), (ub4)OCI_ATTR_PASSWORD, hError)))
     {
         return FALSE;
     }
@@ -226,9 +218,9 @@ int OGROCISession::EstablishSession(const char *pszUseridIn,
     /*      Initialize Service                                              */
     /* -------------------------------------------------------------------- */
 
-    if (Failed(OCIAttrSet((dvoid *)hSvcCtx, (ub4)OCI_HTYPE_SVCCTX,
-                          (dvoid *)hSession, (ub4)0, (ub4)OCI_ATTR_SESSION,
-                          hError)))
+    if (Failed(OCIAttrSet(static_cast<dvoid *>(hSvcCtx), (ub4)OCI_HTYPE_SVCCTX,
+                          static_cast<dvoid *>(hSession), (ub4)0,
+                          (ub4)OCI_ATTR_SESSION, hError)))
     {
         return FALSE;
     }
@@ -237,9 +229,8 @@ int OGROCISession::EstablishSession(const char *pszUseridIn,
     /*      Create a describe handle.                                       */
     /* -------------------------------------------------------------------- */
 
-    if (Failed(OCIHandleAlloc(hEnv, (dvoid **)&hDescribe,
-                              (ub4)OCI_HTYPE_DESCRIBE, (size_t)0,
-                              (dvoid **)nullptr),
+    if (Failed(OCIHandleAlloc(hEnv, reinterpret_cast<dvoid **>(&hDescribe),
+                              (ub4)OCI_HTYPE_DESCRIBE, 0, nullptr),
                "OCIHandleAlloc(Describe)"))
         return FALSE;
 
@@ -249,10 +240,11 @@ int OGROCISession::EstablishSession(const char *pszUseridIn,
     /* If we have no MDSYS.SDO_GEOMETRY then we consider we are
         working along with the VRT driver and access non spatial tables.
         See #2202 for more details (Tamas Szekeres)*/
-    if (OCIDescribeAny(hSvcCtx, hError, (text *)SDO_GEOMETRY,
-                       (ub4)strlen(SDO_GEOMETRY), OCI_OTYPE_NAME,
-                       (ub1)OCI_DEFAULT, (ub1)OCI_PTYPE_TYPE,
-                       hDescribe) != OCI_ERROR)
+    if (OCIDescribeAny(
+            hSvcCtx, hError,
+            reinterpret_cast<text *>(const_cast<char *>(SDO_GEOMETRY)),
+            (ub4)strlen(SDO_GEOMETRY), OCI_OTYPE_NAME, (ub1)OCI_DEFAULT,
+            (ub1)OCI_PTYPE_TYPE, hDescribe) != OCI_ERROR)
     {
         hGeometryTDO = PinTDO(SDO_GEOMETRY);
         if (hGeometryTDO == nullptr)
@@ -289,7 +281,7 @@ int OGROCISession::EstablishSession(const char *pszUseridIn,
 
     char szVersionTxt[256];
 
-    OCIServerVersion(hSvcCtx, hError, (text *)szVersionTxt,
+    OCIServerVersion(hSvcCtx, hError, reinterpret_cast<text *>(szVersionTxt),
                      (ub4)sizeof(szVersionTxt), (ub1)OCI_HTYPE_SVCCTX);
 
     char **papszNameValue =
@@ -334,9 +326,9 @@ int OGROCISession::EstablishSession(const char *pszUseridIn,
     OGROCIStatement oSetNLSTimeFormat(this);
     if (oSetNLSTimeFormat.Execute(
             "ALTER SESSION SET NLS_DATE_FORMAT='YYYY/MM/DD' \
-        NLS_TIME_FORMAT='HH24:MI:SS' NLS_TIME_TZ_FORMAT='HH24:MI:SS TZHTZM' \
-        NLS_TIMESTAMP_FORMAT='YYYY/MM/DD HH24:MI:SS' \
-        NLS_TIMESTAMP_TZ_FORMAT='YYYY/MM/DD HH24:MI:SS TZHTZM' \
+        NLS_TIME_FORMAT='HH24:MI:SS' NLS_TIME_TZ_FORMAT='HH24:MI:SS.FF TZHTZM' \
+        NLS_TIMESTAMP_FORMAT='YYYY/MM/DD HH24:MI:SS.FF' \
+        NLS_TIMESTAMP_TZ_FORMAT='YYYY/MM/DD HH24:MI:SS.FF TZHTZM' \
         NLS_NUMERIC_CHARACTERS = '. '") != CE_None)
         return OGRERR_FAILURE;
 
@@ -360,9 +352,9 @@ int OGROCISession::Failed(sword nStatus, const char *pszFunction)
         szErrorMsg[0] = '\0';
         if (hError != nullptr)
         {
-            OCIErrorGet((dvoid *)hError, (ub4)1, nullptr, &nErrCode,
-                        (text *)szErrorMsg, (ub4)sizeof(szErrorMsg),
-                        OCI_HTYPE_ERROR);
+            OCIErrorGet(static_cast<dvoid *>(hError), (ub4)1, nullptr,
+                        &nErrCode, reinterpret_cast<text *>(szErrorMsg),
+                        (ub4)sizeof(szErrorMsg), OCI_HTYPE_ERROR);
         }
         szErrorMsg[sizeof(szErrorMsg) - 1] = '\0';
 
@@ -512,11 +504,16 @@ CPLErr OGROCISession::GetParamInfo(OCIParam *hParamDesc,
             poOGRDefn->SetType(OFTDate);
             break;
         case SQLT_TIMESTAMP:
+        case SQLT_TIME:
+            poOGRDefn->SetType(OFTDateTime);
+            break;
         case SQLT_TIMESTAMP_TZ:
         case SQLT_TIMESTAMP_LTZ:
-        case SQLT_TIME:
         case SQLT_TIME_TZ:
             poOGRDefn->SetType(OFTDateTime);
+            // Indicates that there's timezones. They might not actually be
+            // mixed !
+            poOGRDefn->SetTZFlag(OGR_TZFLAG_MIXED_TZ);
             break;
 
         case SQLT_RID:
@@ -560,7 +557,8 @@ void OGROCISession::CleanName(char *pszName)
 
     for (i = 0; pszName[i] != '\0'; i++)
     {
-        pszName[i] = static_cast<char>(toupper(pszName[i]));
+        pszName[i] = static_cast<char>(
+            CPLToupper(static_cast<unsigned char>(pszName[i])));
 
         if ((pszName[i] < '0' || pszName[i] > '9') &&
             (pszName[i] < 'A' || pszName[i] > 'Z') && pszName[i] != '_')
@@ -581,28 +579,31 @@ OCIType *OGROCISession::PinTDO(const char *pszType)
     OCIRef *hGeomTypeRef = nullptr;
     OCIType *hPinnedTDO = nullptr;
 
-    if (Failed(OCIDescribeAny(hSvcCtx, hError, (text *)pszType,
-                              (ub4)strlen(pszType), OCI_OTYPE_NAME, (ub1)1,
-                              (ub1)OCI_PTYPE_TYPE, hDescribe),
+    if (Failed(OCIDescribeAny(
+                   hSvcCtx, hError,
+                   reinterpret_cast<text *>(const_cast<char *>(pszType)),
+                   (ub4)strlen(pszType), OCI_OTYPE_NAME, (ub1)1,
+                   (ub1)OCI_PTYPE_TYPE, hDescribe),
                "GetTDO()->OCIDescribeAny()"))
         return nullptr;
 
-    if (Failed(OCIAttrGet((dvoid *)hDescribe, (ub4)OCI_HTYPE_DESCRIBE,
-                          (dvoid *)&hGeomParam, (ub4 *)nullptr,
+    if (Failed(OCIAttrGet(static_cast<dvoid *>(hDescribe),
+                          (ub4)OCI_HTYPE_DESCRIBE,
+                          static_cast<dvoid *>(&hGeomParam), nullptr,
                           (ub4)OCI_ATTR_PARAM, hError),
                "GetTDO()->OCIGetAttr(ATTR_PARAM)"))
         return nullptr;
 
-    if (Failed(OCIAttrGet((dvoid *)hGeomParam, (ub4)OCI_DTYPE_PARAM,
-                          (dvoid *)&hGeomTypeRef, (ub4 *)nullptr,
+    if (Failed(OCIAttrGet(static_cast<dvoid *>(hGeomParam),
+                          (ub4)OCI_DTYPE_PARAM,
+                          static_cast<dvoid *>(&hGeomTypeRef), nullptr,
                           (ub4)OCI_ATTR_REF_TDO, hError),
                "GetTDO()->OCIAttrGet(ATTR_REF_TDO)"))
         return nullptr;
 
-    if (Failed(OCIObjectPin(hEnv, hError, hGeomTypeRef,
-                            (OCIComplexObject *)nullptr, OCI_PIN_ANY,
+    if (Failed(OCIObjectPin(hEnv, hError, hGeomTypeRef, nullptr, OCI_PIN_ANY,
                             OCI_DURATION_SESSION, OCI_LOCK_NONE,
-                            (dvoid **)&hPinnedTDO),
+                            reinterpret_cast<dvoid **>(&hPinnedTDO)),
                "GetTDO()->OCIObjectPin()"))
         return nullptr;
 

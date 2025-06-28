@@ -15,10 +15,6 @@
 #    KDU_LIBRARIES
 # and it defines the KDU::KDU target
 
-if(CMAKE_VERSION VERSION_LESS 3.13)
-    set(KDU_ROOT CACHE PATH "KAKADU library base directory")
-endif()
-
 macro(find_kdu_libs_from_makefiles)
     # first argument = platform
     # second argument = library extension (without .)
@@ -35,16 +31,16 @@ macro(find_kdu_libs_from_makefiles)
     set(KDU_VERSION_VAR "${KDU_MAJOR_VERSION}.${KDU_MINOR_VERSION}")
 
     find_library(KDU_LIBRARY ${KDU_SHARED_LIB_NAME}
-                 PATH ${KDU_ROOT}/lib/${ARGV0})
+                 PATHS ${KDU_ROOT}/lib/${ARGV0})
     find_library(KDU_AUX_LIBRARY ${KDU_AUX_SHARED_LIB_NAME}
-                 PATH ${KDU_ROOT}/lib/${ARGV0})
+                 PATHS ${KDU_ROOT}/lib/${ARGV0})
 endmacro()
 
 set(KDU_VERSION_VAR "")
 if(KDU_ROOT AND EXISTS "${KDU_ROOT}/coresys")
     if("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "x86_64" AND "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
         find_kdu_libs_from_makefiles("Linux-x86-64-gcc" "so")
-    
+
     elseif("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64" AND "${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
         find_kdu_libs_from_makefiles("Linux-arm-64-gcc" "so")
 
@@ -56,7 +52,7 @@ if(KDU_ROOT AND EXISTS "${KDU_ROOT}/coresys")
 
     elseif("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "x86_64" AND "${CMAKE_SYSTEM_NAME}" STREQUAL "Windows" AND MINGW)
         find_kdu_libs_from_makefiles("Mingw-x86-64-gcc" "dll")
-        
+
     elseif("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "AMD64" AND "${CMAKE_SYSTEM_NAME}" STREQUAL "Windows" AND MSVC)
         file(READ "${KDU_ROOT}/coresys/coresys_2019.vcxproj" CORESYS_MAKEFILE_CONTENTS)
         string(REGEX REPLACE [[.*<ImportLibrary>([^l]*)(lib_x64\\)([^R]*R)(\.lib).*]] "\\1\\2\\3\\4" KDU_SHARED_LIB_NAME ${CORESYS_MAKEFILE_CONTENTS})
@@ -64,15 +60,15 @@ if(KDU_ROOT AND EXISTS "${KDU_ROOT}/coresys")
         string(REGEX REPLACE [[.*<ImportLibrary>([^l]*)(lib_x64\\)([^R]*R)(\.lib).*]] "\\1\\2\\3\\4" KDU_AUX_SHARED_LIB_NAME ${MANAGED_MAKEFILE_CONTENTS})
 
         find_library(KDU_LIBRARY ${KDU_SHARED_LIB_NAME}
-                     PATH ${KDU_ROOT})
+                     PATHS ${KDU_ROOT})
 
         find_library(KDU_AUX_LIBRARY ${KDU_AUX_SHARED_LIB_NAME}
-                     PATH ${KDU_ROOT})
+                     PATHS ${KDU_ROOT})
     endif()
 endif()
 
 find_path(KDU_INCLUDE_DIR coresys/common/kdu_elementary.h
-          PATH ${KDU_ROOT})
+          PATHS ${KDU_ROOT})
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(KDU

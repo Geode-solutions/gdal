@@ -22,21 +22,15 @@
 #     target_link_libararies.
 #
 
-if(CMAKE_VERSION VERSION_LESS 3.12)
-    if(CRYPTOPP_ROOT)
-        set(CRYPTOPP_HINTPATH ${CRYPTOPP_ROOT})
-    endif()
-endif()
-
 find_path(CRYPTOPP_INCLUDE_DIR NAMES cryptopp/aes.h HINTS ${CRYPTOPP_HINTPATH}/include)
 
 if(CRYPTOPP_INCLUDE_DIR)
     if(BUILD_SHARED_LIBS)
-        find_library(CRYPTOPP_LIBRARY_RELEASE NAMES cryptolib cryptopp HINTS ${CRYPTOPP_HINTPATH}/lib)
-        find_library(CRYPTOPP_LIBRARY_DEBUG NAMES cryptolibd cryptoppd HINTS ${CRYPTOPP_HINTPATH}/debug)
+        find_library(CRYPTOPP_LIBRARY_RELEASE NAMES cryptolib cryptopp NAMES_PER_DIR HINTS ${CRYPTOPP_HINTPATH}/lib)
+        find_library(CRYPTOPP_LIBRARY_DEBUG NAMES cryptolibd cryptoppd NAMES_PER_DIR HINTS ${CRYPTOPP_HINTPATH}/debug)
     else()
-        find_library(CRYPTOPP_LIBRARY_RELEASE NAMES cryptopp HINTS ${CRYPTOPP_HINTPATH}/lib)
-        find_library(CRYPTOPP_LIBRARY_DEBUG NAMES cryptoppd HINTS ${CRYPTOPP_HINTPATH}/debug)
+        find_library(CRYPTOPP_LIBRARY_RELEASE NAMES cryptopp NAMES_PER_DIR HINTS ${CRYPTOPP_HINTPATH}/lib)
+        find_library(CRYPTOPP_LIBRARY_DEBUG NAMES cryptoppd NAMES_PER_DIR HINTS ${CRYPTOPP_HINTPATH}/debug)
     endif()
     mark_as_advanced(CRYPTOPP_LIBRARY_RELEASE CRYPTOPP_LIBRARY_DEBUG)
     include(SelectLibraryConfigurations)

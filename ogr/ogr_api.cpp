@@ -9,23 +9,7 @@
  * Copyright (c) 2002, Frank Warmerdam
  * Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -226,17 +210,20 @@ double OGR_G_GetX(OGRGeometryH hGeom, int i)
 
 {
     VALIDATE_POINTER1(hGeom, "OGR_G_GetX", 0);
+
     struct Getter
     {
         static double get(const OGRPoint *poPoint)
         {
             return poPoint->getX();
         }
+
         static double get(const OGRSimpleCurve *poSC, int l_i)
         {
             return poSC->getX(l_i);
         }
     };
+
     return OGR_G_Get_Component<Getter>(hGeom, i);
 }
 
@@ -256,17 +243,20 @@ double OGR_G_GetY(OGRGeometryH hGeom, int i)
 
 {
     VALIDATE_POINTER1(hGeom, "OGR_G_GetY", 0);
+
     struct Getter
     {
         static double get(const OGRPoint *poPoint)
         {
             return poPoint->getY();
         }
+
         static double get(const OGRSimpleCurve *poSC, int l_i)
         {
             return poSC->getY(l_i);
         }
     };
+
     return OGR_G_Get_Component<Getter>(hGeom, i);
 }
 
@@ -286,17 +276,20 @@ double OGR_G_GetZ(OGRGeometryH hGeom, int i)
 
 {
     VALIDATE_POINTER1(hGeom, "OGR_G_GetZ", 0);
+
     struct Getter
     {
         static double get(const OGRPoint *poPoint)
         {
             return poPoint->getZ();
         }
+
         static double get(const OGRSimpleCurve *poSC, int l_i)
         {
             return poSC->getZ(l_i);
         }
     };
+
     return OGR_G_Get_Component<Getter>(hGeom, i);
 }
 
@@ -315,17 +308,20 @@ double OGR_G_GetM(OGRGeometryH hGeom, int i)
 
 {
     VALIDATE_POINTER1(hGeom, "OGR_G_GetM", 0);
+
     struct Getter
     {
         static double get(const OGRPoint *poPoint)
         {
             return poPoint->getM();
         }
+
         static double get(const OGRSimpleCurve *poSC, int l_i)
         {
             return poSC->getM(l_i);
         }
     };
+
     return OGR_G_Get_Component<Getter>(hGeom, i);
 }
 
@@ -363,6 +359,7 @@ int OGR_G_GetPoints(OGRGeometryH hGeom, void *pabyX, int nXStride, void *pabyY,
 {
     VALIDATE_POINTER1(hGeom, "OGR_G_GetPoints", 0);
 
+    int ret = 0;
     switch (wkbFlatten(ToPointer(hGeom)->getGeometryType()))
     {
         case wkbPoint:
@@ -374,25 +371,27 @@ int OGR_G_GetPoints(OGRGeometryH hGeom, void *pabyX, int nXStride, void *pabyY,
                 *(static_cast<double *>(pabyY)) = poPoint->getY();
             if (pabyZ)
                 *(static_cast<double *>(pabyZ)) = poPoint->getZ();
-            return 1;
+            ret = 1;
+            break;
         }
-        break;
 
         case wkbLineString:
         case wkbCircularString:
         {
             OGRSimpleCurve *poSC = ToPointer(hGeom)->toSimpleCurve();
             poSC->getPoints(pabyX, nXStride, pabyY, nYStride, pabyZ, nZStride);
-            return poSC->getNumPoints();
+            ret = poSC->getNumPoints();
+            break;
         }
-        break;
 
         default:
+        {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "Incompatible geometry for operation");
-            return 0;
             break;
+        }
     }
+    return ret;
 }
 
 /************************************************************************/
@@ -433,6 +432,7 @@ int OGR_G_GetPointsZM(OGRGeometryH hGeom, void *pabyX, int nXStride,
 {
     VALIDATE_POINTER1(hGeom, "OGR_G_GetPointsZM", 0);
 
+    int ret = 0;
     switch (wkbFlatten(ToPointer(hGeom)->getGeometryType()))
     {
         case wkbPoint:
@@ -446,9 +446,9 @@ int OGR_G_GetPointsZM(OGRGeometryH hGeom, void *pabyX, int nXStride,
                 *static_cast<double *>(pabyZ) = poPoint->getZ();
             if (pabyM)
                 *static_cast<double *>(pabyM) = poPoint->getM();
-            return 1;
+            ret = 1;
+            break;
         }
-        break;
 
         case wkbLineString:
         case wkbCircularString:
@@ -456,16 +456,19 @@ int OGR_G_GetPointsZM(OGRGeometryH hGeom, void *pabyX, int nXStride,
             OGRSimpleCurve *poSC = ToPointer(hGeom)->toSimpleCurve();
             poSC->getPoints(pabyX, nXStride, pabyY, nYStride, pabyZ, nZStride,
                             pabyM, nMStride);
-            return poSC->getNumPoints();
+            ret = poSC->getNumPoints();
+            break;
         }
-        break;
 
         default:
+        {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "Incompatible geometry for operation");
-            return 0;
             break;
+        }
     }
+
+    return ret;
 }
 
 /************************************************************************/
@@ -869,6 +872,9 @@ void CPL_DLL OGR_G_SetPointsZM(OGRGeometryH hGeom, int nPointsIn,
  * points in the linestring, the point count will be increased to
  * accommodate the request.
  *
+ * The geometry is promoted to include a Z component, if it does not already
+ * have one.
+ *
  * @param hGeom handle to the geometry to add a vertex to.
  * @param i the index of the vertex to assign (zero based) or
  *  zero for a point.
@@ -990,6 +996,9 @@ void OGR_G_SetPoint_2D(OGRGeometryH hGeom, int i, double dfX, double dfY)
  * points in the linestring, the point count will be increased to
  * accommodate the request.
  *
+ * The geometry is promoted to include a M component, if it does not already
+ * have one.
+ *
  * @param hGeom handle to the geometry to add a vertex to.
  * @param i the index of the vertex to assign (zero based) or
  *  zero for a point.
@@ -1051,6 +1060,9 @@ void OGR_G_SetPointM(OGRGeometryH hGeom, int i, double dfX, double dfY,
  * If iPoint is larger than the number of existing
  * points in the linestring, the point count will be increased to
  * accommodate the request.
+ *
+ * The geometry is promoted to include a Z and M component, if it does not
+ * already have them.
  *
  * @param hGeom handle to the geometry to add a vertex to.
  * @param i the index of the vertex to assign (zero based) or
@@ -1115,6 +1127,9 @@ void OGR_G_SetPointZM(OGRGeometryH hGeom, int i, double dfX, double dfY,
  * The vertex count of the line string is increased by one, and assigned from
  * the passed location value.
  *
+ * The geometry is promoted to include a Z component, if it does not already
+ * have one.
+ *
  * @param hGeom handle to the geometry to add a point to.
  * @param dfX x coordinate of point to add.
  * @param dfY y coordinate of point to add.
@@ -1158,6 +1173,9 @@ void OGR_G_AddPoint(OGRGeometryH hGeom, double dfX, double dfY, double dfZ)
  * The vertex count of the line string is increased by one, and assigned from
  * the passed location value.
  *
+ * If the geometry includes a Z or M component, the value for those components
+ * for the added point will be 0.
+ *
  * @param hGeom handle to the geometry to add a point to.
  * @param dfX x coordinate of point to add.
  * @param dfY y coordinate of point to add.
@@ -1198,6 +1216,9 @@ void OGR_G_AddPoint_2D(OGRGeometryH hGeom, double dfX, double dfY)
  *
  * The vertex count of the line string is increased by one, and assigned from
  * the passed location value.
+ *
+ * The geometry is promoted to include a M component, if it does not already
+ * have one.
  *
  * @param hGeom handle to the geometry to add a point to.
  * @param dfX x coordinate of point to add.
@@ -1241,6 +1262,9 @@ void OGR_G_AddPointM(OGRGeometryH hGeom, double dfX, double dfY, double dfM)
  *
  * The vertex count of the line string is increased by one, and assigned from
  * the passed location value.
+ *
+ * The geometry is promoted to include a Z and M component, if it does not
+ * already have them.
  *
  * @param hGeom handle to the geometry to add a point to.
  * @param dfX x coordinate of point to add.
@@ -1592,6 +1616,8 @@ OGRErr OGR_G_RemoveGeometry(OGRGeometryH hGeom, int iGeom, int bDelete)
  * \brief Compute length of a geometry.
  *
  * Computes the length for OGRCurve or MultiCurve objects.
+ * For surfaces, compute the sum of the lengths of their exterior
+ * and interior rings (since 3.10).
  * Undefined for all other geometry types (returns zero).
  *
  * This function utilizes the C++ get_Length() method.
@@ -1600,6 +1626,9 @@ OGRErr OGR_G_RemoveGeometry(OGRGeometryH hGeom, int iGeom, int bDelete)
  * @return the length or 0.0 for unsupported geometry types.
  *
  * @since OGR 1.8.0
+ *
+ * @see OGR_G_GeodesicLength() for an alternative method returning lengths
+ * computed on the ellipsoid, and in meters.
  */
 
 double OGR_G_Length(OGRGeometryH hGeom)
@@ -1610,14 +1639,16 @@ double OGR_G_Length(OGRGeometryH hGeom)
     double dfLength = 0.0;
 
     const auto poGeom = ToPointer(hGeom);
-    const OGRwkbGeometryType eType =
-        wkbFlatten(ToPointer(hGeom)->getGeometryType());
+    const OGRwkbGeometryType eType = wkbFlatten(poGeom->getGeometryType());
     if (OGR_GT_IsCurve(eType))
     {
         dfLength = poGeom->toCurve()->get_Length();
     }
-    else if (OGR_GT_IsSubClassOf(eType, wkbMultiCurve) ||
-             eType == wkbGeometryCollection)
+    else if (OGR_GT_IsSurface(eType))
+    {
+        dfLength = poGeom->toSurface()->get_Length();
+    }
+    else if (OGR_GT_IsSubClassOf(eType, wkbGeometryCollection))
     {
         dfLength = poGeom->toGeometryCollection()->get_Length();
     }
@@ -1632,20 +1663,88 @@ double OGR_G_Length(OGRGeometryH hGeom)
 }
 
 /************************************************************************/
+/*                      OGR_G_GeodesicLength()                          */
+/************************************************************************/
+
+/**
+ * \brief Get the length of the curve, considered as a geodesic line on the
+ * underlying ellipsoid of the SRS attached to the geometry.
+ *
+ * The returned length will always be in meters.
+ *
+ * <a href="https://geographiclib.sourceforge.io/html/python/geodesics.html">Geodesics</a>
+ * follow the shortest route on the surface of the ellipsoid.
+ *
+ * If the geometry' SRS is not a geographic one, geometries are reprojected to
+ * the underlying geographic SRS of the geometry' SRS.
+ * OGRSpatialReference::GetDataAxisToSRSAxisMapping() is honored.
+ *
+ * Note that geometries with circular arcs will be linearized in their original
+ * coordinate space first, so the resulting geodesic length will be an
+ * approximation.
+ *
+ * This function utilizes the C++ get_GeodesicLength() method.
+ *
+ * @param hGeom the geometry to operate on.
+ * @return the length or a negative value for unsupported geometry types.
+ *
+ * @since OGR 3.10
+ */
+
+double OGR_G_GeodesicLength(OGRGeometryH hGeom)
+
+{
+    VALIDATE_POINTER1(hGeom, "OGR_G_GeodesicLength", -1);
+
+    double dfLength = 0.0;
+
+    const auto poGeom = ToPointer(hGeom);
+    const OGRwkbGeometryType eType = wkbFlatten(poGeom->getGeometryType());
+    if (OGR_GT_IsCurve(eType))
+    {
+        dfLength = poGeom->toCurve()->get_GeodesicLength();
+    }
+    else if (OGR_GT_IsSurface(eType))
+    {
+        dfLength = poGeom->toSurface()->get_GeodesicLength();
+    }
+    else if (OGR_GT_IsSubClassOf(eType, wkbGeometryCollection))
+    {
+        dfLength = poGeom->toGeometryCollection()->get_GeodesicLength();
+    }
+    else
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "OGR_G_GeodesicLength() called against a non-curve geometry type.");
+        dfLength = -1.0;
+    }
+
+    return dfLength;
+}
+
+/************************************************************************/
 /*                           OGR_G_Area()                               */
 /************************************************************************/
 
 /**
  * \brief Compute geometry area.
  *
- * Computes the area for an OGRLinearRing, OGRPolygon or OGRMultiPolygon.
- * Undefined for all other geometry types (returns zero).
+ * The returned area is a 2D Cartesian (planar) area in square units of the
+ * spatial reference system in use, so potentially "square degrees" for a
+ * geometry expressed in a geographic SRS.
  *
- * This function utilizes the C++ get_Area() methods such as
- * OGRPolygon::get_Area().
+ * Computes the area for surfaces or closed curves.
+ * Undefined for all other geometry types (returns 0.0).
+ *
+ * This function utilizes the C++ OGRSurface::get_Area() method.
  *
  * @param hGeom the geometry to operate on.
- * @return the area or 0.0 for unsupported geometry types.
+ * @return the area of the geometry in square units of the spatial reference
+ * system in use, or 0.0 for unsupported geometry types.
+
+ * @see OGR_G_GeodesicArea() for an alternative function returning areas
+ * computed on the ellipsoid, and in square meters.
  *
  * @since OGR 1.8.0
  */
@@ -1667,8 +1766,7 @@ double OGR_G_Area(OGRGeometryH hGeom)
     {
         dfArea = poGeom->toCurve()->get_Area();
     }
-    else if (OGR_GT_IsSubClassOf(eType, wkbMultiSurface) ||
-             eType == wkbGeometryCollection)
+    else if (OGR_GT_IsSubClassOf(eType, wkbGeometryCollection))
     {
         dfArea = poGeom->toGeometryCollection()->get_Area();
     }
@@ -1693,6 +1791,105 @@ double OGR_G_GetArea(OGRGeometryH hGeom)
 
 {
     return OGR_G_Area(hGeom);
+}
+
+/************************************************************************/
+/*                         OGR_G_GeodesicArea()                         */
+/************************************************************************/
+
+/**
+ * \brief Compute geometry area, considered as a surface on the underlying
+ * ellipsoid of the SRS attached to the geometry.
+ *
+ * The returned area will always be in square meters, and assumes that
+ * polygon edges describe geodesic lines on the ellipsoid.
+ *
+ * <a href="https://geographiclib.sourceforge.io/html/python/geodesics.html">Geodesics</a>
+ * follow the shortest route on the surface of the ellipsoid.
+ *
+ * If the geometry' SRS is not a geographic one, geometries are reprojected to
+ * the underlying geographic SRS of the geometry' SRS.
+ * OGRSpatialReference::GetDataAxisToSRSAxisMapping() is honored.
+ *
+ * Computes the area for surfaces or closed curves.
+ * Undefined for all other geometry types (returns a negative value).
+ *
+ * Note that geometries with circular arcs will be linearized in their original
+ * coordinate space first, so the resulting geodesic area will be an
+ * approximation.
+ *
+ * This function utilizes the C++ OGRSurface::get_GeodesicArea() method.
+ *
+ * @param hGeom the geometry to operate on.
+ * @return the area, or a negative value in case of error (unsupported geometry
+ * type, no SRS attached, etc.)
+ *
+ * @see OGR_G_Area() for an alternative method returning areas computed in
+ * 2D Cartesian space.
+ *
+ * @since OGR 3.9.0
+ */
+
+double OGR_G_GeodesicArea(OGRGeometryH hGeom)
+
+{
+    VALIDATE_POINTER1(hGeom, "OGR_G_GeodesicArea", -1);
+
+    double dfArea = -1;
+
+    const auto poGeom = ToPointer(hGeom);
+    const OGRwkbGeometryType eType = wkbFlatten(poGeom->getGeometryType());
+    if (OGR_GT_IsSurface(eType))
+    {
+        dfArea = poGeom->toSurface()->get_GeodesicArea();
+    }
+    else if (OGR_GT_IsCurve(eType))
+    {
+        dfArea = poGeom->toCurve()->get_GeodesicArea();
+    }
+    else if (OGR_GT_IsSubClassOf(eType, wkbGeometryCollection))
+    {
+        dfArea = poGeom->toGeometryCollection()->get_GeodesicArea();
+    }
+    else
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGR_G_GeodesicArea() called against non-surface geometry "
+                 "type.");
+    }
+
+    return dfArea;
+}
+
+/************************************************************************/
+/*                         OGR_G_IsClockwise()                          */
+/************************************************************************/
+/**
+ * \brief Returns true if the ring has clockwise winding (or less than 2 points)
+ *
+ * Assumes that the ring is closed.
+ *
+ * @param hGeom handle to a curve geometry
+ * @since GDAL 3.8
+ */
+
+bool OGR_G_IsClockwise(OGRGeometryH hGeom)
+
+{
+    VALIDATE_POINTER1(hGeom, "OGR_G_IsClockwise", false);
+
+    auto poGeom = OGRGeometry::FromHandle(hGeom);
+    const OGRwkbGeometryType eGType = wkbFlatten(poGeom->getGeometryType());
+    if (OGR_GT_IsCurve(eGType))
+    {
+        return poGeom->toCurve()->isClockwise();
+    }
+    else
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "Incompatible geometry for operation");
+        return false;
+    }
 }
 
 /************************************************************************/

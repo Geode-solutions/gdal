@@ -8,36 +8,19 @@
  * Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_odbc.h"
 #include "cpl_conv.h"
 #include "cpl_string.h"
+#include "ogrodbcdrivercore.h"
 
 /************************************************************************/
 /*                         OGRODBCDataSource()                          */
 /************************************************************************/
 
-OGRODBCDataSource::OGRODBCDataSource()
-    : papoLayers(nullptr), nLayers(0), pszName(nullptr), nKnownSRID(0),
-      panSRID(nullptr), papoSRS(nullptr)
+OGRODBCDataSource::OGRODBCDataSource() : papoLayers(nullptr), nLayers(0)
 {
 }
 
@@ -48,20 +31,10 @@ OGRODBCDataSource::OGRODBCDataSource()
 OGRODBCDataSource::~OGRODBCDataSource()
 
 {
-    CPLFree(pszName);
-
     for (int i = 0; i < nLayers; i++)
         delete papoLayers[i];
 
     CPLFree(papoLayers);
-
-    for (int i = 0; i < nKnownSRID; i++)
-    {
-        if (papoSRS[i] != nullptr)
-            papoSRS[i]->Release();
-    }
-    CPLFree(panSRID);
-    CPLFree(papoSRS);
 }
 
 /************************************************************************/
@@ -100,7 +73,7 @@ static int CheckDSNStringTemplate(const char *pszStr)
 
 int OGRODBCDataSource::OpenMDB(GDALOpenInfo *poOpenInfo)
 {
-#ifndef WIN32
+#ifndef _WIN32
     // Try to register MDB Tools driver
     CPLODBCDriverInstaller::InstallMdbToolsDriver();
 #endif /* ndef WIN32 */
@@ -135,8 +108,6 @@ int OGRODBCDataSource::OpenMDB(GDALOpenInfo *poOpenInfo)
     // https://github.com/OSGeo/gdal/issues/3885)
     m_nStatementFlags |= CPLODBCStatement::Flag::RetrieveNumericColumnsAsDouble;
 
-    pszName = CPLStrdup(pszNewName);
-
     // Collate a list of all tables in the data source
     CPLODBCStatement oTableList(&oSession);
     std::vector<CPLString> aosTableNames;
@@ -158,8 +129,7 @@ int OGRODBCDataSource::OpenMDB(GDALOpenInfo *poOpenInfo)
 
                 osLayerName += pszTableName;
 
-                const CPLString osLCTableName(CPLString(osLayerName).tolower());
-                m_aosAllLCTableNames.insert(osLCTableName);
+                m_aosAllLCTableNames.insert(CPLString(osLayerName).tolower());
 
                 aosTableNames.emplace_back(osLayerName);
             }
@@ -211,8 +181,10 @@ int OGRODBCDataSource::Open(GDALOpenInfo *poOpenInfo)
 
     const char *pszNewName = poOpenInfo->pszFilename;
 
-    if (!STARTS_WITH_CI(pszNewName, "ODBC:") &&
-        IsSupportedMsAccessFileExtension(CPLGetExtension(pszNewName)))
+    constexpr const char *ODBC_PREFIX = "ODBC:";
+    if (!STARTS_WITH_CI(pszNewName, ODBC_PREFIX) &&
+        OGRODBCDriverIsSupportedMsAccessFileExtension(
+            CPLGetExtensionSafe(pszNewName).c_str()))
         return OpenMDB(poOpenInfo);
 
     /* -------------------------------------------------------------------- */
@@ -220,7 +192,7 @@ int OGRODBCDataSource::Open(GDALOpenInfo *poOpenInfo)
     /*      the name of spatial reference table and names for SRID and      */
     /*      SRTEXT columns first.                                           */
     /* -------------------------------------------------------------------- */
-    char *pszWrkName = CPLStrdup(pszNewName + 5);  // Skip the 'ODBC:' part
+    char *pszWrkName = CPLStrdup(pszNewName + strlen(ODBC_PREFIX));
     char **papszTables = nullptr;
     char **papszGeomCol = nullptr;
     char *pszSRSTableName = nullptr;
@@ -298,36 +270,24 @@ int OGRODBCDataSource::Open(GDALOpenInfo *poOpenInfo)
     /*      user/password@dsn.  But if there are no @ characters the        */
     /*      whole thing is assumed to be a DSN.                             */
     /* -------------------------------------------------------------------- */
-    char *pszUserid = nullptr;
-    char *pszPassword = nullptr;
-    char *pszDSN = nullptr;
+    std::string osUserId;
+    std::string osPassword;
+    std::string osDSN;
 
-    if (strstr(pszWrkName, "@") == nullptr)
+    const char *pszAt = strchr(pszWrkName, '@');
+    if (pszAt == nullptr)
     {
-        pszDSN = CPLStrdup(pszWrkName);
+        osDSN = pszWrkName;
     }
     else
     {
-
-        pszDSN = CPLStrdup(strstr(pszWrkName, "@") + 1);
-        if (*pszWrkName == '/')
+        osDSN = pszAt + 1;
+        osUserId.assign(pszWrkName, pszAt - pszWrkName);
+        const auto nSlashPos = osUserId.find('/');
+        if (nSlashPos != std::string::npos)
         {
-            pszPassword = CPLStrdup(pszWrkName + 1);
-            char *pszTarget = strstr(pszPassword, "@");
-            *pszTarget = '\0';
-        }
-        else
-        {
-            pszUserid = CPLStrdup(pszWrkName);
-            char *pszTarget = strstr(pszUserid, "@");
-            *pszTarget = '\0';
-
-            pszTarget = strstr(pszUserid, "/");
-            if (pszTarget != nullptr)
-            {
-                *pszTarget = '\0';
-                pszPassword = CPLStrdup(pszTarget + 1);
-            }
+            osPassword = osUserId.substr(nSlashPos + 1);
+            osUserId.resize(nSlashPos);
         }
     }
 
@@ -338,31 +298,23 @@ int OGRODBCDataSource::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     CPLDebug("OGR_ODBC",
              "EstablishSession(DSN:\"%s\", userid:\"%s\", password:\"%s\")",
-             pszDSN, pszUserid ? pszUserid : "",
-             pszPassword ? pszPassword : "");
+             osDSN.c_str(), osUserId.c_str(), osPassword.c_str());
 
-    if (!oSession.EstablishSession(pszDSN, pszUserid, pszPassword))
+    if (!oSession.EstablishSession(
+            osDSN.c_str(), osUserId.empty() ? nullptr : osUserId.c_str(),
+            osPassword.empty() ? nullptr : osPassword.c_str()))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Unable to initialize ODBC connection to DSN for %s,\n"
                  "%s",
-                 pszNewName + 5, oSession.GetLastError());
+                 pszNewName + strlen(ODBC_PREFIX), oSession.GetLastError());
         CSLDestroy(papszTables);
         CSLDestroy(papszGeomCol);
-        CPLFree(pszDSN);
-        CPLFree(pszUserid);
-        CPLFree(pszPassword);
         CPLFree(pszSRIDCol);
         CPLFree(pszSRTextCol);
         CPLFree(pszSRSTableName);
         return FALSE;
     }
-
-    CPLFree(pszDSN);
-    CPLFree(pszUserid);
-    CPLFree(pszPassword);
-
-    pszName = CPLStrdup(pszNewName);
 
     /* -------------------------------------------------------------------- */
     /*      If no explicit list of tables was given, check for a list in    */
@@ -430,6 +382,9 @@ int OGRODBCDataSource::Open(GDALOpenInfo *poOpenInfo)
     CSLDestroy(papszTables);
     CSLDestroy(papszGeomCol);
 
+#if 0
+    // NOTE: nothing uses the SRS cache currently. Hence disabled.
+
     /* -------------------------------------------------------------------- */
     /*      If no explicit list of tables was given, check for a list in    */
     /*      a geometry_columns table.                                       */
@@ -454,11 +409,6 @@ int OGRODBCDataSource::Open(GDALOpenInfo *poOpenInfo)
                  oSRSList.GetCommand());
         if (oSRSList.ExecuteSQL())
         {
-            int nRows = 256;  // A reasonable number of SRIDs to start from
-            panSRID = (int *)CPLMalloc(nRows * sizeof(int));
-            papoSRS = (OGRSpatialReference **)CPLMalloc(
-                nRows * sizeof(OGRSpatialReference *));
-
             while (oSRSList.Fetch())
             {
                 const char *pszSRID = oSRSList.GetColData(pszSRIDCol);
@@ -469,29 +419,18 @@ int OGRODBCDataSource::Open(GDALOpenInfo *poOpenInfo)
 
                 if (pszSRText)
                 {
-                    if (nKnownSRID > nRows)
-                    {
-                        nRows *= 2;
-                        panSRID =
-                            (int *)CPLRealloc(panSRID, nRows * sizeof(int));
-                        papoSRS = (OGRSpatialReference **)CPLRealloc(
-                            papoSRS, nRows * sizeof(OGRSpatialReference *));
-                    }
-                    panSRID[nKnownSRID] = atoi(pszSRID);
-                    papoSRS[nKnownSRID] = new OGRSpatialReference();
-                    papoSRS[nKnownSRID]->SetAxisMappingStrategy(
+                    std::unique_ptr<OGRSpatialReference, OGRSpatialReferenceReleaser> poSRS(new OGRSpatialReference());
+                    poSRS->SetAxisMappingStrategy(
                         OAMS_TRADITIONAL_GIS_ORDER);
-                    if (papoSRS[nKnownSRID]->importFromWkt(pszSRText) !=
-                        OGRERR_NONE)
+                    if (poSRS->importFromWkt(pszSRText) == OGRERR_NONE )
                     {
-                        delete papoSRS[nKnownSRID];
-                        continue;
+                        m_oSRSCache[atoi(pszSRID)] = std::move(poSRS);
                     }
-                    nKnownSRID++;
                 }
             }
         }
     }
+#endif
 
     if (pszSRIDCol)
         CPLFree(pszSRIDCol);
@@ -613,8 +552,8 @@ OGRLayer *OGRODBCDataSource::ExecuteSQL(const char *pszSQLCommand,
     /*      Use generic implementation for recognized dialects              */
     /* -------------------------------------------------------------------- */
     if (IsGenericSQLDialect(pszDialect))
-        return OGRDataSource::ExecuteSQL(pszSQLCommand, poSpatialFilter,
-                                         pszDialect);
+        return GDALDataset::ExecuteSQL(pszSQLCommand, poSpatialFilter,
+                                       pszDialect);
 
     /* -------------------------------------------------------------------- */
     /*      Execute statement.                                              */
@@ -662,16 +601,4 @@ void OGRODBCDataSource::ReleaseResultSet(OGRLayer *poLayer)
 
 {
     delete poLayer;
-}
-
-/************************************************************************/
-/*                  IsSupportedMsAccessFileExtension()                  */
-/************************************************************************/
-
-bool OGRODBCDataSource::IsSupportedMsAccessFileExtension(
-    const char *pszExtension)
-{
-    // these are all possible extensions for MS Access databases
-    return EQUAL(pszExtension, "MDB") || EQUAL(pszExtension, "ACCDB") ||
-           EQUAL(pszExtension, "STYLE");
 }

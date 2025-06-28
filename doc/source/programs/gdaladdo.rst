@@ -13,11 +13,7 @@ gdaladdo
 Synopsis
 --------
 
-.. code-block::
-
-    gdaladdo [-r {nearest,average,rms,bilinear,gauss,cubic,cubicspline,lanczos,average_magphase,mode}]
-            [-b band]* [-minsize val]
-            [-ro] [-clean] [-oo NAME=VALUE]* [--help-general] filename [levels]
+.. program-output:: gdaladdo --help-doc
 
 Description
 -----------
@@ -27,22 +23,31 @@ most supported file formats with one of several downsampling algorithms.
 
 .. program:: gdaladdo
 
-.. option:: -r {nearest (default),average,rms,gauss,cubic,cubicspline,lanczos,average_magphase,mode}
+.. include:: options/help_and_help_general.rst
 
-    Select a resampling algorithm.
+.. option:: -r {nearest|average|rms|gauss|bilinear|cubic|cubicspline|lanczos|average_magphase|mode}
 
-    ``nearest`` applies a nearest neighbour (simple sampling) resampler
+    Select a resampling algorithm. The default is ``nearest``, which is generally not
+    appropriate if sub-pixel accuracy is desired.
+
+    Starting with GDAL 3.9, when refreshing existing TIFF overviews, the previously
+    used method, as noted in the RESAMPLING metadata item of the overview, will
+    be used if :option:`-r` is not specified.
+
+    The available methods are:
+
+    ``nearest`` applies a nearest neighbour (simple sampling) resampler.
 
     ``average`` computes the average of all non-NODATA contributing pixels. Starting with GDAL 3.1, this is a weighted average taking into account properly the weight of source pixels not contributing fully to the target pixel.
 
     ``rms`` computes the root mean squared / quadratic mean of all non-NODATA contributing pixels (GDAL >= 3.3)
 
-    ``bilinear`` applies a bilinear convolution kernel.
-
     ``gauss`` applies a Gaussian kernel before computing the overview,
     which can lead to better results than simple averaging in e.g case of sharp edges
     with high contrast or noisy patterns. The advised level values should be 2, 4, 8, ...
     so that a 3x3 resampling Gaussian kernel is selected.
+
+    ``bilinear`` applies a bilinear convolution kernel.
 
     ``cubic`` applies a cubic convolution kernel.
 
@@ -69,7 +74,7 @@ most supported file formats with one of several downsampling algorithms.
 
     remove all overviews.
 
-.. option:: -oo NAME=VALUE
+.. option:: -oo <NAME>=<VALUE>
 
     Dataset open option (format specific)
 
@@ -79,6 +84,41 @@ most supported file formats with one of several downsampling algorithms.
     account if explicit levels are not specified. Defaults to 256.
 
     .. versionadded:: 2.3
+
+.. option:: --partial-refresh-from-source-timestamp
+
+    .. versionadded:: 3.8
+
+    This option performs a partial refresh of existing overviews, when <filename>
+    is a VRT file with an external overview.
+    It checks the modification timestamp of all the sources of the VRT
+    and regenerate the overview for areas corresponding to sources whose
+    timestamp is more recent than the external overview of the VRT.
+    By default all existing overview levels will be refreshed, unless explicit
+    levels are specified. See :example:`refresh-vrt`.
+
+.. option:: --partial-refresh-from-projwin <ulx> <uly> <lrx> <lry>
+
+    .. versionadded:: 3.8
+
+    This option performs a partial refresh of existing overviews, in the region
+    of interest specified by georeference coordinates where <ulx> is the X value
+    of the upper left corner, <uly> is the Y value of the upper left corner,
+    <lrx> is the X value of the lower right corner and <lry> is the Y value of
+    the lower right corner.
+    By default all existing overview levels will be refreshed, unless explicit
+    levels are specified.
+
+.. option:: --partial-refresh-from-source-extent <filename1>[,<filenameN>]...
+
+    .. versionadded:: 3.8
+
+    This option performs a partial refresh of existing overviews, in the region
+    of interest specified by one or several filenames (names separated by comma).
+    Note that the filenames are only used to determine the regions of interest
+    to refresh. The reference source pixels are the one of the main dataset.
+    By default all existing overview levels will be refreshed, unless explicit
+    levels are specified. See :example:`refresh-tiff`.
 
 .. option:: <filename>
 
@@ -90,9 +130,14 @@ most supported file formats with one of several downsampling algorithms.
 
     .. versionadded:: 2.3
 
-        levels are no longer required to build overviews.
+        Levels are no longer required to build overviews.
         In which case, appropriate overview power-of-two factors will be selected
         until the smallest overview is smaller than the value of the -minsize switch.
+
+        Starting with GDAL 3.9, if there are already existing overviews, the
+        corresponding levels will be used to refresh them if no explicit levels
+        are specified.
+
 
 gdaladdo will honour properly NODATA_VALUES tuples (special dataset metadata) so
 that only a given RGB triplet (in case of a RGB image) will be considered as the
@@ -115,21 +160,21 @@ in TIFF format.  By default, the GeoTIFF driver stores overviews internally to t
 operated on (if it is writable), unless the -ro flag is specified.
 
 Most drivers also support an alternate overview format using Erdas Imagine
-format.  To trigger this use the :decl_configoption:`USE_RRD` =YES configuration option.  This will
+format.  To trigger this use the :config:`USE_RRD=YES` configuration option (:example:`use-rrd`).  This will
 place the overviews in an associated .aux file suitable for direct use with
 Imagine or ArcGIS as well as GDAL applications.  (e.g. --config USE_RRD YES)
 
 External overviews in GeoTIFF format
 ------------------------------------
 
-External overviews created in TIFF format may be compressed using the :decl_configoption:`COMPRESS_OVERVIEW`
+External overviews created in TIFF format may be compressed using the :config:`COMPRESS_OVERVIEW`
 configuration option.  All compression methods, supported by the GeoTIFF
 driver, are available here. (e.g. ``--config COMPRESS_OVERVIEW DEFLATE``).
-The photometric interpretation can be set with the :decl_configoption:`PHOTOMETRIC_OVERVIEW`
+The photometric interpretation can be set with the :config:`PHOTOMETRIC_OVERVIEW`
 =RGB/YCBCR/... configuration option,
-and the interleaving with the :decl_configoption:`INTERLEAVE_OVERVIEW` =PIXEL/BAND configuration option.
+and the interleaving with the :config:`INTERLEAVE_OVERVIEW` =PIXEL/BAND configuration option.
 
-Since GDAL 3.6, :decl_configoption:`COMPRESS_OVERVIEW` and decl_configoption:`INTERLEAVE_OVERVIEW`
+Since GDAL 3.6, :config:`COMPRESS_OVERVIEW` and :config:`INTERLEAVE_OVERVIEW`
 are honoured when creating internal overviews of TIFF files.
 
 For JPEG compressed external and internal overviews, the JPEG quality can be set with
@@ -150,6 +195,17 @@ For DEFLATE or LERC_DEFLATE compressed external and internal overviews, the comp
 For ZSTD or LERC_ZSTD compressed external and internal overviews, the compression level can be set with
 ``--config ZSTD_LEVEL_OVERVIEW value``. If not set, will default to 9. Added in GDAL 3.4.1
 
+For JPEG-XL compressed external and internal overviews, the following settings can be set since GDAL 3.9.0:
+
+* Whether compression should be lossless with ``--config JXL_LOSSLESS_OVERVIEW YES|NO``. Default is YES
+
+* Level of effort with ``--config JXL_EFFORT_OVERVIEW value``, with value between 1(fast) and 9(flow). Default is 5
+
+* Distance level for lossy compression with ``--config JXL_DISTANCE_OVERVIEW value``, with value: 0=mathematically lossless, 1.0=visually lossless, usual range [0.5,3]. Default is 1.0. Ignored if JXL_LOSSLESS_OVERVIEW is YES
+
+* Distance level for lossy compression of alpha channel with ``--config JXL_ALPHA_DISTANCE_OVERVIEW value``, with value: 0=mathematically lossless, 1.0=visually lossless, usual range [0.5,3]. Default is the same value as JXL_DISTANCE_OVERVIEW. Ignored if JXL_LOSSLESS_OVERVIEW is YES
+
+
 For LZW, ZSTD or DEFLATE compressed external overviews, the predictor value can be set
 with ``--config PREDICTOR_OVERVIEW 1|2|3``.
 
@@ -160,7 +216,7 @@ To produce the smallest possible JPEG-In-TIFF overviews, you should use:
     --config COMPRESS_OVERVIEW JPEG --config PHOTOMETRIC_OVERVIEW YCBCR --config INTERLEAVE_OVERVIEW PIXEL
 
 External overviews can be created in the BigTIFF format by using
-the :decl_configoption:`BIGTIFF_OVERVIEW` configuration option:
+the :config:`BIGTIFF_OVERVIEW` configuration option:
 ``--config BIGTIFF_OVERVIEW {IF_NEEDED|IF_SAFER|YES|NO}``.
 
 The default value is IF_SAFER starting with GDAL 2.3.0 (previously was IF_NEEDED).
@@ -204,7 +260,7 @@ Multithreading
 
 .. versionadded:: 3.2
 
-The :decl_configoption:`GDAL_NUM_THREADS` configuration option can be set to
+The :config:`GDAL_NUM_THREADS` configuration option can be set to
 ``ALL_CPUS`` or a integer value to specify the number of threads to use for
 overview computation.
 
@@ -216,42 +272,78 @@ Functionality of this utility can be done from C with :cpp:func:`GDALBuildOvervi
 Examples
 --------
 
-Create overviews, embedded in the supplied TIFF file, with automatic computation
-of levels (GDAL 2.3 or later)
+.. example::
+   :title: Create overviews, embedded in the supplied TIFF file, with automatic computation of levels
 
-::
+   .. code-block:: bash
 
-    gdaladdo -r average abc.tif
+       gdaladdo -r average abc.tif
 
-Create overviews, embedded in the supplied TIFF file:
+.. example::
+   :title: Create overviews, embedded in the supplied TIFF file
 
-::
+   .. code-block:: bash
 
-    gdaladdo -r average abc.tif 2 4 8 16
+       gdaladdo -r average abc.tif 2 4 8 16
 
-Create an external compressed GeoTIFF overview file from the ERDAS .IMG file:
+.. example::
+   :title: Create an external compressed GeoTIFF overview file from the ERDAS .IMG file
 
-::
+   .. code-block:: bash
 
-    gdaladdo -ro --config COMPRESS_OVERVIEW DEFLATE erdas.img 2 4 8 16
+       gdaladdo -ro --config COMPRESS_OVERVIEW DEFLATE erdas.img 2 4 8 16
 
-Create an external JPEG-compressed GeoTIFF overview file from a 3-band RGB dataset
-(if the dataset is a writable GeoTIFF, you also need to add the -ro option to
-force the generation of external overview):
+.. example::
+   :title: Create an external JPEG-compressed GeoTIFF overview file from a 3-band RGB dataset
 
-::
+   If the dataset is a writable GeoTIFF, you also need to add the :option:`-ro` option to
+   force the generation of external overview.
 
-    gdaladdo --config COMPRESS_OVERVIEW JPEG --config PHOTOMETRIC_OVERVIEW YCBCR
-             --config INTERLEAVE_OVERVIEW PIXEL rgb_dataset.ext 2 4 8 16
+   .. code-block:: bash
 
-Create an Erdas Imagine format overviews for the indicated JPEG file:
+       gdaladdo --config COMPRESS_OVERVIEW JPEG --config PHOTOMETRIC_OVERVIEW YCBCR
+                --config INTERLEAVE_OVERVIEW PIXEL rgb_dataset.ext 2 4 8 16
 
-::
+.. example::
+   :title: Create Erdas Imagine format overviews for the indicated JPEG file
+   :id: use-rrd
 
-    gdaladdo --config USE_RRD YES airphoto.jpg 3 9 27 81
+   .. code-block:: bash
 
-Create overviews for a specific subdataset, like for example one of potentially many raster layers in a GeoPackage (the "filename" parameter must be driver prefix, filename and subdataset name, like e.g. shown by gdalinfo):
+       gdaladdo --config USE_RRD YES airphoto.jpg 3 9 27 81
 
-::
+.. example::
+   :title: Create overviews for a specific subdataset
 
-    gdaladdo GPKG:file.gpkg:layer
+   For example, one of potentially many raster layers in a GeoPackage (the "filename" parameter must be driver prefix, filename and subdataset name, like e.g. shown by gdalinfo):
+
+   .. code-block:: bash
+
+       gdaladdo GPKG:file.gpkg:layer
+
+
+.. example::
+   :title: Refresh overviews of a VRT file
+   :id: refresh-vrt
+
+   This is needed when for sources have been modified after the .vrt.ovr generation:
+
+   .. code-block:: bash
+
+       gdalbuildvrt my.vrt tile1.tif tile2.tif                          # create VRT
+       gdaladdo -r cubic my.vrt                                         # initial overview generation
+       touch tile1.tif                                                  # simulate update of one of the source tiles
+       gdaladdo --partial-refresh-from-source-timestamp -r cubic my.vrt # refresh overviews
+
+
+.. example::
+   :title: Refresh overviews of a TIFF file
+   :id: refresh-tiff
+
+   .. code-block:: bash
+
+       gdalwarp -overwrite tile1.tif tile2.tif mosaic.tif                          # create mosaic
+       gdaladdo -r cubic mosaic.tif                                                # initial overview generation
+       touch tile1.tif                                                             # simulate update of one of the source tiles
+       gdalwarp tile1.tif mosaic.tif                                               # update mosaic
+       gdaladdo --partial-refresh-from-source-extent tile1.tif -r cubic mosaic.tif # refresh overviews

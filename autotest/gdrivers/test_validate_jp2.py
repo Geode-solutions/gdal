@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test validate_jp2 script
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2015, European Union (European Environment Agency)
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -38,32 +21,40 @@ from test_py_scripts import samples_path
 
 from osgeo import gdal
 
+pytestmark = pytest.mark.require_driver("JP2OpenJPEG")
+
 ###############################################################################
-# Verify we have the JP2OpenJPEG driver.
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
-def test_validate_jp2_1():
+@pytest.fixture(scope="module", autouse=True)
+def setup_and_cleanup():
 
-    gdaltest.has_validate_jp2_and_build_jp2 = False
-    gdaltest.jp2openjpeg_drv = gdal.GetDriverByName("JP2OpenJPEG")
-    if gdaltest.jp2openjpeg_drv is None:
-        pytest.skip()
-
-    path = samples_path
-    if path not in sys.path:
-        sys.path.append(path)
+    if samples_path not in sys.path:
+        sys.path.append(samples_path)
 
     try:
-        import build_jp2_from_xml
         import validate_jp2
 
         validate_jp2.validate
+    except (ImportError, AttributeError):
+        pytest.skip("validate_jp2 not available")
+
+    try:
+        import build_jp2_from_xml
+
         build_jp2_from_xml.build_file
     except (ImportError, AttributeError):
-        pytest.skip()
+        pytest.skip("build_jp2_from_xml not available")
 
-    gdaltest.has_validate_jp2_and_build_jp2 = True
     gdaltest.deregister_all_jpeg2000_drivers_but("JP2OpenJPEG")
+
+    yield
+
+    gdaltest.reregister_all_jpeg2000_drivers()
 
 
 ###############################################################################
@@ -106,10 +97,11 @@ def validate(filename, inspire_tg=True, expected_gmljp2=True, oidoc=None):
 # Highly corrupted file
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_validate_jp2_2():
-
-    if not gdaltest.has_validate_jp2_and_build_jp2:
-        pytest.skip()
 
     import build_jp2_from_xml
 
@@ -181,19 +173,15 @@ def test_validate_jp2_2():
 
 def test_validate_jp2_3():
 
-    if not gdaltest.has_validate_jp2_and_build_jp2:
-        pytest.skip()
-
     import build_jp2_from_xml
 
     build_jp2_from_xml.build_file(
         "data/test_validate_jp2/stefan_full_rgba_corrupted.xml", "/vsimem/out.jp2"
     )
-    gdal.PushErrorHandler()
-    error_report = validate(
-        "/vsimem/out.jp2", oidoc="data/test_validate_jp2/stefan_full_rgba_oi.xml"
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        error_report = validate(
+            "/vsimem/out.jp2", oidoc="data/test_validate_jp2/stefan_full_rgba_oi.xml"
+        )
     gdal.Unlink("/vsimem/out.jp2")
 
     expected_errors = [
@@ -243,17 +231,13 @@ def test_validate_jp2_3():
 
 def test_validate_jp2_4():
 
-    if not gdaltest.has_validate_jp2_and_build_jp2:
-        pytest.skip()
-
     import build_jp2_from_xml
 
     build_jp2_from_xml.build_file(
         "data/test_validate_jp2/almost_nojp2box.xml", "/vsimem/out.jp2"
     )
-    gdal.PushErrorHandler()
-    error_report = validate("/vsimem/out.jp2", expected_gmljp2=False)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        error_report = validate("/vsimem/out.jp2", expected_gmljp2=False)
     gdal.Unlink("/vsimem/out.jp2")
 
     expected_errors = [
@@ -287,21 +271,21 @@ def test_validate_jp2_4():
 # Also a RGN marker
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_validate_jp2_5():
-
-    if not gdaltest.has_validate_jp2_and_build_jp2:
-        pytest.skip()
 
     import build_jp2_from_xml
 
     build_jp2_from_xml.build_file(
         "data/test_validate_jp2/utmsmall_pct_corrupted.xml", "/vsimem/out.jp2"
     )
-    gdal.PushErrorHandler()
-    error_report = validate(
-        "/vsimem/out.jp2", oidoc="data/test_validate_jp2/utmsmall_pct_oi.xml"
-    )
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        error_report = validate(
+            "/vsimem/out.jp2", oidoc="data/test_validate_jp2/utmsmall_pct_oi.xml"
+        )
     gdal.Unlink("/vsimem/out.jp2")
 
     expected_errors = [
@@ -339,9 +323,6 @@ def test_validate_jp2_5():
 
 def test_validate_jp2_6():
 
-    if not gdaltest.has_validate_jp2_and_build_jp2:
-        pytest.skip()
-
     error_report = validate(
         "data/test_validate_jp2/byte.jp2", oidoc="data/test_validate_jp2/byte_oi.xml"
     )
@@ -369,9 +350,6 @@ def test_validate_jp2_6():
 
 
 def test_validate_jp2_7():
-
-    if not gdaltest.has_validate_jp2_and_build_jp2:
-        pytest.skip()
 
     error_report = validate(
         "data/test_validate_jp2/stefan_full_rgba.jp2",
@@ -403,9 +381,6 @@ def test_validate_jp2_7():
 
 def test_validate_jp2_8():
 
-    if not gdaltest.has_validate_jp2_and_build_jp2:
-        pytest.skip()
-
     error_report = validate(
         "data/test_validate_jp2/utmsmall_pct.jp2",
         oidoc="data/test_validate_jp2/utmsmall_pct_oi.xml",
@@ -427,12 +402,3 @@ def test_validate_jp2_8():
         pp = pprint.PrettyPrinter()
         pp.pprint(error_report.warning_array)
         pytest.fail("did not get expected errors")
-
-
-###############################################################################
-
-
-def test_validate_jp2_cleanup():
-
-    if gdaltest.has_validate_jp2_and_build_jp2:
-        gdaltest.reregister_all_jpeg2000_drivers()

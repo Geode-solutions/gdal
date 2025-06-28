@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     Operations.i
  * Project:  GDAL Python Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2007, Howard Butler
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 %{
@@ -225,8 +208,9 @@ int  RasterizeLayer( GDALDatasetShadow *dataset,
         return CE_Failure;
     }
 
+    OGRLayerH hLayer = (OGRLayerH)layer;
     eErr = GDALRasterizeLayers( dataset, bands, band_list,
-                                1, &layer,
+                                1, &hLayer,
                                 NULL, NULL,
                                 burn_values_list, options,
                                 callback, callback_data );
@@ -269,8 +253,9 @@ int  RasterizeLayer( GDALDatasetShadow *dataset,
         return CE_Failure;
     }
 
+    OGRLayerH hLayer = (OGRLayerH)layer;
     eErr = GDALRasterizeLayers( dataset, bands, band_list,
-                                1, &layer,
+                                1, &hLayer,
                                 (GDALTransformerFunc) pfnTransformer,
                                 pTransformArg,
                                 burn_values_list, options,
@@ -391,6 +376,8 @@ int  SieveFilter( GDALRasterBandShadow *srcBand,
 #endif /* SWIGJAVA */
 #ifndef SWIGCSHARP
 %apply (int object_list_count, GDALRasterBandShadow **poObjects) {(int overviewBandCount, GDALRasterBandShadow **overviewBands)};
+#else
+%apply GDALRasterBandShadow OBJPTRS_STATIC[] {GDALRasterBandShadow** overviewBands}
 #endif /* SWIGCSHARP */
 #ifdef SWIGJAVA
 %apply (const char* stringWithDefaultValue) {const char *resampling};
@@ -445,13 +432,13 @@ int  RegenerateOverview( GDALRasterBandShadow *srcBand,
 #ifdef SWIGJAVA
 %rename (GridCreate) wrapper_GridCreate;
 %apply (int nCount, double *x, double *y, double *z) { (int points, double *x, double *y, double *z) };
-%apply (void* nioBuffer, long nioBufferSize) { (void* nioBuffer, long nioBufferSize) };
+%apply (void* nioBuffer, size_t nioBufferSize) { (void* nioBuffer, size_t nioBufferSize) };
 %inline %{
 int wrapper_GridCreate( char* algorithmOptions,
                         int points, double *x, double *y, double *z,
                         double xMin, double xMax, double yMin, double yMax,
                         int xSize, int ySize, GDALDataType dataType,
-                        void* nioBuffer, long nioBufferSize,
+                        void* nioBuffer, size_t nioBufferSize,
                         GDALProgressFunc callback = NULL,
                         void* callback_data = NULL)
 {
@@ -462,7 +449,7 @@ int wrapper_GridCreate( char* algorithmOptions,
 
     CPLErrorReset();
 
-    if (xSize * ySize * (GDALGetDataTypeSize(dataType) / 8) > nioBufferSize)
+    if ((GUIntBig)xSize * ySize * GDALGetDataTypeSizeBytes(dataType) > nioBufferSize)
     {
         CPLError( eErr, CPLE_AppDefined, "Buffer too small" );
         return eErr;
@@ -492,7 +479,7 @@ int wrapper_GridCreate( char* algorithmOptions,
     return eErr;
 }
 %}
-%clear (void *nioBuffer, long nioBufferSize);
+%clear (void *nioBuffer, size_t nioBufferSize);
 #endif
 
 /************************************************************************/
@@ -636,6 +623,41 @@ GDALDatasetShadow *ViewshedGenerate( GDALRasterBandShadow *srcBand,
 %clear (char **creationOptions);
 
 /************************************************************************/
+/*                         IsLineOfSightVisible()                       */
+/************************************************************************/
+
+#ifdef SWIGPYTHON
+%feature( "kwargs" ) IsLineOfSightVisible;
+%apply Pointer NONNULL {GDALRasterBandShadow *band};
+%inline %{
+void IsLineOfSightVisible(GDALRasterBandShadow *band,
+                          int xA, int yA, double zA,
+                          int xB, int yB, double zB,
+                          bool *pbVisible, int *pnXIntersection, int *pnYIntersection,
+                          char** options = NULL)
+{
+    *pbVisible = GDALIsLineOfSightVisible(band, xA, yA, zA, xB, yB, zB, pnXIntersection, pnYIntersection, options);
+}
+%}
+%clear GDALRasterBandShadow *band;
+#else
+#ifndef SWIGJAVA
+%feature( "kwargs" ) IsLineOfSightVisible;
+#endif
+%apply Pointer NONNULL {GDALRasterBandShadow *band};
+%inline %{
+bool IsLineOfSightVisible(GDALRasterBandShadow *band,
+                          int xA, int yA, double zA,
+                          int xB, int yB, double zB,
+                          char** options = NULL)
+{
+    return GDALIsLineOfSightVisible(band, xA, yA, zA, xB, yB, zB, NULL, NULL, options);
+}
+%}
+%clear GDALRasterBandShadow *band;
+#endif
+
+/************************************************************************/
 /*                        AutoCreateWarpedVRT()                         */
 /************************************************************************/
 
@@ -668,6 +690,8 @@ GDALDatasetShadow *AutoCreateWarpedVRT( GDALDatasetShadow *src_ds,
 %newobject CreatePansharpenedVRT;
 #ifndef SWIGCSHARP
 %apply (int object_list_count, GDALRasterBandShadow **poObjects) {(int nInputSpectralBands, GDALRasterBandShadow **ahInputSpectralBands)};
+#else
+%apply GDALRasterBandShadow OBJPTRS_STATIC[] {GDALRasterBandShadow** ahInputSpectralBands}
 #endif /* SWIGCSHARP */
 %apply Pointer NONNULL { GDALRasterBandShadow* panchroBand };
 
@@ -688,6 +712,9 @@ GDALDatasetShadow*  CreatePansharpenedVRT( const char* pszXML,
 /************************************************************************/
 /*                             Transformer                              */
 /************************************************************************/
+
+%rename (GetTranformerOptionList) GDALGetGenImgProjTranformerOptionList;
+const char* GDALGetGenImgProjTranformerOptionList();
 
 #ifndef SWIGPYTHON
 %rename (Transformer) GDALTransformerInfoShadow;
@@ -805,6 +832,201 @@ public:
 %}
 #endif
 
+%rename (WarpGetOptionList) GDALWarpGetOptionList;
+const char* GDALWarpGetOptionList();
+
+/************************************************************************/
+/*                        SuggestedWarpOutput()                         */
+/************************************************************************/
+
+%{
+typedef struct
+{
+  int     width;
+  int     height;
+  double  xmin;
+  double  ymin;
+  double  xmax;
+  double  ymax;
+  double  geotransform[6];
+} SuggestedWarpOutputRes;
+%}
+
+%nodefaultctor SuggestedWarpOutputRes;
+struct SuggestedWarpOutputRes
+{
+%immutable;
+  int     width;
+  int     height;
+  double  xmin;
+  double  ymin;
+  double  xmax;
+  double  ymax;
+
+%extend {
+  ~SuggestedWarpOutputRes() {
+    CPLFree(self);
+  }
+
+  %apply (double argout[ANY]) {(double geotransform[6])};
+  void GetGeotransform( double geotransform[6] ) {
+      memcpy(geotransform, self->geotransform, 6 * sizeof(double));
+  }
+
+} /* extend */
+} /* SuggestedWarpOutputRes */ ;
+
+#ifdef SWIGPYTHON
+%newobject SuggestedWarpOutputFromTransformer;
+#else
+%newobject SuggestedWarpOutput;
+#endif
+%inline %{
+#ifdef SWIGPYTHON
+  SuggestedWarpOutputRes* SuggestedWarpOutputFromTransformer(
+                                               GDALDatasetShadow *src,
+                                               GDALTransformerInfoShadow* transformer )
+#else
+  SuggestedWarpOutputRes* SuggestedWarpOutput( GDALDatasetShadow *src,
+                                               GDALTransformerInfoShadow* transformer )
+#endif
+  {
+    SuggestedWarpOutputRes* res = (SuggestedWarpOutputRes*)CPLMalloc(sizeof(SuggestedWarpOutputRes));
+    double extent[4];
+    if( GDALSuggestedWarpOutput2(src, GDALGenImgProjTransform, transformer,
+                                 res->geotransform,&(res->width), &(res->height),
+                                 extent, 0) != CE_None )
+    {
+        CPLFree(res);
+        return NULL;
+    }
+    res->xmin = extent[0];
+    res->ymin = extent[1];
+    res->xmax = extent[2];
+    res->ymax = extent[3];
+    return res;
+  }
+%}
+
+#ifdef SWIGPYTHON
+%newobject SuggestedWarpOutputFromOptions;
+#else
+%newobject SuggestedWarpOutput;
+#endif
+%inline %{
+#ifdef SWIGPYTHON
+  SuggestedWarpOutputRes* SuggestedWarpOutputFromOptions( GDALDatasetShadow *src,
+                                                          char** options )
+#else
+  SuggestedWarpOutputRes* SuggestedWarpOutput( GDALDatasetShadow *src,
+                                               char** options )
+#endif
+  {
+    SuggestedWarpOutputRes* res = (SuggestedWarpOutputRes*)CPLMalloc(sizeof(SuggestedWarpOutputRes));
+    double extent[4];
+    void* pTransformArg = GDALCreateGenImgProjTransformer2( src, NULL, options );
+    if( GDALSuggestedWarpOutput2(src, GDALGenImgProjTransform, pTransformArg,
+                                 res->geotransform,&(res->width), &(res->height),
+                                 extent, 0) != CE_None )
+    {
+        GDALDestroyTransformer(pTransformArg);
+        CPLFree(res);
+        return NULL;
+    }
+    GDALDestroyTransformer(pTransformArg);
+    res->xmin = extent[0];
+    res->ymin = extent[1];
+    res->xmax = extent[2];
+    res->ymax = extent[3];
+    return res;
+  }
+%}
+
+#ifdef SWIGPYTHON
+
+%extend SuggestedWarpOutputRes {
+%pythoncode %{
+geotransform = property(_gdal.SuggestedWarpOutputRes_GetGeotransform, doc=r"""geotransform : double[6]""")
+%}
+}
+
+%pythoncode %{
+
+def SuggestedWarpOutput(*args):
+    """
+    Suggest output dataset size and extent.
+
+    SuggestedWarpOutput(src: Dataset, transformer: Transformer) -> SuggestedWarpOutputRes
+    SuggestedWarpOutput(src: Dataset, options: list[str]) -> SuggestedWarpOutputRes
+
+    This function is used to suggest the size, and georeferenced extents
+    appropriate given the indicated transformation and input file.  It walks
+    the edges of the input file (approximately 20 sample points along each
+    edge) transforming into output coordinates in order to get an extents box.
+
+    Then a resolution is computed with the intent that the length of the
+    distance from the top left corner of the output imagery to the bottom right
+    corner would represent the same number of pixels as in the source image.
+    Note that if the image is somewhat rotated the diagonal taken isn't of the
+    whole output bounding rectangle, but instead of the locations where the
+    top/left and bottom/right corners transform.  The output pixel size is
+    always square.  This is intended to approximately preserve the resolution
+    of the input data in the output file.
+
+    There are 2 forms of this method:
+
+    - one that takes the output of gdal.Transformer(src, dst, options) as the second argument.
+      The src argument of the gdal.Transformer() call should nominally be the src
+      argument passed to this function.
+      The dst argument of the gdal.Transformer() call should nominally be None
+      The third argument of the gdal.Transformer() call should be a list of strings,
+      that are transforming options accepted by
+      :cpp:func:`GDALCreateGenImgProjTransformer2` (e.g ``DST_SRS``)
+
+    - one that takes a list of strings as the second argument. Those strings
+      are the transforming options accepted by
+      :cpp:func:`GDALCreateGenImgProjTransformer2` (e.g ``DST_SRS``)
+
+    Parameters
+    ----------
+
+    src: Dataset
+        Source dataset
+    transformer: Transformer
+        The return value of gdal.Transformer(src, None, options)
+        (exclusive with below options parameter)
+    options: list[str]
+        List of strings that are the transforming options accepted by
+        :cpp:func:`GDALCreateGenImgProjTransformer2` (e.g ``DST_SRS``)
+        (exclusive with above transformer parameter)
+
+    Returns
+    -------
+
+    A SuggestedWarpOutputRes class instance with the following members:
+    - width: number of pixels in width of the output dataset
+    - height: number of pixels in height of the output dataset
+    - xmin: minimum value of the georeferenced X coordinates
+    - ymin: maximum value of the georeferenced Y coordinates
+    - xmax: minimum value of the georeferenced X coordinates
+    - ymax: maximum value of the georeferenced Y coordinates
+    - geotransform: affine geotransformation matrix (6 values)
+
+    Example
+    -------
+
+    >>> ds = gdal.Open("my.tif")
+    ... res = gdal.SuggestedWarpOutput(ds, ["DST_SRS=EPSG:4326"])
+    ... print(res.width, res.height, res.xmin, res.ymin, res.xmax, res.ymax, res.geotransform)
+
+    """
+    if isinstance(args[1], GDALTransformerInfoShadow):
+        return _gdal.SuggestedWarpOutputFromTransformer(*args)
+    else:
+        return _gdal.SuggestedWarpOutputFromOptions(*args)
+%}
+#endif
+
 /************************************************************************/
 /*                        ApplyVerticalShiftGrid()                      */
 /************************************************************************/
@@ -834,4 +1056,5 @@ GDALDatasetShadow* ApplyVerticalShiftGrid( GDALDatasetShadow *src_ds,
 }
 %}
 %clear GDALDatasetShadow *src_ds, GDALDatasetShadow *grid_ds;
+
 

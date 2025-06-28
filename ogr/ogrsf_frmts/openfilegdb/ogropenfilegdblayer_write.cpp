@@ -7,29 +7,14 @@
  ******************************************************************************
  * Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "ogr_openfilegdb.h"
 #include "filegdb_gdbtoogrfieldtype.h"
 
+#include <cinttypes>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -44,6 +29,7 @@
 #include "cpl_error.h"
 #include "cpl_minixml.h"
 #include "cpl_string.h"
+#include "gdal_priv_templates.hpp"
 #include "ogr_api.h"
 #include "ogr_core.h"
 #include "ogr_feature.h"
@@ -52,6 +38,9 @@
 #include "ogr_srs_api.h"
 #include "ogrsf_frmts.h"
 #include "filegdbtable.h"
+#include "filegdbtable_priv.h"
+#include "filegdb_coordprec_write.h"
+#include "filegdb_reserved_keywords.h"
 
 /*************************************************************************/
 /*                            StringToWString()                          */
@@ -149,20 +138,11 @@ static std::wstring EscapeReservedKeywords(const std::wstring &name)
     std::string newName = WStringToString(name);
     std::string upperName = CPLString(newName).toupper();
 
-    // From ESRI docs
-    static const char *const RESERVED_WORDS[] = {
-        "OBJECTID", "ADD",    "ALTER",  "AND",   "AS",     "ASC",    "BETWEEN",
-        "BY",       "COLUMN", "CREATE", "DATE",  "DELETE", "DESC",   "DROP",
-        "EXISTS",   "FOR",    "FROM",   "IN",    "INSERT", "INTO",   "IS",
-        "LIKE",     "NOT",    "NULL",   "OR",    "ORDER",  "SELECT", "SET",
-        "TABLE",    "UPDATE", "VALUES", "WHERE", nullptr};
-
     // Append an underscore to any FGDB reserved words used as field names
     // This is the same behavior ArcCatalog follows.
-    for (int i = 0; RESERVED_WORDS[i] != nullptr; i++)
+    for (const char *pszKeyword : apszRESERVED_WORDS)
     {
-        const char *w = RESERVED_WORDS[i];
-        if (upperName == w)
+        if (upperName == pszKeyword)
         {
             newName += '_';
             break;
@@ -204,34 +184,34 @@ static void XMLSerializeGeomFieldBase(CPLXMLNode *psRoot,
     }
     CPLCreateXMLElementAndValue(
         psSpatialReference, "XOrigin",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetXOrigin()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetXOrigin()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "YOrigin",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetYOrigin()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetYOrigin()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "XYScale",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetXYScale()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetXYScale()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "ZOrigin",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetZOrigin()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetZOrigin()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "ZScale",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetZScale()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetZScale()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "MOrigin",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetMOrigin()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetMOrigin()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "MScale",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetMScale()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetMScale()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "XYTolerance",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetXYTolerance()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetXYTolerance()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "ZTolerance",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetZTolerance()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetZTolerance()));
     CPLCreateXMLElementAndValue(
         psSpatialReference, "MTolerance",
-        CPLSPrintf("%.18g", poGeomFieldDefn->GetMTolerance()));
+        CPLSPrintf("%.17g", poGeomFieldDefn->GetMTolerance()));
     CPLCreateXMLElementAndValue(psSpatialReference, "HighPrecision", "true");
     if (poSRS)
     {
@@ -312,7 +292,8 @@ bool OGROpenFileGDBLayer::CreateFeatureDataset(const char *pszFeatureDataset)
         if (!oTable.Open(m_poDS->m_osGDBItemsFilename.c_str(), false))
             return false;
         CPLCreateXMLElementAndValue(
-            psRoot, "DSID", CPLSPrintf("%d", 1 + oTable.GetTotalRecordCount()));
+            psRoot, "DSID",
+            CPLSPrintf("%" PRId64, 1 + oTable.GetTotalRecordCount()));
     }
 
     CPLCreateXMLElementAndValue(psRoot, "Versioned", "false");
@@ -399,12 +380,18 @@ OGROpenFileGDBLayer::GetLaunderedLayerName(const std::string &osNameOri) const
 /*                            Create()                                 */
 /***********************************************************************/
 
-bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
+bool OGROpenFileGDBLayer::Create(const OGRGeomFieldDefn *poSrcGeomFieldDefn)
 {
     FileGDBTableGeometryType eTableGeomType = FGTGT_NONE;
     const auto eFlattenType = wkbFlatten(OGR_GT_GetLinear(m_eGeomType));
     if (eFlattenType == wkbNone)
         eTableGeomType = FGTGT_NONE;
+    else if (CPLTestBool(m_aosCreationOptions.FetchNameValueDef(
+                 "CREATE_MULTIPATCH", "FALSE")))
+    {
+        // For compatibility with FileGDB driver
+        eTableGeomType = FGTGT_MULTIPATCH;
+    }
     else if (eFlattenType == wkbPoint)
         eTableGeomType = FGTGT_POINT;
     else if (eFlattenType == wkbMultiPoint)
@@ -414,16 +401,17 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
     {
         eTableGeomType = FGTGT_LINE;
     }
-    else if (OGR_GT_IsSurface(eFlattenType) ||
-             OGR_GT_IsSubClassOf(eFlattenType, wkbMultiSurface))
-    {
-        eTableGeomType = FGTGT_POLYGON;
-    }
-    else if (eFlattenType == wkbTIN || eFlattenType == wkbPolyhedralSurface ||
+    else if (wkbFlatten(m_eGeomType) == wkbTIN ||
+             wkbFlatten(m_eGeomType) == wkbPolyhedralSurface ||
              m_eGeomType == wkbGeometryCollection25D ||
              m_eGeomType == wkbSetZ(wkbUnknown))
     {
         eTableGeomType = FGTGT_MULTIPATCH;
+    }
+    else if (OGR_GT_IsSurface(eFlattenType) ||
+             OGR_GT_IsSubClassOf(eFlattenType, wkbMultiSurface))
+    {
+        eTableGeomType = FGTGT_POLYGON;
     }
     else
     {
@@ -456,7 +444,7 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
             FETCH_FIELD_IDX(iName, "Name", FGFT_STRING);
             FETCH_FIELD_IDX(iDefinition, "Definition", FGFT_XML);
 
-            for (int iCurFeat = 0; iCurFeat < oTable.GetTotalRecordCount();
+            for (int64_t iCurFeat = 0; iCurFeat < oTable.GetTotalRecordCount();
                  ++iCurFeat)
             {
                 iCurFeat = oTable.GetAndSelectNextNonEmptyRow(iCurFeat);
@@ -510,41 +498,6 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
     SetDescription(m_poFeatureDefn->GetName());
     m_poFeatureDefn->SetGeomType(wkbNone);
     m_poFeatureDefn->Reference();
-    if (m_eGeomType != wkbNone)
-    {
-        auto poGeomFieldDefn = cpl::make_unique<OGROpenFileGDBGeomFieldDefn>(
-            this,
-            m_aosCreationOptions.FetchNameValueDef("GEOMETRY_NAME", "SHAPE"),
-            m_eGeomType);
-        poGeomFieldDefn->SetNullable(
-            CPLTestBool(m_aosCreationOptions.FetchNameValueDef(
-                "GEOMETRY_NULLABLE", "YES")));
-
-        if (poSRS)
-        {
-            const char *const apszOptions[] = {
-                "IGNORE_DATA_AXIS_TO_SRS_AXIS_MAPPING=YES", nullptr};
-            if (poFeatureDatasetSRS &&
-                !poSRS->IsSame(poFeatureDatasetSRS.get(), apszOptions))
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Layer CRS does not match feature dataset CRS");
-                return false;
-            }
-
-            auto poSRSClone = poSRS->Clone();
-            poGeomFieldDefn->SetSpatialRef(poSRSClone);
-            poSRSClone->Release();
-        }
-        else if (poFeatureDatasetSRS)
-        {
-            auto poSRSClone = poFeatureDatasetSRS->Clone();
-            poGeomFieldDefn->SetSpatialRef(poSRSClone);
-            poSRSClone->Release();
-        }
-
-        m_poFeatureDefn->AddGeomFieldDefn(std::move(poGeomFieldDefn));
-    }
 
     m_osThisGUID = OFGDBGenerateUUID();
 
@@ -616,14 +569,49 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
             "OPENFILEGDB_CREATE_FIELD_BEFORE_GEOMETRY", "NO")))
     {
         OGRFieldDefn oField("field_before_geom", OFTString);
-        m_poLyrTable->CreateField(cpl::make_unique<FileGDBField>(
-            oField.GetNameRef(), std::string(), FGFT_STRING, true, 0,
-            FileGDBField::UNSET_FIELD));
+        m_poLyrTable->CreateField(std::make_unique<FileGDBField>(
+            oField.GetNameRef(), std::string(), FGFT_STRING,
+            /* bNullable = */ true,
+            /* bRequired = */ true,
+            /* bEditable = */ true, 0, FileGDBField::UNSET_FIELD));
         m_poFeatureDefn->AddFieldDefn(&oField);
     }
 
-    if (m_eGeomType != wkbNone)
+    if (m_eGeomType != wkbNone && poSrcGeomFieldDefn)
     {
+        const auto poSRS = poSrcGeomFieldDefn->GetSpatialRef();
+
+        auto poGeomFieldDefn = std::make_unique<OGROpenFileGDBGeomFieldDefn>(
+            this,
+            m_aosCreationOptions.FetchNameValueDef("GEOMETRY_NAME", "SHAPE"),
+            m_eGeomType);
+        poGeomFieldDefn->SetNullable(
+            CPLTestBool(m_aosCreationOptions.FetchNameValueDef(
+                "GEOMETRY_NULLABLE", "YES")));
+
+        if (poSRS)
+        {
+            const char *const apszOptions[] = {
+                "IGNORE_DATA_AXIS_TO_SRS_AXIS_MAPPING=YES", nullptr};
+            if (poFeatureDatasetSRS &&
+                !poSRS->IsSame(poFeatureDatasetSRS.get(), apszOptions))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Layer CRS does not match feature dataset CRS");
+                return false;
+            }
+
+            auto poSRSClone = poSRS->Clone();
+            poGeomFieldDefn->SetSpatialRef(poSRSClone);
+            poSRSClone->Release();
+        }
+        else if (poFeatureDatasetSRS)
+        {
+            auto poSRSClone = poFeatureDatasetSRS->Clone();
+            poGeomFieldDefn->SetSpatialRef(poSRSClone);
+            poSRSClone->Release();
+        }
+
         std::string osWKT;
         if (poSRS)
         {
@@ -638,60 +626,29 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
             osWKT = "{B286C06B-0879-11D2-AACA-00C04FA33C20}";
         }
 
-        double dfXOrigin;
-        double dfYOrigin;
-        double dfXYScale;
-        double dfZOrigin = -100000;
-        double dfMOrigin = -100000;
-        double dfMScale = 10000;
-        double dfXYTolerance;
-        // default tolerance is 1mm in the units of the coordinate system
-        double dfZTolerance =
-            0.001 * (poSRS ? poSRS->GetTargetLinearUnits("VERT_CS") : 1.0);
-        double dfZScale = 1 / dfZTolerance * 10;
-        double dfMTolerance = 0.001;
-
-        if (poSRS == nullptr || poSRS->IsProjected())
-        {
-            // default tolerance is 1mm in the units of the coordinate system
-            dfXYTolerance =
-                0.001 * (poSRS ? poSRS->GetTargetLinearUnits("PROJCS") : 1.0);
-            // default scale is 10x the tolerance
-            dfXYScale = 1 / dfXYTolerance * 10;
-
-            // Ideally we would use the same X/Y origins as ArcGIS, but we need
-            // the algorithm they use.
-            dfXOrigin = -2147483647;
-            dfYOrigin = -2147483647;
-        }
-        else
-        {
-            dfXOrigin = -400;
-            dfYOrigin = -400;
-            dfXYScale = 1000000000;
-            dfXYTolerance = 0.000000008983153;
-        }
-
-        const char *const paramNames[] = {
-            "XOrigin", "YOrigin", "XYScale",     "ZOrigin",    "ZScale",
-            "MOrigin", "MScale",  "XYTolerance", "ZTolerance", "MTolerance"};
-        double *pGridValues[] = {&dfXOrigin,   &dfYOrigin,     &dfXYScale,
-                                 &dfZOrigin,   &dfZScale,      &dfMOrigin,
-                                 &dfMScale,    &dfXYTolerance, &dfZTolerance,
-                                 &dfMTolerance};
-        static_assert(
-            CPL_ARRAYSIZE(paramNames) == CPL_ARRAYSIZE(pGridValues),
-            "CPL_ARRAYSIZE(paramNames) == CPL_ARRAYSIZE(pGridValues)");
-
-        /* Convert any layer creation options available, use defaults otherwise
-         */
-        for (size_t i = 0; i < CPL_ARRAYSIZE(paramNames); i++)
-        {
-            const char *pszVal =
-                m_aosCreationOptions.FetchNameValue(paramNames[i]);
-            if (pszVal)
-                *(pGridValues[i]) = CPLAtof(pszVal);
-        }
+        const auto oCoordPrec = GDBGridSettingsFromOGR(
+            poSrcGeomFieldDefn, m_aosCreationOptions.List());
+        poGeomFieldDefn->SetCoordinatePrecision(oCoordPrec);
+        const auto &oGridsOptions =
+            oCoordPrec.oFormatSpecificOptions.find("FileGeodatabase")->second;
+        const double dfXOrigin =
+            CPLAtof(oGridsOptions.FetchNameValue("XOrigin"));
+        const double dfYOrigin =
+            CPLAtof(oGridsOptions.FetchNameValue("YOrigin"));
+        const double dfXYScale =
+            CPLAtof(oGridsOptions.FetchNameValue("XYScale"));
+        const double dfXYTolerance =
+            CPLAtof(oGridsOptions.FetchNameValue("XYTolerance"));
+        const double dfZOrigin =
+            CPLAtof(oGridsOptions.FetchNameValue("ZOrigin"));
+        const double dfZScale = CPLAtof(oGridsOptions.FetchNameValue("ZScale"));
+        const double dfZTolerance =
+            CPLAtof(oGridsOptions.FetchNameValue("ZTolerance"));
+        const double dfMOrigin =
+            CPLAtof(oGridsOptions.FetchNameValue("MOrigin"));
+        const double dfMScale = CPLAtof(oGridsOptions.FetchNameValue("MScale"));
+        const double dfMTolerance =
+            CPLAtof(oGridsOptions.FetchNameValue("MTolerance"));
 
         if (!m_poDS->GetExistingSpatialRef(
                 osWKT, dfXOrigin, dfYOrigin, dfXYScale, dfZOrigin, dfZScale,
@@ -701,21 +658,21 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
                                      dfZOrigin, dfZScale, dfMOrigin, dfMScale,
                                      dfXYTolerance, dfZTolerance, dfMTolerance);
         }
+
         // Will be patched later
         constexpr double dfSpatialGridResolution = 0;
-        auto poGeomField =
-            std::unique_ptr<FileGDBGeomField>(new FileGDBGeomField(
-                m_poFeatureDefn->GetGeomFieldDefn(0)->GetNameRef(),
-                std::string(),  // alias
-                CPL_TO_BOOL(m_poFeatureDefn->GetGeomFieldDefn(0)->IsNullable()),
-                osWKT, dfXOrigin, dfYOrigin, dfXYScale, dfXYTolerance,
-                {dfSpatialGridResolution}));
-        poGeomField->SetZOriginScaleTolerance(dfZOrigin, dfZScale,
-                                              dfZTolerance);
-        poGeomField->SetMOriginScaleTolerance(dfMOrigin, dfMScale,
-                                              dfMTolerance);
+        auto poTableGeomField = std::make_unique<FileGDBGeomField>(
+            poGeomFieldDefn->GetNameRef(),
+            std::string(),  // alias
+            CPL_TO_BOOL(poGeomFieldDefn->IsNullable()), osWKT, dfXOrigin,
+            dfYOrigin, dfXYScale, dfXYTolerance,
+            std::vector<double>{dfSpatialGridResolution});
+        poTableGeomField->SetZOriginScaleTolerance(dfZOrigin, dfZScale,
+                                                   dfZTolerance);
+        poTableGeomField->SetMOriginScaleTolerance(dfMOrigin, dfMScale,
+                                                   dfMTolerance);
 
-        if (!m_poLyrTable->CreateField(std::move(poGeomField)))
+        if (!m_poLyrTable->CreateField(std::move(poTableGeomField)))
         {
             Close();
             return false;
@@ -724,13 +681,17 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
         m_iGeomFieldIdx = m_poLyrTable->GetGeomFieldIdx();
         m_poGeomConverter.reset(FileGDBOGRGeometryConverter::BuildConverter(
             m_poLyrTable->GetGeomField()));
+
+        m_poFeatureDefn->AddGeomFieldDefn(std::move(poGeomFieldDefn));
     }
 
     const std::string osFIDName =
         m_aosCreationOptions.FetchNameValueDef("FID", "OBJECTID");
-    if (!m_poLyrTable->CreateField(std::unique_ptr<FileGDBField>(
-            new FileGDBField(osFIDName, std::string(), FGFT_OBJECTID, false, 0,
-                             FileGDBField::UNSET_FIELD))))
+    if (!m_poLyrTable->CreateField(std::make_unique<FileGDBField>(
+            osFIDName, std::string(), FGFT_OBJECTID,
+            /* bNullable = */ false,
+            /* bRequired = */ true,
+            /* bEditable = */ false, 0, FileGDBField::UNSET_FIELD)))
     {
         Close();
         return false;
@@ -751,6 +712,8 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
     // Setting a non-default value doesn't work
     const char *pszAreaFieldName =
         m_aosCreationOptions.FetchNameValueDef("AREA_FIELD_NAME", "Shape_Area");
+
+    m_poFeatureDefn->Seal(/* bSealFields = */ true);
 
     if (bCreateShapeArea)
     {
@@ -805,7 +768,8 @@ bool OGROpenFileGDBLayer::Create(const OGRSpatialReference *poSRS)
 /************************************************************************/
 
 static CPLXMLNode *CreateXMLFieldDefinition(const OGRFieldDefn *poFieldDefn,
-                                            const FileGDBField *poGDBFieldDefn)
+                                            const FileGDBField *poGDBFieldDefn,
+                                            bool bArcGISPro32OrLater)
 {
     auto GPFieldInfoEx =
         CPLCreateXMLNode(nullptr, CXT_Element, "GPFieldInfoEx");
@@ -825,9 +789,12 @@ static CPLXMLNode *CreateXMLFieldDefinition(const OGRFieldDefn *poFieldDefn,
         {
             auto psDefaultValue = CPLCreateXMLElementAndValue(
                 GPFieldInfoEx, "DefaultValueString", psDefault->String);
-            CPLAddXMLAttributeAndValue(
-                psDefaultValue, "xmlns:typens",
-                "http://www.esri.com/schemas/ArcGIS/10.3");
+            if (!bArcGISPro32OrLater)
+            {
+                CPLAddXMLAttributeAndValue(
+                    psDefaultValue, "xmlns:typens",
+                    "http://www.esri.com/schemas/ArcGIS/10.3");
+            }
         }
         else if (poGDBFieldDefn->GetType() == FGFT_INT32)
         {
@@ -840,13 +807,69 @@ static CPLXMLNode *CreateXMLFieldDefinition(const OGRFieldDefn *poFieldDefn,
         {
             auto psDefaultValue = CPLCreateXMLElementAndValue(
                 GPFieldInfoEx, "DefaultValueNumeric",
-                CPLSPrintf("%.18g", psDefault->Real));
-            CPLAddXMLAttributeAndValue(
-                psDefaultValue, "xmlns:typens",
-                "http://www.esri.com/schemas/ArcGIS/10.3");
+                CPLSPrintf("%.17g", psDefault->Real));
+            if (!bArcGISPro32OrLater)
+            {
+                CPLAddXMLAttributeAndValue(
+                    psDefaultValue, "xmlns:typens",
+                    "http://www.esri.com/schemas/ArcGIS/10.3");
+            }
+        }
+        else if (poGDBFieldDefn->GetType() == FGFT_INT64)
+        {
+            CPLCreateXMLElementAndValue(
+                GPFieldInfoEx, "DefaultValueInteger",
+                CPLSPrintf(CPL_FRMT_GIB, psDefault->Integer64));
+        }
+        else if (poGDBFieldDefn->GetType() == FGFT_DATETIME ||
+                 poGDBFieldDefn->GetType() == FGFT_DATE)
+        {
+            CPLCreateXMLElementAndValue(
+                GPFieldInfoEx, "DefaultValueNumeric",
+                CPLSPrintf("%.17g", FileGDBOGRDateToDoubleDate(
+                                        psDefault, /* bConvertToUTC = */ true,
+                                        poGDBFieldDefn->IsHighPrecision())));
+        }
+        else if (poGDBFieldDefn->GetType() == FGFT_TIME)
+        {
+            CPLCreateXMLElementAndValue(
+                GPFieldInfoEx, "DefaultValueNumeric",
+                CPLSPrintf("%.0f", FileGDBOGRTimeToDoubleTime(psDefault)));
+        }
+        else if (poGDBFieldDefn->GetType() == FGFT_DATETIME_WITH_OFFSET)
+        {
+            /*
+             <DefaultValueTimestampOffset xsi:type="typens:TimestampOffset">
+                <Timestamp>2023-02-01T04:05:06</Timestamp>
+                <HoursOffset>6</HoursOffset>
+                <MinutesOffset>0</MinutesOffset>
+              </DefaultValueTimestampOffset>
+            */
+            auto psDefaultValue = CPLCreateXMLNode(
+                GPFieldInfoEx, CXT_Element, "DefaultValueTimestampOffset");
+            CPLAddXMLAttributeAndValue(psDefaultValue, "xsi:type",
+                                       "typens:TimestampOffset");
+            CPLCreateXMLElementAndValue(
+                psDefaultValue, "Timestamp",
+                CPLSPrintf("%04d-%02d-%02dT%02d:%02d:%02d",
+                           psDefault->Date.Year, psDefault->Date.Month,
+                           psDefault->Date.Day, psDefault->Date.Hour,
+                           psDefault->Date.Minute,
+                           static_cast<int>(psDefault->Date.Second)));
+            if (psDefault->Date.TZFlag > 1)
+            {
+                const int nOffsetInMin = (psDefault->Date.TZFlag - 100) * 15;
+                CPLCreateXMLElementAndValue(
+                    psDefaultValue, "HoursOffset",
+                    CPLSPrintf("%d", nOffsetInMin / 60));
+                CPLCreateXMLElementAndValue(
+                    psDefaultValue, "MinutesOffset",
+                    CPLSPrintf("%d", std::abs(nOffsetInMin) % 60));
+            }
         }
     }
     const char *pszFieldType = "";
+    CPL_IGNORE_RET_VAL(pszFieldType);  // Make CSA happy
     int nLength = 0;
     switch (poGDBFieldDefn->GetType())
     {
@@ -898,14 +921,46 @@ static CPLXMLNode *CreateXMLFieldDefinition(const OGRFieldDefn *poFieldDefn,
         case FGFT_XML:
             pszFieldType = "esriFieldTypeXML";
             break;
+        case FGFT_INT64:
+            nLength = 8;
+            pszFieldType = "esriFieldTypeBigInteger";
+            break;
+        case FGFT_DATE:
+            nLength = 8;
+            pszFieldType = "esriFieldTypeDateOnly";
+            break;
+        case FGFT_TIME:
+            nLength = 8;
+            pszFieldType = "esriFieldTypeTimeOnly";
+            break;
+        case FGFT_DATETIME_WITH_OFFSET:
+            nLength = 8 + 2;
+            pszFieldType = "esriFieldTypeTimestampOffset";
+            break;
     }
     auto psFieldType =
         CPLCreateXMLElementAndValue(GPFieldInfoEx, "FieldType", pszFieldType);
-    CPLAddXMLAttributeAndValue(psFieldType, "xmlns:typens",
-                               "http://www.esri.com/schemas/ArcGIS/10.3");
-    CPLCreateXMLElementAndValue(GPFieldInfoEx, "IsNullable",
-                                poGDBFieldDefn->IsNullable() ? "true"
-                                                             : "false");
+    if (!bArcGISPro32OrLater)
+    {
+        CPLAddXMLAttributeAndValue(psFieldType, "xmlns:typens",
+                                   "http://www.esri.com/schemas/ArcGIS/10.3");
+    }
+    if (poGDBFieldDefn->IsNullable())
+    {
+        CPLCreateXMLElementAndValue(GPFieldInfoEx, "IsNullable", "true");
+    }
+    if (poGDBFieldDefn->IsRequired())
+    {
+        CPLCreateXMLElementAndValue(GPFieldInfoEx, "Required", "true");
+    }
+    if (!poGDBFieldDefn->IsEditable())
+    {
+        CPLCreateXMLElementAndValue(GPFieldInfoEx, "Editable", "false");
+    }
+    if (poGDBFieldDefn->IsHighPrecision())
+    {
+        CPLCreateXMLElementAndValue(GPFieldInfoEx, "HighPrecision", "true");
+    }
     CPLCreateXMLElementAndValue(GPFieldInfoEx, "Length",
                                 CPLSPrintf("%d", nLength));
     CPLCreateXMLElementAndValue(GPFieldInfoEx, "Precision", "0");
@@ -923,7 +978,8 @@ static CPLXMLNode *CreateXMLFieldDefinition(const OGRFieldDefn *poFieldDefn,
 /************************************************************************/
 
 static bool GetDefault(const OGRFieldDefn *poField, FileGDBFieldType eType,
-                       OGRField &sDefault, std::string &osDefaultVal)
+                       OGRField &sDefault, std::string &osDefaultVal,
+                       bool bApproxOK)
 {
     sDefault = FileGDBField::UNSET_FIELD;
     const char *pszDefault = poField->GetDefault();
@@ -935,7 +991,7 @@ static bool GetDefault(const OGRFieldDefn *poField, FileGDBFieldType eType,
             if (osDefaultVal[0] == '\'' && osDefaultVal.back() == '\'')
             {
                 osDefaultVal = osDefaultVal.substr(1);
-                osDefaultVal.resize(osDefaultVal.size() - 1);
+                osDefaultVal.pop_back();
                 char *pszTmp =
                     CPLUnescapeString(osDefaultVal.c_str(), nullptr, CPLES_SQL);
                 osDefaultVal = pszTmp;
@@ -947,21 +1003,39 @@ static bool GetDefault(const OGRFieldDefn *poField, FileGDBFieldType eType,
             sDefault.Integer = atoi(pszDefault);
         else if (eType == FGFT_FLOAT32 || eType == FGFT_FLOAT64)
             sDefault.Real = CPLAtof(pszDefault);
-        else if (eType == FGFT_DATETIME)
+        else if (eType == FGFT_DATETIME || eType == FGFT_DATE ||
+                 eType == FGFT_TIME || eType == FGFT_DATETIME_WITH_OFFSET)
         {
             osDefaultVal = pszDefault;
+            if (osDefaultVal == "CURRENT_TIMESTAMP" ||
+                osDefaultVal == "CURRENT_TIME" ||
+                osDefaultVal == "CURRENT_DATE")
+            {
+                CPLError(bApproxOK ? CE_Warning : CE_Failure, CPLE_AppDefined,
+                         "%s is not supported as a default value in File "
+                         "Geodatabase",
+                         osDefaultVal.c_str());
+                return bApproxOK;
+            }
             if (osDefaultVal[0] == '\'' && osDefaultVal.back() == '\'')
             {
                 osDefaultVal = osDefaultVal.substr(1);
-                osDefaultVal.resize(osDefaultVal.size() - 1);
+                osDefaultVal.pop_back();
                 char *pszTmp =
                     CPLUnescapeString(osDefaultVal.c_str(), nullptr, CPLES_SQL);
                 osDefaultVal = pszTmp;
                 CPLFree(pszTmp);
             }
             if (!OGRParseDate(osDefaultVal.c_str(), &sDefault, 0))
-                return false;
+            {
+                CPLError(bApproxOK ? CE_Warning : CE_Failure, CPLE_AppDefined,
+                         "Cannot parse %s as a date time",
+                         osDefaultVal.c_str());
+                return bApproxOK;
+            }
         }
+        else if (eType == FGFT_INT64)
+            sDefault.Integer64 = CPLAtoGIntBig(pszDefault);
     }
     return true;
 }
@@ -970,7 +1044,8 @@ static bool GetDefault(const OGRFieldDefn *poField, FileGDBFieldType eType,
 /*                         GetGDBFieldType()                            */
 /************************************************************************/
 
-static FileGDBFieldType GetGDBFieldType(const OGRFieldDefn *poField)
+static FileGDBFieldType GetGDBFieldType(const OGRFieldDefn *poField,
+                                        bool bArcGISPro32OrLater)
 {
     FileGDBFieldType eType = FGFT_UNDEFINED;
     switch (poField->GetType())
@@ -984,7 +1059,7 @@ static FileGDBFieldType GetGDBFieldType(const OGRFieldDefn *poField)
                                                          : FGFT_FLOAT64;
             break;
         case OFTInteger64:
-            eType = FGFT_FLOAT64;
+            eType = bArcGISPro32OrLater ? FGFT_INT64 : FGFT_FLOAT64;
             break;
         case OFTString:
         case OFTWideString:
@@ -999,9 +1074,14 @@ static FileGDBFieldType GetGDBFieldType(const OGRFieldDefn *poField)
             eType = FGFT_BINARY;
             break;
         case OFTDate:
+            eType = bArcGISPro32OrLater ? FGFT_DATE : FGFT_DATETIME;
+            break;
         case OFTTime:
+            eType = bArcGISPro32OrLater ? FGFT_TIME : FGFT_DATETIME;
+            break;
         case OFTDateTime:
-            eType = FGFT_DATETIME;
+            eType =
+                bArcGISPro32OrLater ? FGFT_DATETIME_WITH_OFFSET : FGFT_DATETIME;
             break;
     }
     return eType;
@@ -1072,7 +1152,8 @@ OGROpenFileGDBLayer::GetLaunderedFieldName(const std::string &osNameOri) const
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGROpenFileGDBLayer::CreateField(const OGRFieldDefn *poFieldIn,
+                                        int bApproxOK)
 {
     if (!m_bEditable)
         return OGRERR_FAILURE;
@@ -1088,8 +1169,33 @@ OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
     }
 
     /* Clean field names */
-    OGRFieldDefn oField(poField);
-    poField = &oField;
+    OGRFieldDefn oField(poFieldIn);
+    OGRFieldDefn *poField = &oField;
+
+    if (poField->GetType() == OFTInteger64 && !m_bArcGISPro32OrLater)
+    {
+        CPLError(CE_Warning, CPLE_AppDefined,
+                 "Field %s of type Integer64 will be written as a Float64. "
+                 "To get Integer64, use layer creation option "
+                 "TARGET_ARCGIS_VERSION=ARCGIS_PRO_3_2_OR_LATER",
+                 poField->GetNameRef());
+    }
+    else if (poField->GetType() == OFTDate && !m_bArcGISPro32OrLater)
+    {
+        CPLError(CE_Warning, CPLE_AppDefined,
+                 "Field %s of type Date will be written as a DateTime. "
+                 "To get DateTime, use layer creation option "
+                 "TARGET_ARCGIS_VERSION=ARCGIS_PRO_3_2_OR_LATER",
+                 poField->GetNameRef());
+    }
+    else if (poField->GetType() == OFTTime && !m_bArcGISPro32OrLater)
+    {
+        CPLError(CE_Warning, CPLE_AppDefined,
+                 "Field %s of type Time will be written as a DateTime. "
+                 "To get DateTime, use layer creation option "
+                 "TARGET_ARCGIS_VERSION=ARCGIS_PRO_3_2_OR_LATER",
+                 poField->GetNameRef());
+    }
 
     const std::string osFidColumn = GetFIDColumn();
     if (!osFidColumn.empty() &&
@@ -1109,7 +1215,7 @@ OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
         }
 
         m_iFIDAsRegularColumnIndex = m_poFeatureDefn->GetFieldCount();
-        m_poFeatureDefn->AddFieldDefn(poField);
+        whileUnsealing(m_poFeatureDefn)->AddFieldDefn(poField);
         return OGRERR_NONE;
     }
 
@@ -1170,6 +1276,8 @@ OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
             eType = FGFT_INT16;
         else if (gdbFieldType == "esriFieldTypeInteger")
             eType = FGFT_INT32;
+        else if (gdbFieldType == "esriFieldTypeBigInteger")
+            eType = FGFT_INT64;
         else if (gdbFieldType == "esriFieldTypeSingle")
             eType = FGFT_FLOAT32;
         else if (gdbFieldType == "esriFieldTypeDouble")
@@ -1186,6 +1294,12 @@ OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
             eType = FGFT_GLOBALID;
         else if (gdbFieldType == "esriFieldTypeXML")
             eType = FGFT_XML;
+        else if (gdbFieldType == "esriFieldTypeDateOnly")
+            eType = FGFT_DATE;
+        else if (gdbFieldType == "esriFieldTypeTimeOnly")
+            eType = FGFT_TIME;
+        else if (gdbFieldType == "esriFieldTypeTimestampOffset")
+            eType = FGFT_DATETIME_WITH_OFFSET;
         else
         {
             CPLAssert(false);
@@ -1193,7 +1307,7 @@ OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
     }
     else
     {
-        eType = GetGDBFieldType(poField);
+        eType = GetGDBFieldType(poField, m_bArcGISPro32OrLater);
     }
 
     int nWidth = 0;
@@ -1206,18 +1320,31 @@ OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
         nWidth = poField->GetWidth();
         if (nWidth == 0)
         {
-            // We can't use a 0 width value since that prevents ArcMap
-            // from editing (#5952)
-            nWidth = atoi(CPLGetConfigOption("OPENFILEGDB_DEFAULT_STRING_WIDTH",
-                                             "65536"));
-            if (nWidth < 65536)
+            // Hard-coded non-zero default string width if the user doesn't
+            // override it with the below configuration option.
+            // See comment at declaration of DEFAULT_STRING_WIDTH for more
+            // details
+            nWidth = DEFAULT_STRING_WIDTH;
+            if (const char *pszVal = CPLGetConfigOption(
+                    "OPENFILEGDB_DEFAULT_STRING_WIDTH", nullptr))
+            {
+                const int nVal = atoi(pszVal);
+                if (nVal >= 0)
+                    nWidth = nVal;
+            }
+            // Advertise a non-zero user-modified width back to the created
+            // OGRFieldDefn, only if it is less than the hard-coded default
+            // value (this will avoid potential issues with excessively large
+            // field width afterwards)
+            if (nWidth < DEFAULT_STRING_WIDTH)
                 poField->SetWidth(nWidth);
         }
     }
 
     OGRField sDefault = FileGDBField::UNSET_FIELD;
     std::string osDefaultVal;
-    if (!GetDefault(poField, eType, sDefault, osDefaultVal))
+    if (!GetDefault(poField, eType, sDefault, osDefaultVal,
+                    CPL_TO_BOOL(bApproxOK)))
         return OGRERR_FAILURE;
 
     if (!poField->GetDomainName().empty() &&
@@ -1230,26 +1357,39 @@ OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
         }
     }
 
-    const char *pszAlias = poField->GetAlternativeNameRef();
-    if (!m_poLyrTable->CreateField(cpl::make_unique<FileGDBField>(
-            poField->GetNameRef(),
-            pszAlias ? std::string(pszAlias) : std::string(), eType,
-            CPL_TO_BOOL(poField->IsNullable()), nWidth, sDefault)))
-    {
-        return OGRERR_FAILURE;
-    }
+    const bool bNullable =
+        CPL_TO_BOOL(poField->IsNullable()) && eType != FGFT_GLOBALID;
+    bool bRequired = (eType == FGFT_GLOBALID);
+    bool bEditable = (eType != FGFT_GLOBALID);
 
     if (poField->GetType() == OFTReal)
     {
         const char *pszDefault = poField->GetDefault();
         if (pszDefault && EQUAL(pszDefault, "FILEGEODATABASE_SHAPE_AREA"))
+        {
             m_iAreaField = m_poFeatureDefn->GetFieldCount();
+            bRequired = true;
+            bEditable = false;
+        }
         else if (pszDefault &&
                  EQUAL(pszDefault, "FILEGEODATABASE_SHAPE_LENGTH"))
+        {
             m_iLengthField = m_poFeatureDefn->GetFieldCount();
+            bRequired = true;
+            bEditable = false;
+        }
     }
 
-    m_poFeatureDefn->AddFieldDefn(poField);
+    const char *pszAlias = poField->GetAlternativeNameRef();
+    if (!m_poLyrTable->CreateField(std::make_unique<FileGDBField>(
+            poField->GetNameRef(),
+            pszAlias ? std::string(pszAlias) : std::string(), eType, bNullable,
+            bRequired, bEditable, nWidth, sDefault)))
+    {
+        return OGRERR_FAILURE;
+    }
+
+    whileUnsealing(m_poFeatureDefn)->AddFieldDefn(poField);
 
     if (m_bRegisteredTable)
     {
@@ -1261,11 +1401,12 @@ OGRErr OGROpenFileGDBLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
             CPLXMLNode *psGPFieldInfoExs = GetGPFieldInfoExsNode(oTree.get());
             if (psGPFieldInfoExs)
             {
-                CPLAddXMLChild(
-                    psGPFieldInfoExs,
-                    CreateXMLFieldDefinition(
-                        poField, m_poLyrTable->GetField(
-                                     m_poLyrTable->GetFieldCount() - 1)));
+                CPLAddXMLChild(psGPFieldInfoExs,
+                               CreateXMLFieldDefinition(
+                                   poField,
+                                   m_poLyrTable->GetField(
+                                       m_poLyrTable->GetFieldCount() - 1),
+                                   m_bArcGISPro32OrLater));
 
                 char *pszDefinition = CPLSerializeXMLTree(oTree.get());
                 m_osDefinition = pszDefinition;
@@ -1324,6 +1465,7 @@ OGRErr OGROpenFileGDBLayer::AlterFieldDefn(int iFieldToAlter,
         return OGRERR_FAILURE;
 
     OGRFieldDefn *poFieldDefn = m_poFeatureDefn->GetFieldDefn(iFieldToAlter);
+    auto oTemporaryUnsealer(poFieldDefn->GetTemporaryUnsealer());
     OGRFieldDefn oField(poFieldDefn);
     const std::string osOldFieldName(poFieldDefn->GetNameRef());
     const std::string osOldDomainName(
@@ -1359,7 +1501,6 @@ OGRErr OGROpenFileGDBLayer::AlterFieldDefn(int iFieldToAlter,
 
             oField.SetName(poNewFieldDefn->GetNameRef());
         }
-        oField.SetAlternativeName(poNewFieldDefn->GetAlternativeNameRef());
     }
     if (nFlagsIn & ALTER_WIDTH_PRECISION_FLAG)
     {
@@ -1385,8 +1526,12 @@ OGRErr OGROpenFileGDBLayer::AlterFieldDefn(int iFieldToAlter,
     {
         oField.SetDomainName(poNewFieldDefn->GetDomainName());
     }
+    if (nFlagsIn & ALTER_ALTERNATIVE_NAME_FLAG)
+    {
+        oField.SetAlternativeName(poNewFieldDefn->GetAlternativeNameRef());
+    }
 
-    const auto eType = GetGDBFieldType(&oField);
+    const auto eType = GetGDBFieldType(&oField, m_bArcGISPro32OrLater);
 
     int nWidth = 0;
     if (eType == FGFT_GLOBALID || eType == FGFT_GUID)
@@ -1406,7 +1551,8 @@ OGRErr OGROpenFileGDBLayer::AlterFieldDefn(int iFieldToAlter,
 
     OGRField sDefault = FileGDBField::UNSET_FIELD;
     std::string osDefaultVal;
-    if (!GetDefault(&oField, eType, sDefault, osDefaultVal))
+    if (!GetDefault(&oField, eType, sDefault, osDefaultVal,
+                    /*bApproxOK=*/false))
         return OGRERR_FAILURE;
 
     const char *pszAlias = oField.GetAlternativeNameRef();
@@ -1450,7 +1596,8 @@ OGRErr OGROpenFileGDBLayer::AlterFieldDefn(int iFieldToAlter,
                         psIter->psNext = nullptr;
                         CPLDestroyXMLNode(psIter);
                         psIter = CreateXMLFieldDefinition(
-                            poFieldDefn, m_poLyrTable->GetField(nGDBIdx));
+                            poFieldDefn, m_poLyrTable->GetField(nGDBIdx),
+                            m_bArcGISPro32OrLater);
                         psIter->psNext = psNext;
                         if (psLastChild == nullptr)
                             psGPFieldInfoExs->psChild = psIter;
@@ -1563,6 +1710,7 @@ OGRErr OGROpenFileGDBLayer::AlterGeomFieldDefn(
 
     const auto poGeomFieldDefn =
         m_poFeatureDefn->GetGeomFieldDefn(iGeomFieldToAlter);
+    auto oTemporaryUnsealer(poGeomFieldDefn->GetTemporaryUnsealer());
     OGRGeomFieldDefn oField(poGeomFieldDefn);
 
     if ((nFlagsIn & ALTER_GEOM_FIELD_DEFN_TYPE_FLAG) != 0)
@@ -1796,7 +1944,7 @@ OGRErr OGROpenFileGDBLayer::DeleteField(int iFieldToDelete)
     const std::string osOldDomainName =
         std::string(poFieldDefn->GetDomainName());
 
-    m_poFeatureDefn->DeleteFieldDefn(iFieldToDelete);
+    whileUnsealing(m_poFeatureDefn)->DeleteFieldDefn(iFieldToDelete);
 
     if (m_iFIDAsRegularColumnIndex > iFieldToDelete)
         m_iFIDAsRegularColumnIndex--;
@@ -1939,7 +2087,8 @@ static double GetLength(const OGRMultiSurface *poMS)
 
 bool OGROpenFileGDBLayer::PrepareFileGDBFeature(OGRFeature *poFeature,
                                                 std::vector<OGRField> &fields,
-                                                const OGRGeometry *&poGeom)
+                                                const OGRGeometry *&poGeom,
+                                                bool bUpdate)
 {
     // Check geometry type
     poGeom = poFeature->GetGeometryRef();
@@ -2016,19 +2165,33 @@ bool OGROpenFileGDBLayer::PrepareFileGDBFeature(OGRFeature *poFeature,
                     eFlattenType != wkbPolyhedralSurface &&
                     eFlattenType != wkbGeometryCollection)
                 {
-                    CPLError(CE_Failure, CPLE_NotSupported,
-                             "Can only insert a "
-                             "TIN/PolyhedralSurface/GeometryCollection in a "
-                             "esriGeometryMultiPatch layer");
-                    return false;
+                    if (CPLTestBool(m_aosCreationOptions.FetchNameValueDef(
+                            "CREATE_MULTIPATCH", "FALSE")) &&
+                        eFlattenType == wkbMultiPolygon)
+                    {
+                        // ok
+                    }
+                    else
+                    {
+                        CPLError(
+                            CE_Failure, CPLE_NotSupported,
+                            "Can only insert a "
+                            "TIN/PolyhedralSurface/GeometryCollection in a "
+                            "esriGeometryMultiPatch layer");
+                        return false;
+                    }
                 }
                 break;
             }
         }
 
         // Treat empty geometries as NULL, like the FileGDB driver
-        if (poGeom->IsEmpty())
+        if (poGeom->IsEmpty() &&
+            !CPLTestBool(CPLGetConfigOption(
+                "OGR_OPENFILEGDB_WRITE_EMPTY_GEOMETRY", "NO")))
+        {
             poGeom = nullptr;
+        }
     }
 
     if (m_iAreaField >= 0)
@@ -2096,6 +2259,7 @@ bool OGROpenFileGDBLayer::PrepareFileGDBFeature(OGRFeature *poFeature,
             }
             continue;
         }
+        memset(&fields[idxFileGDB], 0, sizeof(OGRField));
         switch (m_poLyrTable->GetField(idxFileGDB)->GetType())
         {
             case FGFT_UNDEFINED:
@@ -2143,6 +2307,7 @@ bool OGROpenFileGDBLayer::PrepareFileGDBFeature(OGRFeature *poFeature,
                 break;
             }
             case FGFT_DATETIME:
+            case FGFT_DATE:
             {
                 fields[idxFileGDB].Date = poFeature->GetRawFieldRef(i)->Date;
                 if (m_bTimeInUTC && fields[idxFileGDB].Date.TZFlag <= 1)
@@ -2186,17 +2351,48 @@ bool OGROpenFileGDBLayer::PrepareFileGDBFeature(OGRFeature *poFeature,
                 break;
             case FGFT_GLOBALID:
             {
-                if (poFeature->GetRawFieldRef(i)->String[0] != '\0' &&
-                    CPLTestBool(CPLGetConfigOption(
-                        "OPENFILEGDB_REGENERATE_GLOBALID", "YES")))
+                if (bUpdate)
                 {
-                    CPLError(CE_Warning, CPLE_AppDefined,
-                             "Value found in a GlobalID field. It will be "
-                             "replaced by a "
-                             "newly generated UUID.");
+                    m_aosTempStrings.emplace_back(
+                        poFeature->GetFieldAsString(i));
+                    fields[idxFileGDB].String = &m_aosTempStrings.back()[0];
                 }
-                m_aosTempStrings.emplace_back(OFGDBGenerateUUID());
-                fields[idxFileGDB].String = &m_aosTempStrings.back()[0];
+                else if (poFeature->GetRawFieldRef(i)->String[0] != '\0')
+                {
+                    if (CPLTestBool(CPLGetConfigOption(
+                            "OPENFILEGDB_REGENERATE_GLOBALID", "YES")))
+                    {
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "Value found in a GlobalID field. It will be "
+                                 "replaced by a "
+                                 "newly generated UUID.");
+                        m_aosTempStrings.emplace_back(OFGDBGenerateUUID());
+                        fields[idxFileGDB].String = &m_aosTempStrings.back()[0];
+                    }
+                    else
+                    {
+                        m_aosTempStrings.emplace_back(
+                            poFeature->GetFieldAsString(i));
+                        fields[idxFileGDB].String = &m_aosTempStrings.back()[0];
+                    }
+                }
+                else
+                {
+                    m_aosTempStrings.emplace_back(OFGDBGenerateUUID());
+                    fields[idxFileGDB].String = &m_aosTempStrings.back()[0];
+                }
+                break;
+            }
+            case FGFT_INT64:
+            {
+                fields[idxFileGDB].Integer64 =
+                    poFeature->GetRawFieldRef(i)->Integer64;
+                break;
+            }
+            case FGFT_TIME:
+            case FGFT_DATETIME_WITH_OFFSET:
+            {
+                fields[idxFileGDB].Date = poFeature->GetRawFieldRef(i)->Date;
                 break;
             }
         }
@@ -2223,8 +2419,7 @@ static bool CheckFIDAndFIDColumnConsistency(const OGRFeature *poFeature,
     {
         const double dfFID =
             poFeature->GetFieldAsDouble(iFIDAsRegularColumnIndex);
-        if (dfFID >= static_cast<double>(std::numeric_limits<int64_t>::min()) &&
-            dfFID <= static_cast<double>(std::numeric_limits<int64_t>::max()))
+        if (GDALIsValueInRange<int64_t>(dfFID))
         {
             const auto nFID = static_cast<GIntBig>(dfFID);
             if (nFID == poFeature->GetFID())
@@ -2326,7 +2521,7 @@ OGRErr OGROpenFileGDBLayer::ICreateFeature(OGRFeature *poFeature)
 
     const OGRGeometry *poGeom = nullptr;
     std::vector<OGRField> fields;
-    if (!PrepareFileGDBFeature(poFeature, fields, poGeom))
+    if (!PrepareFileGDBFeature(poFeature, fields, poGeom, /*bUpdate=*/false))
         return OGRERR_FAILURE;
 
     m_eSpatialIndexState = SPI_INVALID;
@@ -2376,7 +2571,7 @@ OGRErr OGROpenFileGDBLayer::ISetFeature(OGRFeature *poFeature)
 
     const OGRGeometry *poGeom = nullptr;
     std::vector<OGRField> fields;
-    if (!PrepareFileGDBFeature(poFeature, fields, poGeom))
+    if (!PrepareFileGDBFeature(poFeature, fields, poGeom, /*bUpdate=*/true))
         return OGRERR_FAILURE;
 
     m_eSpatialIndexState = SPI_INVALID;
@@ -2440,7 +2635,9 @@ void OGROpenFileGDBLayer::RefreshXMLDefinitionInMemory()
     CPLAddXMLSibling(oTree.get(), psRoot);
 
     CPLAddXMLAttributeAndValue(psRoot, "xmlns:typens",
-                               "http://www.esri.com/schemas/ArcGIS/10.3");
+                               m_bArcGISPro32OrLater
+                                   ? "http://www.esri.com/schemas/ArcGIS/10.8"
+                                   : "http://www.esri.com/schemas/ArcGIS/10.3");
     CPLAddXMLAttributeAndValue(psRoot, "xmlns:xsi",
                                "http://www.w3.org/2001/XMLSchema-instance");
     CPLAddXMLAttributeAndValue(psRoot, "xmlns:xs",
@@ -2461,7 +2658,8 @@ void OGROpenFileGDBLayer::RefreshXMLDefinitionInMemory()
         if (!oTable.Open(m_poDS->m_osGDBItemsFilename.c_str(), false))
             return;
         CPLCreateXMLElementAndValue(
-            psRoot, "DSID", CPLSPrintf("%d", 1 + oTable.GetTotalRecordCount()));
+            psRoot, "DSID",
+            CPLSPrintf("%" PRId64, 1 + oTable.GetTotalRecordCount()));
     }
 
     CPLCreateXMLElementAndValue(psRoot, "Versioned", "false");
@@ -2470,6 +2668,11 @@ void OGROpenFileGDBLayer::RefreshXMLDefinitionInMemory()
     {
         CPLCreateXMLElementAndValue(psRoot, "ConfigurationKeyword",
                                     m_osConfigurationKeyword.c_str());
+    }
+    if (m_bArcGISPro32OrLater)
+    {
+        CPLCreateXMLElementAndValue(psRoot, "RequiredGeodatabaseClientVersion",
+                                    "13.2");
     }
     CPLCreateXMLElementAndValue(psRoot, "HasOID", "true");
     CPLCreateXMLElementAndValue(psRoot, "OIDFieldName", GetFIDColumn());
@@ -2522,9 +2725,9 @@ void OGROpenFileGDBLayer::RefreshXMLDefinitionInMemory()
             if (nOGRIdx >= 0)
             {
                 const auto poFieldDefn = m_poFeatureDefn->GetFieldDefn(nOGRIdx);
-                CPLAddXMLChild(
-                    GPFieldInfoExs,
-                    CreateXMLFieldDefinition(poFieldDefn, poGDBFieldDefn));
+                CPLAddXMLChild(GPFieldInfoExs, CreateXMLFieldDefinition(
+                                                   poFieldDefn, poGDBFieldDefn,
+                                                   m_bArcGISPro32OrLater));
             }
         }
     }
@@ -2562,7 +2765,7 @@ void OGROpenFileGDBLayer::RefreshXMLDefinitionInMemory()
                 pszShapeType = "esriGeometryMultipoint";
                 break;
             case FGTGT_LINE:
-                pszShapeType = "esriGeometryLine";
+                pszShapeType = "esriGeometryPolyline";
                 break;
             case FGTGT_POLYGON:
                 pszShapeType = "esriGeometryPolygon";
@@ -2706,7 +2909,8 @@ void OGROpenFileGDBLayer::CreateIndex(const std::string &osIdxName,
 /*                                Repack()                              */
 /************************************************************************/
 
-bool OGROpenFileGDBLayer::Repack()
+bool OGROpenFileGDBLayer::Repack(GDALProgressFunc pfnProgress,
+                                 void *pProgressData)
 {
     if (!m_bEditable)
         return false;
@@ -2714,7 +2918,7 @@ bool OGROpenFileGDBLayer::Repack()
     if (!BuildLayerDefinition())
         return false;
 
-    return m_poLyrTable->Repack();
+    return m_poLyrTable->Repack(pfnProgress, pProgressData);
 }
 
 /************************************************************************/
@@ -2758,19 +2962,20 @@ bool OGROpenFileGDBLayer::BeginEmulatedTransaction()
 
     bool bRet = true;
 
-    const std::string osThisDirname = CPLGetPath(m_osGDBFilename.c_str());
-    const std::string osThisBasename = CPLGetBasename(m_osGDBFilename.c_str());
+    const std::string osThisDirname = CPLGetPathSafe(m_osGDBFilename.c_str());
+    const std::string osThisBasename =
+        CPLGetBasenameSafe(m_osGDBFilename.c_str());
     char **papszFiles = VSIReadDir(osThisDirname.c_str());
     for (char **papszIter = papszFiles;
          papszIter != nullptr && *papszIter != nullptr; ++papszIter)
     {
-        const std::string osBasename = CPLGetBasename(*papszIter);
+        const std::string osBasename = CPLGetBasenameSafe(*papszIter);
         if (osBasename == osThisBasename)
         {
-            std::string osDestFilename = CPLFormFilename(
+            const std::string osDestFilename = CPLFormFilenameSafe(
                 m_poDS->GetBackupDirName().c_str(), *papszIter, nullptr);
-            std::string osSourceFilename =
-                CPLFormFilename(osThisDirname.c_str(), *papszIter, nullptr);
+            const std::string osSourceFilename =
+                CPLFormFilenameSafe(osThisDirname.c_str(), *papszIter, nullptr);
             if (CPLCopyFile(osDestFilename.c_str(), osSourceFilename.c_str()) !=
                 0)
             {
@@ -2814,6 +3019,7 @@ bool OGROpenFileGDBLayer::RollbackEmulatedTransaction()
     if (m_poFeatureDefnBackup != nullptr &&
         !m_poFeatureDefn->IsSame(m_poFeatureDefnBackup.get()))
     {
+        auto oTemporaryUnsealer(m_poFeatureDefn->GetTemporaryUnsealer());
         {
             const int nFieldCount = m_poFeatureDefn->GetFieldCount();
             for (int i = nFieldCount - 1; i >= 0; i--)
@@ -2832,8 +3038,9 @@ bool OGROpenFileGDBLayer::RollbackEmulatedTransaction()
 
     bool bRet = true;
 
-    const std::string osThisDirname = CPLGetPath(m_osGDBFilename.c_str());
-    const std::string osThisBasename = CPLGetBasename(m_osGDBFilename.c_str());
+    const std::string osThisDirname = CPLGetPathSafe(m_osGDBFilename.c_str());
+    const std::string osThisBasename =
+        CPLGetBasenameSafe(m_osGDBFilename.c_str());
 
     // Delete files in working directory that match our basename
     {
@@ -2841,11 +3048,11 @@ bool OGROpenFileGDBLayer::RollbackEmulatedTransaction()
         for (char **papszIter = papszFiles;
              papszIter != nullptr && *papszIter != nullptr; ++papszIter)
         {
-            const std::string osBasename = CPLGetBasename(*papszIter);
+            const std::string osBasename = CPLGetBasenameSafe(*papszIter);
             if (osBasename == osThisBasename)
             {
-                std::string osDestFilename =
-                    CPLFormFilename(osThisDirname.c_str(), *papszIter, nullptr);
+                const std::string osDestFilename = CPLFormFilenameSafe(
+                    osThisDirname.c_str(), *papszIter, nullptr);
                 VSIUnlink(osDestFilename.c_str());
             }
         }
@@ -2859,13 +3066,13 @@ bool OGROpenFileGDBLayer::RollbackEmulatedTransaction()
         for (char **papszIter = papszFiles;
              papszIter != nullptr && *papszIter != nullptr; ++papszIter)
         {
-            const std::string osBasename = CPLGetBasename(*papszIter);
+            const std::string osBasename = CPLGetBasenameSafe(*papszIter);
             if (osBasename == osThisBasename)
             {
                 bBackupFound = true;
-                std::string osDestFilename =
-                    CPLFormFilename(osThisDirname.c_str(), *papszIter, nullptr);
-                std::string osSourceFilename = CPLFormFilename(
+                const std::string osDestFilename = CPLFormFilenameSafe(
+                    osThisDirname.c_str(), *papszIter, nullptr);
+                const std::string osSourceFilename = CPLFormFilenameSafe(
                     m_poDS->GetBackupDirName().c_str(), *papszIter, nullptr);
                 if (CPLCopyFile(osDestFilename.c_str(),
                                 osSourceFilename.c_str()) != 0)
@@ -2983,7 +3190,7 @@ OGRErr OGROpenFileGDBLayer::Rename(const char *pszDstTableName)
 
     m_osName = pszDstTableName;
     SetDescription(pszDstTableName);
-    m_poFeatureDefn->SetName(pszDstTableName);
+    whileUnsealing(m_poFeatureDefn)->SetName(pszDstTableName);
 
     auto nLastSlashPos = m_osPath.rfind('\\');
     if (nLastSlashPos != std::string::npos)
@@ -3006,7 +3213,7 @@ OGRErr OGROpenFileGDBLayer::Rename(const char *pszDstTableName)
 
         FETCH_FIELD_IDX_WITH_RET(iName, "Name", FGFT_STRING, OGRERR_FAILURE);
 
-        for (int iCurFeat = 0; iCurFeat < oTable.GetTotalRecordCount();
+        for (int64_t iCurFeat = 0; iCurFeat < oTable.GetTotalRecordCount();
              ++iCurFeat)
         {
             iCurFeat = oTable.GetAndSelectNextNonEmptyRow(iCurFeat);
@@ -3044,7 +3251,7 @@ OGRErr OGROpenFileGDBLayer::Rename(const char *pszDstTableName)
         FETCH_FIELD_IDX_WITH_RET(iDefinition, "Definition", FGFT_XML,
                                  OGRERR_FAILURE);
 
-        for (int iCurFeat = 0; iCurFeat < oTable.GetTotalRecordCount();
+        for (int64_t iCurFeat = 0; iCurFeat < oTable.GetTotalRecordCount();
              ++iCurFeat)
         {
             iCurFeat = oTable.GetAndSelectNextNonEmptyRow(iCurFeat);

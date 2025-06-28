@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018-2020, Björn Harrtell <bjorn at wololo dot org>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 // NOTE: The upstream of this file is in
@@ -36,7 +20,14 @@
 #include <deque>
 #include <numeric>
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
 #include "flatbuffers/flatbuffers.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 namespace FlatGeobuf
 {
@@ -48,19 +39,23 @@ struct NodeItem
     double maxX;
     double maxY;
     uint64_t offset;
+
     double width() const
     {
         return maxX - minX;
     }
+
     double height() const
     {
         return maxY - minY;
     }
+
     static NodeItem sum(NodeItem a, const NodeItem &b)
     {
         a.expand(b);
         return a;
     }
+
     static NodeItem create(uint64_t offset = 0);
     const NodeItem &expand(const NodeItem &r);
     bool intersects(const NodeItem &r) const;
@@ -91,7 +86,7 @@ template <class ITEM_TYPE>
 NodeItem calcExtent(const std::deque<ITEM_TYPE> &items)
 {
     return std::accumulate(items.begin(), items.end(), NodeItem::create(0),
-                           [](NodeItem a, const ITEM_TYPE &b)
+                           [](NodeItem a, const ITEM_TYPE &b) -> NodeItem
                            { return a.expand(b.nodeItem); });
 }
 
@@ -140,6 +135,7 @@ class PackedRTree
         if (_nodeItems != nullptr)
             delete[] _nodeItems;
     }
+
     PackedRTree(const std::vector<std::shared_ptr<Item>> &items,
                 const NodeItem &extent, const uint16_t nodeSize = 16);
     PackedRTree(const std::vector<NodeItem> &nodes, const NodeItem &extent,

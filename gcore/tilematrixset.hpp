@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2020, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef TILEMATRIXSET_HPP_INCLUDED
@@ -51,10 +35,13 @@ class CPL_DLL TileMatrixSet
     {
         return mIdentifier;
     }
+
     const std::string &title() const
     {
         return mTitle;
     }
+
+    //! "abstract" in TMS v1 / "description" in TMS v2
     const std::string &abstract() const
     {
         return mAbstract;
@@ -62,20 +49,24 @@ class CPL_DLL TileMatrixSet
 
     struct CPL_DLL BoundingBox
     {
-        std::string mCrs{};
+        std::string mCrs{};  //! Can be a URL, a URI, a WKT or PROJJSON string.
         double mLowerCornerX{NaN};
         double mLowerCornerY{NaN};
         double mUpperCornerX{NaN};
         double mUpperCornerY{NaN};
     };
+
     const BoundingBox &bbox() const
     {
         return mBbox;
     }
+
+    //! Can be a URL, a URI, a WKT or PROJJSON string.
     const std::string &crs() const
     {
         return mCrs;
     }
+
     const std::string &wellKnownScaleSet() const
     {
         return mWellKnownScaleSet;
@@ -102,8 +93,10 @@ class CPL_DLL TileMatrixSet
             int mMinTileRow{};
             int mMaxTileRow{};
         };
+
         std::vector<VariableMatrixWidth> mVariableMatrixWidthList{};
     };
+
     const std::vector<TileMatrix> &tileMatrixList() const
     {
         return mTileMatrixList;
@@ -114,9 +107,16 @@ class CPL_DLL TileMatrixSet
      * Set: http://docs.opengeospatial.org/is/17-083r2/17-083r2.html */
     static std::unique_ptr<TileMatrixSet> parse(const char *fileOrDef);
 
+    /** Create a raster tiling scheme */
+    static std::unique_ptr<TileMatrixSet>
+    createRaster(int width, int height, int tileSize, int zoomLevelCount,
+                 double dfTopLeftX = 0.0, double dfTopLeftY = 0.0,
+                 double dfResXFull = 1.0, double dfResYFull = 1.0,
+                 const std::string &mCRS = std::string());
+
     /** Return hardcoded tile matrix set names (such as GoogleMapsCompatible),
      * as well as XXX for each tms_XXXX.json in GDAL data directory */
-    static std::set<std::string> listPredefinedTileMatrixSets();
+    static std::vector<std::string> listPredefinedTileMatrixSets();
 
     bool haveAllLevelsSameTopLeft() const;
 

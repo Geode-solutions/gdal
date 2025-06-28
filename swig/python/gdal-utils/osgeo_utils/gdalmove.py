@@ -10,23 +10,7 @@
 #  Copyright (c) 2012, Frank Warmerdam
 #  Copyright (c) 2021, Idan Miara <idan@miara.com>
 #
-#  Permission is hereby granted, free of charge, to any person obtaining a
-#  copy of this software and associated documentation files (the "Software"),
-#  to deal in the Software without restriction, including without limitation
-#  the rights to use, copy, modify, merge, publish, distribute, sublicense,
-#  and/or sell copies of the Software, and to permit persons to whom the
-#  Software is furnished to do so, subject to the following conditions:
-#
-#  The above copyright notice and this permission notice shall be included
-#  in all copies or substantial portions of the Software.
-#
-#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-#  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-#  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-#  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-#  DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 # ******************************************************************************
 
 import math
@@ -34,6 +18,7 @@ import sys
 from typing import Optional
 
 from osgeo import gdal, osr
+from osgeo_utils.auxiliary.util import enable_gdal_exceptions
 
 ###############################################################################
 
@@ -47,6 +32,7 @@ def fmt_loc(srs_obj, loc):
 ###############################################################################
 
 
+@enable_gdal_exceptions
 def move(
     filename: str,
     t_srs: str,
@@ -233,23 +219,23 @@ def move(
 ###############################################################################
 
 
-def Usage():
+def Usage(isError=True):
+    f = sys.stderr if isError else sys.stdout
     print(
-        """Usage: gdalmove.py [-s_srs <srs_defn>] -t_srs <srs_defn>
-            [-et <max_pixel_err>] target_file"""
+        """Usage: gdalmove [--help] [--help-general]
+                   [-s_srs <srs_defn>] -t_srs <srs_defn>
+                   [-et <max_pixel_err>] <target_file>""",
+        file=f,
     )
-    return 2
+    return 2 if isError else 0
 
 
 def main(argv=sys.argv):
-    # Default GDAL argument parsing.
 
+    # Default GDAL argument parsing.
     argv = gdal.GeneralCmdLineProcessor(argv)
     if argv is None:
         return 0
-
-    if len(argv) == 1:
-        return Usage()
 
     # Script argument defaults
     s_srs = None
@@ -262,7 +248,10 @@ def main(argv=sys.argv):
     i = 1
     while i < len(argv):
 
-        if argv[i] == "-s_srs" and i < len(argv) - 1:
+        if argv[i] == "--help":
+            return Usage(isError=False)
+
+        elif argv[i] == "-s_srs" and i < len(argv) - 1:
             s_srs = argv[i + 1]
             i += 1
 
@@ -283,6 +272,9 @@ def main(argv=sys.argv):
 
         i = i + 1
         # next argument
+
+    if len(argv) == 1:
+        return Usage()
 
     if filename is None:
         print("Missing name of file to operate on, but required.")

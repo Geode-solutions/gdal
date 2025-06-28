@@ -8,29 +8,14 @@
  * Copyright (c) 2007, Jens Oberender
  * Copyright (c) 2007-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "kmlnode.h"
 
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -118,9 +103,7 @@ static Coordinate *ParseCoordinate(std::string const &text)
 KMLNode::KMLNode()
     : pvpoChildren_(new std::vector<KMLNode *>),
       pvsContent_(new std::vector<std::string>),
-      pvoAttributes_(new std::vector<Attribute *>), poParent_(nullptr),
-      nLevel_(0), eType_(Unknown), b25D_(false), nLayerNumber_(-1),
-      nNumFeatures_(-1)
+      pvoAttributes_(new std::vector<Attribute *>)
 {
 }
 
@@ -488,17 +471,16 @@ std::string KMLNode::getDescriptionElement() const
 
 std::size_t KMLNode::getNumFeatures()
 {
-    if (nNumFeatures_ < 0)
+    if (nNumFeatures_ == std::numeric_limits<size_t>::max())
     {
-        std::size_t nNum = 0;
+        nNumFeatures_ = 0;
         kml_nodes_t::size_type size = pvpoChildren_->size();
 
         for (kml_nodes_t::size_type i = 0; i < size; ++i)
         {
             if ((*pvpoChildren_)[i]->sName_ == "Placemark")
-                nNum++;
+                nNumFeatures_++;
         }
-        nNumFeatures_ = (int)nNum;
     }
     return nNumFeatures_;
 }
@@ -779,7 +761,7 @@ Feature *KMLNode::getFeature(std::size_t nNum, int &nLastAsked, int &nLastCount)
               sName == "MultiPoint")))
         {
             poTemp = (*poFeat->pvpoChildren_)[nCount];
-            psReturn->poGeom = poTemp->getGeometry(poFeat->eType_);
+            psReturn->poGeom.reset(poTemp->getGeometry(poFeat->eType_));
             if (psReturn->poGeom)
                 return psReturn;
             else

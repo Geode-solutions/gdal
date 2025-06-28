@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test /vsiadls
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2020 Even Rouault <even dot rouault at spatialys dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import sys
@@ -37,6 +20,12 @@ import webserver
 from osgeo import gdal
 
 pytestmark = pytest.mark.require_curl()
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 def open_for_read(uri):
@@ -50,21 +39,19 @@ def open_for_read(uri):
 @pytest.fixture(autouse=True, scope="module")
 def startup_and_cleanup():
 
-    # Unset all env vars that could influence the tests
-    az_vars = {}
-    for var, reset_val in (
-        ("AZURE_STORAGE_CONNECTION_STRING", None),
-        ("AZURE_STORAGE_ACCOUNT", None),
-        ("AZURE_STORAGE_ACCESS_KEY", None),
-        ("AZURE_STORAGE_SAS_TOKEN", None),
-        ("AZURE_NO_SIGN_REQUEST", None),
-        ("AZURE_CONFIG_DIR", ""),
-        ("AZURE_STORAGE_ACCESS_TOKEN", ""),
+    with gdaltest.config_options(
+        {
+            "AZURE_STORAGE_CONNECTION_STRING": None,
+            "AZURE_STORAGE_ACCOUNT": None,
+            "AZURE_STORAGE_ACCESS_KEY": None,
+            "AZURE_STORAGE_SAS_TOKEN": None,
+            "AZURE_NO_SIGN_REQUEST": None,
+            "AZURE_CONFIG_DIR": "",
+            "AZURE_STORAGE_ACCESS_TOKEN": "",
+            "AZURE_FEDERATED_TOKEN_FILE": "",
+            "CPL_AZURE_VM_API_ROOT_URL": "disabled",
+        }
     ):
-        az_vars[var] = gdal.GetConfigOption(var)
-        gdal.SetConfigOption(var, reset_val)
-
-    with gdaltest.config_option("CPL_AZURE_VM_API_ROOT_URL", "disabled"):
         assert gdal.GetSignedURL("/vsiadls/foo/bar") is None
 
     gdaltest.webserver_process = None
@@ -76,25 +63,26 @@ def startup_and_cleanup():
     if gdaltest.webserver_port == 0:
         pytest.skip()
 
-    gdal.SetConfigOption(
-        "AZURE_STORAGE_CONNECTION_STRING",
-        "DefaultEndpointsProtocol=http;AccountName=myaccount;AccountKey=MY_ACCOUNT_KEY;BlobEndpoint=http://127.0.0.1:%d/azure/blob/myaccount"
-        % gdaltest.webserver_port,
-    )
-    gdal.SetConfigOption("AZURE_STORAGE_ACCOUNT", "")
-    gdal.SetConfigOption("AZURE_STORAGE_ACCESS_KEY", "")
-    gdal.SetConfigOption("CPL_AZURE_TIMESTAMP", "my_timestamp")
-
-    yield
+    with gdal.config_options(
+        {
+            "AZURE_CONFIG_DIR": "",
+            "AZURE_NO_SIGN_REQUEST": None,
+            "AZURE_STORAGE_ACCOUNT": None,
+            "AZURE_STORAGE_ACCESS_KEY": None,
+            "AZURE_STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=http;AccountName=myaccount;AccountKey=MY_ACCOUNT_KEY;BlobEndpoint=http://127.0.0.1:%d/azure/blob/myaccount"
+            % gdaltest.webserver_port,
+            "AZURE_STORAGE_SAS_TOKEN": None,
+            "CPL_AZURE_TIMESTAMP": "my_timestamp",
+        },
+        thread_local=False,
+    ):
+        yield
 
     # Clearcache needed to close all connections, since the Python server
     # can only handle one connection at a time
     gdal.VSICurlClearCache()
 
     webserver.server_stop(gdaltest.webserver_process, gdaltest.webserver_port)
-
-    for var in az_vars:
-        gdal.SetConfigOption(var, az_vars[var])
 
 
 ###############################################################################
@@ -112,7 +100,7 @@ def test_vsiadls_fake_basic():
         "/vsiadls/az_fake_bucket/resource", ["START_DATE=20180213T123456"]
     )
     assert (
-        "/azure/blob/myaccount/az_fake_bucket/resource?se=2018-02-13T13%3A34%3A56Z&sig=9Jc4yBFlSRZSSxf059OohN6pYRrjuHWJWSEuryczN%2FM%3D&sp=r&sr=c&st=2018-02-13T12%3A34%3A56Z&sv=2012-02-12"
+        "/azure/blob/myaccount/az_fake_bucket/resource?se=2018-02-13T13%3A34%3A56Z&sig=j0cUaaHtf2SW2usSsiN79DYx%2Fo1vWwq4lLYZSC5%2Bv7I%3D&sp=r&spr=https&sr=b&st=2018-02-13T12%3A34%3A56Z&sv=2020-12-06"
         in signed_url
     )
 
@@ -637,7 +625,7 @@ def test_vsiadls_fake_unlink():
         {"Connection": "close"},
     )
     with webserver.install_http_handler(handler):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             ret = gdal.Unlink("/vsiadls/az_bucket_test_unlink/myfile")
     assert ret == -1
 
@@ -787,6 +775,7 @@ def test_vsiadls_fake_sync_copyobject():
             "Content-Length": "3",
             "x-ms-permissions": "rwxrwxrwx",
             "x-ms-resource-type": "file",
+            "Last-Modified": "Mon, 04 Sep 2023 22:00:00 GMT",
         },
     )
     handler.add("HEAD", "/azure/blob/myaccount/test_bucket/dst.txt", 404)
@@ -802,9 +791,195 @@ def test_vsiadls_fake_sync_copyobject():
     with webserver.install_http_handler(handler):
         assert gdal.Sync("/vsiadls/test_bucket/src.txt", "/vsiadls/test_bucket/dst.txt")
 
+
+###############################################################################
+# Test sync again, but this is a no-op because of the date time
+
+
+def test_vsiadls_fake_sync_no_op_because_of_data_time():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
     gdal.VSICurlClearCache()
 
-    # Error case
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "HEAD",
+        "/azure/blob/myaccount/test_bucket/src.txt",
+        200,
+        {
+            "Content-Length": "3",
+            "x-ms-permissions": "rwxrwxrwx",
+            "x-ms-resource-type": "file",
+            "Last-Modified": "Mon, 04 Sep 2023 22:00:00 GMT",
+        },
+    )
+    handler.add(
+        "HEAD",
+        "/azure/blob/myaccount/test_bucket/dst.txt",
+        200,
+        {
+            "Content-Length": "3",
+            "x-ms-permissions": "rwxrwxrwx",
+            "x-ms-resource-type": "file",
+            "Last-Modified": "Mon, 04 Sep 2023 23:00:00 GMT",
+        },
+    )
+    with webserver.install_http_handler(handler):
+        assert gdal.Sync("/vsiadls/test_bucket/src.txt", "/vsiadls/test_bucket/dst.txt")
+
+
+###############################################################################
+# Test sync again, but overwrite because of the date time
+
+
+def test_vsiadls_fake_sync_overwite_because_of_data_time():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "HEAD",
+        "/azure/blob/myaccount/test_bucket/src.txt",
+        200,
+        {
+            "Content-Length": "3",
+            "x-ms-permissions": "rwxrwxrwx",
+            "x-ms-resource-type": "file",
+            "Last-Modified": "Mon, 04 Sep 2023 22:00:00 GMT",
+        },
+    )
+    handler.add(
+        "HEAD",
+        "/azure/blob/myaccount/test_bucket/dst.txt",
+        200,
+        {
+            "Content-Length": "3",
+            "x-ms-permissions": "rwxrwxrwx",
+            "x-ms-resource-type": "file",
+            "Last-Modified": "Mon, 04 Sep 1980 23:00:00 GMT",
+        },
+    )
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_bucket/dst.txt",
+        202,
+        expected_headers={
+            "x-ms-copy-source": "http://127.0.0.1:%d/azure/blob/myaccount/test_bucket/src.txt"
+            % gdaltest.webserver_port
+        },
+    )
+    with webserver.install_http_handler(handler):
+        assert gdal.Sync("/vsiadls/test_bucket/src.txt", "/vsiadls/test_bucket/dst.txt")
+
+
+###############################################################################
+# Test sync again on directories, but this is a no-op because of the date time
+
+
+def test_vsiadls_fake_sync_on_dir_no_op_because_of_data_time():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/test_bucket?recursive=true&resource=filesystem",
+        200,
+        {
+            "Content-type": "application/json;charset=utf-8",
+            "x-ms-continuation": "",
+        },
+        """
+                {"paths":[{"name":"test.bin","contentLength":"3","lastModified": "Mon, 01 Jan 2010 00:00:01"}]}
+                """,
+    )
+    handler.add("HEAD", "/azure/blob/myaccount/test_bucket?resource=filesystem", 200)
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/test_bucket2?recursive=true&resource=filesystem",
+        200,
+        {
+            "Content-type": "application/json;charset=utf-8",
+            "x-ms-continuation": "",
+        },
+        """
+                {"paths":[{"name":"test.bin","contentLength":"3","lastModified": "Mon, 01 Jan 2020 00:00:01"}]}
+                """,
+    )
+
+    with webserver.install_http_handler(handler):
+        assert gdal.Sync("/vsiadls/test_bucket/", "/vsiadls/test_bucket2/")
+
+
+###############################################################################
+# Test sync again on directories, but overwrite because of the date time
+
+
+def test_vsiadls_fake_sync_on_dir_overwrite_because_of_data_time():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/test_bucket?recursive=true&resource=filesystem",
+        200,
+        {
+            "Content-type": "application/json;charset=utf-8",
+            "x-ms-continuation": "",
+        },
+        """
+                {"paths":[{"name":"test.bin","contentLength":"3","lastModified": "Mon, 01 Jan 2010 00:00:01"}]}
+                """,
+    )
+    handler.add("HEAD", "/azure/blob/myaccount/test_bucket?resource=filesystem", 200)
+    handler.add(
+        "GET",
+        "/azure/blob/myaccount/test_bucket2?recursive=true&resource=filesystem",
+        200,
+        {
+            "Content-type": "application/json;charset=utf-8",
+            "x-ms-continuation": "",
+        },
+        """
+                {"paths":[{"name":"test.bin","contentLength":"3","lastModified": "Mon, 01 Jan 2000 00:00:01"}]}
+                """,
+    )
+    handler.add(
+        "PUT",
+        "/azure/blob/myaccount/test_bucket2/test.bin",
+        202,
+        expected_headers={
+            "x-ms-copy-source": "http://127.0.0.1:%d/azure/blob/myaccount/test_bucket/test.bin"
+            % gdaltest.webserver_port
+        },
+    )
+    with webserver.install_http_handler(handler):
+        assert gdal.Sync("/vsiadls/test_bucket/", "/vsiadls/test_bucket2/")
+
+
+###############################################################################
+# Test Sync() error
+
+
+def test_vsiadls_fake_sync_error_case():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    gdal.VSICurlClearCache()
+
     handler = webserver.SequentialHandler()
     handler.add(
         "HEAD",
@@ -819,7 +994,7 @@ def test_vsiadls_fake_sync_copyobject():
     handler.add("HEAD", "/azure/blob/myaccount/test_bucket/dst.txt", 404)
     handler.add("PUT", "/azure/blob/myaccount/test_bucket/dst.txt", 400)
     with webserver.install_http_handler(handler):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             assert not gdal.Sync(
                 "/vsiadls/test_bucket/src.txt", "/vsiadls/test_bucket/dst.txt"
             )
@@ -829,15 +1004,15 @@ def test_vsiadls_fake_sync_copyobject():
 # Test Sync() and multithreaded download of a single file
 
 
-def test_vsiadls_fake_sync_multithreaded_upload_single_file():
+def test_vsiadls_fake_sync_multithreaded_upload_single_file(tmp_vsimem):
 
     if gdaltest.webserver_port == 0:
         pytest.skip()
 
     gdal.VSICurlClearCache()
 
-    gdal.Mkdir("/vsimem/test", 0)
-    gdal.FileFromMemBuffer("/vsimem/test/foo", "foo\n")
+    gdal.Mkdir(tmp_vsimem / "test", 0)
+    gdal.FileFromMemBuffer(tmp_vsimem / "test/foo", "foo\n")
 
     handler = webserver.SequentialHandler()
     handler.add("HEAD", "/azure/blob/myaccount/test_bucket?resource=filesystem", 200)
@@ -864,12 +1039,10 @@ def test_vsiadls_fake_sync_multithreaded_upload_single_file():
     with gdaltest.config_option("VSIS3_SIMULATE_THREADING", "YES"):
         with webserver.install_http_handler(handler):
             assert gdal.Sync(
-                "/vsimem/test/foo",
+                tmp_vsimem / "test/foo",
                 "/vsiadls/test_bucket",
                 options=["NUM_THREADS=1", "CHUNK_SIZE=3"],
             )
-
-    gdal.RmdirRecursive("/vsimem/test")
 
 
 ###############################################################################
@@ -971,3 +1144,56 @@ def test_vsiadls_fake_metadata():
         assert not gdal.SetFileMetadata(
             "/vsiadls/test/foo.bin", {"x-ms-properties": "foo=bar"}, "PROPERTIES"
         )
+
+
+###############################################################################
+# Test VSIMultipartUploadXXXX()
+
+
+def test_vsiadls_MultipartUpload():
+
+    if gdaltest.webserver_port == 0:
+        pytest.skip()
+
+    # Test MultipartUploadGetCapabilities()
+    info = gdal.MultipartUploadGetCapabilities("/vsiadls/")
+    assert info.non_sequential_upload_supported
+    assert info.parallel_upload_supported
+    assert not info.abort_supported
+    assert info.min_part_size == 0
+    assert info.max_part_size >= 1024
+    assert info.max_part_count > 0
+
+    # Test MultipartUploadAddPart()
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "PATCH",
+        "/azure/blob/myaccount/test_multipartupload/test.bin?action=append&position=123456",
+        202,
+        expected_body=b"foo",
+    )
+    with webserver.install_http_handler(handler):
+        part_id = gdal.MultipartUploadAddPart(
+            "/vsiadls/test_multipartupload/test.bin", "my_upload_id", 1, 123456, b"foo"
+        )
+    assert part_id == "dummy"
+
+    # Test MultipartUploadEnd()
+    handler = webserver.SequentialHandler()
+    handler.add(
+        "PATCH",
+        "/azure/blob/myaccount/test_multipartupload/test.bin?action=flush&close=true&position=3",
+        200,
+    )
+    with webserver.install_http_handler(handler):
+        assert gdal.MultipartUploadEnd(
+            "/vsiadls/test_multipartupload/test.bin", "my_upload_id", ["dummy"], 3
+        )
+
+    # Test unsupported MultipartUploadAbort()
+    with gdal.ExceptionMgr(useExceptions=True):
+        with pytest.raises(
+            Exception,
+            match=r"MultipartUploadAbort\(\) not supported by this file system",
+        ):
+            gdal.MultipartUploadAbort("/vsiadls/foo/bar", "upload_id")

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     gdalmultidim_gridded.cpp
  * Project:  GDAL Core
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2023, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_alg.h"
@@ -33,24 +16,12 @@
 #include "gdal_priv.h"
 #include "gdal_pam.h"
 #include "ogrsf_frmts.h"
+#include "memdataset.h"
 
 #include <algorithm>
 #include <cassert>
 #include <limits>
 #include <new>
-
-/************************************************************************/
-/*                          GetPAM()                                    */
-/************************************************************************/
-
-static std::shared_ptr<GDALPamMultiDim>
-GetPAM(const std::shared_ptr<GDALMDArray> &poParent)
-{
-    auto poPamArray = dynamic_cast<GDALPamMDArray *>(poParent.get());
-    if (poPamArray)
-        return poPamArray->GetPAM();
-    return nullptr;
-}
 
 /************************************************************************/
 /*                         GDALMDArrayGridded                           */
@@ -65,7 +36,7 @@ class GDALMDArrayGridded final : public GDALPamMDArray
     std::shared_ptr<GDALMDArray> m_poVarY{};
     std::unique_ptr<GDALDataset> m_poVectorDS{};
     GDALGridAlgorithm m_eAlg;
-    std::unique_ptr<void, CPLFreeReleaser> m_poGridOptions;
+    std::unique_ptr<void, VSIFreeReleaser> m_poGridOptions;
     const GDALExtendedDataType m_dt;
     std::vector<GUInt64> m_anBlockSize{};
     const double m_dfNoDataValue;
@@ -84,14 +55,14 @@ class GDALMDArrayGridded final : public GDALPamMDArray
         const std::shared_ptr<GDALMDArray> &poVarX,
         const std::shared_ptr<GDALMDArray> &poVarY,
         std::unique_ptr<GDALDataset> &&poVectorDS, GDALGridAlgorithm eAlg,
-        std::unique_ptr<void, CPLFreeReleaser> &&poGridOptions,
+        std::unique_ptr<void, VSIFreeReleaser> &&poGridOptions,
         double dfNoDataValue, double dfMinX, double dfResX, double dfMinY,
         double dfResY, double dfRadius)
         : GDALAbstractMDArray(std::string(),
                               "Gridded view of " + poParent->GetFullName()),
-          GDALPamMDArray(std::string(),
-                         "Gridded view of " + poParent->GetFullName(),
-                         ::GetPAM(poParent)),
+          GDALPamMDArray(
+              std::string(), "Gridded view of " + poParent->GetFullName(),
+              GDALPamMultiDim::GetPAM(poParent), poParent->GetContext()),
           m_poParent(std::move(poParent)), m_apoDims(apoDims), m_poVarX(poVarX),
           m_poVarY(poVarY), m_poVectorDS(std::move(poVectorDS)), m_eAlg(eAlg),
           m_poGridOptions(std::move(poGridOptions)),
@@ -119,7 +90,7 @@ class GDALMDArrayGridded final : public GDALPamMDArray
            const std::shared_ptr<GDALMDArray> &poVarX,
            const std::shared_ptr<GDALMDArray> &poVarY,
            std::unique_ptr<GDALDataset> &&poVectorDS, GDALGridAlgorithm eAlg,
-           std::unique_ptr<void, CPLFreeReleaser> &&poGridOptions,
+           std::unique_ptr<void, VSIFreeReleaser> &&poGridOptions,
            double dfNoDataValue, double dfMinX, double dfResX, double dfMinY,
            double dfResY, double dfRadius)
     {
@@ -271,7 +242,15 @@ bool GDALMDArrayGridded::IRead(const GUInt64 *arrayStartIdx,
         {
             return false;
         }
-        m_anLastStartIdx = anStartIdx;
+        // GCC 13.1 warns here. Definitely a false positive.
+#if defined(__GNUC__) && __GNUC__ >= 13
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
+        m_anLastStartIdx = std::move(anStartIdx);
+#if defined(__GNUC__) && __GNUC__ >= 13
+#pragma GCC diagnostic pop
+#endif
     }
 
     // Determine the X,Y spatial extent of the request
@@ -447,7 +426,7 @@ GDALMDArray::GetGridded(const std::string &osGridOptions,
         return nullptr;
     }
 
-    std::unique_ptr<void, CPLFreeReleaser> poGridOptions(pOptions);
+    std::unique_ptr<void, VSIFreeReleaser> poGridOptions(pOptions);
 
     if (GetDataType().GetClass() != GEDTC_NUMERIC)
     {
@@ -659,22 +638,17 @@ GDALMDArray::GetGridded(const std::string &osGridOptions,
         if (!poDrv)
         {
             pszExt = "mem";
-            poDrv = GetGDALDriverManager()->GetDriverByName("Memory");
-            if (!poDrv)
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Cannot get driver FlatGeoBuf, GPKG or Memory");
-                return nullptr;
-            }
         }
     }
 
     // Create a in-memory vector layer with (X,Y) points
-    CPLString osTmpFilename;
-    osTmpFilename.Printf("/vsimem/GDALMDArray::GetGridded_%p_%p.%s", this,
-                         pOptions, pszExt);
+    const std::string osTmpFilename(VSIMemGenerateHiddenFilename(
+        std::string("tmp.").append(pszExt).c_str()));
     auto poDS = std::unique_ptr<GDALDataset>(
-        poDrv->Create(osTmpFilename.c_str(), 0, 0, 0, GDT_Unknown, nullptr));
+        poDrv ? poDrv->Create(osTmpFilename.c_str(), 0, 0, 0, GDT_Unknown,
+                              nullptr)
+              : MEMDataset::Create(osTmpFilename.c_str(), 0, 0, 0, GDT_Unknown,
+                                   nullptr));
     if (!poDS)
         return nullptr;
     auto poLyr = poDS->CreateLayer("layer", nullptr, wkbPoint);
@@ -798,7 +772,7 @@ GDALMDArray::GetGridded(const std::string &osGridOptions,
     // CPLDebug("GDAL", "nXSize = %d, nYSize = %d", nXSize, nYSize);
 
     std::vector<std::shared_ptr<GDALDimension>> apoNewDims;
-    const auto apoSelfDims = GetDimensions();
+    const auto &apoSelfDims = GetDimensions();
     for (size_t i = 0; i < GetDimensionCount() - 1; ++i)
         apoNewDims.emplace_back(apoSelfDims[i]);
 

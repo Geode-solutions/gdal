@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDAL_FRMTS_RAW_EHDRDATASET_H_INCLUDED
@@ -78,7 +62,7 @@ class EHdrDataset final : public RawDataset
     CPLString osHeaderExt{};
 
     bool bGotTransform{};
-    double adfGeoTransform[6]{0, 1, 0, 0, 0, 1};
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
 
     bool bHDRDirty{};
@@ -103,13 +87,14 @@ class EHdrDataset final : public RawDataset
     EHdrDataset();
     ~EHdrDataset() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
-    CPLErr SetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
     const OGRSpatialReference *GetSpatialRef() const override
     {
         return m_oSRS.IsEmpty() ? RawDataset::GetSpatialRef() : &m_oSRS;
     }
+
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
     char **GetFileList() override;
@@ -140,6 +125,7 @@ class EHdrRasterBand final : public RawRasterBand
     std::shared_ptr<GDALColorTable> m_poColorTable{};
     std::shared_ptr<GDALRasterAttributeTable> m_poRAT{};
 
+    bool m_bValid = false;
     int nBits{};
     vsi_l_offset nStartBit{};
     int nPixelOffsetBits{};
@@ -163,8 +149,13 @@ class EHdrRasterBand final : public RawRasterBand
   public:
     EHdrRasterBand(GDALDataset *poDS, int nBand, VSILFILE *fpRaw,
                    vsi_l_offset nImgOffset, int nPixelOffset, int nLineOffset,
-                   GDALDataType eDataType, int bNativeOrder, int nBits);
-    ~EHdrRasterBand() override;
+                   GDALDataType eDataType,
+                   RawRasterBand::ByteOrder eByteOrderIn, int nBits);
+
+    bool IsValid() const
+    {
+        return m_bValid;
+    }
 
     CPLErr IReadBlock(int, int, void *) override;
     CPLErr IWriteBlock(int, int, void *) override;

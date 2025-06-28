@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Michael Sumner
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -43,6 +27,7 @@
 class NSIDCbinDataset final : public GDALPamDataset
 {
     friend class NSIDCbinRasterBand;
+
     struct NSIDCbinHeader
     {
 
@@ -100,14 +85,14 @@ class NSIDCbinDataset final : public GDALPamDataset
     CPLString osSRS{};
     NSIDCbinHeader sHeader{};
 
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     CPL_DISALLOW_COPY_ASSIGN(NSIDCbinDataset)
     OGRSpatialReference m_oSRS{};
 
   public:
     NSIDCbinDataset();
     ~NSIDCbinDataset() override;
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     static GDALDataset *Open(GDALOpenInfo *);
@@ -140,8 +125,7 @@ class NSIDCbinRasterBand final : public RawRasterBand
   public:
     NSIDCbinRasterBand(GDALDataset *poDS, int nBand, VSILFILE *fpRaw,
                        vsi_l_offset nImgOffset, int nPixelOffset,
-                       int nLineOffset, GDALDataType eDataType,
-                       int bNativeOrder);
+                       int nLineOffset, GDALDataType eDataType);
     ~NSIDCbinRasterBand() override;
 
     double GetNoDataValue(int *pbSuccess = nullptr) override;
@@ -157,16 +141,16 @@ NSIDCbinRasterBand::NSIDCbinRasterBand(GDALDataset *poDSIn, int nBandIn,
                                        VSILFILE *fpRawIn,
                                        vsi_l_offset nImgOffsetIn,
                                        int nPixelOffsetIn, int nLineOffsetIn,
-                                       GDALDataType eDataTypeIn,
-                                       int bNativeOrderIn)
+                                       GDALDataType eDataTypeIn)
     : RawRasterBand(poDSIn, nBandIn, fpRawIn, nImgOffsetIn, nPixelOffsetIn,
-                    nLineOffsetIn, eDataTypeIn, bNativeOrderIn,
+                    nLineOffsetIn, eDataTypeIn,
+                    RawRasterBand::ByteOrder::ORDER_LITTLE_ENDIAN,
                     RawRasterBand::OwnFP::NO)
 {
 }
 
 /************************************************************************/
-/*                           ~NSIDCbinRasterBand()                           */
+/*                           ~NSIDCbinRasterBand()                      */
 /************************************************************************/
 
 NSIDCbinRasterBand::~NSIDCbinRasterBand()
@@ -210,12 +194,6 @@ double NSIDCbinRasterBand::GetScale(int *pbSuccess)
 
 NSIDCbinDataset::NSIDCbinDataset() : fp(nullptr), m_oSRS(OGRSpatialReference())
 {
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -245,10 +223,7 @@ GDALDataset *NSIDCbinDataset::Open(GDALOpenInfo *poOpenInfo)
     // Confirm the requested access is supported.
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(
-            CE_Failure, CPLE_NotSupported,
-            "The NSIDCbin driver does not support update access to existing "
-            "datasets.");
+        ReportUpdateNotSupportedByDriver("NSIDCbin");
         return nullptr;
     }
 
@@ -261,11 +236,10 @@ GDALDataset *NSIDCbinDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    auto poDS = cpl::make_unique<NSIDCbinDataset>();
+    auto poDS = std::make_unique<NSIDCbinDataset>();
 
     poDS->eAccess = poOpenInfo->eAccess;
-    poDS->fp = poOpenInfo->fpL;
-    poOpenInfo->fpL = nullptr;
+    std::swap(poDS->fp, poOpenInfo->fpL);
 
     /* -------------------------------------------------------------------- */
     /*      Read the header information.                                    */
@@ -331,17 +305,12 @@ GDALDataset *NSIDCbinDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     int nBytesPerSample = 1;
 
-    CPLErrorReset();
-
-    NSIDCbinRasterBand *poBand =
-        new NSIDCbinRasterBand(poDS.get(), 1, poDS->fp, 300, nBytesPerSample,
-                               poDS->nRasterXSize, GDT_Byte, CPL_IS_LSB);
-    poDS->SetBand(1, poBand);
-
-    if (CPLGetLastErrorType() != CE_None)
-    {
+    auto poBand = std::make_unique<NSIDCbinRasterBand>(
+        poDS.get(), 1, poDS->fp, 300, nBytesPerSample, poDS->nRasterXSize,
+        GDT_Byte);
+    if (!poBand->IsValid())
         return nullptr;
-    }
+    poDS->SetBand(1, std::move(poBand));
 
     /* -------------------------------------------------------------------- */
     /*      Geotransform, we simply know this from the documentation.       */
@@ -355,23 +324,23 @@ GDALDataset *NSIDCbinDataset::Open(GDALOpenInfo *poOpenInfo)
     int epsg = -1;
     if (south)
     {
-        poDS->adfGeoTransform[0] = -3950000.0;
-        poDS->adfGeoTransform[1] = 25000;
-        poDS->adfGeoTransform[2] = 0.0;
-        poDS->adfGeoTransform[3] = 4350000.0;
-        poDS->adfGeoTransform[4] = 0.0;
-        poDS->adfGeoTransform[5] = -25000;
+        poDS->m_gt[0] = -3950000.0;
+        poDS->m_gt[1] = 25000;
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[3] = 4350000.0;
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] = -25000;
 
         epsg = 3976;
     }
     else
     {
-        poDS->adfGeoTransform[0] = -3837500;
-        poDS->adfGeoTransform[1] = 25000;
-        poDS->adfGeoTransform[2] = 0.0;
-        poDS->adfGeoTransform[3] = 5837500;
-        poDS->adfGeoTransform[4] = 0.0;
-        poDS->adfGeoTransform[5] = -25000;
+        poDS->m_gt[0] = -3837500;
+        poDS->m_gt[1] = 25000;
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[3] = 5837500;
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] = -25000;
 
         epsg = 3413;
     }
@@ -443,11 +412,10 @@ const OGRSpatialReference *NSIDCbinDataset::GetSpatialRef() const
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr NSIDCbinDataset::GetGeoTransform(double *padfTransform)
+CPLErr NSIDCbinDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
-
+    gt = m_gt;
     return CE_None;
 }
 

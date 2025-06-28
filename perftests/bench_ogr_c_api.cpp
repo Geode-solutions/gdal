@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_priv.h"
@@ -38,7 +22,7 @@ static void Usage()
 {
     printf(
         "Usage: bench_ogr_c_api [-where filter] [-spat xmin ymin xmax ymax]\n");
-    printf("                       filename [layer_name]\n");
+    printf("                       [-oo NAME=VALUE]* filename [layer_name]\n");
     exit(1);
 }
 
@@ -59,6 +43,7 @@ int main(int argc, char *argv[])
     const char *pszDataset = nullptr;
     std::unique_ptr<OGRPolygon> poSpatialFilter;
     const char *pszLayerName = nullptr;
+    CPLStringList aosOpenOptions;
     for (int iArg = 1; iArg < argc; ++iArg)
     {
         if (iArg + 1 < argc && strcmp(argv[iArg], "-where") == 0)
@@ -75,10 +60,15 @@ int main(int argc, char *argv[])
             oRing.addPoint(CPLAtof(argv[iArg + 3]), CPLAtof(argv[iArg + 2]));
             oRing.addPoint(CPLAtof(argv[iArg + 1]), CPLAtof(argv[iArg + 2]));
 
-            poSpatialFilter = cpl::make_unique<OGRPolygon>();
+            poSpatialFilter = std::make_unique<OGRPolygon>();
             poSpatialFilter->addRing(&oRing);
 
             iArg += 4;
+        }
+        else if (iArg + 1 < argc && strcmp(argv[iArg], "-oo") == 0)
+        {
+            ++iArg;
+            aosOpenOptions.AddString(argv[iArg]);
         }
         else if (argv[iArg][0] == '-')
         {
@@ -105,7 +95,8 @@ int main(int argc, char *argv[])
     GDALAllRegister();
 
     auto poDS = std::unique_ptr<GDALDataset>(
-        GDALDataset::Open(pszDataset, GDAL_OF_VECTOR | GDAL_OF_VERBOSE_ERROR));
+        GDALDataset::Open(pszDataset, GDAL_OF_VECTOR | GDAL_OF_VERBOSE_ERROR,
+                          nullptr, aosOpenOptions.List()));
     if (poDS == nullptr)
     {
         CSLDestroy(argv);

@@ -12,23 +12,7 @@
  * Copyright (c) 1999-2003, Daniel Morissette
  * Copyright (c) 2014, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 
 #include "cpl_port.h"
@@ -171,14 +155,14 @@ static std::string GetTabDescription(const char *pszLine)
  *
  * Constructor.
  **********************************************************************/
-TABFile::TABFile()
-    : m_pszFname(nullptr), m_eAccessMode(TABRead), m_papszTABFile(nullptr),
-      m_nVersion(300), m_panIndexNo(nullptr), m_eTableType(TABTableNative),
-      m_poDATFile(nullptr), m_poMAPFile(nullptr), m_poINDFile(nullptr),
-      m_poDefn(nullptr), m_poSpatialRef(nullptr), bUseSpatialTraversal(FALSE),
-      m_nLastFeatureId(0), m_panMatchingFIDs(nullptr), m_iMatchingFID(0),
-      m_bNeedTABRewrite(FALSE), m_bLastOpWasRead(FALSE),
-      m_bLastOpWasWrite(FALSE)
+TABFile::TABFile(GDALDataset *poDS)
+    : IMapInfoFile(poDS), m_pszFname(nullptr), m_eAccessMode(TABRead),
+      m_papszTABFile(nullptr), m_nVersion(300), m_panIndexNo(nullptr),
+      m_eTableType(TABTableNative), m_poDATFile(nullptr), m_poMAPFile(nullptr),
+      m_poINDFile(nullptr), m_poDefn(nullptr), m_poSpatialRef(nullptr),
+      bUseSpatialTraversal(FALSE), m_nLastFeatureId(0),
+      m_panMatchingFIDs(nullptr), m_iMatchingFID(0), m_bNeedTABRewrite(FALSE),
+      m_bLastOpWasRead(FALSE), m_bLastOpWasWrite(FALSE)
 {
     m_poCurFeature = nullptr;
     m_nCurFeatureId = 0;
@@ -567,14 +551,15 @@ int TABFile::Open(const char *pszFname, TABAccess eAccess,
         {
             if (!bHasIndex)
             {
-                const char *pszIndFilename = CPLFormCIFilename(
-                    CPLGetPath(pszFname), CPLGetBasename(pszFname),
-                    (bUpperCase) ? "IND" : "ind");
+                const std::string osIndFilename =
+                    CPLFormCIFilenameSafe(CPLGetPathSafe(pszFname).c_str(),
+                                          CPLGetBasenameSafe(pszFname).c_str(),
+                                          (bUpperCase) ? "IND" : "ind");
                 VSIStatBufL sStat;
-                if (VSIStatL(pszIndFilename, &sStat) == 0)
+                if (VSIStatL(osIndFilename.c_str(), &sStat) == 0)
                 {
                     CPLCreateXMLElementAndValue(psRoot, "MIIDFilename",
-                                                pszIndFilename);
+                                                osIndFilename.c_str());
                 }
                 else
                 {
@@ -613,6 +598,9 @@ int TABFile::Open(const char *pszFname, TABAccess eAccess,
     if (m_poDefn != nullptr && m_eAccessMode != TABWrite &&
         m_poDefn->GetGeomFieldCount() != 0)
         m_poDefn->GetGeomFieldDefn(0)->SetSpatialRef(GetSpatialRef());
+
+    if (m_poDefn)
+        m_poDefn->Seal(/* bSealFields = */ true);
 
     return 0;
 }
@@ -993,7 +981,8 @@ int TABFile::ParseTABFileFields()
                      *------------------------------------------------*/
                     nStatus = m_poDATFile->ValidateFieldInfoFromTAB(
                         iField, osFieldName, TABFLogical, 0, 0);
-                    poFieldDefn = new OGRFieldDefn(osFieldName, OFTString);
+                    poFieldDefn = new OGRFieldDefn(osFieldName, OFTInteger);
+                    poFieldDefn->SetSubType(OFSTBoolean);
                     poFieldDefn->SetWidth(1);
                 }
                 else
@@ -1185,7 +1174,8 @@ int TABFile::WriteTABFile()
                 if (strlen(GetEncoding()) > 0)
                     osFieldName.Recode(CPL_ENC_UTF8, GetEncoding());
 
-                char *pszCleanName = TABCleanFieldName(osFieldName);
+                char *pszCleanName = TABCleanFieldName(
+                    osFieldName, GetEncoding(), m_bStrictLaundering);
                 osFieldName = pszCleanName;
                 CPLFree(pszCleanName);
 
@@ -1765,7 +1755,20 @@ int TABFile::SetCharset(const char *pszCharset)
     {
         m_poMAPFile->SetEncoding(CharsetToEncoding(pszCharset));
     }
+    if (EQUAL(pszCharset, "UTF-8"))
+    {
+        m_nVersion = std::max(m_nVersion, 1520);
+    }
     return 0;
+}
+
+void TABFile::SetStrictLaundering(bool bStrictLaundering)
+{
+    IMapInfoFile::SetStrictLaundering(bStrictLaundering);
+    if (!bStrictLaundering)
+    {
+        m_nVersion = std::max(m_nVersion, 1520);
+    }
 }
 
 /**********************************************************************
@@ -2041,7 +2044,9 @@ int TABFile::SetFeatureDefn(
             switch (poFieldDefn->GetType())
             {
                 case OFTInteger:
-                    eMapInfoType = TABFInteger;
+                    eMapInfoType = poFieldDefn->GetSubType() == OFSTBoolean
+                                       ? TABFLogical
+                                       : TABFInteger;
                     break;
                 case OFTReal:
                     if (poFieldDefn->GetWidth() > 0 ||
@@ -2223,7 +2228,8 @@ int TABFile::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
             /*-------------------------------------------------
              * LOGICAL type (value "T" or "F")
              *------------------------------------------------*/
-            poFieldDefn = new OGRFieldDefn(osName.c_str(), OFTString);
+            poFieldDefn = new OGRFieldDefn(osName.c_str(), OFTInteger);
+            poFieldDefn->SetSubType(OFSTBoolean);
             poFieldDefn->SetWidth(1);
             break;
         default:
@@ -2235,7 +2241,7 @@ int TABFile::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
     /*-----------------------------------------------------
      * Add the FieldDefn to the FeatureDefn
      *----------------------------------------------------*/
-    m_poDefn->AddFieldDefn(poFieldDefn);
+    whileUnsealing(m_poDefn)->AddFieldDefn(poFieldDefn);
     m_oSetFields.insert(CPLString(poFieldDefn->GetNameRef()).toupper());
     delete poFieldDefn;
 
@@ -2525,7 +2531,7 @@ int TABFile::GetBounds(double &dXMin, double &dYMin, double &dXMax,
 }
 
 /**********************************************************************
- *                   TABFile::GetExtent()
+ *                   TABFile::IGetExtent()
  *
  * Fetch extent of the data currently stored in the dataset.
  *
@@ -2534,7 +2540,8 @@ int TABFile::GetBounds(double &dXMin, double &dYMin, double &dXMax,
  *
  * Returns OGRERR_NONE/OGRRERR_FAILURE.
  **********************************************************************/
-OGRErr TABFile::GetExtent(OGREnvelope *psExtent, CPL_UNUSED int bForce)
+OGRErr TABFile::IGetExtent(int /*iGeomField*/, OGREnvelope *psExtent,
+                           bool /* bForce */)
 {
     TABMAPHeaderBlock *poHeader = nullptr;
 
@@ -2762,7 +2769,7 @@ OGRErr TABFile::DeleteField(int iField)
                     (m_poDefn->GetFieldCount() - 1 - iField) * sizeof(int));
         }
 
-        m_poDefn->DeleteFieldDefn(iField);
+        whileUnsealing(m_poDefn)->DeleteFieldDefn(iField);
 
         if (m_eAccessMode == TABReadWrite)
             WriteTABFile();
@@ -2805,7 +2812,7 @@ OGRErr TABFile::ReorderFields(int *panMap)
         CPLFree(m_panIndexNo);
         m_panIndexNo = panNewIndexedField;
 
-        m_poDefn->ReorderFieldDefns(panMap);
+        whileUnsealing(m_poDefn)->ReorderFieldDefns(panMap);
 
         if (m_eAccessMode == TABReadWrite)
             WriteTABFile();
@@ -2836,17 +2843,17 @@ OGRErr TABFile::AlterFieldDefn(int iField, OGRFieldDefn *poNewFieldDefn,
         return OGRERR_FAILURE;
     }
 
-    if (m_poDATFile->AlterFieldDefn(iField, poNewFieldDefn, nFlagsIn) == 0)
+    OGRFieldDefn *poFieldDefn = m_poDefn->GetFieldDefn(iField);
+    if (m_poDATFile->AlterFieldDefn(iField, poFieldDefn, poNewFieldDefn,
+                                    nFlagsIn) == 0)
     {
         m_bNeedTABRewrite = TRUE;
 
-        OGRFieldDefn *poFieldDefn = m_poDefn->GetFieldDefn(iField);
+        auto oTemporaryUnsealer(poFieldDefn->GetTemporaryUnsealer());
         if ((nFlagsIn & ALTER_TYPE_FLAG) &&
             poNewFieldDefn->GetType() != poFieldDefn->GetType())
         {
             poFieldDefn->SetType(poNewFieldDefn->GetType());
-            if ((nFlagsIn & ALTER_WIDTH_PRECISION_FLAG) == 0)
-                poFieldDefn->SetWidth(254);
         }
         if (nFlagsIn & ALTER_NAME_FLAG)
         {
@@ -2855,11 +2862,23 @@ OGRErr TABFile::AlterFieldDefn(int iField, OGRFieldDefn *poNewFieldDefn,
             m_oSetFields.insert(
                 CPLString(poNewFieldDefn->GetNameRef()).toupper());
         }
-        if ((nFlagsIn & ALTER_WIDTH_PRECISION_FLAG) &&
-            poFieldDefn->GetType() == OFTString)
+        if (poFieldDefn->GetType() == OFTString)
         {
             poFieldDefn->SetWidth(m_poDATFile->GetFieldWidth(iField));
         }
+        else if (nFlagsIn & ALTER_WIDTH_PRECISION_FLAG)
+        {
+            poFieldDefn->SetWidth(poNewFieldDefn->GetWidth());
+            poFieldDefn->SetPrecision(poNewFieldDefn->GetPrecision());
+        }
+
+        // Take into account .dat limitations on width & precision to clamp
+        // what user might have specify
+        int nWidth = 0;
+        int nPrecision = 0;
+        GetTABType(poFieldDefn, nullptr, &nWidth, &nPrecision);
+        poFieldDefn->SetWidth(nWidth);
+        poFieldDefn->SetPrecision(nPrecision);
 
         if (m_eAccessMode == TABReadWrite)
             WriteTABFile();
@@ -3014,4 +3033,111 @@ CPLErr TABFile::SetMetadataItem(const char *pszName, const char *pszValue,
         return result;
     }
     return IMapInfoFile::SetMetadataItem(pszName, pszValue, pszDomain);
+}
+
+/**********************************************************************
+ *                   TABFile::GetSpatialRef()
+ *
+ * Returns a reference to an OGRSpatialReference for this dataset.
+ * If the projection parameters have not been parsed yet, then we will
+ * parse them before returning.
+ *
+ * The returned object is owned and maintained by this TABFile and
+ * should not be modified or freed by the caller.
+ *
+ * Returns NULL if the SpatialRef cannot be accessed.
+ **********************************************************************/
+OGRSpatialReference *TABFile::GetSpatialRef()
+{
+    if (m_poMAPFile == nullptr)
+    {
+        CPLError(CE_Failure, CPLE_AssertionFailed,
+                 "GetSpatialRef() failed: file has not been opened yet.");
+        return nullptr;
+    }
+
+    if (GetGeomType() == wkbNone)
+        return nullptr;
+
+    /*-----------------------------------------------------------------
+     * If projection params have already been processed, just use them.
+     *----------------------------------------------------------------*/
+    if (m_poSpatialRef != nullptr)
+        return m_poSpatialRef;
+
+    /*-----------------------------------------------------------------
+     * Fetch the parameters from the header.
+     *----------------------------------------------------------------*/
+    TABProjInfo sTABProj;
+
+    TABMAPHeaderBlock *poHeader = nullptr;
+    if ((poHeader = m_poMAPFile->GetHeaderBlock()) == nullptr ||
+        poHeader->GetProjInfo(&sTABProj) != 0)
+    {
+        CPLError(CE_Failure, CPLE_FileIO,
+                 "GetSpatialRef() failed reading projection parameters.");
+        return nullptr;
+    }
+
+    m_poSpatialRef = TABFileGetSpatialRefFromTABProj(sTABProj);
+    return m_poSpatialRef;
+}
+
+/**********************************************************************
+ *                   TABFile::SetSpatialRef()
+ *
+ * Set the OGRSpatialReference for this dataset.
+ * A reference to the OGRSpatialReference will be kept, and it will also
+ * be converted into a TABProjInfo to be stored in the .MAP header.
+ *
+ * Returns 0 on success, and -1 on error.
+ **********************************************************************/
+int TABFile::SetSpatialRef(OGRSpatialReference *poSpatialRef)
+{
+    if (m_eAccessMode != TABWrite)
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "SetSpatialRef() can be used only with Write access.");
+        return -1;
+    }
+
+    if (m_poMAPFile == nullptr)
+    {
+        CPLError(CE_Failure, CPLE_AssertionFailed,
+                 "SetSpatialRef() failed: file has not been opened yet.");
+        return -1;
+    }
+
+    if (poSpatialRef == nullptr)
+    {
+        CPLError(CE_Failure, CPLE_AssertionFailed,
+                 "SetSpatialRef() failed: Called with NULL poSpatialRef.");
+        return -1;
+    }
+
+    /*-----------------------------------------------------------------
+     * Keep a copy of the OGRSpatialReference...
+     * Note: we have to take the reference count into account...
+     *----------------------------------------------------------------*/
+    if (m_poSpatialRef && m_poSpatialRef->Dereference() == 0)
+        delete m_poSpatialRef;
+
+    m_poSpatialRef = poSpatialRef->Clone();
+
+    TABProjInfo sTABProj;
+    int nParamCount = 0;
+    TABFileGetTABProjFromSpatialRef(poSpatialRef, sTABProj, nParamCount);
+
+    /*-----------------------------------------------------------------
+     * Set the new parameters in the .MAP header.
+     * This will also trigger lookup of default bounds for the projection.
+     *----------------------------------------------------------------*/
+    if (SetProjInfo(&sTABProj) != 0)
+    {
+        CPLError(CE_Failure, CPLE_FileIO,
+                 "SetSpatialRef() failed setting projection parameters.");
+        return -1;
+    }
+
+    return 0;
 }

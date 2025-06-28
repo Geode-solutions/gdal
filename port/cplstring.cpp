@@ -8,23 +8,7 @@
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -277,7 +261,8 @@ size_t CPLString::ifind(const char *s, size_t nPos) const
 
 {
     const char *pszHaystack = c_str();
-    const char chFirst = static_cast<char>(::tolower(s[0]));
+    const char chFirst =
+        static_cast<char>(CPLTolower(static_cast<unsigned char>(s[0])));
     const size_t nTargetLen = strlen(s);
 
     if (nPos > size())
@@ -287,7 +272,7 @@ size_t CPLString::ifind(const char *s, size_t nPos) const
 
     while (*pszHaystack != '\0')
     {
-        if (chFirst == ::tolower(*pszHaystack))
+        if (chFirst == CPLTolower(static_cast<unsigned char>(*pszHaystack)))
         {
             if (EQUALN(pszHaystack, s, nTargetLen))
                 return nPos;
@@ -312,7 +297,7 @@ CPLString &CPLString::toupper()
 
 {
     for (size_t i = 0; i < size(); i++)
-        (*this)[i] = static_cast<char>(::toupper((*this)[i]));
+        (*this)[i] = static_cast<char>(CPLToupper((*this)[i]));
 
     return *this;
 }
@@ -329,7 +314,7 @@ CPLString &CPLString::tolower()
 
 {
     for (size_t i = 0; i < size(); i++)
-        (*this)[i] = static_cast<char>(::tolower((*this)[i]));
+        (*this)[i] = static_cast<char>(CPLTolower((*this)[i]));
 
     return *this;
 }
@@ -446,16 +431,15 @@ CPLString CPLURLGetValue(const char *pszURL, const char *pszKey)
 CPLString CPLURLAddKVP(const char *pszURL, const char *pszKey,
                        const char *pszValue)
 {
-    CPLString osURL(pszURL);
-    if (strchr(osURL, '?') == nullptr)
-        osURL += "?";
-    pszURL = osURL.c_str();
+    CPLString osURL(strchr(pszURL, '?') == nullptr
+                        ? CPLString(pszURL).append("?")
+                        : pszURL);
 
     CPLString osKey(pszKey);
     osKey += "=";
     size_t nKeyPos = osURL.ifind(osKey);
     if (nKeyPos != std::string::npos && nKeyPos > 0 &&
-        (pszURL[nKeyPos - 1] == '?' || pszURL[nKeyPos - 1] == '&'))
+        (osURL[nKeyPos - 1] == '?' || osURL[nKeyPos - 1] == '&'))
     {
         CPLString osNewURL(osURL);
         osNewURL.resize(nKeyPos);
@@ -464,7 +448,7 @@ CPLString CPLURLAddKVP(const char *pszURL, const char *pszKey,
             osNewURL += osKey;
             osNewURL += pszValue;
         }
-        const char *pszNext = strchr(pszURL + nKeyPos, '&');
+        const char *pszNext = strchr(osURL.c_str() + nKeyPos, '&');
         if (pszNext)
         {
             if (osNewURL.back() == '&' || osNewURL.back() == '?')
@@ -476,14 +460,15 @@ CPLString CPLURLAddKVP(const char *pszURL, const char *pszKey,
     }
     else
     {
+        CPLString osNewURL(std::move(osURL));
         if (pszValue)
         {
-            if (osURL.back() != '&' && osURL.back() != '?')
-                osURL += '&';
-            osURL += osKey;
-            osURL += pszValue;
+            if (osNewURL.back() != '&' && osNewURL.back() != '?')
+                osNewURL += '&';
+            osNewURL += osKey;
+            osNewURL += pszValue;
         }
-        return osURL;
+        return osNewURL;
     }
 }
 

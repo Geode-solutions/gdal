@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <math.h>
 
+#include <cmath>
 #include <limits>
 
 #include "degrib2.h"
@@ -833,6 +834,11 @@ int GRIB1_RefTime (VSILFILE *fp, uInt4 gribLen, double *refTime)
       return -1;
    }
    pds = (uChar *) malloc (sectLen * sizeof (uChar));
+   if(!pds)
+   {
+       errSprintf("Out of memory");
+       return -1;
+   }
    *pds = *temp;
    pds[1] = temp[1];
    pds[2] = temp[2];
@@ -1680,7 +1686,7 @@ static int ReadGrib1Sect4 (uChar *bds, uInt4 gribLen, uInt4 *curLoc,
    meta->gridAttrib.max = meta->gridAttrib.min;
    meta->gridAttrib.f_maxmin = 1;
    meta->gridAttrib.numMiss = 0;
-   if (refVal >= std::numeric_limits<float>::max() || CPLIsNan(refVal)) {
+   if (refVal >= std::numeric_limits<float>::max() || std::isnan(refVal)) {
       meta->gridAttrib.refVal = std::numeric_limits<float>::max();
    } else if (refVal <= -std::numeric_limits<float>::max()) {
       meta->gridAttrib.refVal = -std::numeric_limits<float>::max();
@@ -1946,7 +1952,7 @@ int ReadGrib1Record (VSILFILE *fp, sChar f_unit, double **Grib_Data,
       IS->ipackLen = nd5;
       IS->ipack = newipack;
    }
-   c_ipack = (uChar *) IS->ipack;
+   c_ipack = reinterpret_cast<uChar *>(IS->ipack);
    /* Init last sInt4 to 0, to make sure that the padded bytes are 0. */
    IS->ipack[nd5 - 1] = 0;
    /* Init first 2 sInt4 to sect0. */

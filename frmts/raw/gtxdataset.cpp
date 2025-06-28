@@ -8,23 +8,7 @@
  * Copyright (c) 2010, Frank Warmerdam
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -32,6 +16,7 @@
 #include "ogr_srs_api.h"
 #include "rawdataset.h"
 
+#include <algorithm>
 #include <limits>
 
 /**
@@ -70,7 +55,7 @@ class GTXDataset final : public RawDataset
     VSILFILE *fpImage = nullptr;  // image data file.
 
     OGRSpatialReference m_oSRS{};
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
 
     CPL_DISALLOW_COPY_ASSIGN(GTXDataset)
 
@@ -81,18 +66,12 @@ class GTXDataset final : public RawDataset
     {
         m_oSRS.SetFromUserInput(SRS_WKT_WGS84_LAT_LONG);
         m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-
-        adfGeoTransform[0] = 0.0;
-        adfGeoTransform[1] = 1.0;
-        adfGeoTransform[2] = 0.0;
-        adfGeoTransform[3] = 0.0;
-        adfGeoTransform[4] = 0.0;
-        adfGeoTransform[5] = 1.0;
     }
+
     ~GTXDataset() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
-    CPLErr SetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
     const OGRSpatialReference *GetSpatialRef() const override
     {
@@ -218,7 +197,7 @@ int GTXDataset::Identify(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->nHeaderBytes < 40)
         return FALSE;
 
-    if (!EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "gtx"))
+    if (!poOpenInfo->IsExtensionEqualToCI("gtx"))
         return FALSE;
 
     return TRUE;
@@ -237,26 +216,19 @@ GDALDataset *GTXDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    GTXDataset *poDS = new GTXDataset();
+    auto poDS = std::make_unique<GTXDataset>();
 
     poDS->eAccess = poOpenInfo->eAccess;
-    poDS->fpImage = poOpenInfo->fpL;
-    poOpenInfo->fpL = nullptr;
+    std::swap(poDS->fpImage, poOpenInfo->fpL);
 
     /* -------------------------------------------------------------------- */
     /*      Read the header.                                                */
     /* -------------------------------------------------------------------- */
-    poDS->adfGeoTransform[2] = 0.0;
-    poDS->adfGeoTransform[4] = 0.0;
-
-    CPL_IGNORE_RET_VAL(
-        VSIFReadL(poDS->adfGeoTransform + 3, 8, 1, poDS->fpImage));
-    CPL_IGNORE_RET_VAL(
-        VSIFReadL(poDS->adfGeoTransform + 0, 8, 1, poDS->fpImage));
-    CPL_IGNORE_RET_VAL(
-        VSIFReadL(poDS->adfGeoTransform + 5, 8, 1, poDS->fpImage));
-    CPL_IGNORE_RET_VAL(
-        VSIFReadL(poDS->adfGeoTransform + 1, 8, 1, poDS->fpImage));
+    double gt[6] = {0};
+    CPL_IGNORE_RET_VAL(VSIFReadL(&gt[3], 8, 1, poDS->fpImage));
+    CPL_IGNORE_RET_VAL(VSIFReadL(&gt[0], 8, 1, poDS->fpImage));
+    CPL_IGNORE_RET_VAL(VSIFReadL(&gt[5], 8, 1, poDS->fpImage));
+    CPL_IGNORE_RET_VAL(VSIFReadL(&gt[1], 8, 1, poDS->fpImage));
 
     CPL_IGNORE_RET_VAL(VSIFReadL(&(poDS->nRasterYSize), 4, 1, poDS->fpImage));
     CPL_IGNORE_RET_VAL(VSIFReadL(&(poDS->nRasterXSize), 4, 1, poDS->fpImage));
@@ -264,33 +236,33 @@ GDALDataset *GTXDataset::Open(GDALOpenInfo *poOpenInfo)
     CPL_MSBPTR32(&(poDS->nRasterYSize));
     CPL_MSBPTR32(&(poDS->nRasterXSize));
 
-    CPL_MSBPTR64(poDS->adfGeoTransform + 0);
-    CPL_MSBPTR64(poDS->adfGeoTransform + 1);
-    CPL_MSBPTR64(poDS->adfGeoTransform + 3);
-    CPL_MSBPTR64(poDS->adfGeoTransform + 5);
+    CPL_MSBPTR64(&gt[0]);
+    CPL_MSBPTR64(&gt[1]);
+    CPL_MSBPTR64(&gt[3]);
+    CPL_MSBPTR64(&gt[5]);
 
-    poDS->adfGeoTransform[3] += poDS->adfGeoTransform[5] *
-                                (static_cast<double>(poDS->nRasterYSize) - 1);
+    poDS->m_gt = GDALGeoTransform(gt);
+    poDS->m_gt[3] +=
+        poDS->m_gt[5] * (static_cast<double>(poDS->nRasterYSize) - 1);
 
-    poDS->adfGeoTransform[0] -= poDS->adfGeoTransform[1] * 0.5;
-    poDS->adfGeoTransform[3] += poDS->adfGeoTransform[5] * 0.5;
+    poDS->m_gt[0] -= poDS->m_gt[1] * 0.5;
+    poDS->m_gt[3] += poDS->m_gt[5] * 0.5;
 
-    poDS->adfGeoTransform[5] *= -1;
+    poDS->m_gt[5] *= -1;
 
     if (CPLFetchBool(poOpenInfo->papszOpenOptions,
                      "SHIFT_ORIGIN_IN_MINUS_180_PLUS_180", false))
     {
-        if (poDS->adfGeoTransform[0] < -180.0 - poDS->adfGeoTransform[1])
-            poDS->adfGeoTransform[0] += 360.0;
-        else if (poDS->adfGeoTransform[0] > 180.0)
-            poDS->adfGeoTransform[0] -= 360.0;
+        if (poDS->m_gt[0] < -180.0 - poDS->m_gt[1])
+            poDS->m_gt[0] += 360.0;
+        else if (poDS->m_gt[0] > 180.0)
+            poDS->m_gt[0] -= 360.0;
     }
 
     if (!GDALCheckDatasetDimensions(poDS->nRasterXSize, poDS->nRasterYSize) ||
         static_cast<vsi_l_offset>(poDS->nRasterXSize) * poDS->nRasterYSize >
             std::numeric_limits<vsi_l_offset>::max() / sizeof(double))
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -309,20 +281,21 @@ GDALDataset *GTXDataset::Open(GDALOpenInfo *poOpenInfo)
     const int nDTSize = GDALGetDataTypeSizeBytes(eDT);
     if (nDTSize <= 0 || poDS->nRasterXSize > INT_MAX / nDTSize)
     {
-        delete poDS;
         return nullptr;
     }
 
     /* -------------------------------------------------------------------- */
     /*      Create band information object.                                 */
     /* -------------------------------------------------------------------- */
-    GTXRasterBand *poBand = new GTXRasterBand(
-        poDS, 1, poDS->fpImage,
+    auto poBand = std::make_unique<GTXRasterBand>(
+        poDS.get(), 1, poDS->fpImage,
         static_cast<vsi_l_offset>(poDS->nRasterYSize - 1) * poDS->nRasterXSize *
                 nDTSize +
             40,
         nDTSize, poDS->nRasterXSize * -nDTSize, eDT, !CPL_IS_LSB);
-    poDS->SetBand(1, poBand);
+    if (!poBand->IsValid())
+        return nullptr;
+    poDS->SetBand(1, std::move(poBand));
 
     /* -------------------------------------------------------------------- */
     /*      Initialize any PAM information.                                 */
@@ -333,19 +306,19 @@ GDALDataset *GTXDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GTXDataset::GetGeoTransform(double *padfTransform)
+CPLErr GTXDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 
@@ -353,23 +326,21 @@ CPLErr GTXDataset::GetGeoTransform(double *padfTransform)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GTXDataset::SetGeoTransform(double *padfTransform)
-
+CPLErr GTXDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
-    if (padfTransform[2] != 0.0 || padfTransform[4] != 0.0)
+    if (gt[2] != 0.0 || gt[4] != 0.0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Attempt to write skewed or rotated geotransform to gtx.");
         return CE_Failure;
     }
 
-    memcpy(adfGeoTransform, padfTransform, sizeof(double) * 6);
+    m_gt = gt;
 
-    const double dfXOrigin = adfGeoTransform[0] + 0.5 * adfGeoTransform[1];
-    const double dfYOrigin =
-        adfGeoTransform[3] + (nRasterYSize - 0.5) * adfGeoTransform[5];
-    const double dfWidth = adfGeoTransform[1];
-    const double dfHeight = -adfGeoTransform[5];
+    const double dfXOrigin = m_gt[0] + 0.5 * m_gt[1];
+    const double dfYOrigin = m_gt[3] + (nRasterYSize - 0.5) * m_gt[5];
+    const double dfWidth = m_gt[1];
+    const double dfHeight = -m_gt[5];
 
     unsigned char header[32] = {'\0'};
     memcpy(header + 0, &dfYOrigin, 8);
@@ -411,7 +382,7 @@ GDALDataset *GTXDataset::Create(const char *pszFilename, int nXSize, int nYSize,
         return nullptr;
     }
 
-    if (!EQUAL(CPLGetExtension(pszFilename), "gtx"))
+    if (!EQUAL(CPLGetExtensionSafe(pszFilename).c_str(), "gtx"))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Attempt to create gtx file with extension other than gtx.");

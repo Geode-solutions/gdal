@@ -8,23 +8,7 @@
  * Copyright (c) 1999,  Les Technologies SoftMap Inc.
  * Copyright (c) 2008-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogrsf_frmts.h"
@@ -33,18 +17,14 @@
 #include "ogr_attrind.h"
 #include "ogr_swq.h"
 #include "ograpispy.h"
-#include "ogr_recordbatch.h"
-#include "ograrrowarrayhelper.h"
+#include "ogr_wkb.h"
+#include "ogrlayer_private.h"
 
 #include "cpl_time.h"
 #include <cassert>
+#include <cmath>
 #include <limits>
 #include <set>
-
-struct OGRLayer::Private
-{
-    bool m_bInFeatureIterator = false;
-};
 
 /************************************************************************/
 /*                              OGRLayer()                              */
@@ -210,28 +190,73 @@ GIntBig OGR_L_GetFeatureCount(OGRLayerH hLayer, int bForce)
 }
 
 /************************************************************************/
-/*                             GetExtent()                              */
+/*                            GetExtent()                               */
 /************************************************************************/
 
-OGRErr OGRLayer::GetExtent(OGREnvelope *psExtent, int bForce)
+/**
+ \brief Fetch the extent of this layer.
 
+ Returns the extent (MBR) of the data in the layer.  If bForce is FALSE,
+ and it would be expensive to establish the extent then OGRERR_FAILURE
+ will be returned indicating that the extent isn't know.  If bForce is
+ TRUE then some implementations will actually scan the entire layer once
+ to compute the MBR of all the features in the layer.
+
+ Depending on the drivers, the returned extent may or may not take the
+ spatial filter into account.  So it is safer to call GetExtent() without
+ setting a spatial filter.
+
+ Layers without any geometry may return OGRERR_FAILURE just indicating that
+ no meaningful extents could be collected.
+
+ Note that some implementations of this method may alter the read cursor
+ of the layer.
+
+ This method is the same as the C function OGR_L_GetExtent().
+
+ @param psExtent the structure in which the extent value will be returned.
+ @param bForce Flag indicating whether the extent should be computed even
+ if it is expensive.
+
+ @return OGRERR_NONE on success, OGRERR_FAILURE if extent not known.
+*/
+
+OGRErr OGRLayer::GetExtent(OGREnvelope *psExtent, bool bForce)
 {
-    return GetExtentInternal(0, psExtent, bForce);
+    return GetExtent(0, psExtent, bForce);
 }
 
-OGRErr OGRLayer::GetExtent(int iGeomField, OGREnvelope *psExtent, int bForce)
+/**
+ \brief Fetch the extent of this layer, on the specified geometry field.
 
-{
-    if (iGeomField == 0)
-        return GetExtent(psExtent, bForce);
-    else
-        return GetExtentInternal(iGeomField, psExtent, bForce);
-}
+ Returns the extent (MBR) of the data in the layer.  If bForce is FALSE,
+ and it would be expensive to establish the extent then OGRERR_FAILURE
+ will be returned indicating that the extent isn't know.  If bForce is
+ TRUE then some implementations will actually scan the entire layer once
+ to compute the MBR of all the features in the layer.
 
-//! @cond Doxygen_Suppress
-OGRErr OGRLayer::GetExtentInternal(int iGeomField, OGREnvelope *psExtent,
-                                   int bForce)
+ Depending on the drivers, the returned extent may or may not take the
+ spatial filter into account.  So it is safer to call GetExtent() without
+ setting a spatial filter.
 
+ Layers without any geometry may return OGRERR_FAILURE just indicating that
+ no meaningful extents could be collected.
+
+ Note that some implementations of this method may alter the read cursor
+ of the layer.
+
+ This method is the same as the C function OGR_L_GetExtentEx().
+
+ @param iGeomField the index of the geometry field on which to compute the extent.
+ @param psExtent the structure in which the extent value will be returned.
+ @param bForce Flag indicating whether the extent should be computed even
+ if it is expensive.
+
+ @return OGRERR_NONE on success, OGRERR_FAILURE if extent not known.
+
+*/
+
+OGRErr OGRLayer::GetExtent(int iGeomField, OGREnvelope *psExtent, bool bForce)
 {
     psExtent->MinX = 0.0;
     psExtent->MaxX = 0.0;
@@ -253,6 +278,34 @@ OGRErr OGRLayer::GetExtentInternal(int iGeomField, OGREnvelope *psExtent,
         return OGRERR_FAILURE;
     }
 
+    return IGetExtent(iGeomField, psExtent, bForce);
+}
+
+/************************************************************************/
+/*                            IGetExtent()                              */
+/************************************************************************/
+
+/**
+ \brief Fetch the extent of this layer, on the specified geometry field.
+
+ Virtual method implemented by drivers since 3.11. In previous versions,
+ GetExtent() itself was the virtual method.
+
+ Driver implementations, when wanting to call the base method, must take
+ care of calling OGRLayer::IGetExtent() (and note the public method without
+ the leading I).
+
+ @param iGeomField 0-based index of the geometry field to consider.
+ @param psExtent the computed extent of the layer.
+ @param bForce if TRUE, the extent will be computed even if all the
+        layer features have to be fetched.
+ @return OGRERR_NONE on success or an error code in case of failure.
+ @since GDAL 3.11
+*/
+
+OGRErr OGRLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent, bool bForce)
+
+{
     /* -------------------------------------------------------------------- */
     /*      If not forced, we should avoid having to scan all the           */
     /*      features and just return a failure.                             */
@@ -277,8 +330,8 @@ OGRErr OGRLayer::GetExtentInternal(int iGeomField, OGREnvelope *psExtent,
         else if (!bExtentSet)
         {
             poGeom->getEnvelope(psExtent);
-            if (!(CPLIsNan(psExtent->MinX) || CPLIsNan(psExtent->MinY) ||
-                  CPLIsNan(psExtent->MaxX) || CPLIsNan(psExtent->MaxY)))
+            if (!(std::isnan(psExtent->MinX) || std::isnan(psExtent->MinY) ||
+                  std::isnan(psExtent->MaxX) || std::isnan(psExtent->MaxY)))
             {
                 bExtentSet = true;
             }
@@ -300,11 +353,40 @@ OGRErr OGRLayer::GetExtentInternal(int iGeomField, OGREnvelope *psExtent,
 
     return bExtentSet ? OGRERR_NONE : OGRERR_FAILURE;
 }
-//! @endcond
 
 /************************************************************************/
 /*                          OGR_L_GetExtent()                           */
 /************************************************************************/
+
+/**
+ \brief Fetch the extent of this layer.
+
+ Returns the extent (MBR) of the data in the layer.  If bForce is FALSE,
+ and it would be expensive to establish the extent then OGRERR_FAILURE
+ will be returned indicating that the extent isn't know.  If bForce is
+ TRUE then some implementations will actually scan the entire layer once
+ to compute the MBR of all the features in the layer.
+
+ Depending on the drivers, the returned extent may or may not take the
+ spatial filter into account.  So it is safer to call OGR_L_GetExtent() without
+ setting a spatial filter.
+
+ Layers without any geometry may return OGRERR_FAILURE just indicating that
+ no meaningful extents could be collected.
+
+ Note that some implementations of this method may alter the read cursor
+ of the layer.
+
+ This function is the same as the C++ method OGRLayer::GetExtent().
+
+ @param hLayer handle to the layer from which to get extent.
+ @param psExtent the structure in which the extent value will be returned.
+ @param bForce Flag indicating whether the extent should be computed even
+ if it is expensive.
+
+ @return OGRERR_NONE on success, OGRERR_FAILURE if extent not known.
+
+*/
 
 OGRErr OGR_L_GetExtent(OGRLayerH hLayer, OGREnvelope *psExtent, int bForce)
 
@@ -316,13 +398,44 @@ OGRErr OGR_L_GetExtent(OGRLayerH hLayer, OGREnvelope *psExtent, int bForce)
         OGRAPISpy_L_GetExtent(hLayer, bForce);
 #endif
 
-    return OGRLayer::FromHandle(hLayer)->GetExtent(psExtent, bForce);
+    return OGRLayer::FromHandle(hLayer)->GetExtent(0, psExtent,
+                                                   bForce != FALSE);
 }
 
 /************************************************************************/
 /*                         OGR_L_GetExtentEx()                          */
 /************************************************************************/
 
+/**
+ \brief Fetch the extent of this layer, on the specified geometry field.
+
+ Returns the extent (MBR) of the data in the layer.  If bForce is FALSE,
+ and it would be expensive to establish the extent then OGRERR_FAILURE
+ will be returned indicating that the extent isn't know.  If bForce is
+ TRUE then some implementations will actually scan the entire layer once
+ to compute the MBR of all the features in the layer.
+
+ Depending on the drivers, the returned extent may or may not take the
+ spatial filter into account.  So it is safer to call OGR_L_GetExtent() without
+ setting a spatial filter.
+
+ Layers without any geometry may return OGRERR_FAILURE just indicating that
+ no meaningful extents could be collected.
+
+ Note that some implementations of this method may alter the read cursor
+ of the layer.
+
+ This function is the same as the C++ method OGRLayer::GetExtent().
+
+ @param hLayer handle to the layer from which to get extent.
+ @param iGeomField the index of the geometry field on which to compute the extent.
+ @param psExtent the structure in which the extent value will be returned.
+ @param bForce Flag indicating whether the extent should be computed even
+ if it is expensive.
+
+ @return OGRERR_NONE on success, OGRERR_FAILURE if extent not known.
+
+*/
 OGRErr OGR_L_GetExtentEx(OGRLayerH hLayer, int iGeomField,
                          OGREnvelope *psExtent, int bForce)
 
@@ -335,7 +448,200 @@ OGRErr OGR_L_GetExtentEx(OGRLayerH hLayer, int iGeomField,
 #endif
 
     return OGRLayer::FromHandle(hLayer)->GetExtent(iGeomField, psExtent,
-                                                   bForce);
+                                                   bForce != FALSE);
+}
+
+/************************************************************************/
+/*                            GetExtent3D()                             */
+/************************************************************************/
+
+/**
+ \brief Fetch the 3D extent of this layer, on the specified geometry field.
+
+ Returns the 3D extent (MBR) of the data in the layer.  If bForce is FALSE,
+ and it would be expensive to establish the extent then OGRERR_FAILURE
+ will be returned indicating that the extent isn't know.  If bForce is
+ TRUE then some implementations will actually scan the entire layer once
+ to compute the MBR of all the features in the layer.
+
+ (Contrarty to GetExtent() 2D), the returned extent will always take into
+ account the attribute and spatial filters that may be installed.
+
+ Layers without any geometry may return OGRERR_FAILURE just indicating that
+ no meaningful extents could be collected.
+
+ For layers that have no 3D geometries, the psExtent3D->MinZ and psExtent3D->MaxZ
+ fields will be respectively set to +Infinity and -Infinity.
+
+ Note that some implementations of this method may alter the read cursor
+ of the layer.
+
+ This function is the same as the C function OGR_L_GetExtent3D().
+
+ @param iGeomField 0-based index of the geometry field to consider.
+ @param psExtent3D the computed 3D extent of the layer.
+ @param bForce if TRUE, the extent will be computed even if all the
+        layer features have to be fetched.
+ @return OGRERR_NONE on success or an error code in case of failure.
+ @since GDAL 3.9
+*/
+
+OGRErr OGRLayer::GetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
+                             bool bForce)
+
+{
+    psExtent3D->MinX = 0.0;
+    psExtent3D->MaxX = 0.0;
+    psExtent3D->MinY = 0.0;
+    psExtent3D->MaxY = 0.0;
+    psExtent3D->MinZ = std::numeric_limits<double>::infinity();
+    psExtent3D->MaxZ = -std::numeric_limits<double>::infinity();
+
+    /* -------------------------------------------------------------------- */
+    /*      If this layer has a none geometry type, then we can             */
+    /*      reasonably assume there are not extents available.              */
+    /* -------------------------------------------------------------------- */
+    if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount() ||
+        GetLayerDefn()->GetGeomFieldDefn(iGeomField)->GetType() == wkbNone)
+    {
+        if (iGeomField != 0)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Invalid geometry field index : %d", iGeomField);
+        }
+        return OGRERR_FAILURE;
+    }
+
+    return IGetExtent3D(iGeomField, psExtent3D, bForce);
+}
+
+/************************************************************************/
+/*                           IGetExtent3D()                             */
+/************************************************************************/
+
+/**
+ \brief Fetch the 3D extent of this layer, on the specified geometry field.
+
+ See GetExtent3D() documentation.
+
+ Virtual method implemented by drivers since 3.11. In previous versions,
+ GetExtent3D() itself was the virtual method.
+
+ Driver implementations, when wanting to call the base method, must take
+ care of calling OGRLayer::IGetExtent3D() (and note the public method without
+ the leading I).
+
+ @param iGeomField 0-based index of the geometry field to consider.
+ @param psExtent3D the computed 3D extent of the layer.
+ @param bForce if TRUE, the extent will be computed even if all the
+        layer features have to be fetched.
+ @return OGRERR_NONE on success or an error code in case of failure.
+ @since GDAL 3.11
+*/
+
+OGRErr OGRLayer::IGetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
+                              bool bForce)
+
+{
+    /* -------------------------------------------------------------------- */
+    /*      If not forced, we should avoid having to scan all the           */
+    /*      features and just return a failure.                             */
+    /* -------------------------------------------------------------------- */
+    if (!bForce)
+        return OGRERR_FAILURE;
+
+    /* -------------------------------------------------------------------- */
+    /*      OK, we hate to do this, but go ahead and read through all       */
+    /*      the features to collect geometries and build extents.           */
+    /* -------------------------------------------------------------------- */
+    OGREnvelope3D oEnv;
+    bool bExtentSet = false;
+
+    for (auto &&poFeature : *this)
+    {
+        OGRGeometry *poGeom = poFeature->GetGeomFieldRef(iGeomField);
+        if (poGeom == nullptr || poGeom->IsEmpty())
+        {
+            /* Do nothing */
+        }
+        else if (!bExtentSet)
+        {
+            poGeom->getEnvelope(psExtent3D);
+            // This is required because getEnvelope initializes Z to 0 for 2D geometries
+            if (!poGeom->Is3D())
+            {
+                psExtent3D->MinZ = std::numeric_limits<double>::infinity();
+                psExtent3D->MaxZ = -std::numeric_limits<double>::infinity();
+            }
+            bExtentSet = true;
+        }
+        else
+        {
+            poGeom->getEnvelope(&oEnv);
+            // This is required because getEnvelope initializes Z to 0 for 2D geometries
+            if (!poGeom->Is3D())
+            {
+                oEnv.MinZ = std::numeric_limits<double>::infinity();
+                oEnv.MaxZ = -std::numeric_limits<double>::infinity();
+            }
+            // Merge handles infinity correctly
+            psExtent3D->Merge(oEnv);
+        }
+    }
+    ResetReading();
+
+    return bExtentSet ? OGRERR_NONE : OGRERR_FAILURE;
+}
+
+/************************************************************************/
+/*                          OGR_L_GetExtent3D()                         */
+/************************************************************************/
+
+/**
+ \brief Fetch the 3D extent of this layer, on the specified geometry field.
+
+ Returns the 3D extent (MBR) of the data in the layer.  If bForce is FALSE,
+ and it would be expensive to establish the extent then OGRERR_FAILURE
+ will be returned indicating that the extent isn't know.  If bForce is
+ TRUE then some implementations will actually scan the entire layer once
+ to compute the MBR of all the features in the layer.
+
+ (Contrarty to GetExtent() 2D), the returned extent will always take into
+ account the attribute and spatial filters that may be installed.
+
+ Layers without any geometry may return OGRERR_FAILURE just indicating that
+ no meaningful extents could be collected.
+
+ For layers that have no 3D geometries, the psExtent3D->MinZ and psExtent3D->MaxZ
+ fields will be respectively set to +Infinity and -Infinity.
+
+ Note that some implementations of this method may alter the read cursor
+ of the layer.
+
+ This function is the same as the C++ method OGRLayer::GetExtent3D().
+
+ @param hLayer the layer to consider.
+ @param iGeomField 0-based index of the geometry field to consider.
+ @param psExtent3D the computed 3D extent of the layer.
+ @param bForce if TRUE, the extent will be computed even if all the
+        layer features have to be fetched.
+ @return OGRERR_NONE on success or an error code in case of failure.
+ @since GDAL 3.9
+*/
+
+OGRErr OGR_L_GetExtent3D(OGRLayerH hLayer, int iGeomField,
+                         OGREnvelope3D *psExtent3D, int bForce)
+
+{
+    VALIDATE_POINTER1(hLayer, "OGR_L_GetExtent3D", OGRERR_INVALID_HANDLE);
+
+#ifdef OGRAPISPY_ENABLED
+    if (bOGRAPISpyEnabled)
+        OGRAPISpy_L_GetExtent3D(hLayer, iGeomField, bForce);
+#endif
+
+    return OGRLayer::FromHandle(hLayer)->GetExtent3D(iGeomField, psExtent3D,
+                                                     bForce != FALSE);
 }
 
 /************************************************************************/
@@ -425,6 +731,7 @@ int OGRLayer::AttributeFilterEvaluationNeedsGeometry()
 
     return ContainGeomSpecialField(expr, nLayerFieldCount);
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -564,28 +871,80 @@ OGRFeatureH OGR_L_GetNextFeature(OGRLayerH hLayer)
 
 void OGRLayer::ConvertGeomsIfNecessary(OGRFeature *poFeature)
 {
-    const bool bSupportsCurve = CPL_TO_BOOL(TestCapability(OLCCurveGeometries));
-    const bool bSupportsM = CPL_TO_BOOL(TestCapability(OLCMeasuredGeometries));
-    if (!bSupportsCurve || !bSupportsM)
+    if (!m_poPrivate->m_bConvertGeomsIfNecessaryAlreadyCalled)
     {
-        int nGeomFieldCount = GetLayerDefn()->GetGeomFieldCount();
+        // One time initialization
+        m_poPrivate->m_bConvertGeomsIfNecessaryAlreadyCalled = true;
+        m_poPrivate->m_bSupportsCurve =
+            CPL_TO_BOOL(TestCapability(OLCCurveGeometries));
+        m_poPrivate->m_bSupportsM =
+            CPL_TO_BOOL(TestCapability(OLCMeasuredGeometries));
+        if (CPLTestBool(
+                CPLGetConfigOption("OGR_APPLY_GEOM_SET_PRECISION", "FALSE")))
+        {
+            const auto poFeatureDefn = GetLayerDefn();
+            const int nGeomFieldCount = poFeatureDefn->GetGeomFieldCount();
+            for (int i = 0; i < nGeomFieldCount; i++)
+            {
+                const double dfXYResolution = poFeatureDefn->GetGeomFieldDefn(i)
+                                                  ->GetCoordinatePrecision()
+                                                  .dfXYResolution;
+                if (dfXYResolution != OGRGeomCoordinatePrecision::UNKNOWN &&
+                    OGRGeometryFactory::haveGEOS())
+                {
+                    m_poPrivate->m_bApplyGeomSetPrecision = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!m_poPrivate->m_bSupportsCurve || !m_poPrivate->m_bSupportsM ||
+        m_poPrivate->m_bApplyGeomSetPrecision)
+    {
+        const auto poFeatureDefn = GetLayerDefn();
+        const int nGeomFieldCount = poFeatureDefn->GetGeomFieldCount();
         for (int i = 0; i < nGeomFieldCount; i++)
         {
             OGRGeometry *poGeom = poFeature->GetGeomFieldRef(i);
-            if (poGeom != nullptr &&
-                (!bSupportsM && OGR_GT_HasM(poGeom->getGeometryType())))
+            if (poGeom)
             {
-                poGeom->setMeasured(FALSE);
-            }
-            if (poGeom != nullptr &&
-                (!bSupportsCurve &&
-                 OGR_GT_IsNonLinear(poGeom->getGeometryType())))
-            {
-                OGRwkbGeometryType eTargetType =
-                    OGR_GT_GetLinear(poGeom->getGeometryType());
-                poFeature->SetGeomFieldDirectly(
-                    i, OGRGeometryFactory::forceTo(poFeature->StealGeometry(i),
-                                                   eTargetType));
+                if (!m_poPrivate->m_bSupportsM &&
+                    OGR_GT_HasM(poGeom->getGeometryType()))
+                {
+                    poGeom->setMeasured(FALSE);
+                }
+
+                if (!m_poPrivate->m_bSupportsCurve &&
+                    OGR_GT_IsNonLinear(poGeom->getGeometryType()))
+                {
+                    OGRwkbGeometryType eTargetType =
+                        OGR_GT_GetLinear(poGeom->getGeometryType());
+                    poGeom = OGRGeometryFactory::forceTo(
+                        poFeature->StealGeometry(i), eTargetType);
+                    poFeature->SetGeomFieldDirectly(i, poGeom);
+                    poGeom = poFeature->GetGeomFieldRef(i);
+                }
+
+                if (poGeom && m_poPrivate->m_bApplyGeomSetPrecision)
+                {
+                    const double dfXYResolution =
+                        poFeatureDefn->GetGeomFieldDefn(i)
+                            ->GetCoordinatePrecision()
+                            .dfXYResolution;
+                    if (dfXYResolution != OGRGeomCoordinatePrecision::UNKNOWN &&
+                        !poGeom->hasCurveGeometry())
+                    {
+                        auto poNewGeom = poGeom->SetPrecision(dfXYResolution,
+                                                              /* nFlags = */ 0);
+                        if (poNewGeom)
+                        {
+                            poFeature->SetGeomFieldDirectly(i, poNewGeom);
+                            // If there was potential further processing...
+                            // poGeom = poFeature->GetGeomFieldRef(i);
+                        }
+                    }
+                }
             }
         }
     }
@@ -763,7 +1122,8 @@ OGRErr OGRLayer::IUpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
     if (!TestCapability(OLCRandomWrite))
         return OGRERR_UNSUPPORTED_OPERATION;
 
-    auto poFeatureExisting = GetFeature(poFeature->GetFID());
+    auto poFeatureExisting =
+        std::unique_ptr<OGRFeature>(GetFeature(poFeature->GetFID()));
     if (!poFeatureExisting)
         return OGRERR_NON_EXISTING_FEATURE;
 
@@ -783,7 +1143,7 @@ OGRErr OGRLayer::IUpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
     {
         poFeatureExisting->SetStyleString(poFeature->GetStyleString());
     }
-    return ISetFeature(poFeatureExisting);
+    return ISetFeature(poFeatureExisting.get());
 }
 
 /************************************************************************/
@@ -810,7 +1170,7 @@ OGRErr OGR_L_UpdateFeature(OGRLayerH hLayer, OGRFeatureH hFeat,
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRLayer::CreateField(const OGRFieldDefn *poField, int bApproxOK)
 
 {
     (void)poField;
@@ -1056,7 +1416,7 @@ OGRErr OGR_L_AlterGeomFieldDefn(OGRLayerH hLayer, int iGeomField,
 /*                         CreateGeomField()                            */
 /************************************************************************/
 
-OGRErr OGRLayer::CreateGeomField(OGRGeomFieldDefn *poField, int bApproxOK)
+OGRErr OGRLayer::CreateGeomField(const OGRGeomFieldDefn *poField, int bApproxOK)
 
 {
     (void)poField;
@@ -1224,7 +1584,8 @@ int OGRLayer::FindFieldIndex(const char *pszFieldName,
 OGRSpatialReference *OGRLayer::GetSpatialRef()
 {
     if (GetLayerDefn()->GetGeomFieldCount() > 0)
-        return GetLayerDefn()->GetGeomFieldDefn(0)->GetSpatialRef();
+        return const_cast<OGRSpatialReference *>(
+            GetLayerDefn()->GetGeomFieldDefn(0)->GetSpatialRef());
     else
         return nullptr;
 }
@@ -1294,43 +1655,215 @@ OGRGeometryH OGR_L_GetSpatialFilter(OGRLayerH hLayer)
 }
 
 /************************************************************************/
+/*             ValidateGeometryFieldIndexForSetSpatialFilter()          */
+/************************************************************************/
+
+//! @cond Doxygen_Suppress
+bool OGRLayer::ValidateGeometryFieldIndexForSetSpatialFilter(
+    int iGeomField, const OGRGeometry *poGeomIn, bool bIsSelectLayer)
+{
+    if (iGeomField == 0 && poGeomIn == nullptr &&
+        GetLayerDefn()->GetGeomFieldCount() == 0)
+    {
+        // Setting a null spatial filter on geometry field idx 0
+        // when there are no geometry field can't harm, and is accepted silently
+        // for backward compatibility with existing practice.
+    }
+    else if (iGeomField < 0 ||
+             iGeomField >= GetLayerDefn()->GetGeomFieldCount())
+    {
+        if (iGeomField == 0)
+        {
+            CPLError(
+                CE_Failure, CPLE_AppDefined,
+                bIsSelectLayer
+                    ? "Cannot set spatial filter: no geometry field selected."
+                    : "Cannot set spatial filter: no geometry field present in "
+                      "layer.");
+        }
+        else
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Cannot set spatial filter on non-existing geometry field "
+                     "of index %d.",
+                     iGeomField);
+        }
+        return false;
+    }
+    return true;
+}
+
+//! @endcond
+
+/************************************************************************/
 /*                          SetSpatialFilter()                          */
 /************************************************************************/
 
-void OGRLayer::SetSpatialFilter(OGRGeometry *poGeomIn)
+/**
+ \brief Set a new spatial filter.
+
+ This method set the geometry to be used as a spatial filter when
+ fetching features via the GetNextFeature() method.  Only features that
+ geometrically intersect the filter geometry will be returned.
+
+ Currently this test is may be inaccurately implemented, but it is
+ guaranteed that all features whose envelope (as returned by
+ OGRGeometry::getEnvelope()) overlaps the envelope of the spatial filter
+ will be returned.  This can result in more shapes being returned that
+ should strictly be the case.
+
+ Starting with GDAL 2.3, features with null or empty geometries will never
+ be considered as matching a spatial filter.
+
+ This method makes an internal copy of the passed geometry.  The
+ passed geometry remains the responsibility of the caller, and may
+ be safely destroyed.
+
+ For the time being the passed filter geometry should be in the same
+ SRS as the layer (as returned by OGRLayer::GetSpatialRef()).  In the
+ future this may be generalized.
+
+ This method is the same as the C function OGR_L_SetSpatialFilter().
+
+ @param poFilter the geometry to use as a filtering region.  NULL may
+ be passed indicating that the current spatial filter should be cleared,
+ but no new one instituted.
+ */
+
+OGRErr OGRLayer::SetSpatialFilter(const OGRGeometry *poFilter)
 
 {
-    m_iGeomFieldFilter = 0;
-    if (InstallFilter(poGeomIn))
-        ResetReading();
+    return SetSpatialFilter(0, poFilter);
 }
 
-void OGRLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeomIn)
+/**
+ \brief Set a new spatial filter.
+
+ This method set the geometry to be used as a spatial filter when
+ fetching features via the GetNextFeature() method.  Only features that
+ geometrically intersect the filter geometry will be returned.
+
+ Currently this test is may be inaccurately implemented, but it is
+ guaranteed that all features who's envelope (as returned by
+ OGRGeometry::getEnvelope()) overlaps the envelope of the spatial filter
+ will be returned.  This can result in more shapes being returned that
+ should strictly be the case.
+
+ This method makes an internal copy of the passed geometry.  The
+ passed geometry remains the responsibility of the caller, and may
+ be safely destroyed.
+
+ For the time being the passed filter geometry should be in the same
+ SRS as the geometry field definition it corresponds to (as returned by
+ GetLayerDefn()->OGRFeatureDefn::GetGeomFieldDefn(iGeomField)->GetSpatialRef()).  In the
+ future this may be generalized.
+
+ Note that only the last spatial filter set is applied, even if several
+ successive calls are done with different iGeomField values.
+
+ This method is the same as the C function OGR_L_SetSpatialFilterEx().
+
+ @param iGeomField index of the geometry field on which the spatial filter
+ operates.
+ @param poFilter the geometry to use as a filtering region.  NULL may
+ be passed indicating that the current spatial filter should be cleared,
+ but no new one instituted.
+
+ @since GDAL 1.11
+ */
+
+OGRErr OGRLayer::SetSpatialFilter(int iGeomField, const OGRGeometry *poFilter)
 
 {
     if (iGeomField == 0)
     {
-        m_iGeomFieldFilter = iGeomField;
-        SetSpatialFilter(poGeomIn);
+        if (poFilter &&
+            !ValidateGeometryFieldIndexForSetSpatialFilter(0, poFilter))
+        {
+            return OGRERR_FAILURE;
+        }
     }
     else
     {
-        if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount())
+        if (!ValidateGeometryFieldIndexForSetSpatialFilter(iGeomField,
+                                                           poFilter))
         {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Invalid geometry field index : %d", iGeomField);
-            return;
+            return OGRERR_FAILURE;
         }
-
-        m_iGeomFieldFilter = iGeomField;
-        if (InstallFilter(poGeomIn))
-            ResetReading();
     }
+
+    return ISetSpatialFilter(iGeomField, poFilter);
+}
+
+/************************************************************************/
+/*                         ISetSpatialFilter()                          */
+/************************************************************************/
+
+/**
+ \brief Set a new spatial filter.
+
+ Virtual method implemented by drivers since 3.11. In previous versions,
+ SetSpatialFilter() / SetSpatialFilterRect() itself was the virtual method.
+
+ Driver implementations, when wanting to call the base method, must take
+ care of calling OGRLayer::ISetSpatialFilter() (and note the public method without
+ the leading I).
+
+ @param iGeomField index of the geometry field on which the spatial filter
+ operates.
+ @param poFilter the geometry to use as a filtering region.  NULL may
+ be passed indicating that the current spatial filter should be cleared,
+ but no new one instituted.
+
+ @since GDAL 3.11
+ */
+
+OGRErr OGRLayer::ISetSpatialFilter(int iGeomField, const OGRGeometry *poFilter)
+
+{
+    m_iGeomFieldFilter = iGeomField;
+    if (InstallFilter(poFilter))
+        ResetReading();
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
 /*                       OGR_L_SetSpatialFilter()                       */
 /************************************************************************/
+
+/**
+ \brief Set a new spatial filter.
+
+ This function set the geometry to be used as a spatial filter when
+ fetching features via the OGR_L_GetNextFeature() function.  Only
+ features that geometrically intersect the filter geometry will be
+ returned.
+
+ Currently this test is may be inaccurately implemented, but it is
+ guaranteed that all features whose envelope (as returned by
+ OGR_G_GetEnvelope()) overlaps the envelope of the spatial filter
+ will be returned.  This can result in more shapes being returned that
+ should strictly be the case.
+
+ Starting with GDAL 2.3, features with null or empty geometries will never
+ be considered as matching a spatial filter.
+
+ This function makes an internal copy of the passed geometry.  The
+ passed geometry remains the responsibility of the caller, and may
+ be safely destroyed.
+
+ For the time being the passed filter geometry should be in the same
+ SRS as the layer (as returned by OGR_L_GetSpatialRef()).  In the
+ future this may be generalized.
+
+ This function is the same as the C++ method OGRLayer::SetSpatialFilter.
+
+ @param hLayer handle to the layer on which to set the spatial filter.
+ @param hGeom handle to the geometry to use as a filtering region.  NULL may
+ be passed indicating that the current spatial filter should be cleared,
+ but no new one instituted.
+
+ */
 
 void OGR_L_SetSpatialFilter(OGRLayerH hLayer, OGRGeometryH hGeom)
 
@@ -1350,6 +1883,45 @@ void OGR_L_SetSpatialFilter(OGRLayerH hLayer, OGRGeometryH hGeom)
 /*                      OGR_L_SetSpatialFilterEx()                      */
 /************************************************************************/
 
+/**
+ \brief Set a new spatial filter.
+
+ This function set the geometry to be used as a spatial filter when
+ fetching features via the OGR_L_GetNextFeature() function.  Only
+ features that geometrically intersect the filter geometry will be
+ returned.
+
+ Currently this test is may be inaccurately implemented, but it is
+ guaranteed that all features who's envelope (as returned by
+ OGR_G_GetEnvelope()) overlaps the envelope of the spatial filter
+ will be returned.  This can result in more shapes being returned that
+ should strictly be the case.
+
+ This function makes an internal copy of the passed geometry.  The
+ passed geometry remains the responsibility of the caller, and may
+ be safely destroyed.
+
+ For the time being the passed filter geometry should be in the same
+ SRS as the geometry field definition it corresponds to (as returned by
+ GetLayerDefn()->OGRFeatureDefn::GetGeomFieldDefn(iGeomField)->GetSpatialRef()).  In the
+ future this may be generalized.
+
+ Note that only the last spatial filter set is applied, even if several
+ successive calls are done with different iGeomField values.
+
+ This function is the same as the C++ method OGRLayer::SetSpatialFilter.
+
+ @param hLayer handle to the layer on which to set the spatial filter.
+ @param iGeomField index of the geometry field on which the spatial filter
+ operates.
+ @param hGeom handle to the geometry to use as a filtering region.  NULL may
+ be passed indicating that the current spatial filter should be cleared,
+ but no new one instituted.
+
+ @since GDAL 1.11
+
+ */
+
 void OGR_L_SetSpatialFilterEx(OGRLayerH hLayer, int iGeomField,
                               OGRGeometryH hGeom)
 
@@ -1364,42 +1936,120 @@ void OGR_L_SetSpatialFilterEx(OGRLayerH hLayer, int iGeomField,
     OGRLayer::FromHandle(hLayer)->SetSpatialFilter(
         iGeomField, OGRGeometry::FromHandle(hGeom));
 }
+
 /************************************************************************/
 /*                        SetSpatialFilterRect()                        */
 /************************************************************************/
 
-void OGRLayer::SetSpatialFilterRect(double dfMinX, double dfMinY, double dfMaxX,
-                                    double dfMaxY)
+/**
+ \brief Set a new rectangular spatial filter.
+
+ This method set rectangle to be used as a spatial filter when
+ fetching features via the GetNextFeature() method.  Only features that
+ geometrically intersect the given rectangle will be returned.
+
+ The x/y values should be in the same coordinate system as the layer as
+ a whole (as returned by OGRLayer::GetSpatialRef()).   Internally this
+ method is normally implemented as creating a 5 vertex closed rectangular
+ polygon and passing it to OGRLayer::SetSpatialFilter().  It exists as
+ a convenience.
+
+ The only way to clear a spatial filter set with this method is to
+ call OGRLayer::SetSpatialFilter(NULL).
+
+ This method is the same as the C function OGR_L_SetSpatialFilterRect().
+
+ @param dfMinX the minimum X coordinate for the rectangular region.
+ @param dfMinY the minimum Y coordinate for the rectangular region.
+ @param dfMaxX the maximum X coordinate for the rectangular region.
+ @param dfMaxY the maximum Y coordinate for the rectangular region.
+
+ */
+
+OGRErr OGRLayer::SetSpatialFilterRect(double dfMinX, double dfMinY,
+                                      double dfMaxX, double dfMaxY)
 
 {
-    SetSpatialFilterRect(0, dfMinX, dfMinY, dfMaxX, dfMaxY);
+    return SetSpatialFilterRect(0, dfMinX, dfMinY, dfMaxX, dfMaxY);
 }
 
-void OGRLayer::SetSpatialFilterRect(int iGeomField, double dfMinX,
-                                    double dfMinY, double dfMaxX, double dfMaxY)
+/**
+ \brief Set a new rectangular spatial filter.
+
+ This method set rectangle to be used as a spatial filter when
+ fetching features via the GetNextFeature() method.  Only features that
+ geometrically intersect the given rectangle will be returned.
+
+ The x/y values should be in the same coordinate system as as the geometry
+ field definition it corresponds to (as returned by
+ GetLayerDefn()->OGRFeatureDefn::GetGeomFieldDefn(iGeomField)->GetSpatialRef()). Internally this
+ method is normally implemented as creating a 5 vertex closed rectangular
+ polygon and passing it to OGRLayer::SetSpatialFilter().  It exists as
+ a convenience.
+
+ The only way to clear a spatial filter set with this method is to
+ call OGRLayer::SetSpatialFilter(NULL).
+
+ This method is the same as the C function OGR_L_SetSpatialFilterRectEx().
+
+ @param iGeomField index of the geometry field on which the spatial filter
+ operates.
+ @param dfMinX the minimum X coordinate for the rectangular region.
+ @param dfMinY the minimum Y coordinate for the rectangular region.
+ @param dfMaxX the maximum X coordinate for the rectangular region.
+ @param dfMaxY the maximum Y coordinate for the rectangular region.
+
+ @since GDAL 1.11
+ */
+
+OGRErr OGRLayer::SetSpatialFilterRect(int iGeomField, double dfMinX,
+                                      double dfMinY, double dfMaxX,
+                                      double dfMaxY)
 
 {
-    OGRLinearRing oRing;
+    auto poRing = std::make_unique<OGRLinearRing>();
     OGRPolygon oPoly;
 
-    oRing.addPoint(dfMinX, dfMinY);
-    oRing.addPoint(dfMinX, dfMaxY);
-    oRing.addPoint(dfMaxX, dfMaxY);
-    oRing.addPoint(dfMaxX, dfMinY);
-    oRing.addPoint(dfMinX, dfMinY);
+    poRing->addPoint(dfMinX, dfMinY);
+    poRing->addPoint(dfMinX, dfMaxY);
+    poRing->addPoint(dfMaxX, dfMaxY);
+    poRing->addPoint(dfMaxX, dfMinY);
+    poRing->addPoint(dfMinX, dfMinY);
 
-    oPoly.addRing(&oRing);
+    oPoly.addRing(std::move(poRing));
 
-    if (iGeomField == 0)
-        /* for drivers that only overload SetSpatialFilter(OGRGeometry*) */
-        SetSpatialFilter(&oPoly);
-    else
-        SetSpatialFilter(iGeomField, &oPoly);
+    return SetSpatialFilter(iGeomField, &oPoly);
 }
 
 /************************************************************************/
 /*                     OGR_L_SetSpatialFilterRect()                     */
 /************************************************************************/
+
+/**
+ \brief Set a new rectangular spatial filter.
+
+ This method set rectangle to be used as a spatial filter when
+ fetching features via the OGR_L_GetNextFeature() method.  Only features that
+ geometrically intersect the given rectangle will be returned.
+
+ The x/y values should be in the same coordinate system as the layer as
+ a whole (as returned by OGRLayer::GetSpatialRef()).   Internally this
+ method is normally implemented as creating a 5 vertex closed rectangular
+ polygon and passing it to OGRLayer::SetSpatialFilter().  It exists as
+ a convenience.
+
+ The only way to clear a spatial filter set with this method is to
+ call OGRLayer::SetSpatialFilter(NULL).
+
+ This method is the same as the C++ method OGRLayer::SetSpatialFilterRect().
+
+ @param hLayer handle to the layer on which to set the spatial filter.
+ @param dfMinX the minimum X coordinate for the rectangular region.
+ @param dfMinY the minimum Y coordinate for the rectangular region.
+ @param dfMaxX the maximum X coordinate for the rectangular region.
+ @param dfMaxY the maximum Y coordinate for the rectangular region.
+
+ */
 
 void OGR_L_SetSpatialFilterRect(OGRLayerH hLayer, double dfMinX, double dfMinY,
                                 double dfMaxX, double dfMaxY)
@@ -1420,6 +2070,36 @@ void OGR_L_SetSpatialFilterRect(OGRLayerH hLayer, double dfMinX, double dfMinY,
 /************************************************************************/
 /*                    OGR_L_SetSpatialFilterRectEx()                    */
 /************************************************************************/
+
+/**
+ \brief Set a new rectangular spatial filter.
+
+ This method set rectangle to be used as a spatial filter when
+ fetching features via the OGR_L_GetNextFeature() method.  Only features that
+ geometrically intersect the given rectangle will be returned.
+
+ The x/y values should be in the same coordinate system as as the geometry
+ field definition it corresponds to (as returned by
+ GetLayerDefn()->OGRFeatureDefn::GetGeomFieldDefn(iGeomField)->GetSpatialRef()). Internally this
+ method is normally implemented as creating a 5 vertex closed rectangular
+ polygon and passing it to OGRLayer::SetSpatialFilter().  It exists as
+ a convenience.
+
+ The only way to clear a spatial filter set with this method is to
+ call OGRLayer::SetSpatialFilter(NULL).
+
+ This method is the same as the C++ method OGRLayer::SetSpatialFilterRect().
+
+ @param hLayer handle to the layer on which to set the spatial filter.
+ @param iGeomField index of the geometry field on which the spatial filter
+ operates.
+ @param dfMinX the minimum X coordinate for the rectangular region.
+ @param dfMinY the minimum Y coordinate for the rectangular region.
+ @param dfMaxX the maximum X coordinate for the rectangular region.
+ @param dfMaxY the maximum Y coordinate for the rectangular region.
+
+ @since GDAL 1.11
+ */
 
 void OGR_L_SetSpatialFilterRectEx(OGRLayerH hLayer, int iGeomField,
                                   double dfMinX, double dfMinY, double dfMaxX,
@@ -1453,7 +2133,7 @@ void OGR_L_SetSpatialFilterRectEx(OGRLayerH hLayer, int iGeomField,
 /************************************************************************/
 
 //! @cond Doxygen_Suppress
-int OGRLayer::InstallFilter(OGRGeometry *poFilter)
+int OGRLayer::InstallFilter(const OGRGeometry *poFilter)
 
 {
     if (m_poFilterGeom == poFilter)
@@ -1488,46 +2168,78 @@ int OGRLayer::InstallFilter(OGRGeometry *poFilter)
     m_pPreparedFilterGeom =
         OGRCreatePreparedGeometry(OGRGeometry::ToHandle(m_poFilterGeom));
 
-    /* -------------------------------------------------------------------- */
-    /*      Now try to determine if the filter is really a rectangle.       */
-    /* -------------------------------------------------------------------- */
-    if (wkbFlatten(m_poFilterGeom->getGeometryType()) != wkbPolygon)
-        return TRUE;
-
-    OGRPolygon *poPoly = m_poFilterGeom->toPolygon();
-
-    if (poPoly->getNumInteriorRings() != 0)
-        return TRUE;
-
-    OGRLinearRing *poRing = poPoly->getExteriorRing();
-    if (poRing == nullptr)
-        return TRUE;
-
-    if (poRing->getNumPoints() > 5 || poRing->getNumPoints() < 4)
-        return TRUE;
-
-    // If the ring has 5 points, the last should be the first.
-    if (poRing->getNumPoints() == 5 && (poRing->getX(0) != poRing->getX(4) ||
-                                        poRing->getY(0) != poRing->getY(4)))
-        return TRUE;
-
-    // Polygon with first segment in "y" direction.
-    if (poRing->getX(0) == poRing->getX(1) &&
-        poRing->getY(1) == poRing->getY(2) &&
-        poRing->getX(2) == poRing->getX(3) &&
-        poRing->getY(3) == poRing->getY(0))
-        m_bFilterIsEnvelope = TRUE;
-
-    // Polygon with first segment in "x" direction.
-    if (poRing->getY(0) == poRing->getY(1) &&
-        poRing->getX(1) == poRing->getX(2) &&
-        poRing->getY(2) == poRing->getY(3) &&
-        poRing->getX(3) == poRing->getX(0))
-        m_bFilterIsEnvelope = TRUE;
+    m_bFilterIsEnvelope = m_poFilterGeom->IsRectangle();
 
     return TRUE;
 }
+
 //! @endcond
+
+/************************************************************************/
+/*                   DoesGeometryHavePointInEnvelope()                  */
+/************************************************************************/
+
+static bool DoesGeometryHavePointInEnvelope(const OGRGeometry *poGeometry,
+                                            const OGREnvelope &sEnvelope)
+{
+    const OGRLineString *poLS = nullptr;
+
+    switch (wkbFlatten(poGeometry->getGeometryType()))
+    {
+        case wkbPoint:
+        {
+            const auto poPoint = poGeometry->toPoint();
+            const double x = poPoint->getX();
+            const double y = poPoint->getY();
+            return (x >= sEnvelope.MinX && y >= sEnvelope.MinY &&
+                    x <= sEnvelope.MaxX && y <= sEnvelope.MaxY);
+        }
+
+        case wkbLineString:
+            poLS = poGeometry->toLineString();
+            break;
+
+        case wkbPolygon:
+        {
+            const OGRPolygon *poPoly = poGeometry->toPolygon();
+            poLS = poPoly->getExteriorRing();
+            break;
+        }
+
+        case wkbMultiPoint:
+        case wkbMultiLineString:
+        case wkbMultiPolygon:
+        case wkbGeometryCollection:
+        {
+            for (const auto &poSubGeom : *(poGeometry->toGeometryCollection()))
+            {
+                if (DoesGeometryHavePointInEnvelope(poSubGeom, sEnvelope))
+                    return true;
+            }
+            return false;
+        }
+
+        default:
+            return false;
+    }
+
+    if (poLS != nullptr)
+    {
+        const int nNumPoints = poLS->getNumPoints();
+        for (int i = 0; i < nNumPoints; i++)
+        {
+            const double x = poLS->getX(i);
+            const double y = poLS->getY(i);
+            if (x >= sEnvelope.MinX && y >= sEnvelope.MinY &&
+                x <= sEnvelope.MaxX && y <= sEnvelope.MaxY)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
 
 /************************************************************************/
 /*                           FilterGeometry()                           */
@@ -1538,7 +2250,7 @@ int OGRLayer::InstallFilter(OGRGeometry *poFilter)
 /************************************************************************/
 
 //! @cond Doxygen_Suppress
-int OGRLayer::FilterGeometry(OGRGeometry *poGeometry)
+int OGRLayer::FilterGeometry(const OGRGeometry *poGeometry)
 
 {
     /* -------------------------------------------------------------------- */
@@ -1581,57 +2293,13 @@ int OGRLayer::FilterGeometry(OGRGeometry *poGeometry)
     }
     else
     {
-        /* --------------------------------------------------------------------
-         */
-        /*      If the filter geometry is its own envelope and if the */
-        /*      the geometry (line, or polygon without hole) h has at least one
-         */
-        /*      point inside the filter geometry, the geometry itself is inside
-         */
-        /*      the filter geometry. */
-        /* --------------------------------------------------------------------
-         */
+        // If the filter geometry is its own envelope and if the geometry has
+        // at least one point inside the filter geometry, the geometry itself
+        // intersects the filter geometry.
         if (m_bFilterIsEnvelope)
         {
-            OGRLineString *poLS = nullptr;
-
-            switch (wkbFlatten(poGeometry->getGeometryType()))
-            {
-                case wkbPolygon:
-                {
-                    OGRPolygon *poPoly = poGeometry->toPolygon();
-                    OGRLinearRing *poRing = poPoly->getExteriorRing();
-                    if (poRing != nullptr && poPoly->getNumInteriorRings() == 0)
-                    {
-                        poLS = poRing;
-                    }
-                    break;
-                }
-
-                case wkbLineString:
-                    poLS = poGeometry->toLineString();
-                    break;
-
-                default:
-                    break;
-            }
-
-            if (poLS != nullptr)
-            {
-                int nNumPoints = poLS->getNumPoints();
-                for (int i = 0; i < nNumPoints; i++)
-                {
-                    double x = poLS->getX(i);
-                    double y = poLS->getY(i);
-                    if (x >= m_sFilterEnvelope.MinX &&
-                        y >= m_sFilterEnvelope.MinY &&
-                        x <= m_sFilterEnvelope.MaxX &&
-                        y <= m_sFilterEnvelope.MaxY)
-                    {
-                        return TRUE;
-                    }
-                }
-            }
+            if (DoesGeometryHavePointInEnvelope(poGeometry, m_sFilterEnvelope))
+                return true;
         }
 
         /* --------------------------------------------------------------------
@@ -1645,7 +2313,9 @@ int OGRLayer::FilterGeometry(OGRGeometry *poGeometry)
             // CPLDebug("OGRLayer", "GEOS intersection");
             if (m_pPreparedFilterGeom != nullptr)
                 return OGRPreparedGeometryIntersects(
-                    m_pPreparedFilterGeom, OGRGeometry::ToHandle(poGeometry));
+                    m_pPreparedFilterGeom,
+                    OGRGeometry::ToHandle(
+                        const_cast<OGRGeometry *>(poGeometry)));
             else
                 return m_poFilterGeom->Intersects(poGeometry);
         }
@@ -1653,6 +2323,277 @@ int OGRLayer::FilterGeometry(OGRGeometry *poGeometry)
             return TRUE;
     }
 }
+
+/************************************************************************/
+/*                         FilterWKBGeometry()                          */
+/************************************************************************/
+
+bool OGRLayer::FilterWKBGeometry(const GByte *pabyWKB, size_t nWKBSize,
+                                 bool bEnvelopeAlreadySet,
+                                 OGREnvelope &sEnvelope) const
+{
+    OGRPreparedGeometry *pPreparedFilterGeom = m_pPreparedFilterGeom;
+    bool bRet = FilterWKBGeometry(
+        pabyWKB, nWKBSize, bEnvelopeAlreadySet, sEnvelope, m_poFilterGeom,
+        m_bFilterIsEnvelope, m_sFilterEnvelope, pPreparedFilterGeom);
+    const_cast<OGRLayer *>(this)->m_pPreparedFilterGeom = pPreparedFilterGeom;
+    return bRet;
+}
+
+/* static */
+bool OGRLayer::FilterWKBGeometry(const GByte *pabyWKB, size_t nWKBSize,
+                                 bool bEnvelopeAlreadySet,
+                                 OGREnvelope &sEnvelope,
+                                 const OGRGeometry *poFilterGeom,
+                                 bool bFilterIsEnvelope,
+                                 const OGREnvelope &sFilterEnvelope,
+                                 OGRPreparedGeometry *&pPreparedFilterGeom)
+{
+    if (!poFilterGeom)
+        return true;
+
+    if ((bEnvelopeAlreadySet ||
+         OGRWKBGetBoundingBox(pabyWKB, nWKBSize, sEnvelope)) &&
+        sFilterEnvelope.Intersects(sEnvelope))
+    {
+        if (bFilterIsEnvelope && sFilterEnvelope.Contains(sEnvelope))
+        {
+            return true;
+        }
+        else
+        {
+            if (bFilterIsEnvelope &&
+                OGRWKBIntersectsPessimistic(pabyWKB, nWKBSize, sFilterEnvelope))
+            {
+                return true;
+            }
+            else if (OGRGeometryFactory::haveGEOS())
+            {
+                OGRGeometry *poGeom = nullptr;
+                int ret = FALSE;
+                if (OGRGeometryFactory::createFromWkb(pabyWKB, nullptr, &poGeom,
+                                                      nWKBSize) == OGRERR_NONE)
+                {
+                    if (!pPreparedFilterGeom)
+                    {
+                        pPreparedFilterGeom =
+                            OGRCreatePreparedGeometry(OGRGeometry::ToHandle(
+                                const_cast<OGRGeometry *>(poFilterGeom)));
+                    }
+                    if (pPreparedFilterGeom)
+                        ret = OGRPreparedGeometryIntersects(
+                            pPreparedFilterGeom,
+                            OGRGeometry::ToHandle(
+                                const_cast<OGRGeometry *>(poGeom)));
+                    else
+                        ret = poFilterGeom->Intersects(poGeom);
+                }
+                delete poGeom;
+                return CPL_TO_BOOL(ret);
+            }
+            else
+            {
+                // Assume intersection
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/************************************************************************/
+/*                          PrepareStartTransaction()                   */
+/************************************************************************/
+
+void OGRLayer::PrepareStartTransaction()
+{
+    m_apoFieldDefnChanges.clear();
+    m_apoGeomFieldDefnChanges.clear();
+}
+
+/************************************************************************/
+/*                          FinishRollbackTransaction()                 */
+/************************************************************************/
+
+void OGRLayer::FinishRollbackTransaction(const std::string &osSavepointName)
+{
+
+    // Deleted fields can be safely removed from the storage after being restored.
+    std::vector<int> toBeRemoved;
+
+    bool bSavepointFound = false;
+
+    // Loop through all changed fields and reset them to their previous state.
+    for (int i = static_cast<int>(m_apoFieldDefnChanges.size()) - 1; i >= 0;
+         i--)
+    {
+        auto &oFieldChange = m_apoFieldDefnChanges[i];
+
+        if (!osSavepointName.empty())
+        {
+            if (oFieldChange.osSavepointName == osSavepointName)
+            {
+                bSavepointFound = true;
+            }
+            else if (bSavepointFound)
+            {
+                continue;
+            }
+        }
+
+        CPLAssert(oFieldChange.poFieldDefn);
+        const char *pszName = oFieldChange.poFieldDefn->GetNameRef();
+        const int iField = oFieldChange.iField;
+        if (iField >= 0)
+        {
+            switch (oFieldChange.eChangeType)
+            {
+                case FieldChangeType::DELETE_FIELD:
+                {
+                    // Transfer ownership of the field to the layer
+                    whileUnsealing(GetLayerDefn())
+                        ->AddFieldDefn(std::move(oFieldChange.poFieldDefn));
+
+                    // Now move the field to the right place
+                    // from the last position to its original position
+                    const int iFieldCount = GetLayerDefn()->GetFieldCount();
+                    CPLAssert(iFieldCount > 0);
+                    CPLAssert(iFieldCount > iField);
+                    std::vector<int> anOrder(iFieldCount);
+                    for (int j = 0; j < iField; j++)
+                    {
+                        anOrder[j] = j;
+                    }
+                    for (int j = iField + 1; j < iFieldCount; j++)
+                    {
+                        anOrder[j] = j - 1;
+                    }
+                    anOrder[iField] = iFieldCount - 1;
+                    if (OGRERR_NONE == whileUnsealing(GetLayerDefn())
+                                           ->ReorderFieldDefns(anOrder.data()))
+                    {
+                        toBeRemoved.push_back(i);
+                    }
+                    else
+                    {
+                        CPLError(CE_Failure, CPLE_AppDefined,
+                                 "Failed to restore deleted field %s", pszName);
+                    }
+                    break;
+                }
+                case FieldChangeType::ALTER_FIELD:
+                {
+                    OGRFieldDefn *poFieldDefn =
+                        GetLayerDefn()->GetFieldDefn(iField);
+                    if (poFieldDefn)
+                    {
+                        *poFieldDefn = *oFieldChange.poFieldDefn;
+                        toBeRemoved.push_back(i);
+                    }
+                    else
+                    {
+                        CPLError(CE_Failure, CPLE_AppDefined,
+                                 "Failed to restore altered field %s", pszName);
+                    }
+                    break;
+                }
+                case FieldChangeType::ADD_FIELD:
+                {
+                    std::unique_ptr<OGRFieldDefn> poFieldDef =
+                        GetLayerDefn()->StealFieldDefn(iField);
+                    if (poFieldDef)
+                    {
+                        oFieldChange.poFieldDefn = std::move(poFieldDef);
+                    }
+                    else
+                    {
+                        CPLError(CE_Failure, CPLE_AppDefined,
+                                 "Failed to delete added field %s", pszName);
+                    }
+                    break;
+                }
+            }
+        }
+        else
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Failed to restore field %s (field not found at index %d)",
+                     pszName, iField);
+        }
+    }
+
+    // Remove from the storage the deleted fields that have been restored
+    for (const auto &i : toBeRemoved)
+    {
+        m_apoFieldDefnChanges.erase(m_apoFieldDefnChanges.begin() + i);
+    }
+
+    /**********************************************************************/
+    /* Reset geometry fields to their previous state.                    */
+    /**********************************************************************/
+
+    bSavepointFound = false;
+
+    // Loop through all changed geometry fields and reset them to their previous state.
+    for (int i = static_cast<int>(m_apoGeomFieldDefnChanges.size()) - 1; i >= 0;
+         i--)
+    {
+        auto &oGeomFieldChange = m_apoGeomFieldDefnChanges[i];
+
+        if (!osSavepointName.empty())
+        {
+            if (oGeomFieldChange.osSavepointName == osSavepointName)
+            {
+                bSavepointFound = true;
+            }
+            else if (bSavepointFound)
+            {
+                continue;
+            }
+        }
+        const char *pszName = oGeomFieldChange.poFieldDefn->GetNameRef();
+        const int iGeomField = oGeomFieldChange.iField;
+        if (iGeomField >= 0)
+        {
+            switch (oGeomFieldChange.eChangeType)
+            {
+                case FieldChangeType::DELETE_FIELD:
+                case FieldChangeType::ALTER_FIELD:
+                {
+                    // Currently not handled by OGR for geometry fields
+                    break;
+                }
+                case FieldChangeType::ADD_FIELD:
+                {
+                    std::unique_ptr<OGRGeomFieldDefn> poGeomFieldDef =
+                        GetLayerDefn()->StealGeomFieldDefn(
+                            oGeomFieldChange.iField);
+                    if (poGeomFieldDef)
+                    {
+                        oGeomFieldChange.poFieldDefn =
+                            std::move(poGeomFieldDef);
+                    }
+                    else
+                    {
+                        CPLError(CE_Failure, CPLE_AppDefined,
+                                 "Failed to delete added geometry field %s",
+                                 pszName);
+                    }
+                    break;
+                }
+            }
+        }
+        else
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Failed to restore geometry field %s (field not found at "
+                     "index %d)",
+                     pszName, oGeomFieldChange.iField);
+        }
+    }
+}
+
 //! @endcond
 
 /************************************************************************/
@@ -1681,9 +2622,11 @@ void OGR_L_ResetReading(OGRLayerH hLayer)
 /************************************************************************/
 
 //! @cond Doxygen_Suppress
-OGRErr OGRLayer::InitializeIndexSupport(const char *pszFilename)
+OGRErr
+OGRLayer::InitializeIndexSupport([[maybe_unused]] const char *pszFilename)
 
 {
+#ifdef HAVE_MITAB
     OGRErr eErr;
 
     if (m_poAttrIndex != nullptr)
@@ -1699,7 +2642,11 @@ OGRErr OGRLayer::InitializeIndexSupport(const char *pszFilename)
     }
 
     return eErr;
+#else
+    return OGRERR_FAILURE;
+#endif
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -1765,6 +2712,7 @@ GIntBig OGRLayer::GetFeaturesRead()
 {
     return m_nFeaturesRead;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -1976,7 +2924,7 @@ OGRwkbGeometryType OGR_L_GetGeomType(OGRLayerH hLayer)
 /*                          SetIgnoredFields()                          */
 /************************************************************************/
 
-OGRErr OGRLayer::SetIgnoredFields(const char **papszFields)
+OGRErr OGRLayer::SetIgnoredFields(CSLConstList papszFields)
 {
     OGRFeatureDefn *poDefn = GetLayerDefn();
 
@@ -1991,13 +2939,9 @@ OGRErr OGRLayer::SetIgnoredFields(const char **papszFields)
     }
     poDefn->SetStyleIgnored(FALSE);
 
-    if (papszFields == nullptr)
-        return OGRERR_NONE;
-
     // ignore some fields
-    while (*papszFields)
+    for (const char *pszFieldName : cpl::Iterate(papszFields))
     {
-        const char *pszFieldName = *papszFields;
         // check special fields
         if (EQUAL(pszFieldName, "OGR_GEOMETRY"))
             poDefn->SetGeometryIgnored(TRUE);
@@ -2021,7 +2965,6 @@ OGRErr OGRLayer::SetIgnoredFields(const char **papszFields)
             else
                 poDefn->GetFieldDefn(iField)->SetIgnored(TRUE);
         }
-        papszFields++;
     }
 
     return OGRERR_NONE;
@@ -2137,13 +3080,16 @@ static OGRErr set_result_schema(OGRLayer *pLayerResult,
                                 int *mapMethod, bool combined,
                                 const char *const *papszOptions)
 {
+    if (!CPLTestBool(CSLFetchNameValueDef(papszOptions, "ADD_FIELDS", "YES")))
+        return OGRERR_NONE;
+
     OGRErr ret = OGRERR_NONE;
     OGRFeatureDefn *poDefnResult = pLayerResult->GetLayerDefn();
     const char *pszInputPrefix =
         CSLFetchNameValue(papszOptions, "INPUT_PREFIX");
     const char *pszMethodPrefix =
         CSLFetchNameValue(papszOptions, "METHOD_PREFIX");
-    int bSkipFailures =
+    const bool bSkipFailures =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "SKIP_FAILURES", "NO"));
     if (poDefnResult->GetFieldCount() > 0)
     {
@@ -2175,7 +3121,7 @@ static OGRErr set_result_schema(OGRLayer *pLayerResult,
     else
     {
         // use schema from the input layer or from input and method layers
-        int nFieldsInput = poDefnInput->GetFieldCount();
+        const int nFieldsInput = poDefnInput->GetFieldCount();
 
         // If no prefix is specified and we have input+method layers, make
         // sure we will generate unique field names
@@ -2197,67 +3143,81 @@ static OGRErr set_result_schema(OGRLayer *pLayerResult,
             }
         }
 
-        for (int iField = 0; iField < nFieldsInput; iField++)
+        const bool bAddInputFields = CPLTestBool(
+            CSLFetchNameValueDef(papszOptions, "ADD_INPUT_FIELDS", "YES"));
+        if (bAddInputFields)
         {
-            OGRFieldDefn oFieldDefn(poDefnInput->GetFieldDefn(iField));
-            if (pszInputPrefix != nullptr)
-                oFieldDefn.SetName(CPLSPrintf("%s%s", pszInputPrefix,
-                                              oFieldDefn.GetNameRef()));
-            else if (!oSetMethodFieldNames.empty() &&
-                     oSetMethodFieldNames.find(oFieldDefn.GetNameRef()) !=
-                         oSetMethodFieldNames.end())
+            for (int iField = 0; iField < nFieldsInput; iField++)
             {
-                // Field of same name present in method layer
-                oFieldDefn.SetName(
-                    CPLSPrintf("input_%s", oFieldDefn.GetNameRef()));
-            }
-            ret = pLayerResult->CreateField(&oFieldDefn);
-            if (ret != OGRERR_NONE)
-            {
-                if (!bSkipFailures)
-                    return ret;
-                else
+                OGRFieldDefn oFieldDefn(poDefnInput->GetFieldDefn(iField));
+                if (pszInputPrefix != nullptr)
+                    oFieldDefn.SetName(CPLSPrintf("%s%s", pszInputPrefix,
+                                                  oFieldDefn.GetNameRef()));
+                else if (!oSetMethodFieldNames.empty() &&
+                         oSetMethodFieldNames.find(oFieldDefn.GetNameRef()) !=
+                             oSetMethodFieldNames.end())
                 {
-                    CPLErrorReset();
-                    ret = OGRERR_NONE;
+                    // Field of same name present in method layer
+                    oFieldDefn.SetName(
+                        CPLSPrintf("input_%s", oFieldDefn.GetNameRef()));
                 }
+                ret = pLayerResult->CreateField(&oFieldDefn);
+                if (ret != OGRERR_NONE)
+                {
+                    if (!bSkipFailures)
+                        return ret;
+                    else
+                    {
+                        CPLErrorReset();
+                        ret = OGRERR_NONE;
+                    }
+                }
+                if (mapInput)
+                    mapInput[iField] =
+                        pLayerResult->GetLayerDefn()->GetFieldCount() - 1;
             }
-            if (mapInput)
-                mapInput[iField] = iField;
         }
+
         if (!combined)
             return ret;
         if (!mapMethod)
             return ret;
         if (!poDefnMethod)
             return ret;
-        const int nFieldsMethod = poDefnMethod->GetFieldCount();
-        for (int iField = 0; iField < nFieldsMethod; iField++)
+
+        const bool bAddMethodFields = CPLTestBool(
+            CSLFetchNameValueDef(papszOptions, "ADD_METHOD_FIELDS", "YES"));
+        if (bAddMethodFields)
         {
-            OGRFieldDefn oFieldDefn(poDefnMethod->GetFieldDefn(iField));
-            if (pszMethodPrefix != nullptr)
-                oFieldDefn.SetName(CPLSPrintf("%s%s", pszMethodPrefix,
-                                              oFieldDefn.GetNameRef()));
-            else if (!oSetInputFieldNames.empty() &&
-                     oSetInputFieldNames.find(oFieldDefn.GetNameRef()) !=
-                         oSetInputFieldNames.end())
+            const int nFieldsMethod = poDefnMethod->GetFieldCount();
+            for (int iField = 0; iField < nFieldsMethod; iField++)
             {
-                // Field of same name present in method layer
-                oFieldDefn.SetName(
-                    CPLSPrintf("method_%s", oFieldDefn.GetNameRef()));
-            }
-            ret = pLayerResult->CreateField(&oFieldDefn);
-            if (ret != OGRERR_NONE)
-            {
-                if (!bSkipFailures)
-                    return ret;
-                else
+                OGRFieldDefn oFieldDefn(poDefnMethod->GetFieldDefn(iField));
+                if (pszMethodPrefix != nullptr)
+                    oFieldDefn.SetName(CPLSPrintf("%s%s", pszMethodPrefix,
+                                                  oFieldDefn.GetNameRef()));
+                else if (!oSetInputFieldNames.empty() &&
+                         oSetInputFieldNames.find(oFieldDefn.GetNameRef()) !=
+                             oSetInputFieldNames.end())
                 {
-                    CPLErrorReset();
-                    ret = OGRERR_NONE;
+                    // Field of same name present in method layer
+                    oFieldDefn.SetName(
+                        CPLSPrintf("method_%s", oFieldDefn.GetNameRef()));
                 }
+                ret = pLayerResult->CreateField(&oFieldDefn);
+                if (ret != OGRERR_NONE)
+                {
+                    if (!bSkipFailures)
+                        return ret;
+                    else
+                    {
+                        CPLErrorReset();
+                        ret = OGRERR_NONE;
+                    }
+                }
+                mapMethod[iField] =
+                    pLayerResult->GetLayerDefn()->GetFieldCount() - 1;
             }
-            mapMethod[iField] = nFieldsInput + iField;
         }
     }
     return ret;
@@ -2293,7 +3253,9 @@ static OGRGeometry *set_filter_from(OGRLayer *pLayer,
 static OGRGeometry *promote_to_multi(OGRGeometry *poGeom)
 {
     OGRwkbGeometryType eType = wkbFlatten(poGeom->getGeometryType());
-    if (eType == wkbPolygon)
+    if (eType == wkbPoint)
+        return OGRGeometryFactory::forceToMultiPoint(poGeom);
+    else if (eType == wkbPolygon)
         return OGRGeometryFactory::forceToMultiPolygon(poGeom);
     else if (eType == wkbLineString)
         return OGRGeometryFactory::forceToMultiLineString(poGeom);
@@ -2329,23 +3291,32 @@ static OGRGeometry *promote_to_multi(OGRGeometry *poGeom)
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
+ * </li>
  * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * <li>USE_PREPARED_GEOMETRIES=YES/NO. Set to NO to not use prepared
  *     geometries to pretest intersection of features of method layer
  *     with features of this layer.
+ * </li>
  * <li>PRETEST_CONTAINMENT=YES/NO. Set to YES to pretest the
  *     containment of features of method layer within the features of
  *     this layer. This will speed up the method significantly in some
  *     cases. Requires that the prepared geometries are in effect.
+ * </li>
  * <li>KEEP_LOWER_DIMENSION_GEOMETRIES=YES/NO. Set to NO to skip
  *     result features with lower dimension geometry that would
- *     otherwise be added to the result layer. The default is to add
- *     but only if the result layer has an unknown geometry type.
+ *     otherwise be added to the result layer. The default is YES, to add
+ *     features with lower dimension geometry, but only if the result layer
+ *     has an unknown geometry type.
+ * </li>
  * </ul>
  *
  * This method is the same as the C function OGR_L_Intersection().
@@ -2387,22 +3358,22 @@ OGRErr OGRLayer::Intersection(OGRLayer *pLayerMethod, OGRLayer *pLayerResult,
     double progress_max = static_cast<double>(GetFeatureCount(FALSE));
     double progress_counter = 0;
     double progress_ticker = 0;
-    int bSkipFailures =
+    const bool bSkipFailures =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "SKIP_FAILURES", "NO"));
-    int bPromoteToMulti = CPLTestBool(
+    const bool bPromoteToMulti = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "PROMOTE_TO_MULTI", "NO"));
-    int bUsePreparedGeometries = CPLTestBool(
+    const bool bUsePreparedGeometries = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "USE_PREPARED_GEOMETRIES", "YES"));
-    if (bUsePreparedGeometries)
-        bUsePreparedGeometries = OGRHasPreparedGeometrySupport();
-    int bPretestContainment = CPLTestBool(
+    const bool bPretestContainment = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "PRETEST_CONTAINMENT", "NO"));
-    int bKeepLowerDimGeom = CPLTestBool(CSLFetchNameValueDef(
+    bool bKeepLowerDimGeom = CPLTestBool(CSLFetchNameValueDef(
         papszOptions, "KEEP_LOWER_DIMENSION_GEOMETRIES", "YES"));
 
     // check for GEOS
     if (!OGRGeometryFactory::haveGEOS())
     {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRLayer::Intersection() requires GEOS support");
         return OGRERR_UNSUPPORTED_OPERATION;
     }
 
@@ -2429,7 +3400,7 @@ OGRErr OGRLayer::Intersection(OGRLayer *pLayerMethod, OGRLayer *pLayerResult,
         {
             CPLDebug("OGR", "Resetting KEEP_LOWER_DIMENSION_GEOMETRIES to NO "
                             "since the result layer does not allow it.");
-            bKeepLowerDimGeom = FALSE;
+            bKeepLowerDimGeom = false;
         }
     }
 
@@ -2642,23 +3613,32 @@ done:
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * <li>USE_PREPARED_GEOMETRIES=YES/NO. Set to NO to not use prepared
  *     geometries to pretest intersection of features of method layer
  *     with features of this layer.
+ * </li>
  * <li>PRETEST_CONTAINMENT=YES/NO. Set to YES to pretest the
  *     containment of features of method layer within the features of
  *     this layer. This will speed up the method significantly in some
  *     cases. Requires that the prepared geometries are in effect.
+ * </li>
  * <li>KEEP_LOWER_DIMENSION_GEOMETRIES=YES/NO. Set to NO to skip
  *     result features with lower dimension geometry that would
- *     otherwise be added to the result layer. The default is to add
- *     but only if the result layer has an unknown geometry type.
+ *     otherwise be added to the result layer. The default is YES, to add
+ *     features with lower dimension geometry, but only if the result layer
+ *     has an unknown geometry type.
+ * </li>
  * </ul>
  *
  * This function is the same as the C++ method OGRLayer::Intersection().
@@ -2734,19 +3714,27 @@ OGRErr OGR_L_Intersection(OGRLayerH pLayerInput, OGRLayerH pLayerMethod,
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * <li>USE_PREPARED_GEOMETRIES=YES/NO. Set to NO to not use prepared
  *     geometries to pretest intersection of features of method layer
  *     with features of this layer.
+ * </li>
  * <li>KEEP_LOWER_DIMENSION_GEOMETRIES=YES/NO. Set to NO to skip
  *     result features with lower dimension geometry that would
- *     otherwise be added to the result layer. The default is to add
- *     but only if the result layer has an unknown geometry type.
+ *     otherwise be added to the result layer. The default is YES, to add
+ *     features with lower dimension geometry, but only if the result layer
+ *     has an unknown geometry type.
+ * </li>
  * </ul>
  *
  * This method is the same as the C function OGR_L_Union().
@@ -2789,20 +3777,20 @@ OGRErr OGRLayer::Union(OGRLayer *pLayerMethod, OGRLayer *pLayerResult,
         static_cast<double>(pLayerMethod->GetFeatureCount(FALSE));
     double progress_counter = 0;
     double progress_ticker = 0;
-    int bSkipFailures =
+    const bool bSkipFailures =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "SKIP_FAILURES", "NO"));
-    int bPromoteToMulti = CPLTestBool(
+    const bool bPromoteToMulti = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "PROMOTE_TO_MULTI", "NO"));
-    int bUsePreparedGeometries = CPLTestBool(
+    const bool bUsePreparedGeometries = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "USE_PREPARED_GEOMETRIES", "YES"));
-    if (bUsePreparedGeometries)
-        bUsePreparedGeometries = OGRHasPreparedGeometrySupport();
-    int bKeepLowerDimGeom = CPLTestBool(CSLFetchNameValueDef(
+    bool bKeepLowerDimGeom = CPLTestBool(CSLFetchNameValueDef(
         papszOptions, "KEEP_LOWER_DIMENSION_GEOMETRIES", "YES"));
 
     // check for GEOS
     if (!OGRGeometryFactory::haveGEOS())
     {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRLayer::Union() requires GEOS support");
         return OGRERR_UNSUPPORTED_OPERATION;
     }
 
@@ -3180,19 +4168,27 @@ done:
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * <li>USE_PREPARED_GEOMETRIES=YES/NO. Set to NO to not use prepared
  *     geometries to pretest intersection of features of method layer
  *     with features of this layer.
+ * </li>
  * <li>KEEP_LOWER_DIMENSION_GEOMETRIES=YES/NO. Set to NO to skip
  *     result features with lower dimension geometry that would
- *     otherwise be added to the result layer. The default is to add
- *     but only if the result layer has an unknown geometry type.
+ *     otherwise be added to the result layer. The default is YES, to add
+ *     features with lower dimension geometry, but only if the result layer
+ *     has an unknown geometry type.
+ * </li>
  * </ul>
  *
  * This function is the same as the C++ method OGRLayer::Union().
@@ -3266,12 +4262,16 @@ OGRErr OGR_L_Union(OGRLayerH pLayerInput, OGRLayerH pLayerMethod,
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
+ * </li>
  * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
  *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * </ul>
  *
  * This method is the same as the C function OGR_L_SymDifference().
@@ -3314,14 +4314,16 @@ OGRErr OGRLayer::SymDifference(OGRLayer *pLayerMethod, OGRLayer *pLayerResult,
         static_cast<double>(pLayerMethod->GetFeatureCount(FALSE));
     double progress_counter = 0;
     double progress_ticker = 0;
-    int bSkipFailures =
+    const bool bSkipFailures =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "SKIP_FAILURES", "NO"));
-    int bPromoteToMulti = CPLTestBool(
+    const bool bPromoteToMulti = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "PROMOTE_TO_MULTI", "NO"));
 
     // check for GEOS
     if (!OGRGeometryFactory::haveGEOS())
     {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRLayer::SymDifference() requires GEOS support");
         return OGRERR_UNSUPPORTED_OPERATION;
     }
 
@@ -3594,12 +4596,17 @@ done:
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * </ul>
  *
  * This function is the same as the C++ method OGRLayer::SymDifference().
@@ -3674,19 +4681,27 @@ OGRErr OGR_L_SymDifference(OGRLayerH pLayerInput, OGRLayerH pLayerMethod,
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * <li>USE_PREPARED_GEOMETRIES=YES/NO. Set to NO to not use prepared
  *     geometries to pretest intersection of features of method layer
  *     with features of this layer.
+ * </li>
  * <li>KEEP_LOWER_DIMENSION_GEOMETRIES=YES/NO. Set to NO to skip
  *     result features with lower dimension geometry that would
- *     otherwise be added to the result layer. The default is to add
- *     but only if the result layer has an unknown geometry type.
+ *     otherwise be added to the result layer. The default is YES, to add
+ *     features with lower dimension geometry, but only if the result layer
+ *     has an unknown geometry type.
+ * </li>
  * </ul>
  *
  * This method is the same as the C function OGR_L_Identity().
@@ -3726,20 +4741,20 @@ OGRErr OGRLayer::Identity(OGRLayer *pLayerMethod, OGRLayer *pLayerResult,
     double progress_max = static_cast<double>(GetFeatureCount(FALSE));
     double progress_counter = 0;
     double progress_ticker = 0;
-    int bSkipFailures =
+    const bool bSkipFailures =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "SKIP_FAILURES", "NO"));
-    int bPromoteToMulti = CPLTestBool(
+    const bool bPromoteToMulti = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "PROMOTE_TO_MULTI", "NO"));
-    int bUsePreparedGeometries = CPLTestBool(
+    const bool bUsePreparedGeometries = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "USE_PREPARED_GEOMETRIES", "YES"));
-    if (bUsePreparedGeometries)
-        bUsePreparedGeometries = OGRHasPreparedGeometrySupport();
-    int bKeepLowerDimGeom = CPLTestBool(CSLFetchNameValueDef(
+    bool bKeepLowerDimGeom = CPLTestBool(CSLFetchNameValueDef(
         papszOptions, "KEEP_LOWER_DIMENSION_GEOMETRIES", "YES"));
 
     // check for GEOS
     if (!OGRGeometryFactory::haveGEOS())
     {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRLayer::Identity() requires GEOS support");
         return OGRERR_UNSUPPORTED_OPERATION;
     }
     if (bKeepLowerDimGeom)
@@ -4000,19 +5015,27 @@ done:
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * <li>USE_PREPARED_GEOMETRIES=YES/NO. Set to NO to not use prepared
  *     geometries to pretest intersection of features of method layer
  *     with features of this layer.
+ * </li>
  * <li>KEEP_LOWER_DIMENSION_GEOMETRIES=YES/NO. Set to NO to skip
  *     result features with lower dimension geometry that would
- *     otherwise be added to the result layer. The default is to add
- *     but only if the result layer has an unknown geometry type.
+ *     otherwise be added to the result layer. The default is YES, to add
+ *     features with lower dimension geometry, but only if the result layer
+ *     has an unknown geometry type.
+ * </li>
  * </ul>
  *
  * This function is the same as the C++ method OGRLayer::Identity().
@@ -4086,12 +5109,17 @@ OGRErr OGR_L_Identity(OGRLayerH pLayerInput, OGRLayerH pLayerMethod,
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * </ul>
  *
  * This method is the same as the C function OGR_L_Update().
@@ -4133,14 +5161,16 @@ OGRErr OGRLayer::Update(OGRLayer *pLayerMethod, OGRLayer *pLayerResult,
         static_cast<double>(pLayerMethod->GetFeatureCount(FALSE));
     double progress_counter = 0;
     double progress_ticker = 0;
-    int bSkipFailures =
+    const bool bSkipFailures =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "SKIP_FAILURES", "NO"));
-    int bPromoteToMulti = CPLTestBool(
+    const bool bPromoteToMulti = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "PROMOTE_TO_MULTI", "NO"));
 
     // check for GEOS
     if (!OGRGeometryFactory::haveGEOS())
     {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRLayer::Update() requires GEOS support");
         return OGRERR_UNSUPPORTED_OPERATION;
     }
 
@@ -4351,12 +5381,17 @@ done:
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * </ul>
  *
  * This function is the same as the C++ method OGRLayer::Update().
@@ -4423,12 +5458,17 @@ OGRErr OGR_L_Update(OGRLayerH pLayerInput, OGRLayerH pLayerMethod,
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * </ul>
  *
  * This method is the same as the C function OGR_L_Clip().
@@ -4466,14 +5506,16 @@ OGRErr OGRLayer::Clip(OGRLayer *pLayerMethod, OGRLayer *pLayerResult,
     double progress_max = static_cast<double>(GetFeatureCount(FALSE));
     double progress_counter = 0;
     double progress_ticker = 0;
-    int bSkipFailures =
+    const bool bSkipFailures =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "SKIP_FAILURES", "NO"));
-    int bPromoteToMulti = CPLTestBool(
+    const bool bPromoteToMulti = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "PROMOTE_TO_MULTI", "NO"));
 
     // check for GEOS
     if (!OGRGeometryFactory::haveGEOS())
     {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRLayer::Clip() requires GEOS support");
         return OGRERR_UNSUPPORTED_OPERATION;
     }
 
@@ -4648,12 +5690,17 @@ done:
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * </ul>
  *
  * This function is the same as the C++ method OGRLayer::Clip().
@@ -4720,12 +5767,17 @@ OGRErr OGR_L_Clip(OGRLayerH pLayerInput, OGRLayerH pLayerMethod,
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * </ul>
  *
  * This method is the same as the C function OGR_L_Erase().
@@ -4763,14 +5815,16 @@ OGRErr OGRLayer::Erase(OGRLayer *pLayerMethod, OGRLayer *pLayerResult,
     double progress_max = static_cast<double>(GetFeatureCount(FALSE));
     double progress_counter = 0;
     double progress_ticker = 0;
-    int bSkipFailures =
+    const bool bSkipFailures =
         CPLTestBool(CSLFetchNameValueDef(papszOptions, "SKIP_FAILURES", "NO"));
-    int bPromoteToMulti = CPLTestBool(
+    const bool bPromoteToMulti = CPLTestBool(
         CSLFetchNameValueDef(papszOptions, "PROMOTE_TO_MULTI", "NO"));
 
     // check for GEOS
     if (!OGRGeometryFactory::haveGEOS())
     {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRLayer::Erase() requires GEOS support");
         return OGRERR_UNSUPPORTED_OPERATION;
     }
 
@@ -4924,12 +5978,17 @@ done:
  * <ul>
  * <li>SKIP_FAILURES=YES/NO. Set it to YES to go on, even when a
  *     feature could not be inserted or a GEOS call failed.
- * <li>PROMOTE_TO_MULTI=YES/NO. Set it to YES to convert Polygons
- *     into MultiPolygons, or LineStrings to MultiLineStrings.
+ * </li>
+ * <li>PROMOTE_TO_MULTI=YES/NO. Set to YES to convert Polygons
+ *     into MultiPolygons, LineStrings to MultiLineStrings or
+ *     Points to MultiPoints (only since GDAL 3.9.2 for the later)
+ * </li>
  * <li>INPUT_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the input layer.
+ * </li>
  * <li>METHOD_PREFIX=string. Set a prefix for the field names that
  *     will be created from the fields of the method layer.
+ * </li>
  * </ul>
  *
  * This function is the same as the C++ method OGRLayer::Erase().
@@ -5074,1938 +6133,6 @@ OGRLayer::FeatureIterator OGRLayer::end()
 }
 
 /************************************************************************/
-/*                          DefaultReleaseSchema()                      */
-/************************************************************************/
-
-static void OGRLayerDefaultReleaseSchema(struct ArrowSchema *schema)
-{
-    CPLAssert(schema->release != nullptr);
-    if (STARTS_WITH(schema->format, "w:"))
-        CPLFree(const_cast<char *>(schema->format));
-    CPLFree(const_cast<char *>(schema->name));
-    CPLFree(const_cast<char *>(schema->metadata));
-    for (int i = 0; i < static_cast<int>(schema->n_children); ++i)
-    {
-        if (schema->children[i]->release)
-        {
-            schema->children[i]->release(schema->children[i]);
-            CPLFree(schema->children[i]);
-        }
-    }
-    CPLFree(schema->children);
-    if (schema->dictionary)
-    {
-        if (schema->dictionary->release)
-        {
-            schema->dictionary->release(schema->dictionary);
-            CPLFree(schema->dictionary);
-        }
-    }
-    schema->release = nullptr;
-}
-
-/** Release a ArrowSchema.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @param schema Schema to release.
- * @since GDAL 3.6
- */
-
-void OGRLayer::ReleaseSchema(struct ArrowSchema *schema)
-{
-    OGRLayerDefaultReleaseSchema(schema);
-}
-
-/************************************************************************/
-/*                        AddDictToSchema()                             */
-/************************************************************************/
-
-static void AddDictToSchema(struct ArrowSchema *psChild,
-                            const OGRCodedFieldDomain *poCodedDomain)
-{
-    const OGRCodedValue *psIter = poCodedDomain->GetEnumeration();
-    int nLastCode = -1;
-    int nCountNull = 0;
-    uint32_t nCountChars = 0;
-    for (; psIter->pszCode; ++psIter)
-    {
-        if (CPLGetValueType(psIter->pszCode) != CPL_VALUE_INTEGER)
-        {
-            return;
-        }
-        int nCode = atoi(psIter->pszCode);
-        if (nCode <= nLastCode || nCode - nLastCode > 100)
-        {
-            return;
-        }
-        for (int i = nLastCode + 1; i < nCode; ++i)
-        {
-            nCountNull++;
-        }
-        if (psIter->pszValue != nullptr)
-        {
-            const size_t nLen = strlen(psIter->pszValue);
-            if (nLen > std::numeric_limits<uint32_t>::max() - nCountChars)
-                return;
-            nCountChars += static_cast<uint32_t>(nLen);
-        }
-        else
-            nCountNull++;
-        nLastCode = nCode;
-    }
-
-    auto psChildDict = static_cast<struct ArrowSchema *>(
-        CPLCalloc(1, sizeof(struct ArrowSchema)));
-    psChild->dictionary = psChildDict;
-    psChildDict->release = OGRLayerDefaultReleaseSchema;
-    psChildDict->name = CPLStrdup(poCodedDomain->GetName().c_str());
-    psChildDict->format = "u";
-    if (nCountNull)
-        psChildDict->flags = ARROW_FLAG_NULLABLE;
-}
-
-/************************************************************************/
-/*                     DefaultGetArrowSchema()                          */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_schema() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-int OGRLayer::GetArrowSchema(struct ArrowArrayStream *,
-                             struct ArrowSchema *out_schema)
-{
-    const bool bIncludeFID = CPLTestBool(
-        m_aosArrowArrayStreamOptions.FetchNameValueDef("INCLUDE_FID", "YES"));
-    memset(out_schema, 0, sizeof(*out_schema));
-    out_schema->format = "+s";
-    out_schema->name = CPLStrdup("");
-    out_schema->metadata = nullptr;
-    auto poLayerDefn = GetLayerDefn();
-    const int nFieldCount = poLayerDefn->GetFieldCount();
-    const int nGeomFieldCount = poLayerDefn->GetGeomFieldCount();
-    const int nChildren = 1 + nFieldCount + nGeomFieldCount;
-
-    out_schema->children = static_cast<struct ArrowSchema **>(
-        CPLCalloc(nChildren, sizeof(struct ArrowSchema *)));
-    int iSchemaChild = 0;
-    if (bIncludeFID)
-    {
-        out_schema->children[iSchemaChild] = static_cast<struct ArrowSchema *>(
-            CPLCalloc(1, sizeof(struct ArrowSchema)));
-        auto psChild = out_schema->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayer::ReleaseSchema;
-        const char *pszFIDName = GetFIDColumn();
-        psChild->name =
-            CPLStrdup((pszFIDName && pszFIDName[0]) ? pszFIDName : "OGC_FID");
-        psChild->format = "l";
-    }
-    for (int i = 0; i < nFieldCount; ++i)
-    {
-        const auto poFieldDefn = poLayerDefn->GetFieldDefn(i);
-        if (poFieldDefn->IsIgnored())
-        {
-            continue;
-        }
-
-        out_schema->children[iSchemaChild] = static_cast<struct ArrowSchema *>(
-            CPLCalloc(1, sizeof(struct ArrowSchema)));
-        auto psChild = out_schema->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayer::ReleaseSchema;
-        psChild->name = CPLStrdup(poFieldDefn->GetNameRef());
-        if (poFieldDefn->IsNullable())
-            psChild->flags = ARROW_FLAG_NULLABLE;
-        const auto eSubType = poFieldDefn->GetSubType();
-        const char *item_format = nullptr;
-        switch (poFieldDefn->GetType())
-        {
-            case OFTInteger:
-            {
-                if (eSubType == OFSTBoolean)
-                    psChild->format = "b";
-                else if (eSubType == OFSTInt16)
-                    psChild->format = "s";
-                else
-                    psChild->format = "i";
-
-                const auto &osDomainName = poFieldDefn->GetDomainName();
-                if (!osDomainName.empty())
-                {
-                    auto poDS = GetDataset();
-                    if (poDS)
-                    {
-                        const auto poFieldDomain =
-                            poDS->GetFieldDomain(osDomainName);
-                        if (poFieldDomain &&
-                            poFieldDomain->GetDomainType() == OFDT_CODED)
-                        {
-                            const OGRCodedFieldDomain *poCodedDomain =
-                                static_cast<const OGRCodedFieldDomain *>(
-                                    poFieldDomain);
-                            AddDictToSchema(psChild, poCodedDomain);
-                        }
-                    }
-                }
-
-                break;
-            }
-
-            case OFTInteger64:
-                psChild->format = "l";
-                break;
-
-            case OFTReal:
-            {
-                if (eSubType == OFSTFloat32)
-                    psChild->format = "f";
-                else
-                    psChild->format = "g";
-                break;
-            }
-
-            case OFTString:
-            case OFTWideString:
-                psChild->format = "u";
-                break;
-
-            case OFTBinary:
-            {
-                if (poFieldDefn->GetWidth() > 0)
-                    psChild->format =
-                        CPLStrdup(CPLSPrintf("w:%d", poFieldDefn->GetWidth()));
-                else
-                    psChild->format = "z";
-                break;
-            }
-
-            case OFTIntegerList:
-            {
-                if (eSubType == OFSTBoolean)
-                    item_format = "b";
-                else if (eSubType == OFSTInt16)
-                    item_format = "s";
-                else
-                    item_format = "i";
-                break;
-            }
-
-            case OFTInteger64List:
-                item_format = "l";
-                break;
-
-            case OFTRealList:
-            {
-                if (eSubType == OFSTFloat32)
-                    item_format = "f";
-                else
-                    item_format = "g";
-                break;
-            }
-
-            case OFTStringList:
-            case OFTWideStringList:
-                item_format = "u";
-                break;
-
-            case OFTDate:
-                psChild->format = "tdD";
-                break;
-
-            case OFTTime:
-                psChild->format = "ttm";
-                break;
-
-            case OFTDateTime:
-                psChild->format = "tsm:";
-                break;
-        }
-
-        if (item_format)
-        {
-            psChild->format = "+l";
-            psChild->n_children = 1;
-            psChild->children = static_cast<struct ArrowSchema **>(
-                CPLCalloc(1, sizeof(struct ArrowSchema *)));
-            psChild->children[0] = static_cast<struct ArrowSchema *>(
-                CPLCalloc(1, sizeof(struct ArrowSchema)));
-            psChild->children[0]->release = OGRLayer::ReleaseSchema;
-            psChild->children[0]->name = CPLStrdup("item");
-            psChild->children[0]->format = item_format;
-        }
-    }
-    for (int i = 0; i < nGeomFieldCount; ++i)
-    {
-        const auto poFieldDefn = poLayerDefn->GetGeomFieldDefn(i);
-        if (poFieldDefn->IsIgnored())
-        {
-            continue;
-        }
-
-        out_schema->children[iSchemaChild] = static_cast<struct ArrowSchema *>(
-            CPLCalloc(1, sizeof(struct ArrowSchema)));
-        auto psChild = out_schema->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayer::ReleaseSchema;
-        const char *pszGeomFieldName = poFieldDefn->GetNameRef();
-        if (pszGeomFieldName[0] == '\0')
-            pszGeomFieldName = "wkb_geometry";
-        psChild->name = CPLStrdup(pszGeomFieldName);
-        if (poFieldDefn->IsNullable())
-            psChild->flags = ARROW_FLAG_NULLABLE;
-        psChild->format = "z";
-        constexpr const char *ARROW_EXTENSION_NAME_KEY = "ARROW:extension:name";
-        constexpr const char *EXTENSION_NAME = "ogc.wkb";
-        char *pszMetadata = static_cast<char *>(
-            CPLMalloc(sizeof(int32_t) + sizeof(int32_t) +
-                      strlen(ARROW_EXTENSION_NAME_KEY) + sizeof(int32_t) +
-                      strlen(EXTENSION_NAME)));
-        psChild->metadata = pszMetadata;
-        int offsetMD = 0;
-        *reinterpret_cast<int32_t *>(pszMetadata + offsetMD) = 1;
-        offsetMD += sizeof(int32_t);
-        *reinterpret_cast<int32_t *>(pszMetadata + offsetMD) =
-            static_cast<int32_t>(strlen(ARROW_EXTENSION_NAME_KEY));
-        offsetMD += sizeof(int32_t);
-        memcpy(pszMetadata + offsetMD, ARROW_EXTENSION_NAME_KEY,
-               strlen(ARROW_EXTENSION_NAME_KEY));
-        offsetMD += static_cast<int>(strlen(ARROW_EXTENSION_NAME_KEY));
-        *reinterpret_cast<int32_t *>(pszMetadata + offsetMD) =
-            static_cast<int32_t>(strlen(EXTENSION_NAME));
-        offsetMD += sizeof(int32_t);
-        memcpy(pszMetadata + offsetMD, EXTENSION_NAME, strlen(EXTENSION_NAME));
-    }
-
-    out_schema->n_children = iSchemaChild;
-    out_schema->release = OGRLayer::ReleaseSchema;
-    return 0;
-}
-
-/************************************************************************/
-/*                         StaticGetArrowSchema()                       */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_schema() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-int OGRLayer::StaticGetArrowSchema(struct ArrowArrayStream *stream,
-                                   struct ArrowSchema *out_schema)
-{
-    auto poLayer = static_cast<ArrowArrayStreamPrivateDataSharedDataWrapper *>(
-                       stream->private_data)
-                       ->poShared->m_poLayer;
-    if (poLayer == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "Calling get_schema() on a freed OGRLayer is not supported");
-        return EINVAL;
-    }
-    return poLayer->GetArrowSchema(stream, out_schema);
-}
-
-/************************************************************************/
-/*                         DefaultReleaseArray()                        */
-/************************************************************************/
-
-static void OGRLayerDefaultReleaseArray(struct ArrowArray *array)
-{
-    for (int i = 0; i < static_cast<int>(array->n_buffers); ++i)
-        VSIFreeAligned(const_cast<void *>(array->buffers[i]));
-    CPLFree(array->buffers);
-    for (int i = 0; i < static_cast<int>(array->n_children); ++i)
-    {
-        if (array->children[i] && array->children[i]->release)
-        {
-            array->children[i]->release(array->children[i]);
-            CPLFree(array->children[i]);
-        }
-    }
-    CPLFree(array->children);
-    if (array->dictionary)
-    {
-        if (array->dictionary->release)
-        {
-            array->dictionary->release(array->dictionary);
-            CPLFree(array->dictionary);
-        }
-    }
-    array->release = nullptr;
-}
-
-/** Release a ArrowArray.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @param array Arrow array to release.
- * @since GDAL 3.6
- */
-void OGRLayer::ReleaseArray(struct ArrowArray *array)
-{
-    OGRLayerDefaultReleaseArray(array);
-}
-
-/************************************************************************/
-/*                          IsValidField()                              */
-/************************************************************************/
-
-static inline bool IsValidField(const OGRField *psRawField)
-{
-    return (!(psRawField->Set.nMarker1 == OGRUnsetMarker &&
-              psRawField->Set.nMarker2 == OGRUnsetMarker &&
-              psRawField->Set.nMarker3 == OGRUnsetMarker) &&
-            !(psRawField->Set.nMarker1 == OGRNullMarker &&
-              psRawField->Set.nMarker2 == OGRNullMarker &&
-              psRawField->Set.nMarker3 == OGRNullMarker));
-}
-
-/************************************************************************/
-/*                           FillArray()                                */
-/************************************************************************/
-
-template <class T, typename TMember>
-static bool FillArray(struct ArrowArray *psChild,
-                      std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                      const bool bIsNullable, TMember member, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    T *panValues = static_cast<T *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * apoFeatures.size()));
-    if (panValues == nullptr)
-        return false;
-    psChild->buffers[1] = panValues;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            panValues[iFeat] = static_cast<T>((*psRawField).*member);
-        }
-        else if (bIsNullable)
-        {
-            panValues[iFeat] = 0;
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else
-        {
-            panValues[iFeat] = 0;
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                         FillBoolArray()                              */
-/************************************************************************/
-
-template <typename TMember>
-static bool FillBoolArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, TMember member, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    uint8_t *panValues = static_cast<uint8_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE((apoFeatures.size() + 7) / 8));
-    if (panValues == nullptr)
-        return false;
-    memset(panValues, 0, (apoFeatures.size() + 7) / 8);
-    psChild->buffers[1] = panValues;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            if ((*psRawField).*member)
-                panValues[iFeat / 8] |= static_cast<uint8_t>(1 << (iFeat % 8));
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                        FillListArray()                               */
-/************************************************************************/
-
-struct GetFromIntegerList
-{
-    static inline int getCount(const OGRField *psRawField)
-    {
-        return psRawField->IntegerList.nCount;
-    }
-
-    static inline const int *getValues(const OGRField *psRawField)
-    {
-        return psRawField->IntegerList.paList;
-    }
-};
-
-struct GetFromInteger64List
-{
-    static inline int getCount(const OGRField *psRawField)
-    {
-        return psRawField->Integer64List.nCount;
-    }
-
-    static inline const GIntBig *getValues(const OGRField *psRawField)
-    {
-        return psRawField->Integer64List.paList;
-    }
-};
-
-struct GetFromRealList
-{
-    static inline int getCount(const OGRField *psRawField)
-    {
-        return psRawField->RealList.nCount;
-    }
-
-    static inline const double *getValues(const OGRField *psRawField)
-    {
-        return psRawField->RealList.paList;
-    }
-};
-
-template <class OffsetType, class T, class GetFromList>
-static bool FillListArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    OffsetType *panOffsets =
-        static_cast<OffsetType *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-            sizeof(OffsetType) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    OffsetType nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = nOffset;
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const unsigned nCount = GetFromList::getCount(psRawField);
-            if (nCount > static_cast<size_t>(
-                             std::numeric_limits<OffsetType>::max() - nOffset))
-                return false;
-            nOffset += static_cast<OffsetType>(nCount);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = nOffset;
-
-    psChild->n_children = 1;
-    psChild->children = static_cast<struct ArrowArray **>(
-        CPLCalloc(1, sizeof(struct ArrowArray *)));
-    psChild->children[0] = static_cast<struct ArrowArray *>(
-        CPLCalloc(1, sizeof(struct ArrowArray)));
-    auto psValueChild = psChild->children[0];
-
-    psValueChild->release = OGRLayerDefaultReleaseArray;
-    psValueChild->n_buffers = 2;
-    psValueChild->buffers =
-        static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    psValueChild->length = nOffset;
-    T *panValues =
-        static_cast<T *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * nOffset));
-    if (panValues == nullptr)
-        return false;
-    psValueChild->buffers[1] = panValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const int nCount = GetFromList::getCount(psRawField);
-            const auto paList = GetFromList::getValues(psRawField);
-            if (sizeof(*paList) == sizeof(T))
-                memcpy(panValues + nOffset, paList, nCount * sizeof(T));
-            else
-            {
-                for (int j = 0; j < nCount; ++j)
-                {
-                    panValues[nOffset + j] = static_cast<T>(paList[j]);
-                }
-            }
-            nOffset += static_cast<OffsetType>(nCount);
-        }
-    }
-
-    return true;
-}
-
-template <class OffsetType, class GetFromList>
-static bool
-FillListArrayBool(struct ArrowArray *psChild,
-                  std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                  const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    OffsetType *panOffsets =
-        static_cast<OffsetType *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-            sizeof(OffsetType) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    OffsetType nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = nOffset;
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const unsigned nCount = GetFromList::getCount(psRawField);
-            if (nCount > static_cast<size_t>(
-                             std::numeric_limits<OffsetType>::max() - nOffset))
-                return false;
-            nOffset += static_cast<OffsetType>(nCount);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = nOffset;
-
-    psChild->n_children = 1;
-    psChild->children = static_cast<struct ArrowArray **>(
-        CPLCalloc(1, sizeof(struct ArrowArray *)));
-    psChild->children[0] = static_cast<struct ArrowArray *>(
-        CPLCalloc(1, sizeof(struct ArrowArray)));
-    auto psValueChild = psChild->children[0];
-
-    psValueChild->release = OGRLayerDefaultReleaseArray;
-    psValueChild->n_buffers = 2;
-    psValueChild->buffers =
-        static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    psValueChild->length = nOffset;
-    uint8_t *panValues = static_cast<uint8_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE((nOffset + 7) / 8));
-    if (panValues == nullptr)
-        return false;
-    memset(panValues, 0, (nOffset + 7) / 8);
-    psValueChild->buffers[1] = panValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const int nCount = GetFromList::getCount(psRawField);
-            const auto paList = GetFromList::getValues(psRawField);
-
-            for (int j = 0; j < nCount; ++j)
-            {
-                if (paList[j])
-                    panValues[(nOffset + j) / 8] |=
-                        static_cast<uint8_t>(1 << ((nOffset + j) % 8));
-            }
-            nOffset += static_cast<OffsetType>(nCount);
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                        FillStringArray()                             */
-/************************************************************************/
-
-template <class T>
-static bool
-FillStringArray(struct ArrowArray *psChild,
-                std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 3;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    T *panOffsets = static_cast<T *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    size_t nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = static_cast<T>(nOffset);
-        const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const size_t nLen = strlen(psRawField->String);
-            if (nLen >
-                static_cast<size_t>(std::numeric_limits<T>::max()) - nOffset)
-                return false;
-            nOffset += static_cast<T>(nLen);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = static_cast<T>(nOffset);
-
-    char *pachValues =
-        static_cast<char *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nOffset));
-    if (pachValues == nullptr)
-        return false;
-    psChild->buffers[2] = pachValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        const size_t nLen =
-            static_cast<size_t>(panOffsets[iFeat + 1] - panOffsets[iFeat]);
-        if (nLen)
-        {
-            const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-            memcpy(pachValues + nOffset, psRawField->String, nLen);
-            nOffset += nLen;
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                        FillStringListArray()                         */
-/************************************************************************/
-
-template <class OffsetType>
-static bool
-FillStringListArray(struct ArrowArray *psChild,
-                    std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                    const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    OffsetType *panOffsets =
-        static_cast<OffsetType *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-            sizeof(OffsetType) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    OffsetType nStrings = 0;
-    OffsetType nCountChars = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = nStrings;
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const int nCount = psRawField->StringList.nCount;
-            if (static_cast<size_t>(nCount) >
-                static_cast<size_t>(std::numeric_limits<OffsetType>::max() -
-                                    nStrings))
-                return false;
-            for (int j = 0; j < nCount; ++j)
-            {
-                const size_t nLen = strlen(psRawField->StringList.paList[j]);
-                if (nLen >
-                    static_cast<size_t>(std::numeric_limits<OffsetType>::max() -
-                                        nCountChars))
-                    return false;
-                nCountChars += static_cast<OffsetType>(nLen);
-            }
-            nStrings += static_cast<OffsetType>(nCount);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = nStrings;
-
-    psChild->n_children = 1;
-    psChild->children = static_cast<struct ArrowArray **>(
-        CPLCalloc(1, sizeof(struct ArrowArray *)));
-    psChild->children[0] = static_cast<struct ArrowArray *>(
-        CPLCalloc(1, sizeof(struct ArrowArray)));
-    auto psValueChild = psChild->children[0];
-
-    psValueChild->release = OGRLayerDefaultReleaseArray;
-    psValueChild->length = nStrings;
-    psValueChild->n_buffers = 3;
-    psValueChild->buffers =
-        static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-
-    OffsetType *panChildOffsets = static_cast<OffsetType *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(OffsetType) * (1 + nStrings)));
-    if (panChildOffsets == nullptr)
-        return false;
-    psValueChild->buffers[1] = panChildOffsets;
-
-    char *pachValues =
-        static_cast<char *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nCountChars));
-    if (pachValues == nullptr)
-        return false;
-    psValueChild->buffers[2] = pachValues;
-
-    nStrings = 0;
-    nCountChars = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const int nCount = psRawField->StringList.nCount;
-            for (int j = 0; j < nCount; ++j)
-            {
-                panChildOffsets[nStrings] = nCountChars;
-                ++nStrings;
-                const size_t nLen = strlen(psRawField->StringList.paList[j]);
-                memcpy(pachValues + nCountChars,
-                       psRawField->StringList.paList[j], nLen);
-                nCountChars += static_cast<OffsetType>(nLen);
-            }
-        }
-    }
-    panChildOffsets[nStrings] = nCountChars;
-
-    return true;
-}
-
-/************************************************************************/
-/*                        FillBinaryArray()                             */
-/************************************************************************/
-
-template <class T>
-static bool
-FillBinaryArray(struct ArrowArray *psChild,
-                std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 3;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    T *panOffsets = static_cast<T *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-
-    T nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = nOffset;
-        const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const size_t nLen = psRawField->Binary.nCount;
-            if (nLen >
-                static_cast<size_t>(std::numeric_limits<T>::max() - nOffset))
-                return false;
-            nOffset += static_cast<T>(nLen);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-    }
-    panOffsets[apoFeatures.size()] = nOffset;
-
-    GByte *pabyValues =
-        static_cast<GByte *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nOffset));
-    if (pabyValues == nullptr)
-        return false;
-    psChild->buffers[2] = pabyValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        const size_t nLen =
-            static_cast<size_t>(panOffsets[iFeat + 1] - panOffsets[iFeat]);
-        if (nLen)
-        {
-            const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-            memcpy(pabyValues + nOffset, psRawField->Binary.paData, nLen);
-            nOffset += static_cast<T>(nLen);
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                     FillFixedWidthBinaryArray()                      */
-/************************************************************************/
-
-static bool
-FillFixedWidthBinaryArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, const int nWidth, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-
-    if (apoFeatures.size() > std::numeric_limits<size_t>::max() / nWidth)
-        return false;
-    GByte *pabyValues = static_cast<GByte *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(apoFeatures.size() * nWidth));
-    if (pabyValues == nullptr)
-        return false;
-    psChild->buffers[1] = pabyValues;
-
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            const auto nLen = psRawField->Binary.nCount;
-            if (nLen < nWidth)
-            {
-                memcpy(pabyValues + iFeat * nWidth, psRawField->Binary.paData,
-                       nLen);
-                memset(pabyValues + iFeat * nWidth + nLen, 0, nWidth - nLen);
-            }
-            else
-            {
-                memcpy(pabyValues + iFeat * nWidth, psRawField->Binary.paData,
-                       nWidth);
-            }
-        }
-        else
-        {
-            memset(pabyValues + iFeat * nWidth, 0, nWidth);
-            if (bIsNullable)
-            {
-                ++psChild->null_count;
-                if (pabyNull == nullptr)
-                {
-                    pabyNull =
-                        static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                            (apoFeatures.size() + 7) / 8));
-                    if (pabyNull == nullptr)
-                        return false;
-                    memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                    psChild->buffers[0] = pabyNull;
-                }
-                pabyNull[iFeat / 8] &=
-                    static_cast<uint8_t>(~(1 << (iFeat % 8)));
-            }
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                      FillWKBGeometryArray()                          */
-/************************************************************************/
-
-template <class T>
-static bool
-FillWKBGeometryArray(struct ArrowArray *psChild,
-                     std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                     const OGRGeomFieldDefn *poFieldDefn, const int i)
-{
-    const bool bIsNullable = CPL_TO_BOOL(poFieldDefn->IsNullable());
-    psChild->n_buffers = 3;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    T *panOffsets = static_cast<T *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * (1 + apoFeatures.size())));
-    if (panOffsets == nullptr)
-        return false;
-    psChild->buffers[1] = panOffsets;
-    const auto eGeomType = poFieldDefn->GetType();
-    auto poEmptyGeom =
-        std::unique_ptr<OGRGeometry>(OGRGeometryFactory::createGeometry(
-            (eGeomType == wkbNone || wkbFlatten(eGeomType) == wkbUnknown)
-                ? wkbGeometryCollection
-                : eGeomType));
-
-    size_t nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        panOffsets[iFeat] = static_cast<T>(nOffset);
-        const auto poGeom = apoFeatures[iFeat]->GetGeomFieldRef(i);
-        if (poGeom != nullptr)
-        {
-            const size_t nLen = poGeom->WkbSize();
-            if (nLen >
-                static_cast<size_t>(std::numeric_limits<T>::max()) - nOffset)
-                return false;
-            nOffset += static_cast<T>(nLen);
-        }
-        else if (bIsNullable)
-        {
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else if (poEmptyGeom)
-        {
-            const size_t nLen = poEmptyGeom->WkbSize();
-            if (nLen >
-                static_cast<size_t>(std::numeric_limits<T>::max()) - nOffset)
-                return false;
-            nOffset += static_cast<T>(nLen);
-        }
-    }
-    panOffsets[apoFeatures.size()] = static_cast<T>(nOffset);
-
-    GByte *pabyValues =
-        static_cast<GByte *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nOffset));
-    if (pabyValues == nullptr)
-        return false;
-    psChild->buffers[2] = pabyValues;
-
-    nOffset = 0;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        const size_t nLen =
-            static_cast<size_t>(panOffsets[iFeat + 1] - panOffsets[iFeat]);
-        if (nLen)
-        {
-            const auto poGeom = apoFeatures[iFeat]->GetGeomFieldRef(i);
-            poGeom->exportToWkb(wkbNDR, pabyValues + nOffset, wkbVariantIso);
-            nOffset += nLen;
-        }
-        else if (!bIsNullable && poEmptyGeom)
-        {
-            poEmptyGeom->exportToWkb(wkbNDR, pabyValues + nOffset,
-                                     wkbVariantIso);
-            nOffset += nLen;
-        }
-    }
-
-    return true;
-}
-
-/************************************************************************/
-/*                        FillDateArray()                               */
-/************************************************************************/
-
-static bool FillDateArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    int32_t *panValues = static_cast<int32_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(int32_t) * apoFeatures.size()));
-    if (panValues == nullptr)
-        return false;
-    psChild->buffers[1] = panValues;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            struct tm brokenDown;
-            memset(&brokenDown, 0, sizeof(brokenDown));
-            brokenDown.tm_year = psRawField->Date.Year - 1900;
-            brokenDown.tm_mon = psRawField->Date.Month - 1;
-            brokenDown.tm_mday = psRawField->Date.Day;
-            panValues[iFeat] = static_cast<int>(
-                (CPLYMDHMSToUnixTime(&brokenDown) + 36200) / 86400);
-        }
-        else if (bIsNullable)
-        {
-            panValues[iFeat] = 0;
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else
-        {
-            panValues[iFeat] = 0;
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                        FillDateArray()                               */
-/************************************************************************/
-
-static bool FillTimeArray(struct ArrowArray *psChild,
-                          std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                          const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    int32_t *panValues = static_cast<int32_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(int32_t) * apoFeatures.size()));
-    if (panValues == nullptr)
-        return false;
-    psChild->buffers[1] = panValues;
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            panValues[iFeat] =
-                psRawField->Date.Hour * 3600000 +
-                psRawField->Date.Minute * 60000 +
-                static_cast<int>(psRawField->Date.Second * 1000 + 0.5);
-        }
-        else if (bIsNullable)
-        {
-            panValues[iFeat] = 0;
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else
-        {
-            panValues[iFeat] = 0;
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                       FillDateTimeArray()                            */
-/************************************************************************/
-
-static bool
-FillDateTimeArray(struct ArrowArray *psChild,
-                  std::vector<std::unique_ptr<OGRFeature>> &apoFeatures,
-                  const bool bIsNullable, const int i)
-{
-    psChild->n_buffers = 2;
-    psChild->buffers = static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-    uint8_t *pabyNull = nullptr;
-    int64_t *panValues = static_cast<int64_t *>(
-        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(int64_t) * apoFeatures.size()));
-    if (panValues == nullptr)
-        return false;
-    psChild->buffers[1] = panValues;
-    struct tm brokenDown;
-    memset(&brokenDown, 0, sizeof(brokenDown));
-    for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-    {
-        auto &poFeature = apoFeatures[iFeat];
-        const auto psRawField = poFeature->GetRawFieldRef(i);
-        if (IsValidField(psRawField))
-        {
-            brokenDown.tm_year = psRawField->Date.Year - 1900;
-            brokenDown.tm_mon = psRawField->Date.Month - 1;
-            brokenDown.tm_mday = psRawField->Date.Day;
-            brokenDown.tm_hour = psRawField->Date.Hour;
-            brokenDown.tm_min = psRawField->Date.Minute;
-            brokenDown.tm_sec = static_cast<int>(psRawField->Date.Second);
-            panValues[iFeat] =
-                CPLYMDHMSToUnixTime(&brokenDown) * 1000 +
-                (static_cast<int>(psRawField->Date.Second * 1000 + 0.5) % 1000);
-        }
-        else if (bIsNullable)
-        {
-            panValues[iFeat] = 0;
-            ++psChild->null_count;
-            if (pabyNull == nullptr)
-            {
-                pabyNull =
-                    static_cast<uint8_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                        (apoFeatures.size() + 7) / 8));
-                if (pabyNull == nullptr)
-                    return false;
-                memset(pabyNull, 0xFF, (apoFeatures.size() + 7) / 8);
-                psChild->buffers[0] = pabyNull;
-            }
-            pabyNull[iFeat / 8] &= static_cast<uint8_t>(~(1 << (iFeat % 8)));
-        }
-        else
-        {
-            panValues[iFeat] = 0;
-        }
-    }
-    return true;
-}
-
-/************************************************************************/
-/*                          GetNextArrowArray()                         */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_next() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-int OGRLayer::GetNextArrowArray(struct ArrowArrayStream *,
-                                struct ArrowArray *out_array)
-{
-    const bool bIncludeFID = CPLTestBool(
-        m_aosArrowArrayStreamOptions.FetchNameValueDef("INCLUDE_FID", "YES"));
-    int nMaxBatchSize = atoi(m_aosArrowArrayStreamOptions.FetchNameValueDef(
-        "MAX_FEATURES_IN_BATCH", "65536"));
-    if (nMaxBatchSize <= 0)
-        nMaxBatchSize = 1;
-    if (nMaxBatchSize > INT_MAX - 1)
-        nMaxBatchSize = INT_MAX - 1;
-
-    std::vector<std::unique_ptr<OGRFeature>> apoFeatures;
-    try
-    {
-        apoFeatures.reserve(nMaxBatchSize);
-    }
-    catch (const std::exception &e)
-    {
-        CPLError(CE_Failure, CPLE_OutOfMemory, "%s", e.what());
-        return ENOMEM;
-    }
-
-    memset(out_array, 0, sizeof(*out_array));
-    auto poLayerDefn = GetLayerDefn();
-    const int nFieldCount = poLayerDefn->GetFieldCount();
-    const int nGeomFieldCount = poLayerDefn->GetGeomFieldCount();
-    const int nMaxChildren =
-        (bIncludeFID ? 1 : 0) + nFieldCount + nGeomFieldCount;
-    int iSchemaChild = 0;
-
-    out_array->release = OGRLayerDefaultReleaseArray;
-
-    for (int i = 0; i < nMaxBatchSize; i++)
-    {
-        auto poFeature = std::unique_ptr<OGRFeature>(GetNextFeature());
-        if (!poFeature)
-            break;
-        apoFeatures.emplace_back(std::move(poFeature));
-    }
-    if (apoFeatures.empty())
-    {
-        out_array->release(out_array);
-        memset(out_array, 0, sizeof(*out_array));
-        return 0;
-    }
-
-    out_array->length = apoFeatures.size();
-    out_array->null_count = 0;
-
-    out_array->n_children = nMaxChildren;
-    out_array->children = static_cast<struct ArrowArray **>(
-        CPLCalloc(nMaxChildren, sizeof(struct ArrowArray *)));
-    out_array->release = OGRLayerDefaultReleaseArray;
-    out_array->n_buffers = 1;
-    out_array->buffers =
-        static_cast<const void **>(CPLCalloc(1, sizeof(void *)));
-
-    if (bIncludeFID)
-    {
-        out_array->children[iSchemaChild] = static_cast<struct ArrowArray *>(
-            CPLCalloc(1, sizeof(struct ArrowArray)));
-        auto psChild = out_array->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayerDefaultReleaseArray;
-        psChild->length = apoFeatures.size();
-        psChild->n_buffers = 2;
-        psChild->buffers =
-            static_cast<const void **>(CPLCalloc(2, sizeof(void *)));
-        int64_t *panValues =
-            static_cast<int64_t *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(
-                sizeof(int64_t) * apoFeatures.size()));
-        if (panValues == nullptr)
-            goto error;
-        psChild->buffers[1] = panValues;
-        for (size_t iFeat = 0; iFeat < apoFeatures.size(); ++iFeat)
-        {
-            panValues[iFeat] = apoFeatures[iFeat]->GetFID();
-        }
-    }
-
-    for (int i = 0; i < nFieldCount; ++i)
-    {
-        const auto poFieldDefn = poLayerDefn->GetFieldDefn(i);
-        if (poFieldDefn->IsIgnored())
-        {
-            continue;
-        }
-
-        out_array->children[iSchemaChild] = static_cast<struct ArrowArray *>(
-            CPLCalloc(1, sizeof(struct ArrowArray)));
-        auto psChild = out_array->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayerDefaultReleaseArray;
-        psChild->length = apoFeatures.size();
-        const bool bIsNullable = CPL_TO_BOOL(poFieldDefn->IsNullable());
-        const auto eSubType = poFieldDefn->GetSubType();
-        switch (poFieldDefn->GetType())
-        {
-            case OFTInteger:
-            {
-                if (eSubType == OFSTBoolean)
-                {
-                    if (!FillBoolArray(psChild, apoFeatures, bIsNullable,
-                                       &OGRField::Integer, i))
-                        goto error;
-                }
-                else if (eSubType == OFSTInt16)
-                {
-                    if (!FillArray<int16_t>(psChild, apoFeatures, bIsNullable,
-                                            &OGRField::Integer, i))
-                        goto error;
-                }
-                else
-                {
-                    if (!FillArray<int32_t>(psChild, apoFeatures, bIsNullable,
-                                            &OGRField::Integer, i))
-                        goto error;
-                }
-
-                const auto &osDomainName = poFieldDefn->GetDomainName();
-                if (!osDomainName.empty())
-                {
-                    auto poDS = GetDataset();
-                    if (poDS)
-                    {
-                        const auto poFieldDomain =
-                            poDS->GetFieldDomain(osDomainName);
-                        if (poFieldDomain &&
-                            poFieldDomain->GetDomainType() == OFDT_CODED)
-                        {
-                            const OGRCodedFieldDomain *poCodedDomain =
-                                static_cast<const OGRCodedFieldDomain *>(
-                                    poFieldDomain);
-                            OGRArrowArrayHelper::FillDict(psChild,
-                                                          poCodedDomain);
-                        }
-                    }
-                }
-
-                break;
-            }
-
-            case OFTInteger64:
-            {
-                if (!FillArray<int64_t>(psChild, apoFeatures, bIsNullable,
-                                        &OGRField::Integer64, i))
-                    goto error;
-                break;
-            }
-
-            case OFTReal:
-            {
-                if (eSubType == OFSTFloat32)
-                {
-                    if (!FillArray<float>(psChild, apoFeatures, bIsNullable,
-                                          &OGRField::Real, i))
-                        goto error;
-                }
-                else
-                {
-                    if (!FillArray<double>(psChild, apoFeatures, bIsNullable,
-                                           &OGRField::Real, i))
-                        goto error;
-                }
-                break;
-            }
-
-            case OFTString:
-            case OFTWideString:
-            {
-                if (!FillStringArray<int32_t>(psChild, apoFeatures, bIsNullable,
-                                              i))
-                    goto error;
-                break;
-            }
-
-            case OFTBinary:
-            {
-                const int nWidth = poFieldDefn->GetWidth();
-                if (nWidth > 0)
-                {
-                    if (!FillFixedWidthBinaryArray(psChild, apoFeatures,
-                                                   bIsNullable, nWidth, i))
-                        goto error;
-                }
-                else if (!FillBinaryArray<int32_t>(psChild, apoFeatures,
-                                                   bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTIntegerList:
-            {
-                if (eSubType == OFSTBoolean)
-                {
-                    if (!FillListArrayBool<int32_t, GetFromIntegerList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                else if (eSubType == OFSTInt16)
-                {
-                    if (!FillListArray<int32_t, int16_t, GetFromIntegerList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                else
-                {
-                    if (!FillListArray<int32_t, int32_t, GetFromIntegerList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                break;
-            }
-
-            case OFTInteger64List:
-            {
-                if (!FillListArray<int32_t, int64_t, GetFromInteger64List>(
-                        psChild, apoFeatures, bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTRealList:
-            {
-                if (eSubType == OFSTFloat32)
-                {
-                    if (!FillListArray<int32_t, float, GetFromRealList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                else
-                {
-                    if (!FillListArray<int32_t, double, GetFromRealList>(
-                            psChild, apoFeatures, bIsNullable, i))
-                        goto error;
-                }
-                break;
-            }
-
-            case OFTStringList:
-            case OFTWideStringList:
-            {
-                if (!FillStringListArray<int32_t>(psChild, apoFeatures,
-                                                  bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTDate:
-            {
-                if (!FillDateArray(psChild, apoFeatures, bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTTime:
-            {
-                if (!FillTimeArray(psChild, apoFeatures, bIsNullable, i))
-                    goto error;
-                break;
-            }
-
-            case OFTDateTime:
-            {
-                if (!FillDateTimeArray(psChild, apoFeatures, bIsNullable, i))
-                    goto error;
-                break;
-            }
-        }
-    }
-    for (int i = 0; i < nGeomFieldCount; ++i)
-    {
-        const auto poFieldDefn = poLayerDefn->GetGeomFieldDefn(i);
-        if (poFieldDefn->IsIgnored())
-        {
-            continue;
-        }
-
-        out_array->children[iSchemaChild] = static_cast<struct ArrowArray *>(
-            CPLCalloc(1, sizeof(struct ArrowArray)));
-        auto psChild = out_array->children[iSchemaChild];
-        ++iSchemaChild;
-        psChild->release = OGRLayerDefaultReleaseArray;
-        psChild->length = apoFeatures.size();
-        if (!FillWKBGeometryArray<int32_t>(psChild, apoFeatures, poFieldDefn,
-                                           i))
-            goto error;
-    }
-
-    out_array->n_children = iSchemaChild;
-
-    return 0;
-
-error:
-    out_array->release(out_array);
-    memset(out_array, 0, sizeof(*out_array));
-    return ENOMEM;
-}
-
-/************************************************************************/
-/*                       StaticGetNextArrowArray()                      */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_next() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-int OGRLayer::StaticGetNextArrowArray(struct ArrowArrayStream *stream,
-                                      struct ArrowArray *out_array)
-{
-    auto poLayer = static_cast<ArrowArrayStreamPrivateDataSharedDataWrapper *>(
-                       stream->private_data)
-                       ->poShared->m_poLayer;
-    if (poLayer == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "Calling get_next() on a freed OGRLayer is not supported");
-        return EINVAL;
-    }
-    return poLayer->GetNextArrowArray(stream, out_array);
-}
-
-/************************************************************************/
-/*                          GetDataset()                                */
-/************************************************************************/
-
-/** Return the dataset associated with this layer.
- *
- * NOTE: that method is implemented in very few drivers, and cannot generally
- * be relied on. It is currently only used by the GetRecordBatchSchema()
- * method to retrieve the field domain associated with a field, to fill the
- * dictionary field of a struct ArrowSchema.
- *
- * @return dataset, or nullptr when unknown.
- * @since GDAL 3.6
- */
-GDALDataset *OGRLayer::GetDataset()
-{
-    return nullptr;
-}
-
-/************************************************************************/
-/*                            ReleaseStream()                           */
-/************************************************************************/
-
-/** Release a ArrowArrayStream.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @param stream Arrow array stream to release.
- * @since GDAL 3.6
- */
-void OGRLayer::ReleaseStream(struct ArrowArrayStream *stream)
-{
-    assert(stream->release == OGRLayer::ReleaseStream);
-    ArrowArrayStreamPrivateDataSharedDataWrapper *poPrivate =
-        static_cast<ArrowArrayStreamPrivateDataSharedDataWrapper *>(
-            stream->private_data);
-    poPrivate->poShared->m_bArrowArrayStreamInProgress = false;
-    delete poPrivate;
-    stream->private_data = nullptr;
-    stream->release = nullptr;
-}
-
-/************************************************************************/
-/*                     GetLastErrorArrowArrayStream()                   */
-/************************************************************************/
-
-/** Default implementation of the ArrowArrayStream::get_last_error() callback.
- *
- * To be used by driver implementations that have a custom GetArrowStream()
- * implementation.
- *
- * @since GDAL 3.6
- */
-const char *OGRLayer::GetLastErrorArrowArrayStream(struct ArrowArrayStream *)
-{
-    const char *pszLastErrorMsg = CPLGetLastErrorMsg();
-    return pszLastErrorMsg[0] != '\0' ? pszLastErrorMsg : nullptr;
-}
-
-/************************************************************************/
-/*                          GetArrowStream()                            */
-/************************************************************************/
-
-/** Get a Arrow C stream.
- *
- * On successful return, and when the stream interfaces is no longer needed, it
-must must
- * be freed with out_stream->release(out_stream). Please carefully read
- * https://arrow.apache.org/docs/format/CStreamInterface.html for more details
- * on using Arrow C stream.
- *
- * The method may take into account ignored fields set with SetIgnoredFields()
- * (the default implementation does), and should take into account filters set
-with
- * SetSpatialFilter() and SetAttributeFilter(). Note however that specialized
- * implementations may fallback to the default (slower) implementation when
- * filters are set. Drivers that have a specialized implementation should
- * advertise the OLCFastGetArrowStream capability.
- *
- * There are extra precautions to take into account in a OGR context. Unless
- * otherwise specified by a particular driver implementation, the get_schema(),
- * get_next() and get_last_error() function pointers of the ArrowArrayStream
- * structure should no longer be used after the OGRLayer, from which the
- * ArrowArrayStream structure was initialized, has been destroyed (typically at
- * dataset closing). The reason is that those function pointers will typically
- * point to methods of the OGRLayer instance.
- * However, the ArrowSchema and ArrowArray structures filled from those
-callbacks
- * can be used and must be released independently from the
- * ArrowArrayStream or the layer.
- *
- * Furthermore, unless otherwise specified by a particular driver
- * implementation, only one ArrowArrayStream can be active at a time on
- * a given layer (that is the last active one must be explicitly released before
- * a next one is asked). Changing filter state, ignored columns, modifying the
-schema
- * or using ResetReading()/GetNextFeature() while using a ArrowArrayStream is
- * strongly discouraged and may lead to unexpected results. As a rule of thumb,
- * no OGRLayer methods that affect the state of a layer should be called on a
- * layer, while an ArrowArrayStream on it is active.
- *
- * A potential usage can be:
-\code{.cpp}
-    struct ArrowArrayStream stream;
-    if( !poLayer->GetArrowStream(&stream, nullptr))
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "GetArrowStream() failed\n");
-        exit(1);
-    }
-    struct ArrowSchema schema;
-    if( stream.get_schema(&stream, &schema) == 0 )
-    {
-        // Do something useful
-        schema.release(schema);
-    }
-    while( true )
-    {
-        struct ArrowArray array;
-        // Look for an error (get_next() returning a non-zero code), or
-        // end of iteration (array.release == nullptr)
-        if( stream.get_next(&stream, &array) != 0 ||
-            array.release == nullptr )
-        {
-            break;
-        }
-        // Do something useful
-        array.release(&array);
-    }
-    stream.release(&stream);
-\endcode
- *
- * A full example is available in the
- * <a
-href="https://gdal.org/tutorials/vector_api_tut.html#reading-from-ogr-using-the-arrow-c-stream-data-interface">Reading
-From OGR using the Arrow C Stream data interface</a> tutorial.
- *
- * Options may be driver specific. The default implementation recognizes the
- * following options:
- * <ul>
- * <li>INCLUDE_FID=YES/NO. Whether to include the FID column. Defaults to
-YES.</li>
- * <li>MAX_FEATURES_IN_BATCH=integer. Maximum number of features to retrieve in
- *     a ArrowArray batch. Defaults to 65 536.</li>
- * </ul>
- *
- * The Arrow/Parquet drivers recognize the following option:
- * <ul>
- * <li>GEOMETRY_ENCODING=WKB. To force a fallback to the generic implementation
- *     when the native geometry encoding is not WKB. Otherwise the geometry
- *     will be returned with its native Arrow encoding
- *     (possibly using GeoArrow encoding).</li>
- * </ul>
- *
- * @param out_stream Output stream. Must *not* be NULL. The content of the
- *                  structure does not need to be initialized.
- * @param papszOptions NULL terminated list of key=value options.
- * @return true in case of success.
- * @since GDAL 3.6
- */
-bool OGRLayer::GetArrowStream(struct ArrowArrayStream *out_stream,
-                              CSLConstList papszOptions)
-{
-    memset(out_stream, 0, sizeof(*out_stream));
-    if (m_poSharedArrowArrayStreamPrivateData &&
-        m_poSharedArrowArrayStreamPrivateData->m_bArrowArrayStreamInProgress)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "An arrow Arrow Stream is in progress on that layer. Only "
-                 "one at a time is allowed in this implementation.");
-        return false;
-    }
-    m_aosArrowArrayStreamOptions.Assign(CSLDuplicate(papszOptions), true);
-
-    ResetReading();
-
-    out_stream->get_schema = OGRLayer::StaticGetArrowSchema;
-    out_stream->get_next = OGRLayer::StaticGetNextArrowArray;
-    out_stream->get_last_error = OGRLayer::GetLastErrorArrowArrayStream;
-    out_stream->release = OGRLayer::ReleaseStream;
-
-    if (m_poSharedArrowArrayStreamPrivateData == nullptr)
-    {
-        m_poSharedArrowArrayStreamPrivateData =
-            std::make_shared<ArrowArrayStreamPrivateData>();
-        m_poSharedArrowArrayStreamPrivateData->m_poLayer = this;
-    }
-    m_poSharedArrowArrayStreamPrivateData->m_bArrowArrayStreamInProgress = true;
-    auto poPrivateData = new ArrowArrayStreamPrivateDataSharedDataWrapper();
-    poPrivateData->poShared = m_poSharedArrowArrayStreamPrivateData;
-    out_stream->private_data = poPrivateData;
-    return true;
-}
-
-/************************************************************************/
-/*                       OGR_L_GetArrowStream()                         */
-/************************************************************************/
-
-/** Get a Arrow C stream.
- *
- * On successful return, and when the stream interfaces is no longer needed, it
- * must be freed with out_stream->release(out_stream). Please carefully read
- * https://arrow.apache.org/docs/format/CStreamInterface.html for more details
- * on using Arrow C stream.
- *
- * The method may take into account ignored fields set with SetIgnoredFields()
- * (the default implementation does), and should take into account filters set
- * with SetSpatialFilter() and SetAttributeFilter(). Note however that
- * specialized implementations may fallback to the default (slower)
- * implementation when filters are set.
- * Drivers that have a specialized implementation should
- * advertise the OLCFastGetArrowStream capability.
- *
- * There are extra precautions to take into account in a OGR context. Unless
- * otherwise specified by a particular driver implementation, the get_schema(),
- * get_next() and get_last_error() function pointers of the ArrowArrayStream
- * structure should no longer be used after the OGRLayer, from which the
- * ArrowArrayStream structure was initialized, has been destroyed (typically at
- * dataset closing). The reason is that those function pointers will typically
- * point to methods of the OGRLayer instance.
- * However, the ArrowSchema and ArrowArray structures filled from those
- * callbacks can be used and must be released independently from the
- * ArrowArrayStream or the layer.
- *
- * Furthermore, unless otherwise specified by a particular driver
- * implementation, only one ArrowArrayStream can be active at a time on
- * a given layer (that is the last active one must be explicitly released before
- * a next one is asked). Changing filter state, ignored columns, modifying the
- * schema or using ResetReading()/GetNextFeature() while using a
- * ArrowArrayStream is strongly discouraged and may lead to unexpected results.
- * As a rule of thumb, no OGRLayer methods that affect the state of a layer
- * should be called on a layer, while an ArrowArrayStream on it is active.
- *
- * A potential usage can be:
-\code{.cpp}
-    struct ArrowArrayStream stream;
-    if( !OGR_L_GetArrowStream(hLayer, &stream, nullptr))
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "OGR_L_GetArrowStream() failed\n");
-        exit(1);
-    }
-    struct ArrowSchema schema;
-    if( stream.get_schema(&stream, &schema) == 0 )
-    {
-        // Do something useful
-        schema.release(schema);
-    }
-    while( true )
-    {
-        struct ArrowArray array;
-        // Look for an error (get_next() returning a non-zero code), or
-        // end of iteration (array.release == nullptr)
-        if( stream.get_next(&stream, &array) != 0 ||
-            array.release == nullptr )
-        {
-            break;
-        }
-        // Do something useful
-        array.release(&array);
-    }
-    stream.release(&stream);
-\endcode
- *
- * A full example is available in the
- * <a
-href="https://gdal.org/tutorials/vector_api_tut.html#reading-from-ogr-using-the-arrow-c-stream-data-interface">Reading
-From OGR using the Arrow C Stream data interface</a> tutorial.
- *
- * Options may be driver specific. The default implementation recognizes the
- * following options:
- * <ul>
- * <li>INCLUDE_FID=YES/NO. Whether to include the FID column. Defaults to
-YES.</li>
- * <li>MAX_FEATURES_IN_BATCH=integer. Maximum number of features to retrieve in
- *     a ArrowArray batch. Defaults to 65 536.</li>
- * </ul>
- *
- * The Arrow/Parquet drivers recognize the following option:
- * <ul>
- * <li>GEOMETRY_ENCODING=WKB. To force a fallback to the generic implementation
- *     when the native geometry encoding is not WKB. Otherwise the geometry
- *     will be returned with its native Arrow encoding
- *     (possibly using GeoArrow encoding).</li>
- * </ul>
- *
- * @param hLayer Layer
- * @param out_stream Output stream. Must *not* be NULL. The content of the
- *                  structure does not need to be initialized.
- * @param papszOptions NULL terminated list of key=value options.
- * @return true in case of success.
- * @since GDAL 3.6
- */
-bool OGR_L_GetArrowStream(OGRLayerH hLayer, struct ArrowArrayStream *out_stream,
-                          char **papszOptions)
-{
-    VALIDATE_POINTER1(hLayer, "OGR_L_GetArrowStream", false);
-    VALIDATE_POINTER1(out_stream, "OGR_L_GetArrowStream", false);
-
-    return OGRLayer::FromHandle(hLayer)->GetArrowStream(out_stream,
-                                                        papszOptions);
-}
-
-/************************************************************************/
 /*                     OGRLayer::GetGeometryTypes()                     */
 /************************************************************************/
 
@@ -7097,7 +6224,7 @@ OGRLayer::GetGeometryTypes(int iGeomField, int nFlagsGGT, int &nEntryCountOut,
     if (poDefn->IsStyleIgnored())
         aosIgnoredFieldsRestore.AddString("OGR_STYLE");
     aosIgnoredFields.AddString("OGR_STYLE");
-    SetIgnoredFields(const_cast<const char **>(aosIgnoredFields.List()));
+    SetIgnoredFields(aosIgnoredFields.List());
 
     // Iterate over features
     std::map<OGRwkbGeometryType, int64_t> oMapCount;
@@ -7145,7 +6272,7 @@ OGRLayer::GetGeometryTypes(int iGeomField, int nFlagsGGT, int &nEntryCountOut,
     }
 
     // Restore ignore fields state
-    SetIgnoredFields(const_cast<const char **>(aosIgnoredFieldsRestore.List()));
+    SetIgnoredFields(aosIgnoredFieldsRestore.List());
 
     if (bInterrupted)
     {
@@ -7237,7 +6364,7 @@ OGRLayer::GetSupportedSRSList(CPL_UNUSED int iGeomField)
  * @param hLayer Layer.
  * @param iGeomField Geometry field index.
  * @param[out] pnCount Number of values in returned array. Must not be null.
- * @return list of supported SRS, to be freeds with OSRFreeSRSArray(), or
+ * @return list of supported SRS, to be freed with OSRFreeSRSArray(), or
  * nullptr
  * @since GDAL 3.7
  */
@@ -7281,9 +6408,10 @@ OGRSpatialReferenceH *OGR_L_GetSupportedSRSList(OGRLayerH hLayer,
  * <ul>
  * <li>the SRS in which geometries of returned features are expressed,</li>
  * <li>the SRS in which geometries of passed features (CreateFeature(),
- * SetFeature()) are expressed,</li> <li>the SRS returned by GetSpatialRef() and
- * GetGeomFieldDefn()->GetSpatialRef(),</li> <li>the SRS used to interpret
- * SetSpatialFilter() values.</li>
+ * SetFeature()) are expressed,</li>
+ * <li>the SRS returned by GetSpatialRef() and
+ * GetGeomFieldDefn()->GetSpatialRef(),</li>
+ * <li>the SRS used to interpret SetSpatialFilter() values.</li>
  * </ul>
  * This also resets feature reading and the spatial filter.
  * Note however that this does not modify the storage SRS of the features of
@@ -7316,9 +6444,10 @@ OGRErr OGRLayer::SetActiveSRS(CPL_UNUSED int iGeomField,
  * <ul>
  * <li>the SRS in which geometries of returned features are expressed,</li>
  * <li>the SRS in which geometries of passed features (CreateFeature(),
- * SetFeature()) are expressed,</li> <li>the SRS returned by GetSpatialRef() and
- * GetGeomFieldDefn()->GetSpatialRef(),</li> <li>the SRS used to interpret
- * SetSpatialFilter() values.</li>
+ * SetFeature()) are expressed,</li>
+ * <li>the SRS returned by GetSpatialRef() and
+ * GetGeomFieldDefn()->GetSpatialRef(),</li>
+ * <li>the SRS used to interpret SetSpatialFilter() values.</li>
  * </ul>
  * This also resets feature reading and the spatial filter.
  * Note however that this does not modify the storage SRS of the features of
@@ -7338,4 +6467,59 @@ OGRErr OGR_L_SetActiveSRS(OGRLayerH hLayer, int iGeomField,
     VALIDATE_POINTER1(hLayer, "OGR_L_SetActiveSRS", OGRERR_FAILURE);
     return OGRLayer::FromHandle(hLayer)->SetActiveSRS(
         iGeomField, OGRSpatialReference::FromHandle(hSRS));
+}
+
+/************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+/** Return the dataset associated with this layer.
+ *
+ * As of GDAL 3.9, GetDataset() is implemented on all in-tree drivers that
+ * have CreateLayer() capability. It may not be implemented in read-only
+ * drivers or out-of-tree drivers.
+ *
+ * It is currently only used by the GetRecordBatchSchema()
+ * method to retrieve the field domain associated with a field, to fill the
+ * dictionary field of a struct ArrowSchema.
+ * It is also used by CreateFieldFromArrowSchema() to determine which field
+ * types and subtypes are supported by the layer, by inspecting the driver
+ * metadata, and potentially use fallback types when needed.
+ *
+ * This method is the same as the C function OGR_L_GetDataset().
+ *
+ * @return dataset, or nullptr when unknown.
+ * @since GDAL 3.6
+ */
+GDALDataset *OGRLayer::GetDataset()
+{
+    return nullptr;
+}
+
+/************************************************************************/
+/*                          OGR_L_GetDataset()                          */
+/************************************************************************/
+
+/** Return the dataset associated with this layer.
+ *
+ * As of GDAL 3.9, GetDataset() is implemented on all in-tree drivers that
+ * have CreateLayer() capability. It may not be implemented in read-only
+ * drivers or out-of-tree drivers.
+ *
+ * It is currently only used by the GetRecordBatchSchema()
+ * method to retrieve the field domain associated with a field, to fill the
+ * dictionary field of a struct ArrowSchema.
+ * It is also used by CreateFieldFromArrowSchema() to determine which field
+ * types and subtypes are supported by the layer, by inspecting the driver
+ * metadata, and potentially use fallback types when needed.
+ *
+ * This function is the same as the C++ method OGRLayer::GetDataset().
+ *
+ * @return dataset, or nullptr when unknown.
+ * @since GDAL 3.9
+ */
+GDALDatasetH OGR_L_GetDataset(OGRLayerH hLayer)
+{
+    VALIDATE_POINTER1(hLayer, "OGR_L_GetDataset", nullptr);
+    return GDALDataset::ToHandle(OGRLayer::FromHandle(hLayer)->GetDataset());
 }

@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -427,11 +411,12 @@ const char *ERSHdrNode::FindElem(const char *pszPath, int iElem,
 ERSHdrNode *ERSHdrNode::FindNode(const char *pszPath)
 
 {
-    CPLString osPathFirst, osPathRest, osPath = pszPath;
-    size_t iDot = osPath.find_first_of('.');
+    std::string osPathFirst, osPathRest;
+    std::string osPath = pszPath;
+    const size_t iDot = osPath.find('.');
     if (iDot == std::string::npos)
     {
-        osPathFirst = osPath;
+        osPathFirst = std::move(osPath);
     }
     else
     {
@@ -441,12 +426,12 @@ ERSHdrNode *ERSHdrNode::FindNode(const char *pszPath)
 
     for (int i = 0; i < nItemCount; i++)
     {
-        if (EQUAL(osPathFirst, papszItemName[i]))
+        if (EQUAL(osPathFirst.c_str(), papszItemName[i]))
         {
             if (papoItemChild[i] != nullptr)
             {
                 if (osPathRest.length() > 0)
-                    return papoItemChild[i]->FindNode(osPathRest);
+                    return papoItemChild[i]->FindNode(osPathRest.c_str());
                 else
                     return papoItemChild[i];
             }

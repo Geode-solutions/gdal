@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Arc/Info Binary Grid Translator
  * Purpose:  Code for decoding CCITT RLE (G1) compressed data.
@@ -3532,6 +3531,7 @@ typedef struct
     char *subaddress;     /* subaddress string */
     GUInt32 recvtime;     /* time spent receiving (secs) */
 } Fax3BaseState;
+
 #define Fax3State(tif) ((Fax3BaseState *)tif)
 
 typedef struct
@@ -3546,6 +3546,7 @@ typedef struct
     GUInt32 *refruns;            /* runs for reference line */
     GUInt32 *curruns;            /* runs for current line */
 } Fax3DecodeState;
+
 #define DecoderState(tif) ((Fax3DecodeState *)Fax3State(tif))
 
 typedef enum
@@ -3564,6 +3565,7 @@ typedef struct
     int k;                  /* #rows left that can be 2d encoded */
     int maxk;               /* max #rows that can be 2d encoded */
 } Fax3EncodeState;
+
 #define EncoderState(tif) ((Fax3EncodeState *)Fax3State(tif))
 #endif
 
@@ -3634,6 +3636,7 @@ static void Fax3Unexpected()
 {
     CPLError(CE_Failure, CPLE_AppDefined, "Bad code word");
 }
+
 #define unexpected(table, a0) Fax3Unexpected()
 
 static void Fax3BadLength(GUInt32 a0, GUInt32 lastx)
@@ -3649,6 +3652,7 @@ static void Fax3PrematureEOF()
 {
     CPLError(CE_Warning, CPLE_AppDefined, "Premature EOF");
 }
+
 #define prematureEOF(a0) Fax3PrematureEOF()
 
 #define Nop
@@ -3890,6 +3894,7 @@ static void aig_TIFFFax3fillruns(unsigned char *buf, GUInt32 *runs,
     }
     assert(x == lastx);
 }
+
 #undef ZERO
 #undef FILL
 

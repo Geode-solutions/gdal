@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test some functions of HFA driver.  Most testing in ../gcore/hfa_*
@@ -10,32 +9,20 @@
 # Copyright (c) 2004, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import math
 import os
+import shutil
 import struct
 
 import gdaltest
 import pytest
 
 from osgeo import gdal
+
+pytestmark = pytest.mark.require_driver("HFA")
 
 ###############################################################################
 # Verify we can read the special histogram metadata from a provided image.
@@ -345,45 +332,42 @@ def test_hfa_pe_write():
 # Verify we can write and read large metadata items.
 
 
-def test_hfa_metadata_1():
+def test_hfa_metadata_1(tmp_path):
+
+    md1_img = str(tmp_path / "md_1.img")
 
     drv = gdal.GetDriverByName("HFA")
-    ds = drv.Create("tmp/md_1.img", 100, 150, 1, gdal.GDT_Byte)
+    ds = drv.Create(md1_img, 100, 150, 1, gdal.GDT_Byte)
 
     md_val = "0123456789" * 60
     md = {"test": md_val}
     ds.GetRasterBand(1).SetMetadata(md)
     ds = None
 
-    ds = gdal.Open("tmp/md_1.img")
+    ds = gdal.Open(md1_img)
     md = ds.GetRasterBand(1).GetMetadata()
     assert md["test"] == md_val, "got wrong metadata back"
     assert ds.FlushCache() == gdal.CE_None
     ds = None
 
+    ###############################################################################
+    # Verify that writing metadata multiple times does not result in duplicate
+    # nodes.
 
-###############################################################################
-# Verify that writing metadata multiple times does not result in duplicate
-# nodes.
-
-
-def test_hfa_metadata_2():
-
-    ds = gdal.Open("tmp/md_1.img", gdal.GA_Update)
+    ds = gdal.Open(md1_img, gdal.GA_Update)
     md = ds.GetRasterBand(1).GetMetadata()
     md["test"] = "0123456789"
     md["xxx"] = "123"
     ds.GetRasterBand(1).SetMetadata(md)
     ds = None
 
-    ds = gdal.Open("tmp/md_1.img")
+    ds = gdal.Open(md1_img)
     md = ds.GetRasterBand(1).GetMetadata()
     assert "xxx" in md, "metadata rewrite seems not to have worked"
 
     assert md["xxx"] == "123" and md["test"] == "0123456789", "got wrong metadata back"
 
     ds = None
-    gdal.GetDriverByName("HFA").Delete("tmp/md_1.img")
 
 
 ###############################################################################
@@ -465,16 +449,15 @@ def test_hfa_corrupt_aux():
     # NOTE: we depend on being able to open .aux files as a weak sort of
     # dataset.
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("data/hfa/F0116231.aux")
-    gdal.PopErrorHandler()
+    with gdaltest.disable_exceptions(), gdal.quiet_errors():
+        ds = gdal.Open("data/hfa/F0116231.aux")
 
-    assert ds.RasterXSize == 1104, "did not get expected dataset characteristics"
+        assert ds.RasterXSize == 1104, "did not get expected dataset characteristics"
 
-    assert (
-        gdal.GetLastErrorType() == 2
-        and gdal.GetLastErrorMsg().find("Corrupt (looping)") != -1
-    ), "Did not get expected warning."
+        assert (
+            gdal.GetLastErrorType() == 2
+            and gdal.GetLastErrorMsg().find("Corrupt (looping)") != -1
+        ), "Did not get expected warning."
 
     ds = None
 
@@ -488,9 +471,8 @@ def test_hfa_mapinformation_units():
     # NOTE: we depend on being able to open .aux files as a weak sort of
     # dataset.
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("data/hfa/fg118-91.aux")
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("data/hfa/fg118-91.aux")
 
     wkt = ds.GetProjectionRef()
     expected_wkt = """PROJCS["NAD_1983_StatePlane_Virginia_North_FIPS_4501_Feet",GEOGCS["GCS_North_American_1983",DATUM["North_American_Datum_1983",SPHEROID["GRS_1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["Degree",0.0174532925199432955],AUTHORITY["EPSG","4269"]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["False_Easting",11482916.66666666],PARAMETER["False_Northing",6561666.666666666],PARAMETER["Central_Meridian",-78.5],PARAMETER["Standard_Parallel_1",38.03333333333333],PARAMETER["Standard_Parallel_2",39.2],PARAMETER["Latitude_Of_Origin",37.66666666666666],UNIT["Foot_US",0.304800609601219241]]"""
@@ -504,10 +486,12 @@ def test_hfa_mapinformation_units():
 # Write nodata value.
 
 
-def test_hfa_nodata_write():
+def test_hfa_nodata_write(tmp_path):
+
+    nodata_img = str(tmp_path / "nodata.img")
 
     drv = gdal.GetDriverByName("HFA")
-    ds = drv.Create("tmp/nodata.img", 7, 7, 1, gdal.GDT_Byte)
+    ds = drv.Create(nodata_img, 7, 7, 1, gdal.GDT_Byte)
 
     p = [1, 2, 1, 4, 1, 2, 1]
     raw_data = b"".join(struct.pack("h", x) for x in p)
@@ -520,14 +504,10 @@ def test_hfa_nodata_write():
 
     ds = None
 
+    ###############################################################################
+    # Verify written nodata value.
 
-###############################################################################
-# Verify written nodata value.
-
-
-def test_hfa_nodata_read():
-
-    ds = gdal.Open("tmp/nodata.img")
+    ds = gdal.Open(nodata_img)
     b = ds.GetRasterBand(1)
 
     assert b.GetNoDataValue() == 1, "failed to preserve nodata value"
@@ -550,8 +530,6 @@ def test_hfa_nodata_read():
 
     b = None
     ds = None
-
-    gdal.GetDriverByName("HFA").Delete("tmp/nodata.img")
 
 
 ###############################################################################
@@ -674,6 +652,10 @@ def test_hfa_vsimem():
 # the .img file.  (#2422)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_hfa_proName():
 
     drv = gdal.GetDriverByName("HFA")
@@ -941,12 +923,11 @@ def test_hfa_ov_nodata():
     assert ovb.GetMaskFlags() == gdal.GMF_NODATA, "mask flag not as expected."
 
     # Confirm that a .ovr file was *not* produced.
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    try:
-        wrk3_ds = gdal.Open("/vsimem/ov_nodata.img.ovr")
-    except Exception:
-        wrk3_ds = None
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        try:
+            wrk3_ds = gdal.Open("/vsimem/ov_nodata.img.ovr")
+        except Exception:
+            wrk3_ds = None
 
     assert (
         wrk3_ds is None
@@ -986,22 +967,18 @@ def test_hfa_write_bit2grayscale():
     shutil.copyfile("data/hfa/small1bit.img", "tmp/small1bit.img")
     shutil.copyfile("data/hfa/small1bit.rrd", "tmp/small1bit.rrd")
 
-    gdal.SetConfigOption("USE_RRD", "YES")
-    gdal.SetConfigOption("HFA_USE_RRD", "YES")
+    with gdal.config_options({"USE_RRD": "YES", "HFA_USE_RRD": "YES"}):
 
-    ds = gdal.Open("tmp/small1bit.img", gdal.GA_Update)
-    ds.BuildOverviews(resampling="average_bit2grayscale", overviewlist=[2])
+        ds = gdal.Open("tmp/small1bit.img", gdal.GA_Update)
+        ds.BuildOverviews(resampling="average_bit2grayscale", overviewlist=[2])
 
-    ov = ds.GetRasterBand(1).GetOverview(1)
+        ov = ds.GetRasterBand(1).GetOverview(1)
 
-    assert ov.Checksum() == 57325, "wrong checksum for greyscale overview."
+        assert ov.Checksum() == 57325, "wrong checksum for greyscale overview."
 
-    ds = None
+        ds = None
 
-    gdal.GetDriverByName("HFA").Delete("tmp/small1bit.img")
-
-    gdal.SetConfigOption("USE_RRD", "NO")
-    gdal.SetConfigOption("HFA_USE_RRD", "NO")
+        gdal.GetDriverByName("HFA").Delete("tmp/small1bit.img")
 
     # as an aside, confirm the .rrd file was deleted.
     assert not os.path.exists("tmp/small1bit.rrd")
@@ -1081,9 +1058,8 @@ def test_hfa_write_tmso_projection():
     )
     out_ds = None
     exp_wkt = 'PROJCS["Hartebeesthoek94 / Lo15",GEOGCS["Hartebeesthoek94",DATUM["Hartebeesthoek94",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],TOWGS84[0,0,0,0,0,0,0],AUTHORITY["EPSG","6148"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.01745329251994328,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4148"]],UNIT["metre",1,AUTHORITY["EPSG","9001"]],PROJECTION["Transverse_Mercator_South_Orientated"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",15],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],AUTHORITY["EPSG","2046"],AXIS["Y",WEST],AXIS["X",SOUTH]]'
-    ret = hfa_verify_dataset_projection(dataset_path, exp_wkt)
+    hfa_verify_dataset_projection(dataset_path, exp_wkt)
     gdal.GetDriverByName("HFA").Delete(dataset_path)
-    return ret
 
 
 ###############################################################################
@@ -1117,9 +1093,8 @@ def test_hfa_write_homva_projection():
     )
     out_ds = None
     exp_wkt = 'PROJCS["Hotine Oblique Mercator (Variant A)",GEOGCS["GDM_2000",DATUM["GDM_2000",SPHEROID["GRS 1980",6378137,298.257222096042],TOWGS84[0,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]],PROJECTION["Hotine_Oblique_Mercator"],PARAMETER["latitude_of_center",4],PARAMETER["longitude_of_center",115],PARAMETER["azimuth",53.31580995],PARAMETER["rectified_grid_angle",53.1301023611111],PARAMETER["scale_factor",0.99984],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["meters",1],AXIS["Easting",EAST],AXIS["Northing",NORTH]]'
-    ret = hfa_verify_dataset_projection(dataset_path, exp_wkt)
+    hfa_verify_dataset_projection(dataset_path, exp_wkt)
     gdal.GetDriverByName("HFA").Delete(dataset_path)
-    return ret
 
 
 ###############################################################################
@@ -1253,21 +1228,17 @@ def test_hfa_write_rat():
 # Test STATISTICS creation option
 
 
-def test_hfa_createcopy_statistics():
+def test_hfa_createcopy_statistics(tmp_path):
 
-    tmpAuxXml = "../gcore/data/byte.tif.aux.xml"
-    try:
-        os.remove(tmpAuxXml)
-    except OSError:
-        pass
-    ds_src = gdal.Open("../gcore/data/byte.tif")
+    tmp_tif = str(tmp_path / "byte.tif")
+    shutil.copy("../gcore/data/byte.tif", tmp_tif)
+
+    ds_src = gdal.Open(tmp_tif)
     out_ds = gdal.GetDriverByName("HFA").CreateCopy(
         "/vsimem/byte.img", ds_src, options=["STATISTICS=YES"]
     )
     del out_ds
     ds_src = None
-    if os.path.exists(tmpAuxXml):
-        os.remove(tmpAuxXml)
 
     gdal.Unlink("/vsimem/byte.img.aux.xml")
 
@@ -1304,3 +1275,17 @@ def test_hfa_read_elevation_units():
 
 ###############################################################################
 #
+
+
+def test_hfa_read_nan_nodata(tmp_vsimem):
+
+    filename = tmp_vsimem / "test.img"
+    ds = gdal.GetDriverByName("HFA").Create(filename, 1, 1, 1, gdal.GDT_Float32)
+    ds.GetRasterBand(1).SetNoDataValue(float("nan"))
+    ds.Close()
+
+    with gdaltest.disable_exceptions():
+        gdal.ErrorReset()
+        with gdal.Open(filename) as ds:
+            assert gdal.GetLastErrorMsg() == ""
+            assert math.isnan(ds.GetRasterBand(1).GetNoDataValue())

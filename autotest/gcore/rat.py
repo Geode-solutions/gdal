@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test RasterAttributeTables services from Python.
@@ -11,27 +10,10 @@
 # Copyright (c) 2009, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
-import gdaltest
 import pytest
 
 from osgeo import gdal
@@ -40,14 +22,10 @@ from osgeo import gdal
 # Create a raster attribute table.
 
 
-def test_rat_1():
+@pytest.fixture()
+def test_rat():
 
-    gdaltest.saved_rat = None
-
-    try:
-        rat = gdal.RasterAttributeTable()
-    except Exception:
-        pytest.skip()
+    rat = gdal.RasterAttributeTable()
 
     rat.CreateColumn("Value", gdal.GFT_Integer, gdal.GFU_MinMax)
     rat.CreateColumn("Count", gdal.GFT_Integer, gdal.GFU_PixelCount)
@@ -60,7 +38,12 @@ def test_rat_1():
     rat.SetValueAsInt(2, 0, 12)
     rat.SetValueAsInt(2, 1, 90)
 
-    rat2 = rat.Clone()
+    return rat
+
+
+def test_rat_1(test_rat):
+
+    rat2 = test_rat.Clone()
 
     assert rat2.GetColumnCount() == 2, "wrong column count"
 
@@ -76,21 +59,16 @@ def test_rat_1():
 
     assert rat2.GetValueAsInt(1, 1) == 200, "wrong field value."
 
-    gdaltest.saved_rat = rat
-
 
 ###############################################################################
 # Save a RAT in a file, written to .aux.xml, read it back and check it.
 
 
 @pytest.mark.require_driver("PNM")
-def test_rat_2():
-
-    if gdaltest.saved_rat is None:
-        pytest.skip()
+def test_rat_2(test_rat):
 
     ds = gdal.GetDriverByName("PNM").Create("tmp/rat_2.pnm", 100, 90, 1, gdal.GDT_Byte)
-    ds.GetRasterBand(1).SetDefaultRAT(gdaltest.saved_rat)
+    ds.GetRasterBand(1).SetDefaultRAT(test_rat)
 
     ds = None
 
@@ -122,8 +100,6 @@ def test_rat_2():
     assert rat is None, "expected a NULL RAT."
 
     gdal.GetDriverByName("PNM").Delete("tmp/rat_2.pnm")
-
-    gdaltest.saved_rat = None
 
 
 ###############################################################################

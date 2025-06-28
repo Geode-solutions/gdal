@@ -6,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2017-2018 NextGIS, <info@nextgis.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_json.h"
@@ -39,6 +23,33 @@
 static const char *JSON_PATH_DELIMITER = "/";
 
 static const char *INVALID_OBJ_KEY = "__INVALID_OBJ_KEY__";
+
+#define JSON_C_VER_014 (14 << 8)
+
+// json_object_new_uint64() was added in libjson-c 0.14
+#if (!defined(JSON_C_VERSION_NUM)) || (JSON_C_VERSION_NUM < JSON_C_VER_014)
+
+static int CPLJSON_json_object_new_uint64_formatter(struct json_object *jso,
+                                                    struct printbuf *pb,
+                                                    int /* level */,
+                                                    int /* flags */)
+{
+    const char *pszStr = json_object_get_string(jso);
+    return printbuf_memappend(pb, pszStr, static_cast<int>(strlen(pszStr)));
+}
+
+static json_object *CPLJSON_json_object_new_uint64(uint64_t nVal)
+{
+    json_object *jso = json_object_new_string(
+        CPLSPrintf(CPL_FRMT_GUIB, static_cast<GUIntBig>(nVal)));
+    json_object_set_serializer(jso, CPLJSON_json_object_new_uint64_formatter,
+                               nullptr, nullptr);
+    return jso;
+}
+
+#define json_object_new_uint64 CPLJSON_json_object_new_uint64
+
+#endif
 
 //------------------------------------------------------------------------------
 // JSONDocument
@@ -190,8 +201,14 @@ bool CPLJSONDocument::Load(const std::string &osPath)
 {
     GByte *pabyOut = nullptr;
     vsi_l_offset nSize = 0;
-    if (!VSIIngestFile(nullptr, osPath.c_str(), &pabyOut, &nSize,
-                       100 * 1024 * 1024))  // Maximum 100 Mb allowed
+
+    GIntBig nMaxSize = 0;
+    if (CPLParseMemorySize(CPLGetConfigOption("CPL_JSON_MAX_SIZE", "100MB"),
+                           &nMaxSize, nullptr) != CE_None ||
+        nMaxSize <= 0)
+        return false;
+
+    if (!VSIIngestFile(nullptr, osPath.c_str(), &pabyOut, &nSize, nMaxSize))
     {
         CPLError(CE_Failure, CPLE_FileIO, "Load json file %s failed",
                  osPath.c_str());
@@ -456,6 +473,45 @@ CPLJSONObject::CPLJSONObject() : m_poJsonObject(json_object_new_object())
 {
 }
 
+CPLJSONObject::CPLJSONObject(std::nullptr_t) : m_poJsonObject(nullptr)
+{
+}
+
+CPLJSONObject::CPLJSONObject(const std::string &osVal)
+    : m_poJsonObject(json_object_new_string(osVal.c_str()))
+{
+}
+
+CPLJSONObject::CPLJSONObject(const char *pszValue)
+    : m_poJsonObject(json_object_new_string(pszValue))
+{
+}
+
+CPLJSONObject::CPLJSONObject(bool bVal)
+    : m_poJsonObject(json_object_new_boolean(bVal))
+{
+}
+
+CPLJSONObject::CPLJSONObject(int nVal)
+    : m_poJsonObject(json_object_new_int(nVal))
+{
+}
+
+CPLJSONObject::CPLJSONObject(int64_t nVal)
+    : m_poJsonObject(json_object_new_int64(nVal))
+{
+}
+
+CPLJSONObject::CPLJSONObject(uint64_t nVal)
+    : m_poJsonObject(json_object_new_uint64(nVal))
+{
+}
+
+CPLJSONObject::CPLJSONObject(double dfVal)
+    : m_poJsonObject(json_object_new_double(dfVal))
+{
+}
+
 CPLJSONObject::CPLJSONObject(const std::string &osName,
                              const CPLJSONObject &oParent)
     : m_poJsonObject(json_object_get(json_object_new_object())), m_osKey(osName)
@@ -468,6 +524,20 @@ CPLJSONObject::CPLJSONObject(const std::string &osName,
                              JSONObjectH poJsonObject)
     : m_poJsonObject(json_object_get(TO_JSONOBJ(poJsonObject))), m_osKey(osName)
 {
+}
+
+CPLJSONObject CPLJSONObject::Clone() const
+{
+    CPLJSONObject oRet;
+    if (IsValid())
+    {
+        CPLJSONDocument oTmpDoc;
+        oTmpDoc.SetRoot(*this);
+        std::string osStr = oTmpDoc.SaveAsString();
+        CPL_IGNORE_RET_VAL(oTmpDoc.LoadMemory(osStr));
+        oRet = oTmpDoc.GetRoot();
+    }
+    return oRet;
 }
 
 CPLJSONObject::~CPLJSONObject()
@@ -516,6 +586,7 @@ CPLJSONObject &CPLJSONObject::operator=(CPLJSONObject &&other)
     other.m_poJsonObject = nullptr;
     return *this;
 }
+
 /*! @endcond */
 
 /**
@@ -637,6 +708,28 @@ void CPLJSONObject::Add(const std::string &osName, GInt64 nValue)
     {
         json_object *poVal =
             json_object_new_int64(static_cast<int64_t>(nValue));
+        json_object_object_add(TO_JSONOBJ(object.GetInternalHandle()),
+                               objectName.c_str(), poVal);
+    }
+}
+
+/**
+ * Add new key - value pair to json object.
+ * @param osName  Key name.
+ * @param nValue uint64_t value.
+ *
+ * @since GDAL 3.8
+ */
+void CPLJSONObject::Add(const std::string &osName, uint64_t nValue)
+{
+    std::string objectName;
+    if (m_osKey == INVALID_OBJ_KEY)
+        m_osKey.clear();
+    CPLJSONObject object = GetObjectByPath(osName, objectName);
+    if (object.IsValid() && json_object_get_type(TO_JSONOBJ(
+                                object.m_poJsonObject)) == json_type_object)
+    {
+        json_object *poVal = json_object_new_uint64(nValue);
         json_object_object_add(TO_JSONOBJ(object.GetInternalHandle()),
                                objectName.c_str(), poVal);
     }
@@ -818,6 +911,19 @@ void CPLJSONObject::Set(const std::string &osName, int nValue)
  * @since GDAL 2.3
  */
 void CPLJSONObject::Set(const std::string &osName, GInt64 nValue)
+{
+    Delete(osName);
+    Add(osName, nValue);
+}
+
+/**
+ * Change value by key.
+ * @param osName  Key name.
+ * @param nValue   uint64_t value.
+ *
+ * @since GDAL 3.8
+ */
+void CPLJSONObject::Set(const std::string &osName, uint64_t nValue)
 {
     Delete(osName);
     Add(osName, nValue);
@@ -1233,6 +1339,7 @@ CPLJSONObject CPLJSONObject::GetObjectByPath(const std::string &osPath,
     osName = pathPortions[portionsCount - 1];
     return object;
 }
+
 /*! @endcond */
 
 /**
@@ -1326,6 +1433,7 @@ CPLJSONArray::CPLJSONArray(const std::string &osName, JSONObjectH poJsonObject)
 CPLJSONArray::CPLJSONArray(const CPLJSONObject &other) : CPLJSONObject(other)
 {
 }
+
 /*! @endcond */
 
 /**
@@ -1340,6 +1448,17 @@ int CPLJSONArray::Size() const
         return static_cast<int>(
             json_object_array_length(TO_JSONOBJ(m_poJsonObject)));
     return 0;
+}
+
+/**
+ * Add null object to array.
+ *
+ * @since GDAL 3.8
+ */
+void CPLJSONArray::AddNull()
+{
+    if (m_poJsonObject)
+        json_object_array_add(TO_JSONOBJ(m_poJsonObject), nullptr);
 }
 
 /**
@@ -1421,6 +1540,21 @@ void CPLJSONArray::Add(GInt64 nValue)
     if (m_poJsonObject)
         json_object_array_add(TO_JSONOBJ(m_poJsonObject),
                               json_object_new_int64(nValue));
+}
+
+/**
+ * Add value to array
+ * @param nValue Value to add.
+ *
+ * @since GDAL 3.8
+ */
+void CPLJSONArray::Add(uint64_t nValue)
+{
+    if (m_poJsonObject)
+    {
+        json_object_array_add(TO_JSONOBJ(m_poJsonObject),
+                              json_object_new_uint64(nValue));
+    }
 }
 
 /**

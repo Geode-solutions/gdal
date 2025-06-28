@@ -9,23 +9,7 @@
  * Copyright (c) 2008-2020, Even Rouault <even dot rouault at spatialys.com>
  * Copyright (c) 2018, Chiara Marmo <chiara dot marmo at u-psud dot fr>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 // So that OFF_T is 64 bits
@@ -36,6 +20,7 @@
 #include "gdal_pam.h"
 #include "ogr_spatialref.h"
 #include "ogrsf_frmts.h"
+#include "fitsdrivercore.h"
 
 #include <string.h>
 #include <fitsio.h>
@@ -80,7 +65,7 @@ class FITSDataset final : public GDALPamDataset
 
     OGRSpatialReference m_oSRS{};
 
-    double m_adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     bool m_bGeoTransformValid = false;
 
     bool m_bFITSInfoChanged = false;
@@ -94,12 +79,13 @@ class FITSDataset final : public GDALPamDataset
     void WriteFITSInfo();
     void LoadMetadata(GDALMajorObject *poTarget);
 
+    CPL_DISALLOW_COPY_ASSIGN(FITSDataset)
+
   public:
     FITSDataset();  // Others should not call this constructor explicitly
     ~FITSDataset();
 
     static GDALDataset *Open(GDALOpenInfo *);
-    static int Identify(GDALOpenInfo *);
     static GDALDataset *Create(const char *pszFilename, int nXSize, int nYSize,
                                int nBandsIn, GDALDataType eType,
                                char **papszParamList);
@@ -107,19 +93,21 @@ class FITSDataset final : public GDALPamDataset
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
-    virtual CPLErr GetGeoTransform(double *) override;
-    virtual CPLErr SetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    virtual CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     char **GetMetadata(const char *papszDomain = nullptr) override;
 
     int GetLayerCount() override
     {
         return static_cast<int>(m_apoLayers.size());
     }
+
     OGRLayer *GetLayer(int) override;
 
-    OGRLayer *ICreateLayer(const char *pszName, OGRSpatialReference *poSRS,
-                           OGRwkbGeometryType eGType,
-                           char **papszOptions) override;
+    OGRLayer *ICreateLayer(const char *pszName,
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
+
     int TestCapability(const char *pszCap) override;
 
     bool GetRawBinaryLayout(GDALDataset::RawBinaryLayout &) override;
@@ -139,6 +127,8 @@ class FITSRasterBand final : public GDALPamRasterBand
     bool m_bHaveOffsetScale = false;
     double m_dfOffset = 0.0;
     double m_dfScale = 1.0;
+
+    CPL_DISALLOW_COPY_ASSIGN(FITSRasterBand)
 
   protected:
     FITSDataset *m_poFDS = nullptr;
@@ -168,7 +158,7 @@ class FITSRasterBand final : public GDALPamRasterBand
 /*                              FITSLayer                               */
 /* ==================================================================== */
 /************************************************************************/
-namespace
+namespace gdal::FITS
 {
 struct ColDesc
 {
@@ -183,7 +173,9 @@ struct ColDesc
     LONGLONG nNullValue = 0;
     int nTypeCode = 0;  // unset
 };
-}  // namespace
+}  // namespace gdal::FITS
+
+using namespace gdal::FITS;
 
 class FITSLayer final : public OGRLayer,
                         public OGRGetNextFeatureThroughRaw<FITSLayer>
@@ -195,7 +187,7 @@ class FITSLayer final : public OGRLayer,
     LONGLONG m_nCurRow = 1;
     LONGLONG m_nRows = 0;
 
-    std::vector<ColDesc> m_aoColDescs;
+    std::vector<ColDesc> m_aoColDescs{};
 
     CPLStringList m_aosCreationOptions{};
 
@@ -206,6 +198,8 @@ class FITSLayer final : public OGRLayer,
     void RunDeferredFieldCreation(const OGRFeature *poFeature = nullptr);
     bool SetOrCreateFeature(const OGRFeature *poFeature, LONGLONG nRow);
 
+    CPL_DISALLOW_COPY_ASSIGN(FITSLayer)
+
   public:
     FITSLayer(FITSDataset *poDS, int hduNum, const char *pszExtName);
     ~FITSLayer();
@@ -214,11 +208,12 @@ class FITSLayer final : public OGRLayer,
     {
         return m_poFeatureDefn;
     }
+
     void ResetReading() override;
     int TestCapability(const char *) override;
     OGRFeature *GetFeature(GIntBig) override;
     GIntBig GetFeatureCount(int bForce) override;
-    OGRErr CreateField(OGRFieldDefn *poField, int bApproxOK) override;
+    OGRErr CreateField(const OGRFieldDefn *poField, int bApproxOK) override;
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
     OGRErr ISetFeature(OGRFeature *poFeature) override;
     OGRErr DeleteFeature(GIntBig nFID) override;
@@ -824,7 +819,7 @@ OGRFeature *FITSLayer::GetFeature(GIntBig nFID)
             CPLStringList aosList;
             for (int i = 0; i < nRepeat; ++i)
                 aosList.AddString(
-                    CPLSPrintf("%.18g + %.18gj", x[2 * i + 0], x[2 * i + 1]));
+                    CPLSPrintf("%.17g + %.17gj", x[2 * i + 0], x[2 * i + 1]));
             if (nRepeat == 1)
                 poFeature->SetField(iField, aosList[0]);
             else
@@ -839,7 +834,7 @@ OGRFeature *FITSLayer::GetFeature(GIntBig nFID)
             for (int i = 0; i < nRepeat; ++i)
             {
                 aosList.AddString(
-                    CPLSPrintf("%.18g + %.18gj", x[2 * i + 0], x[2 * i + 1]));
+                    CPLSPrintf("%.17g + %.17gj", x[2 * i + 0], x[2 * i + 1]));
             }
             if (nRepeat == 1)
                 poFeature->SetField(iField, aosList[0]);
@@ -1045,7 +1040,7 @@ void FITSLayer::RunDeferredFieldCreation(const OGRFeature *poFeature)
                 (iBit = strtol(pszBit + strlen("_bit"), &pszEndPtr, 10)) > 0 &&
                 pszEndPtr && *pszEndPtr == '\0')
             {
-                CPLString osName;
+                std::string osName;
                 osName.assign(pszFieldName, pszBit - pszFieldName);
                 if (oSetBitFieldNames.find(osName) == oSetBitFieldNames.end())
                 {
@@ -1057,7 +1052,7 @@ void FITSLayer::RunDeferredFieldCreation(const OGRFeature *poFeature)
 
                     if (osPendingBitFieldName.empty())
                     {
-                        osPendingBitFieldName = osName;
+                        osPendingBitFieldName = std::move(osName);
                         nPendingBitFieldSize = 1;
                         continue;
                     }
@@ -1081,7 +1076,8 @@ void FITSLayer::RunDeferredFieldCreation(const OGRFeature *poFeature)
         const char *pszRepeat = m_aosCreationOptions.FetchNameValue(
             (CPLString("REPEAT_") + pszFieldName).c_str());
 
-        const auto osTFormFromMD = oMapColNameToMetadata[pszFieldName]["TFORM"];
+        const auto &osTFormFromMD =
+            oMapColNameToMetadata[pszFieldName]["TFORM"];
 
         // For fields of type list, determine if we can know if it has a fixed
         // number of elements
@@ -1229,6 +1225,7 @@ void FITSLayer::RunDeferredFieldCreation(const OGRFeature *poFeature)
                 osTForm = oCol.typechar;
             }
         }
+        CPL_IGNORE_RET_VAL(osRepeat);
         int status = 0;
         fits_insert_col(m_poDS->m_hFITS, oCol.iCol, &osTType[0], &osTForm[0],
                         &status);
@@ -1260,7 +1257,7 @@ void FITSLayer::RunDeferredFieldCreation(const OGRFeature *poFeature)
 /*                           CreateField()                              */
 /************************************************************************/
 
-OGRErr FITSLayer::CreateField(OGRFieldDefn *poField, int /* bApproxOK */)
+OGRErr FITSLayer::CreateField(const OGRFieldDefn *poField, int /* bApproxOK */)
 {
     if (!TestCapability(OLCCreateField))
         return OGRERR_FAILURE;
@@ -1756,7 +1753,8 @@ CPLErr FITSRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
     if (!dataset->m_isExistingFile && offset > dataset->m_highestOffsetWritten)
     {
         memset(pImage, 0,
-               nBlockXSize * nBlockYSize * GDALGetDataTypeSize(eDataType) / 8);
+               static_cast<size_t>(nBlockXSize) * nBlockYSize *
+                   GDALGetDataTypeSizeBytes(eDataType));
         return CE_None;
     }
 
@@ -1844,6 +1842,7 @@ static const char *const ignorableFITSHeaders[] = {
     "XTENSION", "PCOUNT", "GCOUNT", "EXTEND", "CONTINUE", "COMMENT", "",
     "LONGSTRN", "BZERO",  "BSCALE", "BLANK",  "CHECKSUM", "DATASUM",
 };
+
 static bool isIgnorableFITSHeader(const char *name)
 {
     for (const char *keyword : ignorableFITSHeaders)
@@ -1861,12 +1860,6 @@ static bool isIgnorableFITSHeader(const char *name)
 FITSDataset::FITSDataset()
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    m_adfGeoTransform[0] = 0;
-    m_adfGeoTransform[1] = 1;
-    m_adfGeoTransform[2] = 0;
-    m_adfGeoTransform[3] = 0;
-    m_adfGeoTransform[4] = 0;
-    m_adfGeoTransform[5] = 1;
 }
 
 /************************************************************************/
@@ -2266,25 +2259,6 @@ void FITSDataset::LoadMetadata(GDALMajorObject *poTarget)
 }
 
 /************************************************************************/
-/*                           Identify()                                 */
-/************************************************************************/
-
-int FITSDataset::Identify(GDALOpenInfo *poOpenInfo)
-{
-    if (STARTS_WITH(poOpenInfo->pszFilename, "FITS:"))
-        return true;
-
-    const char *fitsID = "SIMPLE  =                    T";  // Spaces important!
-    const size_t fitsIDLen = strlen(fitsID);  // Should be 30 chars long
-
-    if (static_cast<size_t>(poOpenInfo->nHeaderBytes) < fitsIDLen)
-        return false;
-    if (memcmp(poOpenInfo->pabyHeader, fitsID, fitsIDLen) != 0)
-        return false;
-    return true;
-}
-
-/************************************************************************/
 /*                            GetMetadata()                             */
 /************************************************************************/
 
@@ -2315,12 +2289,13 @@ OGRLayer *FITSDataset::GetLayer(int idx)
 /************************************************************************/
 
 OGRLayer *FITSDataset::ICreateLayer(const char *pszName,
-                                    OGRSpatialReference * /* poSRS */,
-                                    OGRwkbGeometryType eGType,
-                                    char **papszOptions)
+                                    const OGRGeomFieldDefn *poGeomFieldDefn,
+                                    CSLConstList papszOptions)
 {
     if (!TestCapability(ODsCCreateLayer))
         return nullptr;
+
+    const auto eGType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
     if (eGType != wkbNone)
     {
         CPLError(CE_Failure, CPLE_NotSupported, "Spatial tables not supported");
@@ -2385,7 +2360,7 @@ int FITSDataset::TestCapability(const char *pszCap)
 GDALDataset *FITSDataset::Open(GDALOpenInfo *poOpenInfo)
 {
 
-    if (!Identify(poOpenInfo))
+    if (!FITSDriverIdentify(poOpenInfo))
         return nullptr;
 
     CPLString osFilename(poOpenInfo->pszFilename);
@@ -2424,7 +2399,7 @@ GDALDataset *FITSDataset::Open(GDALOpenInfo *poOpenInfo)
         return nullptr;
     }
     // Create a FITSDataset object
-    auto dataset = cpl::make_unique<FITSDataset>();
+    auto dataset = std::make_unique<FITSDataset>();
     dataset->m_isExistingFile = true;
     dataset->m_hFITS = hFITS;
     dataset->eAccess = poOpenInfo->eAccess;
@@ -2569,7 +2544,7 @@ GDALDataset *FITSDataset::Open(GDALOpenInfo *poOpenInfo)
             osPath.resize(1024);
             if (CPLGetExecPath(&osPath[0], static_cast<int>(osPath.size())))
             {
-                osPath = CPLGetBasename(osPath.c_str());
+                osPath = CPLGetBasenameSafe(osPath.c_str());
             }
             if (osPath == "gdalinfo")
             {
@@ -2604,7 +2579,7 @@ GDALDataset *FITSDataset::Open(GDALOpenInfo *poOpenInfo)
             osPath.resize(1024);
             if (CPLGetExecPath(&osPath[0], static_cast<int>(osPath.size())))
             {
-                osPath = CPLGetBasename(osPath.c_str());
+                osPath = CPLGetBasenameSafe(osPath.c_str());
             }
             if (osPath == "ogrinfo")
             {
@@ -3054,8 +3029,8 @@ void FITSDataset::WriteFITSInfo()
             }
         }
 
-        UpperLeftCornerX = m_adfGeoTransform[0] - falseEast;
-        UpperLeftCornerY = m_adfGeoTransform[3] - falseNorth;
+        UpperLeftCornerX = m_gt[0] - falseEast;
+        UpperLeftCornerY = m_gt[3] - falseNorth;
 
         if (centlon > 180.)
         {
@@ -3064,8 +3039,8 @@ void FITSDataset::WriteFITSInfo()
         if (strstr(unit, "metre"))
         {
             // convert degrees/pixel to m/pixel
-            mapres = 1. / m_adfGeoTransform[1];     // mapres is pixel/meters
-            mres = m_adfGeoTransform[1] / cfactor;  // mres is deg/pixel
+            mapres = 1. / m_gt[1];     // mapres is pixel/meters
+            mres = m_gt[1] / cfactor;  // mres is deg/pixel
             crpix1 = -(UpperLeftCornerX * mapres) + centlon / mres + 0.5;
             // assuming that center latitude is also the origin of the
             // coordinate system: this is not always true. More generic
@@ -3075,9 +3050,8 @@ void FITSDataset::WriteFITSInfo()
         else if (strstr(unit, "degree"))
         {
             // convert m/pixel to pixel/degree
-            mapres =
-                1. / m_adfGeoTransform[1] / cfactor;  // mapres is pixel/deg
-            mres = m_adfGeoTransform[1];              // mres is meters/pixel
+            mapres = 1. / m_gt[1] / cfactor;  // mapres is pixel/deg
+            mres = m_gt[1];                   // mres is meters/pixel
             crpix1 = -(UpperLeftCornerX * mres) + centlon / mapres + 0.5;
             // assuming that center latitude is also the origin of the
             // coordinate system: this is not always true. More generic
@@ -3145,10 +3119,10 @@ void FITSDataset::WriteFITSInfo()
             /// Write WCS CDELTia and PCi_ja here
 
             double cd[4];
-            cd[0] = m_adfGeoTransform[1] / cfactor;
-            cd[1] = m_adfGeoTransform[2] / cfactor;
-            cd[2] = m_adfGeoTransform[4] / cfactor;
-            cd[3] = m_adfGeoTransform[5] / cfactor;
+            cd[0] = m_gt[1] / cfactor;
+            cd[1] = m_gt[2] / cfactor;
+            cd[2] = m_gt[4] / cfactor;
+            cd[3] = m_gt[5] / cfactor;
 
             double pc[4];
             pc[0] = 1.;
@@ -3267,10 +3241,10 @@ CPLErr FITSDataset::SetSpatialRef(const OGRSpatialReference *poSRS)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr FITSDataset::GetGeoTransform(double *padfTransform)
+CPLErr FITSDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, m_adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
 
     if (!m_bGeoTransformValid)
         return CE_Failure;
@@ -3282,10 +3256,10 @@ CPLErr FITSDataset::GetGeoTransform(double *padfTransform)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr FITSDataset::SetGeoTransform(double *padfTransform)
+CPLErr FITSDataset::SetGeoTransform(const GDALGeoTransform &gt)
 
 {
-    memcpy(m_adfGeoTransform, padfTransform, sizeof(double) * 6);
+    m_gt = gt;
     m_bGeoTransformValid = true;
 
     return CE_None;
@@ -3534,10 +3508,10 @@ void FITSDataset::LoadGeoreferencing()
 
                 double radfac = DEG2RAD * aRadius;
 
-                m_adfGeoTransform[1] = cd[0] * radfac;
-                m_adfGeoTransform[2] = cd[1] * radfac;
-                m_adfGeoTransform[4] = cd[2] * radfac;
-                m_adfGeoTransform[5] = -cd[3] * radfac;
+                m_gt[1] = cd[0] * radfac;
+                m_gt[2] = cd[1] * radfac;
+                m_gt[4] = cd[2] * radfac;
+                m_gt[5] = -cd[3] * radfac;
                 if (crval1 > 180.)
                 {
                     crval1 = crval1 - 180.;
@@ -3546,12 +3520,11 @@ void FITSDataset::LoadGeoreferencing()
                 /* NOTA BENE: FITS standard define pixel integers at the center
                    of the pixel, 0.5 must be subtract to have UpperLeft corner
                  */
-                m_adfGeoTransform[0] =
-                    crval1 * radfac - m_adfGeoTransform[1] * (crpix1 - 0.5);
+                m_gt[0] = crval1 * radfac - m_gt[1] * (crpix1 - 0.5);
                 // assuming that center latitude is also the origin of the
                 // coordinate system: this is not always true. More generic
                 // implementation coming soon
-                m_adfGeoTransform[3] = -m_adfGeoTransform[5] * (crpix2 - 0.5);
+                m_gt[3] = -m_gt[5] * (crpix2 - 0.5);
                 //+ crval2 * radfac;
                 m_bGeoTransformValid = true;
             }
@@ -3722,44 +3695,14 @@ void FITSDataset::LoadFITSInfo()
 void GDALRegister_FITS()
 
 {
-    if (GDALGetDriverByName("FITS") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
+    FITSDriverSetCommonMetadata(poDriver);
 
-    poDriver->SetDescription("FITS");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_VECTOR, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_CREATE_LAYER, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_CREATE_FIELD, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                              "Flexible Image Transport System");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/fits.html");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES,
-                              "Byte UInt16 Int16 UInt32 Int32 Float32 Float64");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSIONS, "fits");
-
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATATYPES,
-                              "Integer Integer64 Real String IntegerList "
-                              "Integer64List RealList");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES,
-                              "Boolean Int16 Float32");
-
-    poDriver->SetMetadataItem(
-        GDAL_DS_LAYER_CREATIONOPTIONLIST,
-        "<LayerCreationOptionList>"
-        "  <Option name='REPEAT_*' type='int' description='Repeat value for "
-        "fields of type List'/>"
-        "  <Option name='COMPUTE_REPEAT' type='string-select' "
-        "description='Determine when the repeat value for fields is computed'>"
-        "    <Value>AT_FIELD_CREATION</Value>"
-        "    <Value>AT_FIRST_FEATURE_CREATION</Value>"
-        "  </Option>"
-        "</LayerCreationOptionList>");
     poDriver->pfnOpen = FITSDataset::Open;
-    poDriver->pfnIdentify = FITSDataset::Identify;
     poDriver->pfnCreate = FITSDataset::Create;
-    poDriver->pfnCreateCopy = nullptr;
     poDriver->pfnDelete = FITSDataset::Delete;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);

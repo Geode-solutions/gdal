@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  KML Driver
  * Purpose:  Class for reading, parsing and handling a kmlfile.
@@ -9,23 +8,7 @@
  * Copyright (c) 2007, Jens Oberender
  * Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #ifndef OGR_KML_KML_H_INCLUDED
 #define OGR_KML_KML_H_INCLUDED
@@ -95,28 +78,30 @@ class KML
     static void XMLCALL endElement(void *, const char *);
 
     // Trunk of KMLnodes.
-    KMLNode *poTrunk_;
+    KMLNode *poTrunk_ = nullptr;
     // Number of layers.
-    int nNumLayers_;
-    KMLNode **papoLayers_;
+    int nNumLayers_ = -1;
+    KMLNode **papoLayers_ = nullptr;
 
   private:
     // Depth of the DOM.
-    unsigned int nDepth_;
+    unsigned int nDepth_ = 0;
     // KML version number.
-    std::string sVersion_;
+    std::string sVersion_{};
     // Set to KML_VALIDITY_VALID if the beginning of the file is detected as KML
-    OGRKMLValidity validity;
+    OGRKMLValidity validity = KML_VALIDITY_UNKNOWN;
     // File descriptor.
-    VSILFILE *pKMLFile_;
+    VSILFILE *pKMLFile_ = nullptr;
     // Error text ("" when everything is OK").
-    std::string sError_;
+    std::string sError_{};
     // Current KMLNode.
-    KMLNode *poCurrent_;
+    KMLNode *poCurrent_ = nullptr;
 
-    XML_Parser oCurrentParser;
-    int nDataHandlerCounter;
-    int nWithoutEventCounter;
+    XML_Parser oCurrentParser{};
+    int nDataHandlerCounter = 0;
+    int nWithoutEventCounter = 0;
+
+    CPL_DISALLOW_COPY_ASSIGN(KML)
 };
 
 #endif  // HAVE_EXPAT

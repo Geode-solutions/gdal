@@ -1,12 +1,14 @@
 # coding: utf-8
-from __future__ import absolute_import, division, print_function
-
 import os
 import sys
 
 import pytest
 
-from osgeo import gdal, ogr
+from osgeo import gdal, ogr, osr
+
+# Explicitly enable exceptions since autotest/ now assumes them to be
+# enabled
+gdal.UseExceptions()
 
 # Put the pymod dir on the path, so modules can `import gdaltest`
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "pymod"))
@@ -14,6 +16,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "pymod"))
 # put the autotest dir on the path too. This lets us import all test modules
 sys.path.insert(1, os.path.dirname(__file__))
 
+# import fixtures that need to be used outside the test module where they were defined
+from ogr.ogr_pg import (  # noqa
+    pg_autotest_ds,
+    pg_ds,
+    pg_has_postgis,
+    pg_postgis_version,
+    use_postgis,
+)
 
 # These files may be non-importable, and don't contain tests anyway.
 # So we skip searching them during test collection.
@@ -24,9 +34,6 @@ collect_ignore = [
     "gdrivers/generate_fits.py",
 ]
 collect_ignore_glob = ["pymod/*.py"]
-
-# we set ECW to not resolve projection and datum strings to get 3.x behavior.
-gdal.SetConfigOption("ECW_DO_NOT_RESOLVE_DATUM_PROJECTION", "YES")
 
 if "APPLY_LOCALE" in os.environ:
     import locale
@@ -115,6 +122,19 @@ def chdir_to_test_file(request):
     os.chdir(old)
 
 
+@pytest.fixture(autouse=True, scope="function")
+def check_no_unintended_side_car_files(request):
+    """Detect if some tests generate unintended side car files that can cause
+    troubles to other tests.
+    """
+    yield
+
+    filename = os.path.dirname(__file__) + "/gcore/data/byte.tif.aux.xml"
+    if os.path.exists(filename):
+        os.unlink(filename)
+        assert False, f"{filename} exists but should not"
+
+
 def pytest_collection_modifyitems(config, items):
     # skip test with @ptest.mark.require_run_on_demand when RUN_ON_DEMAND is not set
     skip_run_on_demand_not_set = pytest.mark.skip("RUN_ON_DEMAND not set")
@@ -127,7 +147,9 @@ def pytest_collection_modifyitems(config, items):
         for mark in item.iter_markers("require_driver"):
             driver_name = mark.args[0]
             if driver_name not in drivers_checked:
-                driver = gdal.GetDriverByName(driver_name)
+                driver = gdal.GetDriverByName(driver_name) or ogr.GetDriverByName(
+                    driver_name
+                )
                 drivers_checked[driver_name] = bool(driver)
                 if driver:
                     # Store the driver on gdaltest module so test functions can assume it's there.
@@ -142,6 +164,22 @@ def pytest_collection_modifyitems(config, items):
         for mark in item.iter_markers("slow"):
             if not gdaltest.run_slow_tests():
                 item.add_marker(pytest.mark.skip("GDAL_RUN_SLOW_TESTS not set"))
+
+        for mark in item.iter_markers("require_creation_option"):
+
+            driver, option = mark.args
+
+            drv = gdal.GetDriverByName(driver)
+            if drv is None:
+                item.add_marker(
+                    pytest.mark.skip(f"{driver} driver is not included in this build")
+                )
+            elif option not in drv.GetMetadata()["DMD_CREATIONOPTIONLIST"]:
+                item.add_marker(
+                    pytest.mark.skip(
+                        f"{driver} creation option {option} not supported in this build"
+                    )
+                )
 
         for mark in item.iter_markers("require_geos"):
             if not ogrtest.have_geos():
@@ -166,13 +204,82 @@ def pytest_collection_modifyitems(config, items):
                     )
                 )
 
+        for mark in item.iter_markers("require_proj"):
+            required_version = (
+                mark.args[0],
+                mark.args[1] if len(mark.args) > 1 else 0,
+                mark.args[2] if len(mark.args) > 2 else 0,
+            )
+
+            actual_version = (
+                osr.GetPROJVersionMajor(),
+                osr.GetPROJVersionMinor(),
+                osr.GetPROJVersionMicro(),
+            )
+
+            if actual_version < required_version:
+                item.add_marker(
+                    pytest.mark.skip(
+                        f"Requires PROJ >= {'.'.join(str(x) for x in required_version)}"
+                    )
+                )
+
         for mark in item.iter_markers("require_curl"):
             if not gdaltest.built_against_curl():
                 item.add_marker(pytest.mark.skip("curl support not available"))
 
+            required_version = [
+                mark.args[0] if len(mark.args) > 0 else 0,
+                mark.args[1] if len(mark.args) > 1 else 0,
+                mark.args[2] if len(mark.args) > 2 else 0,
+            ]
+
+            actual_version = [0, 0, 0]
+            for build_info_item in gdal.VersionInfo("BUILD_INFO").strip().split("\n"):
+                if build_info_item.startswith("CURL_VERSION="):
+                    curl_version = build_info_item[len("CURL_VERSION=") :]
+                    # Remove potential -rcX postfix.
+                    dashrc_pos = curl_version.find("-rc")
+                    if dashrc_pos > 0:
+                        curl_version = curl_version[0:dashrc_pos]
+                    actual_version = [int(x) for x in curl_version.split(".")]
+
+            if actual_version < required_version:
+                item.add_marker(
+                    pytest.mark.skip(
+                        f"Requires curl >= {'.'.join(str(x) for x in required_version)}"
+                    )
+                )
+
+        # For any tests marked to run sequentially (pytest.mark.random_order(disabled=True)
+        # check to make sure they are also marked with pytest.mark.xdist_group()
+        # so they are sent to the same xdist worker.
+        unmarked_modules = set()
+        xdist = config.pluginmanager.getplugin("xdist")
+        if xdist and xdist.is_xdist_worker(item.session):
+            for mark in item.iter_markers("random_order"):
+                if (
+                    mark.kwargs["disabled"]
+                    and not next(item.iter_markers("xdist_group"), None)
+                    and item.module.__name__ not in unmarked_modules
+                ):
+                    unmarked_modules.add(item.module.__name__)
+                    import warnings
+
+                    warnings.warn(
+                        f"module {item.module.__name__} marked as random_order(disabled=True) but does not have an assigned xdist_group"
+                    )
+
 
 def pytest_addoption(parser):
     parser.addini("gdal_version", "GDAL version for which pytest.ini was generated")
+
+    # our pytest.ini specifies --dist=loadgroup but we don't want to fail if the
+    # user doesn't have this extension installed.
+    try:
+        import xdist  # noqa: F401
+    except ImportError:
+        parser.addoption("--dist")
 
 
 def pytest_configure(config):
@@ -184,6 +291,20 @@ def pytest_configure(config):
             f"Attempting to run tests for GDAL {test_version} but library version is "
             f"{lib_version}. Do you need to run setdevenv.sh ?"
         )
+
+
+def list_loaded_dlls():
+    try:
+        import psutil
+    except ImportError:
+        return None
+    process = psutil.Process()
+    loaded_dlls = []
+    for dll in process.memory_maps():
+        if os.path.exists(dll.path):
+            loaded_dlls.append(dll.path)
+    loaded_dlls = sorted(loaded_dlls)
+    return "\n".join(loaded_dlls)
 
 
 def pytest_report_header(config):
@@ -207,4 +328,42 @@ def pytest_report_header(config):
     if not gdaltest.run_slow_tests():
         gdal_header_info += ' (tests marked as "slow" will be skipped)'
 
+    if gdal.GetConfigOption("CI"):
+        loaded_dlls = list_loaded_dlls()
+        if loaded_dlls:
+            gdal_header_info += "\nLoaded shared objects:\n" + loaded_dlls
+
     return gdal_header_info
+
+
+@pytest.fixture()
+def tmp_vsimem(request):
+    import pathlib
+    import re
+
+    # sanitize test name using same method as pytest's tmp_path
+    subdir = re.sub(r"[\W]", "_", request.node.name)
+
+    # return a pathlib object so that behavior matches tmp_path
+    # and we can easily switch between the two
+    path = pathlib.PurePosixPath("/vsimem") / subdir
+
+    gdal.Mkdir(str(path), 0o755)
+
+    yield path
+
+    gdal.RmdirRecursive(str(path))
+
+
+# Fixture to run a test function with pytest_benchmark
+@pytest.fixture(scope="function")
+def decorate_with_benchmark(request, benchmark):
+    def run_under_benchmark(f, benchmark):
+        def test_with_benchmark_fixture(*args, **kwargs):
+            @benchmark
+            def do():
+                f(*args, **kwargs)
+
+        return test_with_benchmark_fixture
+
+    request.node.obj = run_under_benchmark(request.node.obj, benchmark)

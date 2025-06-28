@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2004, ITC
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef ILWISDATASET_H_INCLUDED
@@ -63,30 +47,37 @@ class ValueRange
     ValueRange(double min, double max, double step);
     explicit ValueRange(const std::string &str);
     std::string ToString() const;
+
     ilwisStoreType get_NeededStoreType() const
     {
         return st;
     }
+
     double get_rLo() const
     {
         return _rLo;
     }
+
     double get_rHi() const
     {
         return _rHi;
     }
+
     double get_rStep() const
     {
         return _rStep;
     }
+
     double get_rRaw0() const
     {
         return _r0;
     }
+
     int get_iDec() const
     {
         return _iDec;
     }
+
     double rValue(int raw) const;
     int iRaw(double value) const;
 
@@ -111,6 +102,7 @@ struct ILWISInfo
     ILWISInfo() : bUseValueRange(false), vr(0, 0), stStoreType(stByte)
     {
     }
+
     bool bUseValueRange;
     ValueRange vr;
     ilwisStoreType stStoreType;
@@ -157,13 +149,13 @@ class ILWISDataset final : public GDALPamDataset
     CPLString osFileName;
     std::string pszIlwFileName;
     OGRSpatialReference m_oSRS{};
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     int bGeoDirty;
     int bNewDataset;          /* product of Create() */
     std::string pszFileType;  // indicating the input dataset: Map/MapList
     CPLErr ReadProjection(const std::string &csyFileName);
     CPLErr WriteProjection();
-    CPLErr WriteGeoReference();
+    void WriteGeoReference();
     void CollectTransformCoef(std::string &pszRefFile);
 
   public:
@@ -182,8 +174,8 @@ class ILWISDataset final : public GDALPamDataset
                                int nBands, GDALDataType eType,
                                char **papszParamList);
 
-    virtual CPLErr GetGeoTransform(double *padfTransform) override;
-    virtual CPLErr SetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    virtual CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;

@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -33,16 +17,6 @@
 #include "ogr_api.h"
 #include "ogr_core.h"
 #include "ogr_p.h"
-
-/************************************************************************/
-/*                          OGRMultiPolygon()                           */
-/************************************************************************/
-
-/**
- * \brief Create an empty multi polygon collection.
- */
-
-OGRMultiPolygon::OGRMultiPolygon() = default;
 
 /************************************************************************/
 /*              OGRMultiPolygon( const OGRMultiPolygon& )               */
@@ -58,12 +32,6 @@ OGRMultiPolygon::OGRMultiPolygon() = default;
  */
 
 OGRMultiPolygon::OGRMultiPolygon(const OGRMultiPolygon &) = default;
-
-/************************************************************************/
-/*                         ~OGRMultiPolygon()                           */
-/************************************************************************/
-
-OGRMultiPolygon::~OGRMultiPolygon() = default;
 
 /************************************************************************/
 /*                  operator=( const OGRMultiPolygon&)                    */
@@ -94,7 +62,16 @@ OGRMultiPolygon &OGRMultiPolygon::operator=(const OGRMultiPolygon &other)
 OGRMultiPolygon *OGRMultiPolygon::clone() const
 
 {
-    return new (std::nothrow) OGRMultiPolygon(*this);
+    auto ret = new (std::nothrow) OGRMultiPolygon(*this);
+    if (ret)
+    {
+        if (ret->WkbSize() != WkbSize())
+        {
+            delete ret;
+            ret = nullptr;
+        }
+    }
+    return ret;
 }
 
 /************************************************************************/
@@ -132,6 +109,45 @@ OGRBoolean
 OGRMultiPolygon::isCompatibleSubType(OGRwkbGeometryType eGeomType) const
 {
     return wkbFlatten(eGeomType) == wkbPolygon;
+}
+
+/************************************************************************/
+/*                           importFromWkb()                            */
+/************************************************************************/
+
+OGRErr OGRMultiPolygon::importFromWkb(const unsigned char *pabyData,
+                                      size_t nSize, OGRwkbVariant eWkbVariant,
+                                      size_t &nBytesConsumedOut)
+
+{
+    if (nGeomCount == 1 && nSize >= 9 && flags == 0 && pabyData[0] == wkbNDR &&
+        memcmp(pabyData + 1, "\x06\x00\x00\x00\x01\x00\x00\x00", 8) == 0)
+    {
+        // Optimization to import a Intel-ordered 1-part multipolyon on
+        // top of an existing 1-part multipolygon, to save dynamic memory
+        // allocations.
+        const size_t nDataOffset = 9;
+        size_t nBytesConsumedPolygon = 0;
+        // cppcheck-suppress knownConditionTrueFalse
+        if (nSize != static_cast<size_t>(-1))
+            nSize -= nDataOffset;
+        OGRErr eErr =
+            cpl::down_cast<OGRPolygon *>(papoGeoms[0])
+                ->OGRPolygon::importFromWkb(pabyData + nDataOffset, nSize,
+                                            eWkbVariant, nBytesConsumedPolygon);
+        if (eErr == OGRERR_NONE)
+        {
+            nBytesConsumedOut = nDataOffset + nBytesConsumedPolygon;
+        }
+        else
+        {
+            empty();
+        }
+        return eErr;
+    }
+
+    return OGRGeometryCollection::importFromWkbInternal(
+        pabyData, nSize, /*nRecLevel=*/0, eWkbVariant, nBytesConsumedOut);
 }
 
 /************************************************************************/
@@ -196,6 +212,7 @@ OGRErr OGRMultiPolygon::_addGeometryWithExpectedSubGeometryType(
 
     return eErr;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -224,4 +241,5 @@ OGRErr OGRMultiPolygon::_addGeometryDirectlyWithExpectedSubGeometryType(
 
     return OGRERR_NONE;
 }
+
 //! @endcond

@@ -8,23 +8,7 @@
  * Copyright (c) 2011, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 // ncsjpcbuffer.h needs the min and max macros.
@@ -32,7 +16,7 @@
 
 #include "gdal_ecw.h"
 
-#if defined(FRMT_ecw) && (ECWSDK_VERSION >= 40)
+#if ECWSDK_VERSION >= 40
 
 /************************************************************************/
 /*                          BeginAsyncReader()                          */
@@ -50,7 +34,7 @@ GDALAsyncReader *ECWDataset::BeginAsyncReader(
     /*      Provide default packing if needed.                              */
     /* -------------------------------------------------------------------- */
     if (nPixelSpace == 0)
-        nPixelSpace = GDALGetDataTypeSize(eBufType) / 8;
+        nPixelSpace = GDALGetDataTypeSizeBytes(eBufType);
     if (nLineSpace == 0)
         nLineSpace = nPixelSpace * nBufXSize;
     if (nBandSpace == 0)
@@ -293,13 +277,15 @@ NCSEcwReadStatus ECWAsyncReader::ReadToBuffer()
     /* -------------------------------------------------------------------- */
     ECWDataset *poECWDS = (ECWDataset *)poDS;
     int i;
-    int nDataTypeSize = (GDALGetDataTypeSize(poECWDS->eRasterDataType) / 8);
-    GByte *pabyBILScanline =
-        (GByte *)CPLMalloc(nBufXSize * nDataTypeSize * nBandCount);
+    const int nDataTypeSize =
+        GDALGetDataTypeSizeBytes(poECWDS->eRasterDataType);
+    GByte *pabyBILScanline = (GByte *)CPLMalloc(static_cast<size_t>(nBufXSize) *
+                                                nDataTypeSize * nBandCount);
     GByte **papabyBIL = (GByte **)CPLMalloc(nBandCount * sizeof(void *));
 
     for (i = 0; i < nBandCount; i++)
-        papabyBIL[i] = pabyBILScanline + i * nBufXSize * nDataTypeSize;
+        papabyBIL[i] = pabyBILScanline +
+                       static_cast<size_t>(i) * nBufXSize * nDataTypeSize;
 
     /* -------------------------------------------------------------------- */
     /*      Read back the imagery into the buffer.                          */
@@ -322,7 +308,8 @@ NCSEcwReadStatus ECWAsyncReader::ReadToBuffer()
 
         for (i = 0; i < nBandCount; i++)
         {
-            GDALCopyWords(pabyBILScanline + i * nDataTypeSize * nBufXSize,
+            GDALCopyWords(pabyBILScanline + static_cast<size_t>(i) *
+                                                nDataTypeSize * nBufXSize,
                           poECWDS->eRasterDataType, nDataTypeSize,
                           ((GByte *)pBuf) + nLineSpace * iScanline +
                               nBandSpace * i,
@@ -426,4 +413,4 @@ GDALAsyncStatusType ECWAsyncReader::GetNextUpdatedRegion(double dfTimeout,
     }
 }
 
-#endif /* def FRMT_ecw */
+#endif /* ECWSDK_VERSION >= 40 */

@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Winor Chen <wchen329 at wisc.edu>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #include "netcdfsgwriterutil.h"
 #include "netcdfdataset.h"
@@ -37,7 +21,7 @@ SGeometry_Feature::SGeometry_Feature(OGRFeature &ft)
 
     if (geom == nullptr)
     {
-        throw SGWriter_Exception_EmptyGeometry();
+        throw SGWriter_Exception_NullGeometry();
     }
 
     OGRwkbGeometryType ogwkt = geom->getGeometryType();
@@ -114,12 +98,8 @@ SGeometry_Feature::SGeometry_Feature(OGRFeature &ft)
         // Get node count
         // First count exterior ring
         const auto exterior_ring = poly->getExteriorRing();
-        if (exterior_ring == nullptr)
-        {
-            throw SGWriter_Exception_EmptyGeometry();
-        }
-
-        size_t outer_ring_ct = exterior_ring->getNumPoints();
+        const size_t outer_ring_ct =
+            exterior_ring ? exterior_ring->getNumPoints() : 0;
 
         this->total_point_count += outer_ring_ct;
         this->ppart_node_count.push_back(outer_ring_ct);
@@ -134,14 +114,12 @@ SGeometry_Feature::SGeometry_Feature(OGRFeature &ft)
         {
             this->hasInteriorRing = true;
             const auto iring = poly->getInteriorRing(iRingCt);
-            if (iring == nullptr)
+            if (iring)
             {
-                throw SGWriter_Exception_RingOOB();
+                this->total_point_count += iring->getNumPoints();
+                this->ppart_node_count.push_back(iring->getNumPoints());
+                this->total_part_count++;
             }
-
-            this->total_point_count += iring->getNumPoints();
-            this->ppart_node_count.push_back(iring->getNumPoints());
-            this->total_part_count++;
         }
     }
 
@@ -155,12 +133,8 @@ SGeometry_Feature::SGeometry_Feature(OGRFeature &ft)
         for (const auto poly : *poMP)
         {
             const auto exterior_ring = poly->getExteriorRing();
-            if (exterior_ring == nullptr)
-            {
-                throw SGWriter_Exception_EmptyGeometry();
-            }
-
-            size_t outer_ring_ct = exterior_ring->getNumPoints();
+            const size_t outer_ring_ct =
+                exterior_ring ? exterior_ring->getNumPoints() : 0;
 
             this->total_point_count += outer_ring_ct;
             this->ppart_node_count.push_back(outer_ring_ct);
@@ -176,16 +150,14 @@ SGeometry_Feature::SGeometry_Feature(OGRFeature &ft)
                  iRingCt++)
             {
                 const auto iring = poly->getInteriorRing(iRingCt);
-                if (iring == nullptr)
+                if (iring)
                 {
-                    throw SGWriter_Exception_RingOOB();
+                    this->hasInteriorRing = true;
+                    this->total_point_count += iring->getNumPoints();
+                    this->ppart_node_count.push_back(iring->getNumPoints());
+                    this->total_part_count++;
+                    this->part_at_ind_interior.push_back(true);
                 }
-
-                this->hasInteriorRing = true;
-                this->total_point_count += iring->getNumPoints();
-                this->ppart_node_count.push_back(iring->getNumPoints());
-                this->total_part_count++;
-                this->part_at_ind_interior.push_back(true);
             }
         }
     }
@@ -542,14 +514,15 @@ static std::string sgwe_msg_builder(const char *layer_name,
 // Exception related definitions
 SGWriter_Exception_NCWriteFailure::SGWriter_Exception_NCWriteFailure(
     const char *layer_name, const char *failure_name, const char *failure_type)
-    : msg(sgwe_msg_builder(layer_name, failure_name, failure_type,
+    : SGWriter_Exception(
+          sgwe_msg_builder(layer_name, failure_name, failure_type,
                            "could not be written to (write failure)."))
 {
 }
 
 SGWriter_Exception_NCInqFailure::SGWriter_Exception_NCInqFailure(
     const char *layer_name, const char *failure_name, const char *failure_type)
-    : msg(sgwe_msg_builder(
+    : SGWriter_Exception(sgwe_msg_builder(
           layer_name, failure_name, failure_type,
           "could not be read from (property inquiry failure)."))
 {
@@ -557,7 +530,7 @@ SGWriter_Exception_NCInqFailure::SGWriter_Exception_NCInqFailure(
 
 SGWriter_Exception_NCDefFailure::SGWriter_Exception_NCDefFailure(
     const char *layer_name, const char *failure_name, const char *failure_type)
-    : msg(sgwe_msg_builder(
+    : SGWriter_Exception(sgwe_msg_builder(
           layer_name, failure_name, failure_type,
           "could not be defined in the dataset (definition failure)."))
 {
@@ -710,7 +683,6 @@ void OGR_NCScribe::commit_transaction()
                             double_trn->getData(), this->ncvd);
                         break;
                     }
-#ifdef NETCDF_HAS_NC4
                     case NC_UINT:
                     {
                         NCWMapAllocIfNeeded<unsigned>(wvid, writerMap,
@@ -771,7 +743,6 @@ void OGR_NCScribe::commit_transaction()
                             ushort_trn->getData(), this->ncvd);
                         break;
                     }
-#endif
                     default:
                     {
                         break;
@@ -874,7 +845,6 @@ void OGR_SGFS_NC_Char_Transaction::appendToLog(VSILFILE *f)
     VSIFWriteL(char_rep.c_str(), sizeof(char), DATA_SIZE, f);  // write data
 }
 
-#ifdef NETCDF_HAS_NC4
 void OGR_SGFS_NC_String_Transaction::appendToLog(VSILFILE *f)
 {
     int vid = OGR_SGFS_Transaction::getVarId();
@@ -886,7 +856,6 @@ void OGR_SGFS_NC_String_Transaction::appendToLog(VSILFILE *f)
     VSIFWriteL(&DATA_SIZE, sizeof(size_t), 1, f);  // write length
     VSIFWriteL(char_rep.c_str(), sizeof(char), DATA_SIZE, f);  // write data
 }
-#endif
 
 void OGR_SGFS_NC_CharA_Transaction::appendToLog(VSILFILE *f)
 {
@@ -960,7 +929,6 @@ MTPtr WTransactionLog::pop()
         case NC_DOUBLE:
             return genericLogDataRead<OGR_SGFS_NC_Double_Transaction, double>(
                 varId, log);
-#ifdef NETCDF_HAS_NC4
         case NC_UBYTE:
             return genericLogDataRead<OGR_SGFS_NC_UByte_Transaction,
                                       unsigned char>(varId, log);
@@ -976,7 +944,6 @@ MTPtr WTransactionLog::pop()
         case NC_UINT64:
             return genericLogDataRead<OGR_SGFS_NC_UInt64_Transaction,
                                       unsigned long long>(varId, log);
-#endif
         case NC_CHAR:
         {
             size_t readcheck;  // 0 means at least one read 0 bytes
@@ -1017,7 +984,6 @@ MTPtr WTransactionLog::pop()
             }
         }
 
-#ifdef NETCDF_HAS_NC4
         case NC_STRING:
         {
             size_t readcheck;  // 0 means at least one read 0 bytes
@@ -1042,7 +1008,6 @@ MTPtr WTransactionLog::pop()
             return MTPtr(new OGR_SGFS_NC_String_Transaction(
                 varId, &data[0]));  // data is copied so okay!
         }
-#endif
 
         default:
             // Unsupported type
@@ -1195,4 +1160,7 @@ int write_Geometry_Container(
 
     return write_var_id;
 }
+
+OGR_SGFS_Transaction::~OGR_SGFS_Transaction() = default;
+
 }  // namespace nccfdriver

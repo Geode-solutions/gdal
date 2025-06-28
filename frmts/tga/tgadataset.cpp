@@ -6,28 +6,13 @@
  ******************************************************************************
  * Copyright (c) 2020, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_pam.h"
 
 #include <algorithm>
+#include <cassert>
 #include <vector>
 
 extern "C" void CPL_DLL GDALRegister_TGA();
@@ -86,6 +71,8 @@ class GDALTGADataset final : public GDALPamDataset
     std::vector<ScanlineState> m_aoScanlineState{};
     int m_nLastLineKnownOffset = 0;
     bool m_bFourthChannelIsAlpha = false;
+
+    CPL_DISALLOW_COPY_ASSIGN(GDALTGADataset)
 
   public:
     GDALTGADataset(const ImageHeader &sHeader, VSILFILE *fpImage);
@@ -174,7 +161,7 @@ int GDALTGADataset::Identify(GDALOpenInfo *poOpenInfo)
         return TRUE;
     }
 
-    if (!EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "tga"))
+    if (!poOpenInfo->IsExtensionEqualToCI("tga"))
         return FALSE;
     return TRUE;
 }
@@ -398,7 +385,9 @@ CPLErr GDALTGARasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
             {
                 if (pImage == nullptr)
                 {
-                    VSIFSeekL(poGDS->m_fpImage, nPixelsToFill * nBytesPerPixel,
+                    VSIFSeekL(poGDS->m_fpImage,
+                              static_cast<size_t>(nPixelsToFill) *
+                                  nBytesPerPixel,
                               SEEK_CUR);
                 }
                 else
@@ -406,11 +395,13 @@ CPLErr GDALTGARasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
                     if (nBands == 1)
                     {
                         VSIFReadL(static_cast<GByte *>(pImage) + x * nDTSize, 1,
-                                  nPixelsToFill * nDTSize, poGDS->m_fpImage);
+                                  static_cast<size_t>(nPixelsToFill) * nDTSize,
+                                  poGDS->m_fpImage);
                     }
                     else
                     {
-                        abyData.resize(nBytesPerPixel * nPixelsToFill);
+                        abyData.resize(static_cast<size_t>(nBytesPerPixel) *
+                                       nPixelsToFill);
                         VSIFReadL(&abyData[0], 1, abyData.size(),
                                   poGDS->m_fpImage);
                         if (poGDS->m_sImageHeader.nPixelDepth == 16)
@@ -459,7 +450,8 @@ CPLErr GDALTGARasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
             poGDS->m_aoScanlineState[nLine + 1].nRemainingPixelsPrevScanline =
                 nRemainingPixelsPrevScanline;
             if (nRemainingPixelsPrevScanline)
-                poGDS->m_aoScanlineState[nLine + 1].abyDataPrevRLERun = abyData;
+                poGDS->m_aoScanlineState[nLine + 1].abyDataPrevRLERun =
+                    std::move(abyData);
         }
         if (pImage && nBands == 1)
         {
@@ -482,7 +474,8 @@ CPLErr GDALTGARasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
             poGDS->m_nImageDataOffset +
             static_cast<vsi_l_offset>(nLine) * nRasterXSize * nDTSize;
         VSIFSeekL(poGDS->m_fpImage, nOffset, SEEK_SET);
-        VSIFReadL(pImage, 1, nRasterXSize * nDTSize, poGDS->m_fpImage);
+        VSIFReadL(pImage, 1, static_cast<size_t>(nRasterXSize) * nDTSize,
+                  poGDS->m_fpImage);
 #ifdef CPL_MSB
         if (nDTSize > 1)
         {
@@ -495,13 +488,12 @@ CPLErr GDALTGARasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
         const int nBytesPerPixel =
             (nBands == 4) ? 4 : poGDS->m_sImageHeader.nPixelDepth / 8;
         std::vector<GByte> abyData;
-        abyData.resize(nBytesPerPixel * nRasterXSize);
+        abyData.resize(static_cast<size_t>(nBytesPerPixel) * nRasterXSize);
         vsi_l_offset nOffset =
             poGDS->m_nImageDataOffset +
             static_cast<vsi_l_offset>(nLine) * nRasterXSize * nBytesPerPixel;
         VSIFSeekL(poGDS->m_fpImage, nOffset, SEEK_SET);
-        VSIFReadL(&abyData[0], 1, nRasterXSize * nBytesPerPixel,
-                  poGDS->m_fpImage);
+        VSIFReadL(&abyData[0], 1, abyData.size(), poGDS->m_fpImage);
         if (poGDS->m_sImageHeader.nPixelDepth == 16)
         {
             for (int i = 0; i < nRasterXSize; i++)
@@ -617,7 +609,7 @@ GDALDataset *GDALTGADataset::Open(GDALOpenInfo *poOpenInfo)
                         while (!osAuthorName.empty() &&
                                osAuthorName.back() == ' ')
                         {
-                            osAuthorName.resize(osAuthorName.size() - 1);
+                            osAuthorName.pop_back();
                         }
                         poDS->GDALDataset::SetMetadataItem(
                             "AUTHOR_NAME", osAuthorName.c_str());
@@ -640,7 +632,7 @@ GDALDataset *GDALTGADataset::Open(GDALOpenInfo *poOpenInfo)
                             osLine.resize(strlen(osLine.c_str()));
                             while (!osLine.empty() && osLine.back() == ' ')
                             {
-                                osLine.resize(osLine.size() - 1);
+                                osLine.pop_back();
                             }
                             if (i > 0)
                                 osComments += '\n';
@@ -688,8 +680,7 @@ GDALDataset *GDALTGADataset::Open(GDALOpenInfo *poOpenInfo)
         sHeader.eImageType == RLE_GRAYSCALE ||
         sHeader.eImageType == RLE_TRUE_COLOR)
     {
-        // nHeight is a GUInt16, so well bounded...
-        // coverity[tainted_data]
+        assert(nHeight <= 65535);
         poDS->m_aoScanlineState.resize(nHeight);
         poDS->m_aoScanlineState[0].nOffset = poDS->m_nImageDataOffset;
     }
@@ -742,6 +733,7 @@ GDALDataset *GDALTGADataset::Open(GDALOpenInfo *poOpenInfo)
 
     return poDS;
 }
+
 /************************************************************************/
 /*                       GDALRegister_TGA()                             */
 /************************************************************************/

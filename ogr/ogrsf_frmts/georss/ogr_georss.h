@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2008-2010, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_GEORSS_H_INCLUDED
@@ -37,6 +21,8 @@
 #ifdef HAVE_EXPAT
 #include "ogr_expat.h"
 #endif
+
+constexpr int PARSER_BUF_SIZE = 8192;
 
 class OGRGeoRSSDataSource;
 
@@ -135,13 +121,15 @@ class OGRGeoRSSLayer final : public OGRLayer
     OGRFeature *GetNextFeature() override;
 
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
-    OGRErr CreateField(OGRFieldDefn *poField, int bApproxOK) override;
+    OGRErr CreateField(const OGRFieldDefn *poField, int bApproxOK) override;
 
     OGRFeatureDefn *GetLayerDefn() override;
 
     int TestCapability(const char *) override;
 
     GIntBig GetFeatureCount(int bForce) override;
+
+    GDALDataset *GetDataset() override;
 
     void LoadSchema();
 
@@ -157,7 +145,7 @@ class OGRGeoRSSLayer final : public OGRLayer
 };
 
 /************************************************************************/
-/*                           OGRGeoRSSDataSource                           */
+/*                           OGRGeoRSSDataSource                        */
 /************************************************************************/
 
 typedef enum
@@ -167,10 +155,8 @@ typedef enum
     GEORSS_VALIDITY_VALID
 } OGRGeoRSSValidity;
 
-class OGRGeoRSSDataSource final : public OGRDataSource
+class OGRGeoRSSDataSource final : public GDALDataset
 {
-    char *pszName;
-
     OGRGeoRSSLayer **papoLayers;
     int nLayers;
 
@@ -197,35 +183,33 @@ class OGRGeoRSSDataSource final : public OGRDataSource
 
     int Create(const char *pszFilename, char **papszOptions);
 
-    const char *GetName() override
-    {
-        return pszName;
-    }
-
     int GetLayerCount() override
     {
         return nLayers;
     }
+
     OGRLayer *GetLayer(int) override;
 
-    OGRLayer *ICreateLayer(const char *pszLayerName, OGRSpatialReference *poSRS,
-                           OGRwkbGeometryType eType,
-                           char **papszOptions) override;
-
+    OGRLayer *ICreateLayer(const char *pszName,
+                           const OGRGeomFieldDefn *poGeomFieldDefn,
+                           CSLConstList papszOptions) override;
     int TestCapability(const char *) override;
 
     VSILFILE *GetOutputFP()
     {
         return fpOutput;
     }
+
     OGRGeoRSSFormat GetFormat()
     {
         return eFormat;
     }
+
     OGRGeoRSSGeomDialect GetGeomDialect()
     {
         return eGeomDialect;
     }
+
     bool GetUseExtensions()
     {
         return bUseExtensions;

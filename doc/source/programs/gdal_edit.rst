@@ -1,7 +1,7 @@
 .. _gdal_edit:
 
 ================================================================================
-gdal_edit.py
+gdal_edit
 ================================================================================
 
 .. only:: html
@@ -15,20 +15,22 @@ Synopsis
 
 .. code-block::
 
-    gdal_edit [--help-general] [-ro] [-a_srs srs_def]
-            [-a_ullr ulx uly lrx lry] [-a_ulurll ulx uly urx ury llx lly]
-            [-tr xres yres] [-unsetgt] [-unsetrpc] [-a_nodata value] [-unsetnodata]
+    gdal_edit [--help] [--help-general] [-ro] [-a_srs <srs_def>]
+            [-a_ullr <ulx> <uly> <lrx> <lry>] [-a_ulurll <ulx> <uly> <urx> <ury> <llx> <lly>]
+            [-tr <xres> <yres>] [-unsetgt] [-unsetrpc] [-a_nodata <value>] [-unsetnodata]
+            [-a_coord_epoch <epoch>] [-unsetepoch]
             [-unsetstats] [-stats] [-approx_stats]
-            [-setstats min max mean stddev]
-            [-scale value] [-offset value] [-units value]
-            [-colorinterp_X red|green|blue|alpha|gray|undefined]*
-            [-gcp pixel line easting northing [elevation]]*
-            [-unsetmd] [-oo NAME=VALUE]* [-mo "META-TAG=VALUE"]*  datasetname
+            [-setstats <min> <max> <mean> <stddev>]
+            [-scale <value>] [-offset <value>] [-units <value>]
+            [-colorinterp_<X> {red|green|blue|alpha|gray|undefined|pan|coastal|rededge|nir|swir|mwir|lwir|...}]...
+            [-gcp <pixel> <line> <easting> <northing> [<elevation>]]...
+            [-unsetmd] [-oo <NAME>=<VALUE>]... [-mo <META-TAG>=<VALUE>]...
+            <datasetname>
 
 Description
 -----------
 
-The :program:`gdal_edit.py` script can be used to edit in place various
+:program:`gdal_edit` can be used to edit in place various
 information of an existing GDAL dataset (projection, geotransform,
 nodata, metadata).
 
@@ -41,9 +43,11 @@ It works only with raster formats that support update access to existing dataset
     through the GDAL API. This is for example the case of the :ref:`raster.gtiff`
     format (this is not a exhaustive list).
 
-.. option:: --help-general
+.. note::
 
-    Gives a brief usage message for the generic GDAL commandline options and exit.
+    gdal_edit is a Python utility, and is only available if GDAL Python bindings are available.
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: -ro
 
@@ -59,11 +63,23 @@ It works only with raster formats that support update access to existing dataset
     coordinate system will be removed (for TIFF/GeoTIFF, might not be well
     supported besides that).
 
-.. option:: -a_ullr ulx uly lrx lry:
+.. option:: -a_coord_epoch <epoch>
+
+    Assign/override the coordinate epoch of the dataset, as a decimal year (e.g., 2021.3).
+
+    .. versionadded:: 3.9
+
+.. option:: -unsetepoch
+
+    Remove the coordinate epoch of the dataset.
+
+    .. versionadded:: 3.9
+
+.. option:: -a_ullr  <ulx> <uly> <lrx> <lry>
 
     Assign/override the georeferenced bounds of the dataset.
 
-.. option:: -a_ulurll ulx uly urx ury llx lly:
+.. option:: -a_ulurll <ulx> <uly> <urx> <ury> <llx> <lly>
 
     Assign/override the georeferenced bounds of the dataset from three points:
     upper-left, upper-right and lower-left. Unlike :option:`-a_ullr`, this also
@@ -98,11 +114,11 @@ It works only with raster formats that support update access to existing dataset
 
     .. versionadded:: 2.0
 
-.. option:: -setstats min max mean stddev
+.. option:: -setstats <min> <max> <mean> <stddev>
 
     Store user-defined values for band statistics (minimum, maximum,
     mean and standard deviation). If any of the values is set to None,
-    the real statistics are calclulated from the file and the ones set
+    the real statistics are calculated from the file and the ones set
     to None are used from the real statistics.
 
     .. versionadded:: 2.4
@@ -156,14 +172,14 @@ It works only with raster formats that support update access to existing dataset
 
     .. versionadded:: 3.1
 
-.. option:: -colorinterp_X red|green|blue|alpha|gray|undefined
+.. option:: -colorinterp_<X> {red|green|blue|alpha|gray|undefined|pan|coastal|rededge|nir|swir|mwir|lwir|...}
 
     Change the color interpretation of band X (where X is a valid band
     number, starting at 1).
 
     .. versionadded:: 2.3
 
-.. option:: -gcp pixel line easting northing [elevation]
+.. option:: -gcp pixel <line> <easting> <northing> [<elevation>]
 
     Add the indicated ground control point to the dataset.
     This option may be provided multiple times to provide a set of GCPs.
@@ -175,13 +191,13 @@ It works only with raster formats that support update access to existing dataset
 
     .. versionadded:: 2.0
 
-.. option:: -mo META-TAG=VALUE
+.. option:: -mo <META-TAG>=<VALUE>
 
     Passes a metadata key and value to set on the output dataset if possible.
     This metadata is added to the existing metadata items, unless :option:`-unsetmd`
     is also specified.
 
-.. option:: -oo NAME=VALUE
+.. option:: -oo <NAME>=<VALUE>
 
     Open option (format specific).
 
@@ -194,10 +210,18 @@ The :option:`-unsetstats` and either :option:`-stats` or :option:`-approx_stats`
 Example
 -------
 
-.. code-block::
+.. example::
+   :title: Override the spatial bounds of a dataset and assign metadata values
 
-    gdal_edit -mo DATUM=WGS84 -mo PROJ=GEODETIC -a_ullr 7 47 8 46 test.ecw
+   .. code-block:: bash
 
-.. code-block::
+       gdal_edit -mo DATUM=WGS84 -mo PROJ=GEODETIC -a_ullr 7 47 8 46 test.ecw
 
-    gdal_edit -scale 1e3 1e4 -offset 0 10 twoBand.tif
+.. example::
+   :title: Assign scale and offset values to dataset
+
+   .. code-block:: bash
+
+       gdal_edit -scale 1e3 1e4 -offset 0 10 twoBand.tif
+
+   The values in the GeoTIFF are not changed.

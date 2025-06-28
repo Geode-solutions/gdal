@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2008, Ivan Lucena
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files ( the "Software" ),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 #include <string.h>
@@ -34,12 +18,17 @@
 #include "cpl_string.h"
 #include "cpl_minixml.h"
 
+#ifdef JPEG_SUPPORTED
+#include "georaster_jpeg_vsidataio.h"
+#endif
+
 //  ---------------------------------------------------------------------------
 //                                                           GeoRasterWrapper()
 //  ---------------------------------------------------------------------------
 
 GeoRasterWrapper::GeoRasterWrapper()
-    : sPyramidResampling("NN"), sCompressionType("NONE"), sInterleaving("BSQ")
+    : sPyramidResampling("NN"), sCompressionType("NONE"), sInterleaving("BSQ"),
+      bGenStatsUseSamplingWindow(false), sGenStatsLayerNumbers("")
 {
     nRasterId = -1;
     phMetadata = nullptr;
@@ -111,6 +100,20 @@ GeoRasterWrapper::GeoRasterWrapper()
     pasGCPList = nullptr;
     nGCPCount = 0;
     bFlushGCP = false;
+    bGenStats = false;
+    nGenStatsSamplingFactor = 1;
+    bGenStatsHistogram = false;
+    bGenStatsUseBin = true;
+    bGenStatsNodata = false;
+    dfGenStatsBinFunction[0] = 0.0;
+    dfGenStatsBinFunction[1] = 0.0;
+    dfGenStatsBinFunction[2] = 0.0;
+    dfGenStatsBinFunction[3] = 0.0;
+    dfGenStatsBinFunction[4] = 0.0;
+    dfGenStatsSamplingWindow[0] = 0.0;
+    dfGenStatsSamplingWindow[1] = 0.0;
+    dfGenStatsSamplingWindow[2] = 0.0;
+    dfGenStatsSamplingWindow[3] = 0.0;
 }
 
 //  ---------------------------------------------------------------------------
@@ -195,10 +198,10 @@ char **GeoRasterWrapper::ParseIdentificator(const char *pszStringID)
 
     char *pszStartPos = (char *)strstr(pszStringID, ":") + 1;
 
-    char **papszParam =
-        CSLTokenizeString2(pszStartPos, ",@",
-                           CSLT_HONOURSTRINGS | CSLT_ALLOWEMPTYTOKENS |
-                               CSLT_STRIPLEADSPACES | CSLT_STRIPENDSPACES);
+    char **papszParam = CSLTokenizeString2(
+        pszStartPos, ",@",
+        CSLT_HONOURSTRINGS | CSLT_ALLOWEMPTYTOKENS | CSLT_STRIPLEADSPACES |
+            CSLT_STRIPENDSPACES | CSLT_PRESERVEQUOTES);
 
     //  -------------------------------------------------------------------
     //  The "/" should not be catch on the previous parser
@@ -365,10 +368,12 @@ GeoRasterWrapper *GeoRasterWrapper::Open(const char *pszStringId, bool bUpdate)
     //  Query all the basic information at once to reduce round trips
     //  -------------------------------------------------------------------
 
-    char szOwner[OWCODE];
-    char szTable[OWCODE];
-    char szColumn[OWTEXT];
-    char szDataTable[OWCODE];
+    // Note, the table, column or owner name length supported by Oracle is
+    // up to 128 bytes, not 128 characters.
+    char szOwner[OWNAME];
+    char szTable[OWNAME];
+    char szColumn[OWNAME];
+    char szDataTable[OWNAME];
     char szWhere[OWTEXT];
     long long nRasterId = -1;
     OCILobLocator *phLocator = nullptr;
@@ -539,6 +544,75 @@ GeoRasterWrapper *GeoRasterWrapper::Open(const char *pszStringId, bool bUpdate)
     return poGRW;
 }
 
+static bool ValidateInsertExpression(const CPLString &sInsertStatement)
+{
+    bool bInQuotes = false;
+    const size_t nStrLength = sInsertStatement.length();
+
+    for (size_t nPos = 0; nPos < nStrLength; ++nPos)
+    {
+        const char cCurrentChar = sInsertStatement[nPos];
+
+        if (cCurrentChar == '\'')
+        {
+            if (bInQuotes)
+            {
+                if (nPos + 1 < nStrLength && sInsertStatement[nPos + 1] == '\'')
+                {
+                    ++nPos;
+                }
+                else
+                {
+                    bInQuotes = false;
+                }
+            }
+            else
+            {
+                bInQuotes = true;
+            }
+        }
+        else if (!bInQuotes)
+        {
+            if (cCurrentChar == ';')
+            {
+                return false;
+            }
+            else if (nPos < nStrLength - 1)
+            {
+                const char cNextChar = sInsertStatement[nPos + 1];
+                const bool bIsInvalid =
+                    (cCurrentChar == '-' && cNextChar == '-') ||
+                    (cCurrentChar == '/' && cNextChar == '/') ||
+                    (cCurrentChar == '/' && cNextChar == '*') ||
+                    (cCurrentChar == '*' && cNextChar == '/');
+
+                if (bIsInvalid)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    // Quotes must be properly closed, if not, this variable will be true
+    // thus having an unclosed string
+    return !bInQuotes;
+}
+
+static bool ValidateDescriptionExpression(const CPLString &sInsertStatement)
+{
+    const char *rgpszInvalidChars[] = {";", "--", "/*", "*/", "//"};
+
+    for (const char *pszInvalidChar : rgpszInvalidChars)
+    {
+        if (sInsertStatement.find(pszInvalidChar) != std::string::npos)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 //  ---------------------------------------------------------------------------
 //                                                                     Create()
 //  ---------------------------------------------------------------------------
@@ -597,6 +671,12 @@ bool GeoRasterWrapper::Create(char *pszDescription, char *pszInsert,
 
         if (pszDescription)
         {
+            if (!ValidateDescriptionExpression(pszDescription))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "DESCRIPTION expression contains invalid values.");
+                return false;
+            }
             snprintf(szDescription, sizeof(szDescription), "%s",
                      pszDescription);
         }
@@ -613,6 +693,14 @@ bool GeoRasterWrapper::Create(char *pszDescription, char *pszInsert,
         if (pszInsert)
         {
             sValues = pszInsert;
+            sValues.Trim();  // Remove spaces on the left and on the right
+
+            if (!ValidateInsertExpression(sValues))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "INSERT expression contains invalid values.");
+                return false;
+            }
 
             if (pszInsert[0] == '(' &&
                 sValues.ifind("VALUES") == std::string::npos)
@@ -757,13 +845,11 @@ bool GeoRasterWrapper::Create(char *pszDescription, char *pszInsert,
                              sInterleaving.c_str());
     }
 
-    nTotalColumnBlocks =
-        (int)((nRasterColumns + nColumnBlockSize - 1) / nColumnBlockSize);
+    nTotalColumnBlocks = (int)DIV_ROUND_UP(nRasterColumns, nColumnBlockSize);
 
-    nTotalRowBlocks = (int)((nRasterRows + nRowBlockSize - 1) / nRowBlockSize);
+    nTotalRowBlocks = (int)DIV_ROUND_UP(nRasterRows, nRowBlockSize);
 
-    nTotalBandBlocks =
-        (int)((nRasterBands + nBandBlockSize - 1) / nBandBlockSize);
+    nTotalBandBlocks = (int)DIV_ROUND_UP(nRasterBands, nBandBlockSize);
 
     //  -------------------------------------------------------------------
     //  Create Georaster Table if needed
@@ -775,9 +861,9 @@ bool GeoRasterWrapper::Create(char *pszDescription, char *pszInsert,
     {
         poStmt = poConnection->CreateStatement(
             CPLSPrintf("DECLARE\n"
-                       "  TAB VARCHAR2(68)  := UPPER('%s');\n"
-                       "  COL VARCHAR2(68)  := UPPER('%s');\n"
-                       "  OWN VARCHAR2(68)  := UPPER('%s');\n"
+                       "  TAB VARCHAR2(128) := UPPER('%s');\n"
+                       "  COL VARCHAR2(128) := UPPER('%s');\n"
+                       "  OWN VARCHAR2(128) := UPPER('%s');\n"
                        "  CNT NUMBER        := 0;\n"
                        "BEGIN\n"
                        "  EXECUTE IMMEDIATE 'SELECT COUNT(*) FROM ALL_TABLES\n"
@@ -866,9 +952,9 @@ bool GeoRasterWrapper::Create(char *pszDescription, char *pszInsert,
     {
         poStmt = poConnection->CreateStatement(CPLSPrintf(
             "DECLARE\n"
-            "  TAB  VARCHAR2(68)    := UPPER('%s');\n"
-            "  COL  VARCHAR2(68)    := UPPER('%s');\n"
-            "  OWN  VARCHAR2(68)    := UPPER('%s');\n"
+            "  TAB  VARCHAR2(128)   := UPPER('%s');\n"
+            "  COL  VARCHAR2(128)   := UPPER('%s');\n"
+            "  OWN  VARCHAR2(128)   := UPPER('%s');\n"
             "  CNT  NUMBER          := 0;\n"
             "  GR1  SDO_GEORASTER   := NULL;\n"
             "BEGIN\n"
@@ -972,7 +1058,7 @@ bool GeoRasterWrapper::Create(char *pszDescription, char *pszInsert,
         "  BB   NUMBER          := :3;\n"
         "  RB   NUMBER          := :4;\n"
         "  CB   NUMBER          := :5;\n"
-        "  OWN  VARCHAR2(68)    := UPPER('%s');\n"
+        "  OWN  VARCHAR2(128)   := UPPER('%s');\n"
         "  X    NUMBER          := 0;\n"
         "  Y    NUMBER          := 0;\n"
         "  CNT  NUMBER          := 0;\n"
@@ -1079,7 +1165,7 @@ void GeoRasterWrapper::PrepareToOverwrite(void)
     if (sscanf(sCellDepth.c_str(), "%dBIT", &nCellSizeBits))
     {
         nGDALCellBytes =
-            GDALGetDataTypeSize(OWGetDataType(sCellDepth.c_str())) / 8;
+            GDALGetDataTypeSizeBytes(OWGetDataType(sCellDepth.c_str()));
     }
     else
     {
@@ -1270,7 +1356,7 @@ void GeoRasterWrapper::GetRasterInfo(void)
     if (sscanf(sCellDepth.c_str(), "%dBIT", &nCellSizeBits))
     {
         nGDALCellBytes =
-            GDALGetDataTypeSize(OWGetDataType(sCellDepth.c_str())) / 8;
+            GDALGetDataTypeSizeBytes(OWGetDataType(sCellDepth.c_str()));
     }
     else
     {
@@ -1993,8 +2079,8 @@ bool GeoRasterWrapper::GetDataBlock(int nBand, int nLevel, int nXOffset,
 
         GByte *pabyData = (GByte *)pData;
 
-        unsigned long ii = 0;
-        unsigned long jj = nStart * nGDALCellBytes;
+        size_t ii = 0;
+        size_t jj = static_cast<size_t>(nStart) * nGDALCellBytes;
 
         for (ii = 0; ii < nGDALBlockBytes; ii += nSize, jj += nIncr)
         {
@@ -2131,8 +2217,8 @@ bool GeoRasterWrapper::SetDataBlock(int nBand, int nLevel, int nXOffset,
             nSize *= nColumnBlockSize;
         }
 
-        unsigned long ii = 0;
-        unsigned long jj = nStart * nGDALCellBytes;
+        size_t ii = 0;
+        size_t jj = static_cast<size_t>(nStart) * nGDALCellBytes;
 
         for (ii = 0; ii < nGDALBlockBytes; ii += nSize, jj += nIncr)
         {
@@ -3123,7 +3209,7 @@ bool GeoRasterWrapper::SetNoData(int nLayer, const char *pszValue)
     //  Add NoData for all bands (layer=0) or for a specific band
     // ------------------------------------------------------------
 
-    char szRDT[OWCODE];
+    char szRDT[OWNAME];
     char szNoData[OWTEXT];
 
     snprintf(szRDT, sizeof(szRDT), "%s", sDataTable.c_str());
@@ -3614,6 +3700,22 @@ bool GeoRasterWrapper::FlushMetadata()
         }
     }
 
+    if (bGenStats)
+    {
+        if (GenerateStatistics(nGenStatsSamplingFactor,
+                               dfGenStatsSamplingWindow, bGenStatsHistogram,
+                               sGenStatsLayerNumbers.c_str(), bGenStatsUseBin,
+                               dfGenStatsBinFunction, bGenStatsNodata))
+        {
+            CPLDebug("GEOR", "Generated statistics successfully.");
+        }
+        else
+        {
+            CPLError(CE_Warning, CPLE_AppDefined,
+                     "Error generating statistics!");
+        }
+    }
+
     return true;
 }
 
@@ -3769,6 +3871,89 @@ void GeoRasterWrapper::DeletePyramid()
     CPL_IGNORE_RET_VAL(poStmt->Execute());
 
     delete poStmt;
+}
+
+//  ---------------------------------------------------------------------------
+//                                                         GenerateStatistics()
+//  ---------------------------------------------------------------------------
+bool GeoRasterWrapper::GenerateStatistics(int nSamplingFactor,
+                                          double *pdfSamplingWindow,
+                                          bool bHistogram,
+                                          const char *pszLayerNumbers,
+                                          bool bUseBin, double *pdfBinFunction,
+                                          bool bNodata)
+{
+    // Length is 6 because it's the length of string FALSE.
+    char szHistogram[] = "FALSE";
+    char szNodata[] = "FALSE";
+    char szUseBin[] = "FALSE";
+    char szUseWin[] = "FALSE";
+    if (bHistogram)
+    {
+        strncpy(szHistogram, "TRUE", 5);
+    }
+    if (bNodata)
+    {
+        strncpy(szNodata, "TRUE", 5);
+    }
+    if (bUseBin)
+    {
+        strncpy(szUseBin, "TRUE", 5);
+    }
+    if (bGenStatsUseSamplingWindow)
+    {
+        strncpy(szUseWin, "TRUE", 5);
+    }
+
+    char szLayerNumbers[OWTEXT];
+    snprintf(szLayerNumbers, sizeof(szLayerNumbers), "%s", pszLayerNumbers);
+
+    OWStatement *poStmt = poConnection->CreateStatement(
+        CPLSPrintf("DECLARE\n"
+                   "  gr sdo_georaster;\n"
+                   "  swin SDO_NUMBER_ARRAY := SDO_NUMBER_ARRAY(:1, :2, :3,"
+                   "  :4);\n"
+                   "  binfunc SDO_NUMBER_ARRAY := SDO_NUMBER_ARRAY(:5, :6, :7,"
+                   "  :8, :9);\n"
+                   "  res VARCHAR2(5);\n"
+                   "BEGIN\n"
+                   "  IF :usewin = 'FALSE' THEN\n"
+                   "    swin := NULL;\n"
+                   "  END IF;"
+                   "  IF :usebin = 'FALSE' THEN\n"
+                   "    binfunc := NULL;\n"
+                   "  END IF;"
+                   "  SELECT t.%s INTO gr FROM %s t WHERE %s FOR UPDATE;\n"
+                   "  res := sdo_geor.generateStatistics(gr, "
+                   "'samplingFactor='||:samplingfactor, swin,\n"
+                   "  :histogram, :layernums, :usebin, binfunc, :nodata);\n"
+                   "  UPDATE %s t SET t.%s = gr WHERE %s;\n"
+                   "  COMMIT;\n"
+                   "END;\n",
+                   sColumn.c_str(), sTable.c_str(), sWhere.c_str(),
+                   sTable.c_str(), sColumn.c_str(), sWhere.c_str()));
+
+    // Bind sampling window
+    for (int i = 0; i < 4; i++)
+    {
+        poStmt->Bind(&pdfSamplingWindow[i]);
+    }
+    // Bind bin function
+    for (int i = 0; i < 5; i++)
+    {
+        poStmt->Bind(&pdfBinFunction[i]);
+    }
+    poStmt->BindName(":samplingfactor", &nSamplingFactor);
+    poStmt->BindName(":layernums", szLayerNumbers);
+    poStmt->BindName(":histogram", szHistogram);
+    poStmt->BindName(":nodata", szNodata);
+    poStmt->BindName(":usebin", szUseBin);
+    poStmt->BindName(":usewin", szUseWin);
+
+    bool bResult = poStmt->Execute();
+    delete poStmt;
+
+    return bResult;
 }
 
 //  ---------------------------------------------------------------------------
@@ -3935,6 +4120,7 @@ void GeoRasterWrapper::PackNBits(GByte *pabyData) const
 }
 
 #ifdef JPEG_SUPPORTED
+
 //  ---------------------------------------------------------------------------
 //                                                             UncompressJpeg()
 //  ---------------------------------------------------------------------------
@@ -4034,13 +4220,13 @@ void GeoRasterWrapper::UncompressJpeg(unsigned long nInSize)
     //  Load JPEG in a virtual file
     //  --------------------------------------------------------------------
 
-    const char *pszMemFile = CPLSPrintf("/vsimem/geor_%p.jpg", pabyBlockBuf);
+    const CPLString osMemFile = VSIMemGenerateHiddenFilename("geor.jpg");
 
-    VSILFILE *fpImage = VSIFOpenL(pszMemFile, "wb");
+    VSILFILE *fpImage = VSIFOpenL(osMemFile, "wb");
     VSIFWriteL(pabyBlockBuf, nInSize, 1, fpImage);
     VSIFCloseL(fpImage);
 
-    fpImage = VSIFOpenL(pszMemFile, "rb");
+    fpImage = VSIFOpenL(osMemFile, "rb");
 
     //  --------------------------------------------------------------------
     //  Initialize decompressor
@@ -4088,7 +4274,7 @@ void GeoRasterWrapper::UncompressJpeg(unsigned long nInSize)
 
     for (int iLine = 0; iLine < nRowBlockSize; iLine++)
     {
-        JSAMPLE *ppSamples = (JSAMPLE *)pabyScanline;
+        JSAMPLE *ppSamples = reinterpret_cast<JSAMPLE *>(pabyScanline);
         jpeg_read_scanlines(&sDInfo, &ppSamples, 1);
         pabyScanline += (nColumnBlockSize * nBandBlockSize);
     }
@@ -4097,7 +4283,7 @@ void GeoRasterWrapper::UncompressJpeg(unsigned long nInSize)
 
     VSIFCloseL(fpImage);
 
-    VSIUnlink(pszMemFile);
+    VSIUnlink(osMemFile);
 }
 
 //  ---------------------------------------------------------------------------
@@ -4110,9 +4296,9 @@ unsigned long GeoRasterWrapper::CompressJpeg(void)
     //  Load JPEG in a virtual file
     //  --------------------------------------------------------------------
 
-    const char *pszMemFile = CPLSPrintf("/vsimem/geor_%p.jpg", pabyBlockBuf);
+    const CPLString osMemFile = VSIMemGenerateHiddenFilename("geor.jpg");
 
-    VSILFILE *fpImage = VSIFOpenL(pszMemFile, "wb");
+    VSILFILE *fpImage = VSIFOpenL(osMemFile, "wb");
 
     bool write_all_tables = TRUE;
 
@@ -4178,7 +4364,7 @@ unsigned long GeoRasterWrapper::CompressJpeg(void)
 
     for (int iLine = 0; iLine < nRowBlockSize; iLine++)
     {
-        JSAMPLE *ppSamples = (JSAMPLE *)pabyScanline;
+        JSAMPLE *ppSamples = reinterpret_cast<JSAMPLE *>(pabyScanline);
         jpeg_write_scanlines(&sCInfo, &ppSamples, 1);
         pabyScanline += (nColumnBlockSize * nBandBlockSize);
     }
@@ -4187,11 +4373,11 @@ unsigned long GeoRasterWrapper::CompressJpeg(void)
 
     VSIFCloseL(fpImage);
 
-    fpImage = VSIFOpenL(pszMemFile, "rb");
+    fpImage = VSIFOpenL(osMemFile, "rb");
     size_t nSize = VSIFReadL(pabyCompressBuf, 1, nBlockBytes, fpImage);
     VSIFCloseL(fpImage);
 
-    VSIUnlink(pszMemFile);
+    VSIUnlink(osMemFile);
 
     return (unsigned long)nSize;
 }

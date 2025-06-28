@@ -20,6 +20,7 @@
 #include <math.h>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "clock.h"
@@ -37,13 +38,14 @@
 #include "metaname.h"
 
 #include "cpl_port.h"
+#include "cpl_error.h"
 
 #define SECT0LEN_BYTE 16
 
 static sInt4 DoubleToSInt4Clamp(double val) {
    if (val >= INT_MAX) return INT_MAX;
    if (val <= INT_MIN) return INT_MIN;
-   if (CPLIsNan(val)) return 0;
+   if (std::isnan(val)) return 0;
    return (sInt4)val;
 }
 
@@ -951,7 +953,7 @@ enum { GS4_ANALYSIS, GS4_ENSEMBLE, GS4_DERIVED, GS4_PROBABIL_PNT = 5,
  *   3/2003 AAT: Implemented multiple grid inventories in the same GRIB2
  *          message.
  *   4/2003 AAT: Started adding GRIB1 support
- *   6/2003 Matthew T. Kallio (matt@wunderground.com):
+ *   6/2003 Matthew T. Kallio (matt at wunderground.com):
  *          "wmo" dimension increased to WMO_HEADER_LEN + 1 (for '\0' char)
  *   7/2003 AAT: Added numMsg so we can quickly find the reference time for
  *          a file by inventorying just the first message.
@@ -985,7 +987,9 @@ int GRIB2Inventory (VSILFILE *fp, inventoryType **Inv, uInt4 *LenInv,
                             * there are multiple grids in the same message. */
    wordType word;       /* Used to parse the prodType out of Sect 0. */
    int ans;             /* The return error code of ReadSect0. */
+#if 0
    char *msg;           /* Used to pop messages off the error Stack. */
+#endif
    int version;         /* Which version of GRIB is in this message. */
    uChar prodType;      /* Which GRIB2 type of product, 0 is meteo, 1 is
                          * hydro, 2 is land, 3 is space, 10 is oceanographic.
@@ -1054,6 +1058,7 @@ int GRIB2Inventory (VSILFILE *fp, inventoryType **Inv, uInt4 *LenInv,
             return -2;
          } else {
             /* Handle case where there are trailing bytes. */
+#if 0
             msg = errSprintf (nullptr);
             printf ("Warning: Inside GRIB2Inventory, Message # %d\n",
                     msgNum);
@@ -1066,6 +1071,16 @@ int GRIB2Inventory (VSILFILE *fp, inventoryType **Inv, uInt4 *LenInv,
             /* fseek (fp, 0L, SEEK_SET); */
             printf ("There were " CPL_FRMT_GUIB " trailing bytes in the file.\n",
                     fileLen - offset);
+#endif
+#else
+#ifdef DEBUG
+            /* find out how big the file is. */
+            VSIFSeekL (fp, 0L, SEEK_END);
+            fileLen = VSIFTellL(fp);
+            CPLDebug("GRIB", CPL_FRMT_GUIB " trailing byte(s) found after message #%d", fileLen - offset, msgNum);
+#else
+            CPLDebug("GRIB", "Trailing byte(s) found after message #%d", msgNum);
+#endif
 #endif
             free (buffer);
             free (buff);

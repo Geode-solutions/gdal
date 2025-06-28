@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL SWIG Interfaces.
  * Purpose:  OGRSpatialReference related declarations.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2005, Kevin Ruland
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 #ifdef SWIGPYTHON
@@ -159,7 +142,9 @@ typedef void OSRCoordinateTransformationShadow;
 #endif
 %}
 
+#if !defined(SWIGCSHARP) || !defined(FROM_OGR_I)
 typedef int OGRErr;
+#endif
 
 #if defined(SWIGPYTHON)
 %include osr_python.i
@@ -335,6 +320,10 @@ public:
     return OSRGetName( self );
   }
 
+  const char* GetCelestialBodyName() {
+    return OSRGetCelestialBodyName( self );
+  }
+
 %apply Pointer NONNULL {OSRSpatialReferenceShadow* rhs};
 #ifndef SWIGJAVA
   %feature("kwargs") IsSame;
@@ -363,6 +352,10 @@ public:
     return OSRIsProjected(self);
   }
 
+  int IsDerivedProjected() {
+    return OSRIsDerivedProjected(self);
+  }
+
   int IsCompound() {
     return OSRIsCompound(self);
   }
@@ -381,6 +374,10 @@ public:
 
   bool IsDynamic() {
     return OSRIsDynamic(self);
+  }
+
+  bool HasPointMotionOperation() {
+    return OSRHasPointMotionOperation(self);
   }
 
   double GetCoordinateEpoch() {
@@ -572,6 +569,13 @@ public:
   void FindMatches( char** options = NULL, OSRSpatialReferenceShadow*** matches = NULL, int* nvalues = NULL, int** confidence_values = NULL )
   {
         *matches = OSRFindMatches(self, options, nvalues, confidence_values);
+  }
+#endif
+
+#ifdef SWIGCSHARP
+  OSRSpatialReferenceShadow** FindMatches(char** options, int* nvalues, int** confidence_values)
+  {
+       return (OSRSpatialReferenceShadow**) OSRFindMatches(self, options, nvalues, confidence_values);
   }
 #endif
 
@@ -923,9 +927,21 @@ public:
     return OSRSetWellKnownGeogCS( self, name );
   }
 
-  OGRErr SetFromUserInput( const char *name ) {
-    return OSRSetFromUserInput( self, name );
+#ifdef SWIGCSHARP
+  OGRErr SetFromUserInput( const char *name) {
+    return OSRSetFromUserInputEx( self, name, NULL );
   }
+  OGRErr SetFromUserInput( const char *name, char** options ) {
+    return OSRSetFromUserInputEx( self, name, options );
+  }
+#else
+#ifndef SWIGJAVA
+  %feature( "kwargs" ) SetFromUserInput;
+#endif
+  OGRErr SetFromUserInput( const char *name, char** options = NULL ) {
+    return OSRSetFromUserInputEx( self, name, options );
+  }
+#endif
 
   OGRErr CopyGeogCSFrom( OSRSpatialReferenceShadow *rhs ) {
     return OSRCopyGeogCSFrom( self, rhs );
@@ -1056,6 +1072,13 @@ public:
     return OSRImportFromOzi( self, papszLines );
   }
 
+%apply Pointer NONNULL {const char* const *keyValues};
+%apply (char **options) { char ** keyValues };
+  OGRErr ImportFromCF1( char** keyValues, const char* units = NULL) {
+      return OSRImportFromCF1(self, keyValues, units);
+  }
+%clear (char **);
+
   OGRErr ExportToWkt( char **argout, char **options = NULL ) {
     return OSRExportToWktEx( self, argout, options );
   }
@@ -1088,6 +1111,17 @@ public:
 %clear (long*);
 %clear (double *params[15]);
 
+%apply (char **argout) { (char **) };
+  OGRErr ExportToERM( char **proj, char** datum, char **units ) {
+    char szProj[32] = {0}, szDatum[32] = {0}, szUnits[32] = {0};
+    OGRErr ret = OSRExportToERM( self, szProj, szDatum, szUnits );
+    *proj = CPLStrdup(szProj);
+    *datum = CPLStrdup(szDatum);
+    *units = CPLStrdup(szUnits);
+    return ret;
+  }
+%clear (char **);
+
   OGRErr ExportToXML( char **argout, const char *dialect = "" ) {
     return OSRExportToXML( self, argout, dialect );
   }
@@ -1095,6 +1129,26 @@ public:
   OGRErr ExportToMICoordSys( char **argout ) {
     return OSRExportToMICoordSys( self, argout );
   }
+
+#if defined(SWIGPYTHON) || defined(SWIGJAVA) || defined(SWIGCSHARP)
+%apply (char **dictAndCSLDestroy) { char ** };
+#else
+// We'd also need a dictAndCSLDestroy for other languages!
+%apply (char **) { char ** };
+#endif
+%apply (char **options) { char **options };
+  char** ExportToCF1( char **options = NULL ) {
+    char** ret = NULL;
+    OSRExportToCF1(self, NULL, &ret, NULL, options);
+    return ret;
+  }
+%clear char **;
+
+ retStringAndCPLFree* ExportToCF1Units( char **options = NULL ) {
+    char* units = NULL;
+    OSRExportToCF1(self, NULL, NULL, &units, options);
+    return units;
+ }
 
 %newobject CloneGeogCS;
   OSRSpatialReferenceShadow *CloneGeogCS() {
@@ -1124,7 +1178,7 @@ public:
 
 %newobject ConvertToOtherProjection;
   OSRSpatialReferenceShadow* ConvertToOtherProjection(const char* other_projection, char **options = NULL) {
-    return OSRConvertToOtherProjection(self, other_projection, options);
+    return (OSRSpatialReferenceShadow*)OSRConvertToOtherProjection(self, other_projection, options);
   }
 
 %clear const char* name;
@@ -1182,12 +1236,15 @@ public:
   bool SetBallparkAllowed(bool allowBallpark) {
     return OCTCoordinateTransformationOptionsSetBallparkAllowed(self, allowBallpark);
   }
+
+  bool SetOnlyBest(bool onlyBest) {
+    return OCTCoordinateTransformationOptionsSetOnlyBest(self, onlyBest);
+  }
 } /*extend */
 };
 
 // NEEDED
 // Custom python __init__ which takes a tuple.
-// TransformPoints which takes list of 3-tuples
 
 %rename (CoordinateTransformation) OSRCoordinateTransformationShadow;
 class OSRCoordinateTransformationShadow {
@@ -1202,7 +1259,7 @@ public:
 
   OSRCoordinateTransformationShadow( OSRSpatialReferenceShadow *src, OSRSpatialReferenceShadow *dst, OGRCoordinateTransformationOptions* options ) {
     return (OSRCoordinateTransformationShadow*)
-        options ? OCTNewCoordinateTransformationEx( src, dst, options ) : OCTNewCoordinateTransformation(src, dst);
+        (options ? OCTNewCoordinateTransformationEx( src, dst, options ) : OCTNewCoordinateTransformation(src, dst));
   }
 
   ~OSRCoordinateTransformationShadow() {
@@ -1211,7 +1268,7 @@ public:
 
   %newobject GetInverse;
   OSRCoordinateTransformationShadow* GetInverse() {
-    return OCTGetInverse(self);
+    return (OSRCoordinateTransformationShadow*) OCTGetInverse(self);
   }
 
 // Need to apply argin typemap second so the numinputs=1 version gets applied
@@ -1222,7 +1279,11 @@ public:
 %apply (double argout[ANY]) {(double inout[3])};
 %apply (double argin[ANY]) {(double inout[3])};
 #endif
+#if SWIGPYTHON
+  void _TransformPoint3Double( double inout[3] ) {
+#else
   void TransformPoint( double inout[3] ) {
+#endif
     if (self == NULL)
         return;
     OCTTransform( self, 1, &inout[0], &inout[1], &inout[2] );
@@ -1235,7 +1296,13 @@ public:
 %apply (double argout[ANY]) {(double inout[4])};
 %apply (double argin[ANY]) {(double inout[4])};
 #endif
+#if SWIGPYTHON
+  void _TransformPoint4Double( double inout[4] ) {
+#elif defined(SWIGCSHARP)
+  void TransformPoint4D( double inout[4] ) {
+#else
   void TransformPoint( double inout[4] ) {
+#endif
     if (self == NULL)
         return;
     OCTTransform4D( self, 1, &inout[0], &inout[1], &inout[2], &inout[3], NULL );
@@ -1347,7 +1414,7 @@ void TransformBounds(
 %inline %{
   OSRCoordinateTransformationShadow *CreateCoordinateTransformation( OSRSpatialReferenceShadow *src, OSRSpatialReferenceShadow *dst, OGRCoordinateTransformationOptions* options = NULL ) {
     return (OSRCoordinateTransformationShadow*)
-        options ? OCTNewCoordinateTransformationEx( src, dst, options ) : OCTNewCoordinateTransformation(src, dst);
+        (options ? OCTNewCoordinateTransformationEx( src, dst, options ) : OCTNewCoordinateTransformation(src, dst));
 }
 %}
 
@@ -1407,6 +1474,8 @@ struct OSRCRSInfo {
     /** Name of the projection method for a projected CRS. Might be NULL even
      *for projected CRS in some cases. */
     char* projection_method;
+    /** Name of the celestial body of the CRS (e.g. "Earth"). */
+    char* celestial_body_name;
 
   OSRCRSInfo( const char* auth_name,
               const char* code,
@@ -1419,7 +1488,8 @@ struct OSRCRSInfo {
               double east_lon_degree,
               double north_lat_degree,
               const char* area_name,
-              const char* projection_method)
+              const char* projection_method,
+              const char* celestial_body_name)
     {
     OSRCRSInfo *self = (OSRCRSInfo*) CPLMalloc( sizeof( OSRCRSInfo ) );
     self->pszAuthName = auth_name ? CPLStrdup(auth_name) : NULL;
@@ -1434,6 +1504,7 @@ struct OSRCRSInfo {
     self->dfNorthLatitudeDeg = north_lat_degree;
     self->pszAreaName = area_name ? CPLStrdup(area_name) : NULL;
     self->pszProjectionMethod = projection_method ? CPLStrdup(projection_method) : NULL;
+    self->pszCelestialBodyName = celestial_body_name ? CPLStrdup(celestial_body_name) : NULL;
     return self;
   }
 
@@ -1443,6 +1514,7 @@ struct OSRCRSInfo {
     CPLFree( self->pszName );
     CPLFree( self->pszAreaName );
     CPLFree( self->pszProjectionMethod );
+    CPLFree( self->pszCelestialBodyName );
     CPLFree( self );
   }
 } /* extend */
@@ -1499,9 +1571,22 @@ const char* OSRCRSInfo_projection_method_get( OSRCRSInfo *crsInfo ) {
   return crsInfo->pszProjectionMethod;
 }
 
+const char* OSRCRSInfo_celestial_body_name_get( OSRCRSInfo *crsInfo ) {
+  return crsInfo->pszCelestialBodyName;
+}
+
 %}
 
 #endif
+
+%apply (char **CSL) {(char **)};
+%inline %{
+char** GetAuthorityListFromDatabase()
+{
+    return OSRGetAuthorityListFromDatabase();
+}
+%}
+%clear (char **);
 
 #ifdef SWIGPYTHON
 %inline %{

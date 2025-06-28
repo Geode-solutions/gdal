@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test LVBAG driver functionality.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -394,11 +377,8 @@ def test_ogr_lvbag_read_zip_4():
     assert lyr.GetFeatureCount() > 0
 
 
+@pytest.mark.require_geos(3, 8)
 def test_ogr_lvbag_fix_invalid_polygon():
-
-    _test = ogr.CreateGeometryFromWkt("POLYGON ((0 0,1 1,0 1,1 0,0 0))")
-    if _test.MakeValid() is None:
-        pytest.skip("MakeValid() not available")
 
     ds = gdal.OpenEx(
         "data/lvbag/inval_polygon.xml",
@@ -426,11 +406,8 @@ def test_ogr_lvbag_fix_invalid_polygon():
     assert feat is None
 
 
+@pytest.mark.require_geos(3, 8)
 def test_ogr_lvbag_fix_invalid_polygon_to_polygon():
-
-    _test = ogr.CreateGeometryFromWkt("POLYGON ((0 0,1 1,0 1,1 0,0 0))")
-    if _test.MakeValid() is None:
-        pytest.skip("MakeValid() not available")
 
     ds = gdal.OpenEx(
         "data/lvbag/inval_polygon2.xml",
@@ -462,9 +439,10 @@ def test_ogr_lvbag_read_errors():
     assert ds.GetLayerCount() == 1, "bad layer count"
 
     lyr = ds.GetLayer(0)
-    with gdaltest.error_handler():
-        assert lyr.GetName() == ""
-        assert lyr.GetFeatureCount() == 0
+    with pytest.raises(Exception):
+        lyr.GetName()
+    with pytest.raises(Exception):
+        lyr.GetFeatureCount()
 
 
 def test_ogr_lvbag_fix_identificatie():
@@ -575,8 +553,6 @@ def test_ogr_lvbag_test_ogrsf_wpl():
     if test_cli_utilities.get_test_ogrsf_path() is None:
         pytest.skip()
 
-    import gdaltest
-
     ret = gdaltest.runexternal(
         test_cli_utilities.get_test_ogrsf_path() + " -ro data/lvbag/wpl.xml"
     )
@@ -590,8 +566,6 @@ def test_ogr_lvbag_test_ogrsf_pnd():
 
     if test_cli_utilities.get_test_ogrsf_path() is None:
         pytest.skip()
-
-    import gdaltest
 
     ret = gdaltest.runexternal(
         test_cli_utilities.get_test_ogrsf_path() + " -ro data/lvbag/pnd.xml"
@@ -607,10 +581,19 @@ def test_ogr_lvbag_test_ogrsf_num():
     if test_cli_utilities.get_test_ogrsf_path() is None:
         pytest.skip()
 
-    import gdaltest
-
     ret = gdaltest.runexternal(
         test_cli_utilities.get_test_ogrsf_path() + " -ro data/lvbag/num.xml"
     )
 
     assert "INFO" in ret and "ERROR" not in ret
+
+
+###############################################################################
+# Test force opening
+
+
+def test_ogr_lvbag_force_opening():
+
+    # Would be opened by GML driver if not forced
+    ds = gdal.OpenEx("data/gml/empty.gml", allowed_drivers=["LVBAG"])
+    assert ds.GetDriver().GetDescription() == "LVBAG"

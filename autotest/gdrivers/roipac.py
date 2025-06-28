@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test ROI_PAC format driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2014, Matthieu Volat <matthieu.volat@ujf-grenoble.fr>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -34,7 +17,7 @@ import pytest
 
 from osgeo import gdal
 
-pytestmark = pytest.mark.require_driver("ROIPAC")
+pytestmark = pytest.mark.require_driver("ROI_PAC")
 
 ###############################################################################
 # Perform simple read test.
@@ -56,7 +39,7 @@ def test_roipac_1():
         AUTHORITY["EPSG","9108"]],
     AUTHORITY["EPSG","4326"]]"""
 
-    return tst.testOpen(
+    tst.testOpen(
         check_prj=prj,
         check_gt=(-180.0083333, 0.0083333333, 0.0, -59.9916667, 0.0, -0.0083333333),
     )
@@ -80,7 +63,7 @@ def test_roipac_2():
 def test_roipac_3():
 
     tst = gdaltest.GDALTest("roi_pac", "roipac/srtm.dem", 1, 64074)
-    return tst.testCreateCopy(check_gt=1, new_filename="strm.tst.dem")
+    tst.testCreateCopy(check_gt=1, new_filename="strm.tst.dem")
 
 
 ###############################################################################
@@ -90,7 +73,7 @@ def test_roipac_3():
 def test_roipac_4():
 
     tst = gdaltest.GDALTest("roi_pac", "roipac/srtm.dem", 1, 64074)
-    return tst.testCreateCopy(check_gt=1, new_filename="strm.tst.dem", vsimem=1)
+    tst.testCreateCopy(check_gt=1, new_filename="strm.tst.dem", vsimem=1)
 
 
 ###############################################################################
@@ -114,6 +97,5 @@ def test_roipac_5():
 def test_roipac_6():
 
     tst = gdaltest.GDALTest("roi_pac", "byte.tif", 1, 4672)
-    with gdaltest.error_handler():
-        ret = tst.testCreateCopy(check_gt=1, new_filename="byte.flg", vsimem=1)
-    return ret
+    with gdal.quiet_errors():
+        tst.testCreateCopy(check_gt=1, new_filename="byte.flg", vsimem=1)

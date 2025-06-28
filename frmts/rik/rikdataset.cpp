@@ -8,29 +8,15 @@
  * Copyright (c) 2005, Daniel Wallner <daniel.wallner@bredband.net>
  * Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <cfloat>
 #include <zlib.h>
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+
+#include <cmath>
 
 #define RIK_HEADER_DEBUG 0
 #define RIK_CLEAR_DEBUG 0
@@ -119,7 +105,7 @@ class RIKDataset final : public GDALPamDataset
     VSILFILE *fp;
 
     OGRSpatialReference m_oSRS{};
-    double adfTransform[6];
+    GDALGeoTransform m_gt{};
 
     GUInt32 nBlockXSize;
     GUInt32 nBlockYSize;
@@ -138,7 +124,7 @@ class RIKDataset final : public GDALPamDataset
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 };
 
@@ -284,9 +270,7 @@ CPLErr RIKRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
     }
     nBlockSize -= nBlockOffset;
 
-    GUInt32 pixels;
-
-    pixels = poRDS->nBlockXSize * poRDS->nBlockYSize;
+    const GUInt32 pixels = poRDS->nBlockXSize * poRDS->nBlockYSize;
 
     if (!nBlockOffset || !nBlockSize
 #ifdef RIK_SINGLE_BLOCK
@@ -306,7 +290,7 @@ CPLErr RIKRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 
     if (poRDS->options == 0x00 || poRDS->options == 0x40)
     {
-        VSIFReadL(pImage, 1, nBlockXSize * nBlockYSize, poRDS->fp);
+        VSIFReadL(pImage, 1, pixels, poRDS->fp);
         return CE_None;
     }
 
@@ -625,13 +609,12 @@ RIKDataset::RIKDataset()
         "414.1055246174,41.3265500042,603.0582474221,-0.8551163377,2."
         "1413174055,-7.0227298286,0],AUTHORITY[\"EPSG\",\"6124\"]],PRIMEM["
         "\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0."
-        "01745329251994328,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\","
+        "0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AUTHORITY[\"EPSG\","
         "\"4124\"]],PROJECTION[\"Transverse_Mercator\"],PARAMETER[\"latitude_"
         "of_origin\",0],PARAMETER[\"central_meridian\",15.80827777777778],"
         "PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",1500000],"
         "PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\","
         "\"9001\"]],AUTHORITY[\"EPSG\",\"3021\"]]");
-    memset(adfTransform, 0, sizeof(adfTransform));
 }
 
 /************************************************************************/
@@ -652,11 +635,10 @@ RIKDataset::~RIKDataset()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr RIKDataset::GetGeoTransform(double *padfTransform)
+CPLErr RIKDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, &adfTransform, sizeof(double) * 6);
-
+    gt = m_gt;
     return CE_None;
 }
 
@@ -730,7 +712,7 @@ int RIKDataset::Identify(GDALOpenInfo *poOpenInfo)
                 return FALSE;
         }
 
-        if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "rik"))
+        if (poOpenInfo->IsExtensionEqualToCI("rik"))
             return TRUE;
 
         // We really need Open to be able to conclude
@@ -903,8 +885,8 @@ GDALDataset *RIKDataset::Open(GDALOpenInfo *poOpenInfo)
         CPL_SWAP32PTR(&header.iMPPNum);
 #endif
 
-        if (!CPLIsFinite(header.fSouth) || !CPLIsFinite(header.fWest) ||
-            !CPLIsFinite(header.fNorth) || !CPLIsFinite(header.fEast) ||
+        if (!std::isfinite(header.fSouth) || !std::isfinite(header.fWest) ||
+            !std::isfinite(header.fNorth) || !std::isfinite(header.fEast) ||
             header.iMPPNum == 0)
         {
             return nullptr;
@@ -1224,12 +1206,12 @@ GDALDataset *RIKDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->fp = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
 
-    poDS->adfTransform[0] = header.fWest - metersPerPixel / 2.0;
-    poDS->adfTransform[1] = metersPerPixel;
-    poDS->adfTransform[2] = 0.0;
-    poDS->adfTransform[3] = header.fNorth + metersPerPixel / 2.0;
-    poDS->adfTransform[4] = 0.0;
-    poDS->adfTransform[5] = -metersPerPixel;
+    poDS->m_gt[0] = header.fWest - metersPerPixel / 2.0;
+    poDS->m_gt[1] = metersPerPixel;
+    poDS->m_gt[2] = 0.0;
+    poDS->m_gt[3] = header.fNorth + metersPerPixel / 2.0;
+    poDS->m_gt[4] = 0.0;
+    poDS->m_gt[5] = -metersPerPixel;
 
     poDS->nBlockXSize = header.iBlockWidth;
     poDS->nBlockYSize = header.iBlockHeight;
@@ -1281,9 +1263,7 @@ GDALDataset *RIKDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         delete poDS;
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The RIK driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("RIK");
         return nullptr;
     }
 

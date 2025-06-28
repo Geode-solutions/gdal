@@ -7,34 +7,21 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_pam.h"
 #include "ogrsf_frmts.h"
 
 #include <map>
+#include <mutex>
 
 #include "ogr_feather.h"
 #include "../arrow_common/ograrrowrandomaccessfile.h"
 #include "../arrow_common/ograrrowwritablefile.h"
 #include "../arrow_common/ograrrowdataset.hpp"
+
+#include "ogrfeatherdrivercore.h"
 
 /************************************************************************/
 /*                        IsArrowIPCStream()                            */
@@ -42,6 +29,9 @@
 
 static bool IsArrowIPCStream(GDALOpenInfo *poOpenInfo)
 {
+    // WARNING: if making changes in that method, reflect them in
+    // OGRFeatherDriverIsArrowIPCStreamBasic() in ogrfeatherdrivercore.cpp
+
     if (STARTS_WITH_CI(poOpenInfo->pszFilename, "ARROW_IPC_STREAM:"))
         return true;
 
@@ -55,7 +45,7 @@ static bool IsArrowIPCStream(GDALOpenInfo *poOpenInfo)
         memcmp(poOpenInfo->pabyHeader, "\xFF\xFF\xFF\xFF", CONTINUATION_SIZE) ==
             0)
     {
-        const char *pszExt = CPLGetExtension(poOpenInfo->pszFilename);
+        const char *pszExt = poOpenInfo->osExtension.c_str();
         if (EQUAL(pszExt, "arrows") || EQUAL(pszExt, "ipc"))
             return true;
 
@@ -63,6 +53,9 @@ static bool IsArrowIPCStream(GDALOpenInfo *poOpenInfo)
             CPL_LSBUINT32PTR(poOpenInfo->pabyHeader + CONTINUATION_SIZE);
         if (strcmp(poOpenInfo->pszFilename, "/vsistdin/") == 0)
         {
+            if (poOpenInfo->IsSingleAllowedDriver("ARROW"))
+                return true;
+
             // Padding after metadata and before body is not necessarily present
             // but the body must be at least 4 bytes
             constexpr int PADDING_MAX_SIZE = 4;
@@ -82,11 +75,12 @@ static bool IsArrowIPCStream(GDALOpenInfo *poOpenInfo)
             }
 
             const std::string osTmpFilename(
-                CPLSPrintf("/vsimem/_arrow/%p", poOpenInfo));
-            VSILFILE *fp = VSIFileFromMemBuffer(osTmpFilename.c_str(),
-                                                poOpenInfo->pabyHeader,
-                                                nSizeToRead, false);
-            auto infile = std::make_shared<OGRArrowRandomAccessFile>(fp);
+                VSIMemGenerateHiddenFilename("arrow"));
+            auto fp = VSIVirtualHandleUniquePtr(VSIFileFromMemBuffer(
+                osTmpFilename.c_str(), poOpenInfo->pabyHeader, nSizeToRead,
+                false));
+            auto infile = std::make_shared<OGRArrowRandomAccessFile>(
+                osTmpFilename.c_str(), std::move(fp));
             auto options = arrow::ipc::IpcReadOptions::Defaults();
             auto result =
                 arrow::ipc::RecordBatchStreamReader::Open(infile, options);
@@ -104,8 +98,8 @@ static bool IsArrowIPCStream(GDALOpenInfo *poOpenInfo)
             return false;
 
         // Do not give ownership of poOpenInfo->fpL to infile
-        auto infile =
-            std::make_shared<OGRArrowRandomAccessFile>(poOpenInfo->fpL, false);
+        auto infile = std::make_shared<OGRArrowRandomAccessFile>(
+            poOpenInfo->pszFilename, poOpenInfo->fpL, false);
         auto options = arrow::ipc::IpcReadOptions::Defaults();
         auto result =
             arrow::ipc::RecordBatchStreamReader::Open(infile, options);
@@ -113,56 +107,6 @@ static bool IsArrowIPCStream(GDALOpenInfo *poOpenInfo)
         return result.ok();
     }
     return false;
-}
-
-/************************************************************************/
-/*                           IsArrowFileFormat()                        */
-/************************************************************************/
-
-template <size_t N> constexpr int constexpr_length(const char (&)[N])
-{
-    return static_cast<int>(N - 1);
-}
-
-static bool IsArrowFileFormat(GDALOpenInfo *poOpenInfo)
-{
-    // See https://arrow.apache.org/docs/format/Columnar.html#ipc-file-format
-    bool bRet = false;
-    constexpr const char SIGNATURE[] = "ARROW1";
-    constexpr int SIGNATURE_SIZE = constexpr_length(SIGNATURE);
-    static_assert(SIGNATURE_SIZE == 6, "SIGNATURE_SIZE == 6");
-    constexpr int SIGNATURE_PLUS_PADDING = SIGNATURE_SIZE + 2;
-    constexpr int FOOTERSIZE_SIZE = 4;
-    if (poOpenInfo->fpL != nullptr &&
-        poOpenInfo->nHeaderBytes >=
-            SIGNATURE_PLUS_PADDING + FOOTERSIZE_SIZE + SIGNATURE_SIZE &&
-        memcmp(poOpenInfo->pabyHeader, SIGNATURE, SIGNATURE_SIZE) == 0)
-    {
-        VSIFSeekL(poOpenInfo->fpL, 0, SEEK_END);
-        const auto nFileSize = VSIFTellL(poOpenInfo->fpL);
-        VSIFSeekL(poOpenInfo->fpL,
-                  nFileSize - (FOOTERSIZE_SIZE + SIGNATURE_SIZE), SEEK_SET);
-        uint32_t nFooterSize = 0;
-        static_assert(sizeof(nFooterSize) == FOOTERSIZE_SIZE,
-                      "sizeof(nFooterSize) == FOOTERSIZE_SIZE");
-        VSIFReadL(&nFooterSize, 1, sizeof(nFooterSize), poOpenInfo->fpL);
-        CPL_LSBPTR32(&nFooterSize);
-        unsigned char abyTrailingBytes[SIGNATURE_SIZE] = {0};
-        VSIFReadL(&abyTrailingBytes[0], 1, SIGNATURE_SIZE, poOpenInfo->fpL);
-        bRet = memcmp(abyTrailingBytes, SIGNATURE, SIGNATURE_SIZE) == 0 &&
-               nFooterSize < nFileSize;
-        VSIFSeekL(poOpenInfo->fpL, 0, SEEK_SET);
-    }
-    return bRet;
-}
-
-/************************************************************************/
-/*                             Identify()                               */
-/************************************************************************/
-
-static int OGRFeatherDriverIdentify(GDALOpenInfo *poOpenInfo)
-{
-    return IsArrowIPCStream(poOpenInfo) || IsArrowFileFormat(poOpenInfo);
 }
 
 /************************************************************************/
@@ -176,8 +120,19 @@ static GDALDataset *OGRFeatherDriverOpen(GDALOpenInfo *poOpenInfo)
         return nullptr;
     }
 
-    const bool bIsStreamingFormat = IsArrowIPCStream(poOpenInfo);
-    if (!bIsStreamingFormat && !IsArrowFileFormat(poOpenInfo))
+    GDALOpenInfo *poOpenInfoForIdentify = poOpenInfo;
+    std::unique_ptr<GDALOpenInfo> poOpenInfoTmp;
+    if (STARTS_WITH(poOpenInfo->pszFilename, "gdalvsi://"))
+    {
+        poOpenInfoTmp = std::make_unique<GDALOpenInfo>(poOpenInfo->pszFilename +
+                                                           strlen("gdalvsi://"),
+                                                       poOpenInfo->nOpenFlags);
+        poOpenInfoForIdentify = poOpenInfoTmp.get();
+    }
+
+    const bool bIsStreamingFormat = IsArrowIPCStream(poOpenInfoForIdentify);
+    if (!bIsStreamingFormat &&
+        !OGRFeatherDriverIsArrowFileFormat(poOpenInfoForIdentify))
     {
         return nullptr;
     }
@@ -187,29 +142,54 @@ static GDALDataset *OGRFeatherDriverOpen(GDALOpenInfo *poOpenInfo)
     {
         const std::string osFilename(poOpenInfo->pszFilename +
                                      strlen("ARROW_IPC_STREAM:"));
-        VSILFILE *fp = VSIFOpenL(osFilename.c_str(), "rb");
+        auto fp =
+            VSIVirtualHandleUniquePtr(VSIFOpenL(osFilename.c_str(), "rb"));
         if (fp == nullptr)
         {
             CPLError(CE_Failure, CPLE_FileIO, "Cannot open %s",
                      osFilename.c_str());
             return nullptr;
         }
-        infile = std::make_shared<OGRArrowRandomAccessFile>(fp);
+        infile = std::make_shared<OGRArrowRandomAccessFile>(osFilename.c_str(),
+                                                            std::move(fp));
     }
     else if (STARTS_WITH(poOpenInfo->pszFilename, "/vsi") ||
              CPLTestBool(CPLGetConfigOption("OGR_ARROW_USE_VSI", "NO")))
     {
-        VSILFILE *fp = poOpenInfo->fpL;
+        VSIVirtualHandleUniquePtr fp(poOpenInfo->fpL);
         poOpenInfo->fpL = nullptr;
-        infile = std::make_shared<OGRArrowRandomAccessFile>(fp);
+        infile = std::make_shared<OGRArrowRandomAccessFile>(
+            poOpenInfo->pszFilename, std::move(fp));
     }
     else
     {
-        auto result = arrow::io::ReadableFile::Open(poOpenInfo->pszFilename);
+        // FileSystemFromUriOrPath() doesn't like relative paths
+        // so transform them to absolute.
+        std::string osPath(poOpenInfo->pszFilename);
+        if (CPLIsFilenameRelative(osPath.c_str()))
+        {
+            char *pszCurDir = CPLGetCurrentDir();
+            if (pszCurDir == nullptr)
+                return nullptr;
+            osPath = CPLFormFilenameSafe(pszCurDir, osPath.c_str(), nullptr);
+            CPLFree(pszCurDir);
+        }
+
+        std::string osFSPath;
+        auto poFS =
+            arrow::fs::FileSystemFromUriOrPath(osPath.c_str(), &osFSPath);
+        if (!poFS.ok())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "arrow::fs::FileSystemFromUriOrPath failed with %s",
+                     poFS.status().message().c_str());
+            return nullptr;
+        }
+        auto result = (*poFS)->OpenInputFile(osFSPath);
         if (!result.ok())
         {
             CPLError(CE_Failure, CPLE_AppDefined,
-                     "ReadableFile::Open() failed with %s",
+                     "OpenInputFile() failed with %s",
                      result.status().message().c_str());
             return nullptr;
         }
@@ -221,7 +201,7 @@ static GDALDataset *OGRFeatherDriverOpen(GDALOpenInfo *poOpenInfo)
     auto options = arrow::ipc::IpcReadOptions::Defaults();
     options.memory_pool = poMemoryPool.get();
 
-    auto poDS = cpl::make_unique<OGRFeatherDataset>(poMemoryPool);
+    auto poDS = std::make_unique<OGRFeatherDataset>(poMemoryPool);
     if (bIsStreamingFormat)
     {
         auto result =
@@ -237,10 +217,10 @@ static GDALDataset *OGRFeatherDriverOpen(GDALOpenInfo *poOpenInfo)
         const bool bSeekable =
             !STARTS_WITH_CI(poOpenInfo->pszFilename, "ARROW_IPC_STREAM:") &&
             strcmp(poOpenInfo->pszFilename, "/vsistdin/") != 0;
-        std::string osLayername = CPLGetBasename(poOpenInfo->pszFilename);
+        std::string osLayername = CPLGetBasenameSafe(poOpenInfo->pszFilename);
         if (osLayername.empty())
             osLayername = "layer";
-        auto poLayer = cpl::make_unique<OGRFeatherLayer>(
+        auto poLayer = std::make_unique<OGRFeatherLayer>(
             poDS.get(), osLayername.c_str(), infile, bSeekable, options,
             poRecordBatchStreamReader);
         poDS->SetLayer(std::move(poLayer));
@@ -276,8 +256,8 @@ static GDALDataset *OGRFeatherDriverOpen(GDALOpenInfo *poOpenInfo)
             return nullptr;
         }
         auto poRecordBatchReader = *result;
-        auto poLayer = cpl::make_unique<OGRFeatherLayer>(
-            poDS.get(), CPLGetBasename(poOpenInfo->pszFilename),
+        auto poLayer = std::make_unique<OGRFeatherLayer>(
+            poDS.get(), CPLGetBasenameSafe(poOpenInfo->pszFilename).c_str(),
             poRecordBatchReader);
         poDS->SetLayer(std::move(poLayer));
     }
@@ -329,26 +309,32 @@ static GDALDataset *OGRFeatherDriverCreate(const char *pszName, int nXSize,
 
 class OGRFeatherDriver final : public GDALDriver
 {
+    std::mutex m_oMutex{};
     bool m_bMetadataInitialized = false;
     void InitMetadata();
 
   public:
     const char *GetMetadataItem(const char *pszName,
-                                const char *pszDomain) override
-    {
-        if (EQUAL(pszName, GDAL_DS_LAYER_CREATIONOPTIONLIST))
-        {
-            InitMetadata();
-        }
-        return GDALDriver::GetMetadataItem(pszName, pszDomain);
-    }
+                                const char *pszDomain) override;
 
     char **GetMetadata(const char *pszDomain) override
     {
+        std::lock_guard oLock(m_oMutex);
         InitMetadata();
         return GDALDriver::GetMetadata(pszDomain);
     }
 };
+
+const char *OGRFeatherDriver::GetMetadataItem(const char *pszName,
+                                              const char *pszDomain)
+{
+    std::lock_guard oLock(m_oMutex);
+    if (EQUAL(pszName, GDAL_DS_LAYER_CREATIONOPTIONLIST))
+    {
+        InitMetadata();
+    }
+    return GDALDriver::GetMetadataItem(pszName, pszDomain);
+}
 
 void OGRFeatherDriver::InitMetadata()
 {
@@ -413,10 +399,14 @@ void OGRFeatherDriver::InitMetadata()
         CPLAddXMLAttributeAndValue(psOption, "description",
                                    "Encoding of geometry columns");
         CPLAddXMLAttributeAndValue(psOption, "default", "GEOARROW");
-        for (const char *pszEncoding : {"GEOARROW", "WKB", "WKT"})
+        for (const char *pszEncoding :
+             {"GEOARROW", "GEOARROW_INTERLEAVED", "WKB", "WKT"})
         {
             auto poValueNode = CPLCreateXMLNode(psOption, CXT_Element, "Value");
             CPLCreateXMLNode(poValueNode, CXT_Text, pszEncoding);
+            if (EQUAL(pszEncoding, "GEOARROW"))
+                CPLAddXMLAttributeAndValue(poValueNode, "alias",
+                                           "GEOARROW_STRUCT");
         }
     }
 
@@ -457,35 +447,33 @@ void OGRFeatherDriver::InitMetadata()
 
 void RegisterOGRArrow()
 {
-    if (GDALGetDriverByName("Arrow") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
-    auto poDriver = cpl::make_unique<OGRFeatherDriver>();
+    auto poDriver = std::make_unique<OGRFeatherDriver>();
 
-    poDriver->SetDescription("Arrow");
-    poDriver->SetMetadataItem(GDAL_DCAP_VECTOR, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_CREATE_LAYER, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_CREATE_FIELD, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                              "(Geo)Arrow IPC File Format / Stream");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSIONS, "arrow feather arrows ipc");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC,
-                              "drivers/vector/feather.html");
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_MEASURED_GEOMETRIES, "YES");
-    poDriver->SetMetadataItem(GDAL_DCAP_Z_GEOMETRIES, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
-
-    poDriver->SetMetadataItem(
-        GDAL_DMD_CREATIONFIELDDATATYPES,
-        "Integer Integer64 Real String Date Time DateTime "
-        "Binary IntegerList Integer64List RealList StringList");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES,
-                              "Boolean Int16 Float32 JSON UUID");
+    OGRFeatherDriverSetCommonMetadata(poDriver.get());
 
     poDriver->pfnOpen = OGRFeatherDriverOpen;
-    poDriver->pfnIdentify = OGRFeatherDriverIdentify;
     poDriver->pfnCreate = OGRFeatherDriverCreate;
 
+    poDriver->SetMetadataItem("ARROW_VERSION", ARROW_VERSION_STRING);
+
     GetGDALDriverManager()->RegisterDriver(poDriver.release());
+
+#if ARROW_VERSION_MAJOR >= 16
+    // Mostly for tests
+    const char *pszPath =
+        CPLGetConfigOption("OGR_ARROW_LOAD_FILE_SYSTEM_FACTORIES", nullptr);
+    if (pszPath)
+    {
+        auto result = arrow::fs::LoadFileSystemFactories(pszPath);
+        if (!result.ok())
+        {
+            CPLError(CE_Warning, CPLE_AppDefined,
+                     "arrow::fs::LoadFileSystemFactories() failed with %s",
+                     result.message().c_str());
+        }
+    }
+#endif
 }

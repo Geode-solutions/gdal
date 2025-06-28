@@ -63,8 +63,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-CPL_CVSID("$Id$")
-
 #define MAXORDER 3
 
 namespace
@@ -80,31 +78,29 @@ struct Control_Points
 };
 }  // namespace
 
-typedef struct
+struct GCPTransformInfo
 {
-    GDALTransformerInfo sTI;
+    GDALTransformerInfo sTI{};
 
-    double adfToGeoX[20];
-    double adfToGeoY[20];
+    double adfToGeoX[20]{};
+    double adfToGeoY[20]{};
 
-    double adfFromGeoX[20];
-    double adfFromGeoY[20];
-    double x1_mean;
-    double y1_mean;
-    double x2_mean;
-    double y2_mean;
-    int nOrder;
-    int bReversed;
+    double adfFromGeoX[20]{};
+    double adfFromGeoY[20]{};
+    double x1_mean{};
+    double y1_mean{};
+    double x2_mean{};
+    double y2_mean{};
+    int nOrder{};
+    int bReversed{};
 
-    int nGCPCount;
-    GDAL_GCP *pasGCPList;
-    int bRefine;
-    int nMinimumGcps;
-    double dfTolerance;
+    std::vector<gdal::GCP> asGCPs{};
+    int bRefine{};
+    int nMinimumGcps{};
+    double dfTolerance{};
 
-    volatile int nRefCount;
-
-} GCPTransformInfo;
+    volatile int nRefCount{};
+};
 
 CPL_C_START
 CPLXMLNode *GDALSerializeGCPTransformer(void *pTransformArg);
@@ -140,7 +136,6 @@ static const char *const CRS_error_message[] = {
 static void *GDALCreateSimilarGCPTransformer(void *hTransformArg,
                                              double dfRatioX, double dfRatioY)
 {
-    GDAL_GCP *pasGCPList = nullptr;
     GCPTransformInfo *psInfo = static_cast<GCPTransformInfo *>(hTransformArg);
 
     VALIDATE_POINTER1(hTransformArg, "GDALCreateSimilarGCPTransformer",
@@ -154,18 +149,17 @@ static void *GDALCreateSimilarGCPTransformer(void *hTransformArg,
     }
     else
     {
-        pasGCPList = GDALDuplicateGCPs(psInfo->nGCPCount, psInfo->pasGCPList);
-        for (int i = 0; i < psInfo->nGCPCount; i++)
+        auto newGCPs = psInfo->asGCPs;
+        for (auto &gcp : newGCPs)
         {
-            pasGCPList[i].dfGCPPixel /= dfRatioX;
-            pasGCPList[i].dfGCPLine /= dfRatioY;
+            gcp.Pixel() /= dfRatioX;
+            gcp.Line() /= dfRatioY;
         }
         /* As remove_outliers modifies the provided GCPs we don't need to
          * reapply it */
         psInfo = static_cast<GCPTransformInfo *>(GDALCreateGCPTransformer(
-            psInfo->nGCPCount, pasGCPList, psInfo->nOrder, psInfo->bReversed));
-        GDALDeinitGCPs(psInfo->nGCPCount, pasGCPList);
-        CPLFree(pasGCPList);
+            static_cast<int>(newGCPs.size()), gdal::GCP::c_ptr(newGCPs),
+            psInfo->nOrder, psInfo->bReversed));
     }
 
     return psInfo;
@@ -177,11 +171,18 @@ static void *GDALCreateSimilarGCPTransformer(void *hTransformArg,
 
 static void *GDALCreateGCPTransformerEx(int nGCPCount,
                                         const GDAL_GCP *pasGCPList,
-                                        int nReqOrder, int bReversed,
-                                        int bRefine, double dfTolerance,
+                                        int nReqOrder, bool bReversed,
+                                        bool bRefine, double dfTolerance,
                                         int nMinimumGcps)
 
 {
+    // If no minimumGcp parameter was passed, we  use the default value
+    // according to the model
+    if (bRefine && nMinimumGcps == -1)
+    {
+        nMinimumGcps = ((nReqOrder + 1) * (nReqOrder + 2)) / 2 + 1;
+    }
+
     GCPTransformInfo *psInfo = nullptr;
     double *padfGeoX = nullptr;
     double *padfGeoY = nullptr;
@@ -209,8 +210,7 @@ static void *GDALCreateGCPTransformerEx(int nGCPCount,
             nReqOrder = 1;
     }
 
-    psInfo =
-        static_cast<GCPTransformInfo *>(CPLCalloc(sizeof(GCPTransformInfo), 1));
+    psInfo = new GCPTransformInfo();
     psInfo->bReversed = bReversed;
     psInfo->nOrder = nReqOrder;
     psInfo->bRefine = bRefine;
@@ -219,8 +219,23 @@ static void *GDALCreateGCPTransformerEx(int nGCPCount,
 
     psInfo->nRefCount = 1;
 
-    psInfo->pasGCPList = GDALDuplicateGCPs(nGCPCount, pasGCPList);
-    psInfo->nGCPCount = nGCPCount;
+    psInfo->asGCPs = gdal::GCP::fromC(pasGCPList, nGCPCount);
+    if (nGCPCount == 2 && nReqOrder == 1 &&
+        psInfo->asGCPs[0].X() != psInfo->asGCPs[1].X() &&
+        psInfo->asGCPs[0].Y() != psInfo->asGCPs[1].Y())
+    {
+        // Assumes that the 2 GCPs form opposite corners of a rectangle,
+        // and synthetize a 3rd corner
+        gdal::GCP newGCP;
+        newGCP.X() = psInfo->asGCPs[1].X();
+        newGCP.Y() = psInfo->asGCPs[0].Y();
+        newGCP.Pixel() = psInfo->asGCPs[1].Pixel();
+        newGCP.Line() = psInfo->asGCPs[0].Line();
+        psInfo->asGCPs.emplace_back(std::move(newGCP));
+
+        nGCPCount = 3;
+        pasGCPList = gdal::GCP::c_ptr(psInfo->asGCPs);
+    }
 
     memcpy(psInfo->sTI.abySignature, GDAL_GTI2_SIGNATURE,
            strlen(GDAL_GTI2_SIGNATURE));
@@ -341,7 +356,7 @@ void *GDALCreateGCPTransformer(int nGCPCount, const GDAL_GCP *pasGCPList,
 
 {
     return GDALCreateGCPTransformerEx(nGCPCount, pasGCPList, nReqOrder,
-                                      bReversed, FALSE, -1, -1);
+                                      CPL_TO_BOOL(bReversed), false, -1, -1);
 }
 
 /** Create GCP based polynomial transformer, with a tolerance threshold to
@@ -352,14 +367,8 @@ void *GDALCreateGCPRefineTransformer(int nGCPCount, const GDAL_GCP *pasGCPList,
                                      double dfTolerance, int nMinimumGcps)
 
 {
-    // If no minimumGcp parameter was passed, we  use the default value
-    // according to the model
-    if (nMinimumGcps == -1)
-    {
-        nMinimumGcps = ((nReqOrder + 1) * (nReqOrder + 2)) / 2 + 1;
-    }
     return GDALCreateGCPTransformerEx(nGCPCount, pasGCPList, nReqOrder,
-                                      bReversed, TRUE, dfTolerance,
+                                      CPL_TO_BOOL(bReversed), true, dfTolerance,
                                       nMinimumGcps);
 }
 
@@ -387,10 +396,7 @@ void GDALDestroyGCPTransformer(void *pTransformArg)
 
     if (CPLAtomicDec(&(psInfo->nRefCount)) == 0)
     {
-        GDALDeinitGCPs(psInfo->nGCPCount, psInfo->pasGCPList);
-        CPLFree(psInfo->pasGCPList);
-
-        CPLFree(pTransformArg);
+        delete psInfo;
     }
 }
 
@@ -416,7 +422,7 @@ void GDALDestroyGCPTransformer(void *pTransformArg)
  * @param panSuccess array in which a flag indicating success (TRUE) or
  * failure (FALSE) of the transformation are placed.
  *
- * @return TRUE.
+ * @return TRUE if all points have been successfully transformed.
  */
 
 int GDALGCPTransform(void *pTransformArg, int bDstToSrc, int nPointCount,
@@ -430,10 +436,12 @@ int GDALGCPTransform(void *pTransformArg, int bDstToSrc, int nPointCount,
     if (psInfo->bReversed)
         bDstToSrc = !bDstToSrc;
 
+    int bRet = TRUE;
     for (i = 0; i < nPointCount; i++)
     {
         if (x[i] == HUGE_VAL || y[i] == HUGE_VAL)
         {
+            bRet = FALSE;
             panSuccess[i] = FALSE;
             continue;
         }
@@ -453,7 +461,7 @@ int GDALGCPTransform(void *pTransformArg, int bDstToSrc, int nPointCount,
         panSuccess[i] = TRUE;
     }
 
-    return TRUE;
+    return bRet;
 }
 
 /************************************************************************/
@@ -494,15 +502,14 @@ CPLXMLNode *GDALSerializeGCPTransformer(void *pTransformArg)
     /* -------------------------------------------------------------------- */
     /*     Attach GCP List.                                                 */
     /* -------------------------------------------------------------------- */
-    if (psInfo->nGCPCount > 0)
+    if (!psInfo->asGCPs.empty())
     {
         if (psInfo->bRefine)
         {
             remove_outliers(psInfo);
         }
 
-        GDALSerializeGCPListToXML(psTree, psInfo->pasGCPList, psInfo->nGCPCount,
-                                  nullptr);
+        GDALSerializeGCPListToXML(psTree, psInfo->asGCPs, nullptr);
     }
 
     return psTree;
@@ -515,8 +522,7 @@ CPLXMLNode *GDALSerializeGCPTransformer(void *pTransformArg)
 void *GDALDeserializeGCPTransformer(CPLXMLNode *psTree)
 
 {
-    GDAL_GCP *pasGCPList = nullptr;
-    int nGCPCount = 0;
+    std::vector<gdal::GCP> asGCPs;
     void *pResult = nullptr;
     int nReqOrder = 0;
     int bReversed = 0;
@@ -531,8 +537,7 @@ void *GDALDeserializeGCPTransformer(CPLXMLNode *psTree)
 
     if (psGCPList != nullptr)
     {
-        GDALDeserializeGCPListFromXML(psGCPList, &pasGCPList, &nGCPCount,
-                                      nullptr);
+        GDALDeserializeGCPListFromXML(psGCPList, asGCPs, nullptr);
     }
 
     /* -------------------------------------------------------------------- */
@@ -549,21 +554,16 @@ void *GDALDeserializeGCPTransformer(CPLXMLNode *psTree)
     /* -------------------------------------------------------------------- */
     if (bRefine)
     {
-        pResult = GDALCreateGCPRefineTransformer(nGCPCount, pasGCPList,
-                                                 nReqOrder, bReversed,
-                                                 dfTolerance, nMinimumGcps);
+        pResult = GDALCreateGCPRefineTransformer(
+            static_cast<int>(asGCPs.size()), gdal::GCP::c_ptr(asGCPs),
+            nReqOrder, bReversed, dfTolerance, nMinimumGcps);
     }
     else
     {
-        pResult = GDALCreateGCPTransformer(nGCPCount, pasGCPList, nReqOrder,
+        pResult = GDALCreateGCPTransformer(static_cast<int>(asGCPs.size()),
+                                           gdal::GCP::c_ptr(asGCPs), nReqOrder,
                                            bReversed);
     }
-
-    /* -------------------------------------------------------------------- */
-    /*      Cleanup GCP copy.                                               */
-    /* -------------------------------------------------------------------- */
-    GDALDeinitGCPs(nGCPCount, pasGCPList);
-    CPLFree(pasGCPList);
 
     return pResult;
 }
@@ -755,7 +755,8 @@ static int calccoef(struct Control_Points *cp, double x_mean, double y_mean,
 
     /* INITIALIZE MATRIX */
 
-    m.v = static_cast<double *>(VSICalloc(m.n * m.n, sizeof(double)));
+    m.v = static_cast<double *>(
+        VSICalloc(cpl::fits_on<int>(m.n * m.n), sizeof(double)));
     if (m.v == nullptr)
     {
         return (MMEMERR);
@@ -1121,7 +1122,7 @@ static int remove_outliers(GCPTransformInfo *psInfo)
     double y2_sum = 0;
     memset(&sPoints, 0, sizeof(sPoints));
 
-    nGCPCount = psInfo->nGCPCount;
+    nGCPCount = static_cast<int>(psInfo->asGCPs.size());
     nMinimumGcps = psInfo->nMinimumGcps;
     nReqOrder = psInfo->nOrder;
     dfTolerance = psInfo->dfTolerance;
@@ -1137,14 +1138,14 @@ static int remove_outliers(GCPTransformInfo *psInfo)
         for (int nI = 0; nI < nGCPCount; nI++)
         {
             panStatus[nI] = 1;
-            padfGeoX[nI] = psInfo->pasGCPList[nI].dfGCPX;
-            padfGeoY[nI] = psInfo->pasGCPList[nI].dfGCPY;
-            padfRasterX[nI] = psInfo->pasGCPList[nI].dfGCPPixel;
-            padfRasterY[nI] = psInfo->pasGCPList[nI].dfGCPLine;
-            x1_sum += psInfo->pasGCPList[nI].dfGCPPixel;
-            y1_sum += psInfo->pasGCPList[nI].dfGCPLine;
-            x2_sum += psInfo->pasGCPList[nI].dfGCPX;
-            y2_sum += psInfo->pasGCPList[nI].dfGCPY;
+            padfGeoX[nI] = psInfo->asGCPs[nI].X();
+            padfGeoY[nI] = psInfo->asGCPs[nI].Y();
+            padfRasterX[nI] = psInfo->asGCPs[nI].Pixel();
+            padfRasterY[nI] = psInfo->asGCPs[nI].Line();
+            x1_sum += psInfo->asGCPs[nI].Pixel();
+            y1_sum += psInfo->asGCPs[nI].Line();
+            x2_sum += psInfo->asGCPs[nI].X();
+            y2_sum += psInfo->asGCPs[nI].Y();
         }
         psInfo->x1_mean = x1_sum / nGCPCount;
         psInfo->y1_mean = y1_sum / nGCPCount;
@@ -1174,18 +1175,14 @@ static int remove_outliers(GCPTransformInfo *psInfo)
                 break;
             }
 
-            CPLFree(psInfo->pasGCPList[nIndex].pszId);
-            CPLFree(psInfo->pasGCPList[nIndex].pszInfo);
-
             for (int nI = nIndex; nI < sPoints.count - 1; nI++)
             {
                 sPoints.e1[nI] = sPoints.e1[nI + 1];
                 sPoints.n1[nI] = sPoints.n1[nI + 1];
                 sPoints.e2[nI] = sPoints.e2[nI + 1];
                 sPoints.n2[nI] = sPoints.n2[nI + 1];
-                psInfo->pasGCPList[nI].pszId = psInfo->pasGCPList[nI + 1].pszId;
-                psInfo->pasGCPList[nI].pszInfo =
-                    psInfo->pasGCPList[nI + 1].pszInfo;
+                psInfo->asGCPs[nI].SetId(psInfo->asGCPs[nI + 1].Id());
+                psInfo->asGCPs[nI].SetInfo(psInfo->asGCPs[nI + 1].Info());
             }
 
             sPoints.count = sPoints.count - 1;
@@ -1197,12 +1194,12 @@ static int remove_outliers(GCPTransformInfo *psInfo)
 
         for (int nI = 0; nI < sPoints.count; nI++)
         {
-            psInfo->pasGCPList[nI].dfGCPX = sPoints.e2[nI];
-            psInfo->pasGCPList[nI].dfGCPY = sPoints.n2[nI];
-            psInfo->pasGCPList[nI].dfGCPPixel = sPoints.e1[nI];
-            psInfo->pasGCPList[nI].dfGCPLine = sPoints.n1[nI];
+            psInfo->asGCPs[nI].X() = sPoints.e2[nI];
+            psInfo->asGCPs[nI].Y() = sPoints.n2[nI];
+            psInfo->asGCPs[nI].Pixel() = sPoints.e1[nI];
+            psInfo->asGCPs[nI].Line() = sPoints.n1[nI];
         }
-        psInfo->nGCPCount = sPoints.count;
+        psInfo->asGCPs.resize(sPoints.count);
     }
     catch (const std::exception &e)
     {

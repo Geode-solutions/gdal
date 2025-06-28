@@ -80,45 +80,91 @@ the USE_TILE_EXTENT=YES open option to use the actual extent of tiles at
 the maximum zoom level. Or it can specify any of MINX/MINY/MAXX/MAXY to
 have a custom extent.
 
+|about-open-options|
 The following open options are available:
 
--  **TABLE**\ =table_name: Name of the table containing the tiles
-   (called `"Tile Pyramid User Data
-   Table" <http://www.geopackage.org/spec/#tiles_user_tables>`__ in the
-   GeoPackage specification language). If the GeoPackage dataset only
-   contains one table, this option is not necessary. Otherwise, it is
-   required.
--  **ZOOM_LEVEL**\ =value: Integer value between 0 and the maximum
-   filled in the *gpkg_tile_matrix* table. By default, the driver will
-   select the maximum zoom level, such as at least one tile at that zoom
-   level is found in the raster table.
--  **BAND_COUNT**\ =AUTO/1/2/3/4: Number of bands of the dataset exposed
-   after opening. Only used for Byte data type.
-   Some conversions will be done when possible and
-   implemented, but this might fail in some cases, depending on the
-   BAND_COUNT value and the number of bands of the tile.
-   Before GDAL 3.6, the default value is 4 (which is the always safe value).
-   Starting with GDAL 3.6, when the metadata of the file contains an hint
-   of the number of bands, this one is used in AUTO mode (default value), or
-   fallback to 4 when it is not present.
--  **MINX**\ =value: Minimum longitude/easting of the area of interest.
--  **MINY**\ =value: Minimum latitude/northing of the area of interest.
--  **MAXX**\ =value: Maximum longitude/easting of the area of interest.
--  **MAXY**\ =value: Maximum latitude/northing of the area of interest.
--  **USE_TILE_EXTENT**\ =YES/NO: Whether to use the extent of actual
-   existing tiles at the zoom level of the full resolution dataset.
-   Defaults to NO.
--  **TILE_FORMAT**\ =PNG_JPEG/PNG/PNG8/JPEG/WEBP: Format used to store
-   tiles. See :ref:`raster.gpkg.tile_formats`. Only used in
-   update mode and for Byte data type.
-   Defaults to PNG_JPEG, unless, starting with GDAL 3.6, if the
-   raster has one band, in which case PNG is used.
--  **QUALITY**\ =1-100: Quality setting for JPEG and WEBP compression.
-   Only used in update mode. Default to 75.
--  **ZLEVEL**\ =1-9: DEFLATE compression level for PNG tiles. Only used
-   in update mode. Default to 6.
--  **DITHER**\ =YES/NO: Whether to use Floyd-Steinberg dithering (for
-   TILE_FORMAT=PNG8). Only used in update mode. Defaults to NO.
+-  .. oo:: TABLE
+      :choices: <table_name>
+
+      Name of the table containing the tiles
+      (called `"Tile Pyramid User Data
+      Table" <http://www.geopackage.org/spec/#tiles_user_tables>`__ in the
+      GeoPackage specification language). If the GeoPackage dataset only
+      contains one table, this option is not necessary. Otherwise, it is
+      required.
+
+-  .. oo:: ZOOM_LEVEL
+
+      Integer value between 0 and the maximum
+      filled in the *gpkg_tile_matrix* table. By default, the driver will
+      select the maximum zoom level, such as at least one tile at that zoom
+      level is found in the raster table.
+
+-  .. oo:: BAND_COUNT
+      :choices: AUTO, 1, 2, 3, 4
+
+      Number of bands of the dataset exposed
+      after opening. Only used for Byte data type.
+      Some conversions will be done when possible and
+      implemented, but this might fail in some cases, depending on the
+      BAND_COUNT value and the number of bands of the tile.
+      Before GDAL 3.6, the default value is 4 (which is the always safe value).
+      Starting with GDAL 3.6, when the metadata of the file contains an hint
+      of the number of bands, this one is used in AUTO mode (default value), or
+      fallback to 4 when it is not present.
+
+-  .. oo:: MINX
+
+      Minimum longitude/easting of the area of interest.
+
+-  .. oo:: MINY
+
+      Minimum latitude/northing of the area of interest.
+
+-  .. oo:: MAXX
+
+      Maximum longitude/easting of the area of interest.
+
+-  .. oo:: MAXY
+
+      Maximum latitude/northing of the area of interest.
+
+-  .. oo:: USE_TILE_EXTENT
+      :choices: YES, NO
+      :default: NO
+
+      Whether to use the extent of actual
+      existing tiles at the zoom level of the full resolution dataset.
+
+-  .. oo:: TILE_FORMAT
+      :choices: PNG_JPEG, PNG, PNG8, JPEG, WEBP
+
+      Format used to store
+      tiles. See :ref:`raster.gpkg.tile_formats`. Only used in
+      update mode and for Byte data type.
+      Defaults to PNG_JPEG, unless, starting with GDAL 3.6, if the
+      raster has one band, in which case PNG is used.
+
+-  .. oo:: QUALITY
+      :choices: 1-100
+      :default: 75
+
+      Quality setting for JPEG and WEBP compression.
+      Only used in update mode.
+
+-  .. oo:: ZLEVEL
+      :choices: 1-9
+      :default: 6
+
+      DEFLATE compression level for PNG tiles. Only used
+      in update mode.
+
+-  .. oo:: DITHER
+      :choices: YES, NO
+      :default: NO
+
+      Whether to use Floyd-Steinberg dithering (for
+      :co:`TILE_FORMAT=PNG8`). Only used in update mode.
 
 Note: open options are typically specified with "-oo name=value" syntax
 in most GDAL utilities, or with the GDALOpenEx() API call.
@@ -167,7 +213,7 @@ transparent to the user of GDAL API/utilities
 The driver updates the GeoPackage ``last_change`` timestamp when the file is
 created or modified. If consistent binary output is required for
 reproducibility, the timestamp can be forced to a specific value by setting the
-:decl_configoption:`OGR_CURRENT_DATE` global configuration option.
+:config:`OGR_CURRENT_DATE` global configuration option.
 When setting the option, take care to meet the specific time format
 requirement of the GeoPackage standard,
 e.g. `for version 1.2 <https://www.geopackage.org/spec120/#r15>`__.
@@ -317,7 +363,7 @@ In all the above tiling schemes, consecutive zoom levels defer by a
 resolution of a factor of two.
 
 Starting with GDAL 3.2, it is also possible to use a Tile Matrix Set definition,
-encoded as a JSon file, according to the `OGC Two Dimensional Tile Matrix Set standard`_
+encoded as a JSON file, according to the `OGC Two Dimensional Tile Matrix Set standard`_
 Examples of such files can be found at http://schemas.opengis.net/tms/1.0/json/examples/
 The GDAL data directory also contains files prefixed with ``tms_`` and with a ``.json``
 extension. If there is a ``tms_FOO.json`` file, then ``FOO`` can be used as the
@@ -375,75 +421,204 @@ Float32        65535                                               65535
 Creation options
 ~~~~~~~~~~~~~~~~
 
+|about-creation-options|
 The following creation options are available:
 
--  **RASTER_TABLE**\ =string. Name of tile user table. By default, based
-   on the filename (i.e. if filename is foo.gpkg, the table will be
-   called "foo").
--  **APPEND_SUBDATASET**\ =YES/NO: If set to YES, an existing GeoPackage
-   will not be priorly destroyed, such as to be able to add new content
-   to it. Defaults to NO.
--  **RASTER_IDENTIFIER**\ =string. Human-readable identifier (e.g. short
-   name), put in the *identifier* column of the *gpkg_contents* table.
--  **RASTER_DESCRIPTION**\ =string. Human-readable description, put in
-   the *description* column of the *gpkg_contents* table.
--  **BLOCKSIZE**\ =integer. Block size in width and height in pixels.
-   Defaults to 256. Maximum supported is 4096. Should not be set when
-   using a non-custom TILING_SCHEME.
--  **BLOCKXSIZE**\ =integer. Block width in pixels. Defaults to 256.
-   Maximum supported is 4096.
--  **BLOCKYSIZE**\ =integer. Block height in pixels. Defaults to 256.
-   Maximum supported is 4096.
--  **TILE_FORMAT**\ =PNG_JPEG/PNG/PNG8/JPEG/WEBP/TIFF/AUTO: Format used
-   to store tiles. See :ref:`raster.gpkg.tile_formats`.
-   Defaults to AUTO.
--  **QUALITY**\ =1-100: Quality setting for JPEG and WEBP compression.
-   Default to 75.
--  **ZLEVEL**\ =1-9: DEFLATE compression level for PNG tiles. Default to
-   6.
--  **DITHER**\ =YES/NO: Whether to use Floyd-Steinberg dithering (for
-   TILE_FORMAT=PNG8). Defaults to NO.
--  **TILING_SCHEME**\ =CUSTOM/GoogleCRS84Quad/GoogleMapsCompatible/InspireCRS84Quad/PseudoTMS_GlobalGeodetic/PseudoTMS_GlobalMercator/other.
-   See :ref:`raster.gpkg.tiling_schemes`. Defaults to CUSTOM.
-   Starting with GDAL 3.2, the value of TILING_SCHEME can also be the filename
-   of a JSON file according to the `OGC Two Dimensional Tile Matrix Set standard`_,
-   a URL to such file, the radical of a definition file in the GDAL data directory
-   (e.g. ``FOO`` for a file named ``tms_FOO.json``) or the inline JSON definition.
-   Note: the TILING_SCHEME option with a non-CUSTOM value is best used
-   with the gdal_translate utility / CreateCopy() API operation. If used
-   with gdalwarp, it requires setting the -tr switch to the exact value
-   expected by one zoom level of the tiling scheme.
--  **ZOOM_LEVEL_STRATEGY**\ =AUTO/LOWER/UPPER. Strategy to determine
-   zoom level. Only used by CreateCopy() for TILING_SCHEME different
-   from CUSTOM. LOWER will select the zoom level immediately below the
-   theoretical computed non-integral zoom level, leading to subsampling.
-   On the contrary, UPPER will select the immediately above zoom level,
-   leading to oversampling. Defaults to AUTO which selects the closest
-   zoom level.
--  **RESAMPLING**\ =NEAREST/BILINEAR/CUBIC/CUBICSPLINE/LANCZOS/MODE/AVERAGE.
-   Resampling algorithm. Only used by CreateCopy() for TILING_SCHEME
-   different from CUSTOM. Defaults to BILINEAR.
--  **PRECISION**\ =floating_point_value_in_vertical_units: Smallest
-   significant value. Only used for tile gridded coverage datasets.
-   Defaults to 1.
--  **UOM**\ =string: (GDAL >= 2.3) Unit of Measurement. Only used for
-   tiled gridded coverage datasets. Also set through SetUnitType()
--  **FIELD_NAME**\ =string: (GDAL >= 2.3) Field name. Only used for
-   tiled gridded coverage datasets. Defaults to Height.
--  **QUANTITY_DEFINITION**\ =string: (GDAL >= 2.3) Description of the
-   field. Only used for tiled gridded coverage datasets. Defaults to
-   Height.
--  **GRID_CELL_ENCODING**\ =grid-value-is-center/grid-value-is-area/
-   grid-value-is-corner: (GDAL >= 2.3) Grid cell encoding. Only used for
-   tiled gridded coverage datasets. Defaults to grid-value-is-center,
-   when AREA_OR_POINT metadata item is not set.
--  **VERSION**\ =AUTO/1.0/1.1/1.2/1.3: (GDAL >= 2.2) Set GeoPackage version
-   (for application_id and user_version fields). In AUTO mode, this will
-   be equivalent to 1.2 starting with GDAL 2.3.
-   1.3 is available starting with GDAL 3.3
--  **ADD_GPKG_OGR_CONTENTS**\ =YES/NO: (GDAL >= 2.2) Defines whether to
-   add a gpkg_ogr_contents table to keep feature count for vector
-   layers, and associated triggers. Defaults to YES.
+-  .. co:: RASTER_TABLE
+
+      Name of tile user table. By default, based
+      on the filename (i.e. if filename is foo.gpkg, the table will be
+      called "foo").
+
+-  .. co:: APPEND_SUBDATASET
+      :choices: YES, NO
+      :default: NO
+
+      If set to YES, an existing GeoPackage
+      will not be priorly destroyed, such as to be able to add new content
+      to it.
+
+-  .. co:: RASTER_IDENTIFIER
+
+      Human-readable identifier (e.g. short
+      name), put in the *identifier* column of the *gpkg_contents* table.
+
+-  .. co:: RASTER_DESCRIPTION
+
+      Human-readable description, put in
+      the *description* column of the *gpkg_contents* table.
+
+-  .. co:: BLOCKSIZE
+      :choices: <integer>
+      :default: 256
+
+      Block size in width and height in pixels.
+      Maximum supported is 4096. Should not be set when
+      using a non-custom :co:`TILING_SCHEME`.
+
+-  .. co:: BLOCKXSIZE
+      :choices: <integer>
+      :default: 256
+
+      Block width in pixels. Maximum supported is 4096.
+
+-  .. co:: BLOCKYSIZE
+      :choices: <integer>
+      :default: 256
+
+      Block height in pixels. Maximum supported is 4096.
+
+-  .. co:: TILE_FORMAT
+      :choices: PNG_JPEG, PNG, PNG8, JPEG, WEBP, TIFF, AUTO
+      :default: AUTO
+
+      Format used to store tiles. See :ref:`raster.gpkg.tile_formats`.
+
+-  .. co:: QUALITY
+      :choices: 1-100
+      :default: 75
+
+      Quality setting for JPEG and WEBP compression.
+
+-  .. co:: ZLEVEL
+      :choices: 1-9
+      :default: 6
+
+      DEFLATE compression level for PNG tiles.
+
+-  .. co:: DITHER
+      :choices: YES, NO
+      :default: NO
+
+      Whether to use Floyd-Steinberg dithering (for
+      :co:`TILE_FORMAT=PNG8`).
+
+-  .. co:: TILING_SCHEME
+      :choices: CUSTOM, GoogleCRS84Quad, GoogleMapsCompatible, InspireCRS84Quad, PseudoTMS_GlobalGeodetic, PseudoTMS_GlobalMercator, other
+      :default: CUSTOM
+
+      See :ref:`raster.gpkg.tiling_schemes`.
+
+      Starting with GDAL 3.2, the value of TILING_SCHEME can also be the filename
+      of a JSON file according to the `OGC Two Dimensional Tile Matrix Set standard`_,
+      a URL to such file, the radical of a definition file in the GDAL data directory
+      (e.g. ``FOO`` for a file named ``tms_FOO.json``) or the inline JSON definition.
+      Note: the TILING_SCHEME option with a non-CUSTOM value is best used
+      with the gdal_translate utility / CreateCopy() API operation. If used
+      with gdalwarp, it requires setting the -tr switch to the exact value
+      expected by one zoom level of the tiling scheme.
+
+      In non-CUSTOM mode, the actual resolution can be controlled with the
+      :co:`ZOOM_LEVEL` or :co:`ZOOM_LEVEL_STRATEGY` options.
+
+- .. co:: ZOOM_LEVEL
+     :choices: <integer>
+     :since: 3.9
+
+     Zoom level number (starting at 0 for
+     coarsest zoom level). Only used for :co:`TILING_SCHEME` different from CUSTOM.
+     If this option is specified, :co:`ZOOM_LEVEL_STRATEGY` is ignored.
+
+-  .. co:: ZOOM_LEVEL_STRATEGY
+      :choices: AUTO, LOWER, UPPER
+      :default: AUTO
+
+      Strategy to determine
+      zoom level. Only used by CreateCopy() for :co:`TILING_SCHEME` different
+      from CUSTOM. LOWER will select the zoom level immediately below the
+      theoretical computed non-integral zoom level, leading to subsampling.
+      On the contrary, UPPER will select the immediately above zoom level,
+      leading to oversampling. Defaults to AUTO which selects the closest
+      zoom level.
+
+-  .. co:: RESAMPLING
+      :choices: NEAREST, BILINEAR, CUBIC, CUBICSPLINE, LANCZOS, MODE, AVERAGE
+      :default: BILINEAR
+
+      Resampling algorithm. Only used by CreateCopy() for TILING_SCHEME
+      different from CUSTOM. Defaults to BILINEAR.
+
+-  .. co:: PRECISION
+      :choices: <floating_point_value_in_vertical_units>
+      :default: 1.0
+
+      Smallest
+      significant value. Only used for tile gridded coverage datasets.
+
+-  .. co:: UOM
+      :since: 2.3
+
+      Unit of Measurement. Only used for
+      tiled gridded coverage datasets. Also set through SetUnitType()
+
+-  .. co:: FIELD_NAME
+      :default: Height
+      :since: 2.3
+
+      Field name. Only used for tiled gridded coverage datasets.
+
+-  .. co:: QUANTITY_DEFINITION
+      :default: Height
+      :since: 2.3
+
+      Description of the
+      field. Only used for tiled gridded coverage datasets.
+
+-  .. co:: GRID_CELL_ENCODING
+      :choices: grid-value-is-center, grid-value-is-area, grid-value-is-corner
+      :since: 2.3
+
+      Grid cell encoding. Only used for
+      tiled gridded coverage datasets. Defaults to grid-value-is-center,
+      when AREA_OR_POINT metadata item is not set.
+
+-  .. co:: VERSION
+      :choices: AUTO, 1.0, 1.1, 1.2, 1.3, 1.4
+      :since: 2.2
+
+      Set GeoPackage version
+      (for application_id and user_version fields). In AUTO mode, this will
+      be equivalent to 1.4 starting with GDAL 3.11 (1.2 in prior versions)
+      1.3 is available starting with GDAL 3.3
+      1.4 is available starting with GDAL 3.7.1
+
+-  .. co:: ADD_GPKG_OGR_CONTENTS
+      :choices: YES, NO
+      :default: YES
+      :since: 2.2
+
+      Defines whether to
+      add a gpkg_ogr_contents table to keep feature count for vector
+      layers, and associated triggers.
+
+-  .. co:: CRS_WKT_EXTENSION
+      :choices: YES, NO
+      :default: NO
+      :since: 3.8
+
+      Defines whether to add the ``definition_12_063`` column to the
+      ``gpkg_spatial_ref_sys`` system table, according to
+      http://www.geopackage.org/spec/#extension_crs_wkt . The default is NO,
+      unless the tile gridded coverage extension is used.
+      With VERSION >= 1.4, a ``epoch`` column is also added.
+      WKT strings in ``definition_12_063`` will follow the
+      `WKT2:2015 standard <https://docs.ogc.org/is/12-063r5/12-063r5.html>`__
+      when possible, but may use the
+      `WKT2:2019 standard <https://docs.ogc.org/is/18-010r7/18-010r7.html>`__
+      for specific cases (dynamic CRS with coordinate epoch).
+      This option generally does not need to be specified, as the driver will
+      automatically update the ``gpkg_spatial_ref_sys`` table when needed, but
+      it may be useful to create GeoPackage datasets matching the exceptions of
+      other software or profiles (such as the DGIWG-GPKG profile).
+
+-  .. co:: METADATA_TABLES
+      :choices: YES, NO
+      :since: 3.8
+
+      Defines whether to add the metadata system tables.
+      By default, they are created on demand.
+      If NO is specified, they are not created, even if metadata is set.
+      If YES is specified, they are always created.
 
 Overviews
 ---------
@@ -464,9 +639,9 @@ Metadata
 --------
 
 GDAL uses the standardized
-```gpkg_metadata`` <http://www.geopackage.org/spec/#_metadata_table>`__
+`gpkg_metadata <http://www.geopackage.org/spec/#_metadata_table>`__
 and
-```gpkg_metadata_reference`` <http://www.geopackage.org/spec/#_metadata_reference_table>`__
+`gpkg_metadata_reference <http://www.geopackage.org/spec/#_metadata_reference_table>`__
 tables to read and write metadata.
 
 GDAL metadata, from the default metadata domain and possibly other
@@ -504,7 +679,7 @@ IMAGE_STRUCTURE metadata item
 
 Starting with GDAL 3.6.1, the following optional metadata items can be read and
 write into the ``IMAGE_STRUCTURE`` metadata domain, in the
-``<GDALMultiDomainMetadata>``` XML element:
+``<GDALMultiDomainMetadata>`` XML element:
 
 - BAND_COUNT=1, 2, 3 or 4. Applies only for Byte data. Set when creating a
   dataset so that GDAL knows the number of bands when reopening it.
@@ -622,7 +797,7 @@ The ``gdal_get_layer_pixel_value()`` function (added in GDAL 3.7), variant of th
 generic ``gdal_get_pixel_value()``, can be used to extract the value of a pixel
 in a raster layer of the current dataset.
 
-It takes 5 arguments:
+It takes 5 or 6 arguments:
 
 * a string with the layer/table name
 * a band number (numbering starting at 1)
@@ -631,11 +806,13 @@ It takes 5 arguments:
   pixel space
 * georeferenced X value or column number
 * georeferenced Y value or line number
+* resampling method among ``nearest`` (default), ``bilinear``, ``cubic``, ``cubicspline``. Optional, added in GDAL 3.10
 
 .. code-block::
 
     SELECT gdal_get_layer_pixel_value('my_raster_table', 1, 'georef', 440720, 3751320)
     SELECT gdal_get_layer_pixel_value('my_raster_table', 1, 'pixel', 0, 0)
+    SELECT gdal_get_pixel_value('my_raster_table', 1, 'pixel', 0.5, 0.5, 'bilinear')  -- GDAL >= 3.10
 
 See Also
 --------

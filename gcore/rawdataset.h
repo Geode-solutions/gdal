@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Raw Translator
  * Purpose:  Implementation of RawDataset class.  Intended to be subclassed
@@ -10,23 +9,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2008-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDAL_FRMTS_RAW_RAWDATASET_H_INCLUDED
@@ -54,7 +37,7 @@ class CPL_DLL RawDataset : public GDALPamDataset
 
   protected:
     CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                     GDALDataType, int, int *, GSpacing nPixelSpace,
+                     GDALDataType, int, BANDMAP_TYPE, GSpacing nPixelSpace,
                      GSpacing nLineSpace, GSpacing nBandSpace,
                      GDALRasterIOExtraArg *psExtraArg) override;
     virtual CPLErr Close() override = 0;
@@ -62,6 +45,13 @@ class CPL_DLL RawDataset : public GDALPamDataset
   public:
     RawDataset();
     virtual ~RawDataset() = 0;
+
+    enum class Interleave
+    {
+        BSQ,
+        BIL,
+        BIP,
+    };
 
     bool GetRawBinaryLayout(GDALDataset::RawBinaryLayout &) override;
     void ClearCachedConfigOption(void);
@@ -93,6 +83,13 @@ class CPL_DLL RawRasterBand : public GDALPamRasterBand
         ORDER_BIG_ENDIAN,
         ORDER_VAX  // only valid for Float32, Float64, CFloat32 and CFloat64
     };
+
+#ifdef CPL_LSB
+    static constexpr ByteOrder NATIVE_BYTE_ORDER =
+        ByteOrder::ORDER_LITTLE_ENDIAN;
+#else
+    static constexpr ByteOrder NATIVE_BYTE_ORDER = ByteOrder::ORDER_BIG_ENDIAN;
+#endif
 
   protected:
     friend class RawDataset;
@@ -145,23 +142,44 @@ class CPL_DLL RawRasterBand : public GDALPamRasterBand
         YES
     };
 
+    // IsValid() should be called afterwards
     RawRasterBand(GDALDataset *poDS, int nBand, VSILFILE *fpRaw,
                   vsi_l_offset nImgOffset, int nPixelOffset, int nLineOffset,
                   GDALDataType eDataType, int bNativeOrder, OwnFP bOwnsFP);
 
+    // IsValid() should be called afterwards
     RawRasterBand(GDALDataset *poDS, int nBand, VSILFILE *fpRaw,
                   vsi_l_offset nImgOffset, int nPixelOffset, int nLineOffset,
                   GDALDataType eDataType, ByteOrder eByteOrder, OwnFP bOwnsFP);
 
+    // IsValid() should be called afterwards
     RawRasterBand(VSILFILE *fpRaw, vsi_l_offset nImgOffset, int nPixelOffset,
                   int nLineOffset, GDALDataType eDataType, int bNativeOrder,
                   int nXSize, int nYSize, OwnFP bOwnsFP);
 
+    // IsValid() should be called afterwards
     RawRasterBand(VSILFILE *fpRaw, vsi_l_offset nImgOffset, int nPixelOffset,
                   int nLineOffset, GDALDataType eDataType, ByteOrder eByteOrder,
                   int nXSize, int nYSize, OwnFP bOwnsFP);
 
+    // Returns nullptr in case of error
+    static std::unique_ptr<RawRasterBand>
+    Create(GDALDataset *poDS, int nBand, VSILFILE *fpRaw,
+           vsi_l_offset nImgOffset, int nPixelOffset, int nLineOffset,
+           GDALDataType eDataType, ByteOrder eByteOrder, OwnFP bOwnsFP);
+
+    // Returns nullptr in case of error
+    static std::unique_ptr<RawRasterBand>
+    Create(VSILFILE *fpRaw, vsi_l_offset nImgOffset, int nPixelOffset,
+           int nLineOffset, GDALDataType eDataType, ByteOrder eByteOrder,
+           int nXSize, int nYSize, OwnFP bOwnsFP);
+
     virtual ~RawRasterBand() /* = 0 */;
+
+    bool IsValid() const
+    {
+        return pLineStart != nullptr;
+    }
 
     CPLErr IReadBlock(int, int, void *) override;
     CPLErr IWriteBlock(int, int, void *) override;
@@ -192,22 +210,27 @@ class CPL_DLL RawRasterBand : public GDALPamRasterBand
     {
         return nImgOffset;
     }
+
     int GetPixelOffset() const
     {
         return nPixelOffset;
     }
+
     int GetLineOffset() const
     {
         return nLineOffset;
     }
+
     ByteOrder GetByteOrder() const
     {
         return eByteOrder;
     }
+
     VSILFILE *GetFPL() const
     {
         return fpRawL;
     }
+
     int GetOwnsFP() const
     {
         return bOwnsFP;

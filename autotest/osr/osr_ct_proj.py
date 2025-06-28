@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test reprojection of points of many different projections.
@@ -11,23 +10,7 @@
 # Copyright (c) 2004, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -35,7 +18,7 @@ import os
 import gdaltest
 import pytest
 
-from osgeo import gdal, osr
+from osgeo import gdal, ogr, osr
 
 bonne = 'PROJCS["bonne",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["bonne"],PARAMETER["False_Easting",0.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",0.0],PARAMETER["Standard_Parallel_1",60.0],UNIT["Meter",1.0]]'
 
@@ -461,12 +444,13 @@ def test_transform_bounds_densify_out_of_bounds():
         == 0
     )
     ctr = osr.CoordinateTransformation(src, dst)
-    assert ctr.TransformBounds(-120, 40, -80, 64, -1) == (
-        float("inf"),
-        float("inf"),
-        float("inf"),
-        float("inf"),
-    )
+    with osr.ExceptionMgr(useExceptions=False):
+        assert ctr.TransformBounds(-120, 40, -80, 64, -1) == (
+            float("inf"),
+            float("inf"),
+            float("inf"),
+            float("inf"),
+        )
 
 
 def test_transform_bounds_densify_out_of_bounds__geographic_output():
@@ -482,12 +466,8 @@ def test_transform_bounds_densify_out_of_bounds__geographic_output():
     dst.SetAxisMappingStrategy(osr.OAMS_AUTHORITY_COMPLIANT)
     assert dst.ImportFromEPSG(4326) == 0
     ctr = osr.CoordinateTransformation(src, dst)
-    assert ctr.TransformBounds(-120, 40, -80, 64, 1) == (
-        float("inf"),
-        float("inf"),
-        float("inf"),
-        float("inf"),
-    )
+    with pytest.raises(Exception):
+        ctr.TransformBounds(-120, 40, -80, 64, 1)
 
 
 def test_transform_bounds_antimeridian():
@@ -685,3 +665,28 @@ def test_transform_bounds__epsg_4326_to_esri_53037():
         (-17243953.787082285, -8392929.693707585, 17243953.787082285, 8392929.693707585)
     )
     assert gdal.GetLastErrorMsg() == ""
+
+
+def test_transform_bounds_polar_to_webmercator():
+    src = osr.SpatialReference()
+    src.SetAxisMappingStrategy(osr.OAMS_AUTHORITY_COMPLIANT)
+    assert (
+        src.ImportFromProj4(
+            "+proj=stere +lat_0=90 +lat_ts=60 +lon_0=-80 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+        == ogr.OGRERR_NONE
+    )
+    dst = osr.SpatialReference()
+    dst.SetAxisMappingStrategy(osr.OAMS_AUTHORITY_COMPLIANT)
+    assert dst.ImportFromEPSG(3857) == ogr.OGRERR_NONE
+    ctr = osr.CoordinateTransformation(src, dst)
+    assert ctr.TransformBounds(
+        -12288000, -12288000, 12288000, 12288000, 21
+    ) == pytest.approx(
+        (
+            -20037508.34167605,
+            -2450824.9835280986,
+            20037508.341676045,
+            20037508.329885136,
+        )
+    )

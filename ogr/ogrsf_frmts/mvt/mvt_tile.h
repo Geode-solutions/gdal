@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef MVT_TILE_H
@@ -103,6 +87,7 @@ class MVTTileLayerValue
         char *m_pszValue;
         char m_achValue[8];  // optimization for short strings
     };
+
     ValueType m_eType = ValueType::NONE;
 
     void unset();
@@ -119,12 +104,14 @@ class MVTTileLayerValue
     {
         return m_eType;
     }
+
     bool isNumeric() const
     {
         return m_eType == ValueType::FLOAT || m_eType == ValueType::DOUBLE ||
                m_eType == ValueType::INT || m_eType == ValueType::UINT ||
                m_eType == ValueType::SINT;
     }
+
     bool isString() const
     {
         return m_eType == ValueType::STRING ||
@@ -135,18 +122,22 @@ class MVTTileLayerValue
     {
         return m_fValue;
     }
+
     double getDoubleValue() const
     {
         return m_dfValue;
     }
+
     GInt64 getIntValue() const
     {
         return m_nIntValue;
     }
+
     GUInt64 getUIntValue() const
     {
         return m_nUIntValue;
     }
+
     bool getBoolValue() const
     {
         return m_bBoolValue;
@@ -180,36 +171,42 @@ class MVTTileLayerValue
     }
 
     void setStringValue(const std::string &osValue);
+
     void setFloatValue(float fValue)
     {
         unset();
         m_eType = ValueType::FLOAT;
         m_fValue = fValue;
     }
+
     void setDoubleValue(double dfValue)
     {
         unset();
         m_eType = ValueType::DOUBLE;
         m_dfValue = dfValue;
     }
+
     void setIntValue(GInt64 nVal)
     {
         unset();
         m_eType = ValueType::INT;
         m_nIntValue = nVal;
     }
+
     void setUIntValue(GUInt64 nVal)
     {
         unset();
         m_eType = ValueType::UINT;
         m_nUIntValue = nVal;
     }
+
     void setSIntValue(GInt64 nVal)
     {
         unset();
         m_eType = ValueType::SINT;
         m_nIntValue = nVal;
     }
+
     void setBoolValue(bool bVal)
     {
         unset();
@@ -218,10 +215,12 @@ class MVTTileLayerValue
     }
 
     void setValue(double dfVal);
+
     void setValue(int nVal)
     {
         setValue(static_cast<GInt64>(nVal));
     }
+
     void setValue(GInt64 nVal)
     {
         if (nVal < 0)
@@ -271,26 +270,32 @@ class MVTTileLayerFeature
     {
         return m_bHasId;
     }
+
     GUInt64 getId() const
     {
         return m_nId;
     }
+
     const std::vector<GUInt32> &getTags() const
     {
         return m_anTags;
     }
+
     bool hasType() const
     {
         return m_bHasType;
     }
+
     GeomType getType() const
     {
         return m_eType;
     }
+
     GUInt32 getGeometryCount() const
     {
         return static_cast<GUInt32>(m_anGeometry.size());
     }
+
     const std::vector<GUInt32> &getGeometry() const
     {
         return m_anGeometry;
@@ -302,32 +307,38 @@ class MVTTileLayerFeature
         m_nId = nId;
         invalidateCachedSize();
     }
+
     void addTag(GUInt32 nTag)
     {
         m_anTags.push_back(nTag);
         invalidateCachedSize();
     }
+
     void setType(GeomType eType)
     {
         m_bHasType = true;
         m_eType = eType;
         invalidateCachedSize();
     }
+
     void resizeGeometryArray(GUInt32 nNewSize)
     {
         m_anGeometry.resize(nNewSize);
         invalidateCachedSize();
     }
+
     void addGeometry(GUInt32 nGeometry)
     {
         m_anGeometry.push_back(nGeometry);
         invalidateCachedSize();
     }
+
     void setGeometry(GUInt32 nIdx, GUInt32 nVal)
     {
         m_anGeometry[nIdx] = nVal;
         invalidateCachedSize();
     }
+
     void setGeometry(const std::vector<GUInt32> &anGeometry)
     {
         m_anGeometry = anGeometry;
@@ -368,22 +379,27 @@ class MVTTileLayer
     {
         return m_nVersion;
     }
+
     const std::string &getName() const
     {
         return m_osName;
     }
+
     const std::vector<std::shared_ptr<MVTTileLayerFeature>> &getFeatures() const
     {
         return m_apoFeatures;
     }
+
     const std::vector<std::string> &getKeys() const
     {
         return m_aosKeys;
     }
+
     const std::vector<MVTTileLayerValue> &getValues() const
     {
         return m_aoValues;
     }
+
     GUInt32 getExtent() const
     {
         return m_nExtent;
@@ -394,12 +410,15 @@ class MVTTileLayer
         m_nVersion = nVersion;
         invalidateCachedSize();
     }
+
     void setName(const std::string &osName)
     {
         m_osName = osName;
         invalidateCachedSize();
     }
+
     size_t addFeature(std::shared_ptr<MVTTileLayerFeature> poFeature);
+
     GUInt32 addKey(const std::string &osKey)
     {
         m_aosKeys.push_back(osKey);
@@ -454,6 +473,7 @@ class MVTTile
         m_apoLayers.clear();
         invalidateCachedSize();
     }
+
     void addLayer(std::shared_ptr<MVTTileLayer> poLayer);
     size_t getSize() const;
     void write(GByte **ppabyData) const;

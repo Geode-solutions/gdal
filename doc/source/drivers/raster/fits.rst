@@ -25,7 +25,7 @@ Only Latitude - Longitude systems (see the `FITS standard document
 have been implemented, those for which remote sensing processing is commonly used.
 As 3D Datum information is missing in FITS/WCS standard, Radii and target bodies
 are translated using the planetary extension proposed `here
-<https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018EA000388>`_. 
+<https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2018EA000388>`_.
 
 Non-standard header keywords that are present in the FITS file will be
 copied to the dataset's metadata when the file is opened, for access via
@@ -244,27 +244,35 @@ of the field.
 Fields that have TSCAL and/or TZERO headers are automatically scaled and offset
 to the physical value (only applies to numeric data types)
 
-TNULL headers are used for integer numeric data types and for a single-occurence
+TNULL headers are used for integer numeric data types and for a single-occurrence
 field to set a OGR field to NULL.
 
 Layer creation options
 ----------------------
 
+|about-layer-creation-options|
 The following layer creation options are available:
 
-- **REPEAT_{fieldname}=number**. For a given field (substitute {fieldname} by its
-  name) of type IntegerList, Integer64List
-  or RealList, specify a fixed number of elements. Otherwise those fields will be
-  created as variable-length FITS columns, which can have performance impact on
-  creation.
+- .. lco:: REPEAT_{fieldname}
+     :choices: <integer>
 
-- **COMPUTE_REPEAT=AT_FIELD_CREATION/AT_FIRST_FEATURE_CREATION**. For fields of
-  type IntegerList, Integer64List or RealList, specifies when they are mapped to
-  a FITS column type. The default is AT_FIELD_CREATION, and implies that they
-  will be created as variable-length FITS columns, unless a REPEAT_{fieldname}
-  option is specified. When AT_FIRST_FEATURE_CREATION is specified, the number of
-  elements in the first feature will be taken into account to create fixed-size
-  FITS columns.
+     For a given field (substitute {fieldname} by its
+     name) of type IntegerList, Integer64List
+     or RealList, specify a fixed number of elements. Otherwise those fields will be
+     created as variable-length FITS columns, which can have performance impact on
+     creation.
+
+- .. lco:: COMPUTE_REPEAT
+     :choices: AT_FIELD_CREATION, AT_FIRST_FEATURE_CREATION
+     :default: AT_FIELD_CREATION
+
+     For fields of
+     type IntegerList, Integer64List or RealList, specifies when they are mapped to
+     a FITS column type. The default is AT_FIELD_CREATION, and implies that they
+     will be created as variable-length FITS columns, unless a :lco:`REPEAT_{fieldname}`
+     option is specified. When AT_FIRST_FEATURE_CREATION is specified, the number of
+     elements in the first feature will be taken into account to create fixed-size
+     FITS columns.
 
 When using ogr2ogr or :cpp:func:`GDALVectorTranslate` with a FITS source, the
 FITS header will be taken into account, in particular to help to determine the
@@ -333,7 +341,7 @@ Examples
 Other
 -----
 
-NOTE: Implemented as ``gdal/frmts/fits/fitsdataset.cpp``.
+NOTE: Implemented as :source_file:`frmts/fits/fitsdataset.cpp`.
 
 .. _notes-on-cfitsio-linking:
 
@@ -343,10 +351,10 @@ Linux
 ^^^^^
 From source
 """""""""""
-Install CFITSIO headers from your distro (eg, cfitsio-devel on Fedora; libcfitsio-dev on Debian-Ubuntu), then compile GDAL as usual. CFITSIO will be automatically detected and linked.
+Install CFITSIO headers from your distribution (eg, cfitsio-devel on Fedora; libcfitsio-dev on Debian-Ubuntu), then compile GDAL as usual. CFITSIO will be automatically detected and linked.
 
-From distros
-""""""""""""
+From distributions
+""""""""""""""""""
 On Fedora/CentOS install CFITSIO then GDAL with dnf (yum): cfitsio is automatically linked.
 
 MacOSX

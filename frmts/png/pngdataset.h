@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  PNG Driver
  * Purpose:  Implement GDAL PNG Support
@@ -9,23 +8,7 @@
  * Copyright (c) 2000, Frank Warmerdam
  * Copyright (c) 2007-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************
  *
  * ISSUES:
@@ -60,12 +43,16 @@
 #include <csetjmp>
 
 #include <algorithm>
+#include <array>
 
 #ifdef _MSC_VER
 #pragma warning(disable : 4611)
 #endif
 
-#if defined(__SSE2__) || defined(_M_X64) ||                                    \
+#ifdef USE_NEON_OPTIMIZATIONS
+#define HAVE_SSE2
+#include "include_sse2neon.h"
+#elif defined(__SSE2__) || defined(_M_X64) ||                                  \
     (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
 #define HAVE_SSE2
 #include <emmintrin.h>
@@ -94,50 +81,53 @@ class PNGDataset final : public GDALPamDataset
 {
     friend class PNGRasterBand;
 
-    VSILFILE *fpImage;
-    png_structp hPNG;
-    png_infop psPNGInfo;
-    int nBitDepth;
-    int nColorType;  // PNG_COLOR_TYPE_*
-    int bInterlaced;
+    VSILFILE *fpImage{};
+    png_structp hPNG{};
+    png_infop psPNGInfo{};
+    int nBitDepth{8};
+    int nColorType{};  // PNG_COLOR_TYPE_*
+    int bInterlaced{};
 
-    int nBufferStartLine;
-    int nBufferLines;
-    int nLastLineRead;
-    GByte *pabyBuffer;
+    int nBufferStartLine{};
+    int nBufferLines{};
+    int nLastLineRead{-1};
+    GByte *pabyBuffer{};
 
-    GDALColorTable *poColorTable;
+    GDALColorTable *poColorTable{};
 
-    int bGeoTransformValid;
-    double adfGeoTransform[6];
+    int bGeoTransformValid{};
+    GDALGeoTransform m_gt{};
 
     void CollectMetadata();
 
-    int bHasReadXMPMetadata;
+    int bHasReadXMPMetadata{};
     void CollectXMPMetadata();
 
     CPLErr LoadScanline(int);
     CPLErr LoadInterlacedChunk(int);
     void Restart();
 
-    int bHasTriedLoadWorldFile;
+    int bHasTriedLoadWorldFile{};
     void LoadWorldFile();
-    CPLString osWldFilename;
+    CPLString osWldFilename{};
 
-    int bHasReadICCMetadata;
+    int bHasReadICCMetadata{};
     void LoadICCProfile();
+
+    bool m_bByteOrderIsLittleEndian = false;
 
     static void WriteMetadataAsText(jmp_buf sSetJmpContext, png_structp hPNG,
                                     png_infop psPNGInfo, const char *pszKey,
                                     const char *pszValue);
     static GDALDataset *OpenStage2(GDALOpenInfo *, PNGDataset *&);
 
+    CPL_DISALLOW_COPY_ASSIGN(PNGDataset)
+
   public:
     PNGDataset();
     virtual ~PNGDataset();
 
     static GDALDataset *Open(GDALOpenInfo *);
-    static int Identify(GDALOpenInfo *);
     static GDALDataset *CreateCopy(const char *pszFilename,
                                    GDALDataset *poSrcDS, int bStrict,
                                    char **papszOptions,
@@ -146,7 +136,7 @@ class PNGDataset final : public GDALPamDataset
 
     virtual char **GetFileList(void) override;
 
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     virtual CPLErr FlushCache(bool bAtClosing) override;
 
     virtual char **GetMetadataDomainList() override;
@@ -157,8 +147,8 @@ class PNGDataset final : public GDALPamDataset
                     const char *pszDomain = nullptr) override;
 
     virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, int, int *, GSpacing, GSpacing,
-                             GSpacing,
+                             GDALDataType, int, BANDMAP_TYPE, GSpacing,
+                             GSpacing, GSpacing,
                              GDALRasterIOExtraArg *psExtraArg) override;
 
 #ifdef ENABLE_WHOLE_IMAGE_OPTIMIZATION
@@ -168,7 +158,7 @@ class PNGDataset final : public GDALPamDataset
                           void *apabyBuffers[4]);
 #endif
 
-    jmp_buf sSetJmpContext;  // Semi-private.
+    jmp_buf sSetJmpContext{};  // Semi-private.
 
 #ifdef SUPPORT_CREATE
     int m_nBitDepth;
@@ -209,6 +199,7 @@ class PNGRasterBand final : public GDALPamRasterBand
 
   public:
     PNGRasterBand(PNGDataset *, int);
+
     virtual ~PNGRasterBand()
     {
     }
@@ -239,6 +230,7 @@ class PNGRasterBand final : public GDALPamRasterBand
 
   protected:
     int m_bBandProvided[5];
+
     void reset_band_provision_flags()
     {
         PNGDataset &ds = *reinterpret_cast<PNGDataset *>(poDS);

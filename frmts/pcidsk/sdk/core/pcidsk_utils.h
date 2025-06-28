@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #ifndef INCLUDE_CORE_PCIDSK_UTILS_H
 #define INCLUDE_CORE_PCIDSK_UTILS_H
@@ -59,7 +43,7 @@ namespace PCIDSK
     bool   BigEndianSystem(void);
     void   GetCurrentDateTime( char *out_datetime );
 
-    void   ParseTileFormat(std::string oOptions, int & nTileSize,
+    void   ParseTileFormat(const std::string& oOptions, int & nTileSize,
                            std::string & oCompress);
 
     void   SwapPixels(void* const data,
@@ -98,6 +82,15 @@ namespace PCIDSK
 
     void                DefaultDebug( const char * );
     void                Debug( void (*)(const char *), const char *fmt, ... ) PCIDSK_PRINT_FUNC_FORMAT(2,3);
+
+/************************************************************************/
+/*                           DIV_ROUND_UP()                             */
+/************************************************************************/
+
+template <class T, class U> inline T DIV_ROUND_UP(T a, U b)
+{
+    return static_cast<T>(a / b + (((a % b) == 0) ? 0 : 1));
+}
 
 } // end namespace PCIDSK
 

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  NITF Read/Write Library
  * Purpose:  Module responsible for implementation of DE segments.
@@ -8,23 +7,7 @@
  **********************************************************************
  * Copyright (c) 2010-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal.h"
@@ -33,9 +16,13 @@
 #include "cpl_conv.h"
 #include "cpl_string.h"
 
+#ifndef CPL_IGNORE_RET_VAL_INT_defined
+#define CPL_IGNORE_RET_VAL_INT_defined
+
 CPL_INLINE static void CPL_IGNORE_RET_VAL_INT(CPL_UNUSED int unused)
 {
 }
+#endif
 
 /************************************************************************/
 /*                          NITFDESAccess()                             */
@@ -584,6 +571,7 @@ CPLXMLNode *NITFDESGetXml(NITFFile *psFile, int iSegment, bool bValidate,
     psDesNode = CPLCreateXMLNode(NULL, CXT_Element, "des");
     papszTmp = psDes->papszMetadata;
 
+    bool bIsXML_DATA_CONTENT = false;
     while (papszTmp != NULL && *papszTmp != NULL)
     {
         CPLXMLNode *psFieldNode;
@@ -605,6 +593,7 @@ CPLXMLNode *NITFDESGetXml(NITFFile *psFile, int iSegment, bool bValidate,
 
         if (papszTmp == psDes->papszMetadata)
         {
+            bIsXML_DATA_CONTENT = strcmp(pszMDval, "XML_DATA_CONTENT") == 0;
             CPLCreateXMLNode(CPLCreateXMLNode(psDesNode, CXT_Attribute, "name"),
                              CXT_Text, pszMDval);
         }
@@ -646,13 +635,32 @@ CPLXMLNode *NITFDESGetXml(NITFFile *psFile, int iSegment, bool bValidate,
                     return NULL;
                 }
 
-                CPLAddXMLAttributeAndValue(psFieldNode, "value", pszBase64);
                 CPLXMLNode *psChild = NITFCreateXMLDesDataFields(
                     psFile, psDes, (GByte *)pszUnescaped, nLen, bValidate,
                     pbGotError);
                 if (psChild)
                 {
+                    CPLAddXMLAttributeAndValue(psFieldNode, "value", pszBase64);
                     CPLAddXMLChild(psFieldNode, psChild);
+                }
+                else if (bIsXML_DATA_CONTENT)
+                {
+                    CPLXMLNode *psXML = CPLParseXMLString(pszUnescaped);
+                    if (psXML)
+                    {
+                        CPLXMLNode *psXMLContent = CPLCreateXMLNode(
+                            psFieldNode, CXT_Element, "xml_content");
+                        CPLAddXMLChild(psXMLContent, psXML);
+                    }
+                    else
+                    {
+                        CPLAddXMLAttributeAndValue(psFieldNode, "value",
+                                                   pszBase64);
+                    }
+                }
+                else
+                {
+                    CPLAddXMLAttributeAndValue(psFieldNode, "value", pszBase64);
                 }
 
                 CPLFree(pszBase64);
@@ -673,3 +681,5 @@ CPLXMLNode *NITFDESGetXml(NITFFile *psFile, int iSegment, bool bValidate,
 
     return psDesNode;
 }
+
+#undef GetMD

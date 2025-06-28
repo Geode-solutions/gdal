@@ -8,28 +8,13 @@
  * Copyright (C) 2010 Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2010-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "ogr_swq.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -68,16 +53,28 @@ swq_select::~swq_select()
     }
     CPLFree(table_defs);
 
-    for (int i = 0; i < result_columns; i++)
+    for (auto &col : column_defs)
     {
-        CPLFree(column_defs[i].table_name);
-        CPLFree(column_defs[i].field_name);
-        CPLFree(column_defs[i].field_alias);
+        CPLFree(col.table_name);
+        CPLFree(col.field_name);
+        CPLFree(col.field_alias);
 
-        delete column_defs[i].expr;
+        delete col.expr;
     }
 
-    CPLFree(column_defs);
+    // cppcheck-suppress constVariableReference
+    for (auto &entry : m_exclude_fields)
+    {
+        // cppcheck-suppress constVariableReference
+        for (auto &col : entry.second)
+        {
+            CPLFree(col.table_name);
+            CPLFree(col.field_name);
+            CPLFree(col.field_alias);
+
+            delete col.expr;
+        }
+    }
 
     for (int i = 0; i < order_specs; i++)
     {
@@ -166,125 +163,6 @@ void swq_select::postpreparse()
 }
 
 /************************************************************************/
-/*                                Dump()                                */
-/************************************************************************/
-
-void swq_select::Dump(FILE *fp)
-
-{
-    fprintf(fp, "SELECT Statement:\n");
-
-    /* -------------------------------------------------------------------- */
-    /*      query mode.                                                     */
-    /* -------------------------------------------------------------------- */
-    if (query_mode == SWQM_SUMMARY_RECORD)
-        fprintf(fp, "  QUERY MODE: SUMMARY RECORD\n");
-    else if (query_mode == SWQM_RECORDSET)
-        fprintf(fp, "  QUERY MODE: RECORDSET\n");
-    else if (query_mode == SWQM_DISTINCT_LIST)
-        fprintf(fp, "  QUERY MODE: DISTINCT LIST\n");
-    else
-        fprintf(fp, "  QUERY MODE: %d/unknown\n", query_mode);
-
-    /* -------------------------------------------------------------------- */
-    /*      column_defs                                                     */
-    /* -------------------------------------------------------------------- */
-    fprintf(fp, "  Result Columns:\n");
-    for (int i = 0; i < result_columns; i++)
-    {
-        swq_col_def *def = column_defs + i;
-
-        fprintf(fp, "  Table name: %s\n", def->table_name);
-        fprintf(fp, "  Name: %s\n", def->field_name);
-
-        if (def->field_alias)
-            fprintf(fp, "    Alias: %s\n", def->field_alias);
-
-        if (def->col_func == SWQCF_NONE)
-            /* nothing */;
-        else if (def->col_func == SWQCF_AVG)
-            fprintf(fp, "    Function: AVG\n");
-        else if (def->col_func == SWQCF_MIN)
-            fprintf(fp, "    Function: MIN\n");
-        else if (def->col_func == SWQCF_MAX)
-            fprintf(fp, "    Function: MAX\n");
-        else if (def->col_func == SWQCF_COUNT)
-            fprintf(fp, "    Function: COUNT\n");
-        else if (def->col_func == SWQCF_SUM)
-            fprintf(fp, "    Function: SUM\n");
-        else if (def->col_func == SWQCF_CUSTOM)
-            fprintf(fp, "    Function: CUSTOM\n");
-        else
-            fprintf(fp, "    Function: UNKNOWN!\n");
-
-        if (def->distinct_flag)
-            fprintf(fp, "    DISTINCT flag set\n");
-
-        fprintf(fp, "    Field Index: %d, Table Index: %d\n", def->field_index,
-                def->table_index);
-
-        fprintf(fp, "    Field Type: %d\n", def->field_type);
-        fprintf(fp, "    Target Type: %d\n", def->target_type);
-        fprintf(fp, "    Target SubType: %d\n", def->target_subtype);
-        fprintf(fp, "    Length: %d, Precision: %d\n", def->field_length,
-                def->field_precision);
-
-        if (def->expr != nullptr)
-        {
-            fprintf(fp, "    Expression:\n");
-            def->expr->Dump(fp, 3);
-        }
-    }
-
-    /* -------------------------------------------------------------------- */
-    /*      table_defs                                                      */
-    /* -------------------------------------------------------------------- */
-    fprintf(fp, "  Table Defs: %d\n", table_count);
-    for (int i = 0; i < table_count; i++)
-    {
-        fprintf(fp, "    datasource=%s, table_name=%s, table_alias=%s\n",
-                table_defs[i].data_source, table_defs[i].table_name,
-                table_defs[i].table_alias);
-    }
-
-    /* -------------------------------------------------------------------- */
-    /*      join_defs                                                       */
-    /* -------------------------------------------------------------------- */
-    if (join_count > 0)
-        fprintf(fp, "  joins:\n");
-
-    for (int i = 0; i < join_count; i++)
-    {
-        fprintf(fp, "  %d:\n", i);
-        join_defs[i].poExpr->Dump(fp, 4);
-        fprintf(fp, "    Secondary Table: %d\n", join_defs[i].secondary_table);
-    }
-
-    /* -------------------------------------------------------------------- */
-    /*      Where clause.                                                   */
-    /* -------------------------------------------------------------------- */
-    if (where_expr != nullptr)
-    {
-        fprintf(fp, "  WHERE:\n");
-        where_expr->Dump(fp, 2);
-    }
-
-    /* -------------------------------------------------------------------- */
-    /*      Order by                                                        */
-    /* -------------------------------------------------------------------- */
-
-    for (int i = 0; i < order_specs; i++)
-    {
-        fprintf(fp, "  ORDER BY: %s (%d/%d)", order_defs[i].field_name,
-                order_defs[i].table_index, order_defs[i].field_index);
-        if (order_defs[i].ascending_flag)
-            fprintf(fp, " ASC\n");
-        else
-            fprintf(fp, " DESC\n");
-    }
-}
-
-/************************************************************************/
 /*                               Unparse()                              */
 /************************************************************************/
 
@@ -294,9 +172,9 @@ char *swq_select::Unparse()
     if (query_mode == SWQM_DISTINCT_LIST)
         osSelect += "DISTINCT ";
 
-    for (int i = 0; i < result_columns; i++)
+    for (int i = 0; i < result_columns(); i++)
     {
-        swq_col_def *def = column_defs + i;
+        swq_col_def *def = &column_defs[i];
 
         if (i > 0)
             osSelect += ", ";
@@ -309,16 +187,34 @@ char *swq_select::Unparse()
         }
         else
         {
-            if (def->col_func == SWQCF_AVG)
-                osSelect += "AVG(";
-            else if (def->col_func == SWQCF_MIN)
-                osSelect += "MIN(";
-            else if (def->col_func == SWQCF_MAX)
-                osSelect += "MAX(";
-            else if (def->col_func == SWQCF_COUNT)
-                osSelect += "COUNT(";
-            else if (def->col_func == SWQCF_SUM)
-                osSelect += "SUM(";
+            switch (def->col_func)
+            {
+                case SWQCF_NONE:
+                    break;
+                case SWQCF_AVG:
+                    osSelect += "AVG(";
+                    break;
+                case SWQCF_MIN:
+                    osSelect += "MIN(";
+                    break;
+                case SWQCF_MAX:
+                    osSelect += "MAX(";
+                    break;
+                case SWQCF_COUNT:
+                    osSelect += "COUNT(";
+                    break;
+                case SWQCF_SUM:
+                    osSelect += "SUM(";
+                    break;
+                case SWQCF_STDDEV_POP:
+                    osSelect += "STDDEV_POP(";
+                    break;
+                case SWQCF_STDDEV_SAMP:
+                    osSelect += "STDDEV_SAMP(";
+                    break;
+                case SWQCF_CUSTOM:
+                    break;
+            }
 
             if (def->distinct_flag && def->col_func == SWQCF_COUNT)
                 osSelect += "DISTINCT ";
@@ -331,6 +227,7 @@ char *swq_select::Unparse()
                 osSelect += ".";
             }
             osSelect += swq_expr_node::QuoteIfNecessary(def->field_name, '"');
+            osSelect += ")";
         }
 
         if (def->field_alias != nullptr &&
@@ -339,9 +236,6 @@ char *swq_select::Unparse()
             osSelect += " AS ";
             osSelect += swq_expr_node::QuoteIfNecessary(def->field_alias, '"');
         }
-
-        if (def->col_func != SWQCF_NONE)
-            osSelect += ")";
     }
 
     osSelect += " FROM ";
@@ -394,13 +288,30 @@ char *swq_select::Unparse()
         CPLFree(pszTmp);
     }
 
-    for (int i = 0; i < order_specs; i++)
+    if (order_specs > 0)
     {
         osSelect += " ORDER BY ";
-        osSelect +=
-            swq_expr_node::QuoteIfNecessary(order_defs[i].field_name, '"');
-        if (!order_defs[i].ascending_flag)
-            osSelect += " DESC";
+        for (int i = 0; i < order_specs; i++)
+        {
+            if (i > 0)
+                osSelect += ", ";
+            osSelect +=
+                swq_expr_node::QuoteIfNecessary(order_defs[i].field_name, '"');
+            if (!order_defs[i].ascending_flag)
+                osSelect += " DESC";
+        }
+    }
+
+    if (limit >= 0)
+    {
+        osSelect += " LIMIT ";
+        osSelect += CPLSPrintf(CPL_FRMT_GIB, limit);
+    }
+
+    if (offset > 0)
+    {
+        osSelect += " OFFSET ";
+        osSelect += CPLSPrintf(CPL_FRMT_GIB, offset);
     }
 
     return CPLStrdup(osSelect);
@@ -413,7 +324,7 @@ char *swq_select::Unparse()
 /************************************************************************/
 
 int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
-                          int distinct_flag)
+                          bool distinct_flag, bool bHidden)
 
 {
     if (query_mode == SWQM_DISTINCT_LIST && distinct_flag)
@@ -427,12 +338,9 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
     /* -------------------------------------------------------------------- */
     /*      Grow the array.                                                 */
     /* -------------------------------------------------------------------- */
-    result_columns++;
 
-    column_defs = static_cast<swq_col_def *>(
-        CPLRealloc(column_defs, sizeof(swq_col_def) * result_columns));
-
-    swq_col_def *col_def = column_defs + result_columns - 1;
+    column_defs.emplace_back();
+    swq_col_def *col_def = &column_defs.back();
 
     memset(col_def, 0, sizeof(swq_col_def));
 
@@ -444,11 +352,26 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
         col_def->table_name =
             CPLStrdup(poExpr->table_name ? poExpr->table_name : "");
         col_def->field_name = CPLStrdup(poExpr->string_value);
+
+        // Associate a column list from an EXCEPT () clause with its associated
+        // wildcard
+        if (EQUAL(col_def->field_name, "*"))
+        {
+            auto it = m_exclude_fields.find(-1);
+
+            if (it != m_exclude_fields.end())
+            {
+                int curr_asterisk_pos =
+                    static_cast<int>(column_defs.size() - 1);
+                m_exclude_fields[curr_asterisk_pos] = std::move(it->second);
+                m_exclude_fields.erase(it);
+            }
+        }
     }
     else if (poExpr->eNodeType == SNT_OPERATION &&
              (poExpr->nOperation == SWQ_CAST ||
-              (poExpr->nOperation >= SWQ_AVG &&
-               poExpr->nOperation <= SWQ_SUM)) &&
+              (poExpr->nOperation >= SWQ_AGGREGATE_BEGIN &&
+               poExpr->nOperation <= SWQ_AGGREGATE_END)) &&
              poExpr->nSubExprCount >= 1 &&
              poExpr->papoSubExpr[0]->eNodeType == SNT_COLUMN)
     {
@@ -480,6 +403,26 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
             "%s_%s", op->pszName, poExpr->papoSubExpr[0]->string_value));
     }
 
+    if (bHidden)
+    {
+        const char *pszDstFieldName =
+            col_def->field_alias ? col_def->field_alias : col_def->field_name;
+        if (!EQUAL(pszDstFieldName, "OGR_STYLE"))
+        {
+            CPLError(
+                CE_Failure, CPLE_AppDefined,
+                "HIDDEN keyword only supported on a column named OGR_STYLE");
+            CPLFree(col_def->table_name);
+            col_def->table_name = nullptr;
+            CPLFree(col_def->field_name);
+            col_def->field_name = nullptr;
+            CPLFree(col_def->field_alias);
+            col_def->field_alias = nullptr;
+            column_defs.pop_back();
+            return FALSE;
+        }
+    }
+
     col_def->table_index = -1;
     col_def->field_index = -1;
     col_def->field_type = SWQ_OTHER;
@@ -488,6 +431,7 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
     col_def->target_subtype = OFSTNone;
     col_def->col_func = SWQCF_NONE;
     col_def->distinct_flag = distinct_flag;
+    col_def->bHidden = bHidden;
 
     /* -------------------------------------------------------------------- */
     /*      Do we have a CAST operator in play?                             */
@@ -554,7 +498,7 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
             col_def->field_name = nullptr;
             CPLFree(col_def->field_alias);
             col_def->field_alias = nullptr;
-            result_columns--;
+            column_defs.pop_back();
             return FALSE;
         }
 
@@ -573,7 +517,7 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
                     col_def->field_name = nullptr;
                     CPLFree(col_def->field_alias);
                     col_def->field_alias = nullptr;
-                    result_columns--;
+                    column_defs.pop_back();
                     return FALSE;
                 }
 
@@ -604,7 +548,7 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
                     col_def->field_name = nullptr;
                     CPLFree(col_def->field_alias);
                     col_def->field_alias = nullptr;
-                    result_columns--;
+                    column_defs.pop_back();
                     return FALSE;
                 }
                 col_def->field_length =
@@ -631,8 +575,8 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
     /*      Do we have a special column function in play?                   */
     /* -------------------------------------------------------------------- */
     if (poExpr->eNodeType == SNT_OPERATION &&
-        static_cast<swq_op>(poExpr->nOperation) >= SWQ_AVG &&
-        static_cast<swq_op>(poExpr->nOperation) <= SWQ_SUM)
+        static_cast<swq_op>(poExpr->nOperation) >= SWQ_AGGREGATE_BEGIN &&
+        static_cast<swq_op>(poExpr->nOperation) <= SWQ_AGGREGATE_END)
     {
         if (poExpr->nSubExprCount != 1)
         {
@@ -648,7 +592,7 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
             col_def->field_name = nullptr;
             CPLFree(col_def->field_alias);
             col_def->field_alias = nullptr;
-            result_columns--;
+            column_defs.pop_back();
             return FALSE;
         }
         else if (poExpr->papoSubExpr[0]->eNodeType != SNT_COLUMN)
@@ -665,7 +609,7 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
             col_def->field_name = nullptr;
             CPLFree(col_def->field_alias);
             col_def->field_alias = nullptr;
-            result_columns--;
+            column_defs.pop_back();
             return FALSE;
         }
         else
@@ -683,6 +627,43 @@ int swq_select::PushField(swq_expr_node *poExpr, const char *pszAlias,
     }
 
     col_def->expr = poExpr;
+
+    return TRUE;
+}
+
+int swq_select::PushExcludeField(swq_expr_node *poExpr)
+{
+    if (poExpr->eNodeType != SNT_COLUMN)
+    {
+        return FALSE;
+    }
+
+    // Check if this column has already been excluded
+    for (const auto &col_def : m_exclude_fields[-1])
+    {
+        if (EQUAL(poExpr->string_value, col_def.field_name) &&
+            EQUAL(poExpr->table_name ? poExpr->table_name : "",
+                  col_def.table_name))
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Field %s.%s repeated in EXCEPT/EXCLUDE expression.",
+                     col_def.table_name, col_def.field_name);
+
+            return FALSE;
+        }
+    }
+
+    m_exclude_fields[-1].emplace_back();
+    swq_col_def *col_def = &m_exclude_fields[-1].back();
+    memset(col_def, 0, sizeof(swq_col_def));
+
+    col_def->table_name =
+        CPLStrdup(poExpr->table_name ? poExpr->table_name : "");
+    col_def->field_name = CPLStrdup(poExpr->string_value);
+    col_def->table_index = -1;
+    col_def->field_index = -1;
+
+    delete poExpr;
 
     return TRUE;
 }
@@ -784,7 +765,7 @@ void swq_select::SetOffset(GIntBig nOffset)
 /*                          expand_wildcard()                           */
 /*                                                                      */
 /*      This function replaces the '*' in a "SELECT *" with the list    */
-/*      provided list of fields.  Itis used by swq_select_parse(),      */
+/*      provided list of fields.  It is used by swq_select::parse(),    */
 /*      but may be called in advance by applications wanting the        */
 /*      "default" field list to be different than the full list of      */
 /*      fields.                                                         */
@@ -794,14 +775,16 @@ CPLErr swq_select::expand_wildcard(swq_field_list *field_list,
                                    int bAlwaysPrefixWithTableName)
 
 {
+    int columns_added = 0;
+
     /* ==================================================================== */
     /*      Check each pre-expansion field.                                 */
     /* ==================================================================== */
-    for (int isrc = 0; isrc < result_columns; isrc++)
+    for (int isrc = 0; isrc < result_columns(); isrc++)
     {
         const char *src_tablename = column_defs[isrc].table_name;
         const char *src_fieldname = column_defs[isrc].field_name;
-        int itable, new_fields, iout;
+        int itable;
 
         if (*src_fieldname == '\0' ||
             src_fieldname[strlen(src_fieldname) - 1] != '*')
@@ -811,23 +794,17 @@ CPLErr swq_select::expand_wildcard(swq_field_list *field_list,
         if (column_defs[isrc].col_func == SWQCF_COUNT)
             continue;
 
-        /* --------------------------------------------------------------------
-         */
-        /*      Parse out the table name, verify it, and establish the */
-        /*      number of fields to insert from it. */
-        /* --------------------------------------------------------------------
-         */
+        // Parse out the table name and verify it
         if (src_tablename[0] == 0 && strcmp(src_fieldname, "*") == 0)
         {
             itable = -1;
-            new_fields = field_list->count;
         }
         else
         {
             for (itable = 0; itable < field_list->table_count; itable++)
             {
-                if (strcasecmp(src_tablename,
-                               field_list->table_defs[itable].table_alias) == 0)
+                if (EQUAL(src_tablename,
+                          field_list->table_defs[itable].table_alias))
                     break;
             }
 
@@ -838,90 +815,39 @@ CPLErr swq_select::expand_wildcard(swq_field_list *field_list,
                          src_tablename, src_tablename, src_fieldname);
                 return CE_Failure;
             }
-
-            // Count the number of fields in this table.
-            new_fields = 0;
-            for (int i = 0; i < field_list->count; i++)
-            {
-                if (field_list->table_ids[i] == itable)
-                    new_fields++;
-            }
         }
 
-        if (new_fields > 0)
-        {
-            /* --------------------------------------------------------------------
-             */
-            /*      Reallocate the column list larger. */
-            /* --------------------------------------------------------------------
-             */
-            CPLFree(column_defs[isrc].table_name);
-            CPLFree(column_defs[isrc].field_name);
-            delete column_defs[isrc].expr;
-
-            column_defs = static_cast<swq_col_def *>(
-                CPLRealloc(column_defs, sizeof(swq_col_def) *
-                                            (result_columns + new_fields - 1)));
-
-            /* --------------------------------------------------------------------
-             */
-            /*      Push the old definitions that came after the one to be */
-            /*      replaced further up in the array. */
-            /* --------------------------------------------------------------------
-             */
-            if (new_fields != 1)
-            {
-                for (int i = result_columns - 1; i > isrc; i--)
-                {
-                    memcpy(column_defs + i + new_fields - 1, column_defs + i,
-                           sizeof(swq_col_def));
-                }
-            }
-
-            result_columns += (new_fields - 1);
-
-            /* --------------------------------------------------------------------
-             */
-            /*      Zero out all the stuff in the target column definitions. */
-            /* --------------------------------------------------------------------
-             */
-            memset(column_defs + isrc, 0, new_fields * sizeof(swq_col_def));
-        }
-        else
-        {
-            /* --------------------------------------------------------------------
-             */
-            /*      The wildcard expands to nothing */
-            /* --------------------------------------------------------------------
-             */
-            CPLFree(column_defs[isrc].table_name);
-            CPLFree(column_defs[isrc].field_name);
-            delete column_defs[isrc].expr;
-
-            memmove(column_defs + isrc, column_defs + isrc + 1,
-                    sizeof(swq_col_def) * (result_columns - 1 - isrc));
-
-            result_columns--;
-        }
-
-        /* --------------------------------------------------------------------
-         */
-        /*      Assign the selected fields. */
-        /* --------------------------------------------------------------------
-         */
-        iout = isrc;
-
+        // Assign the selected fields. */
+        std::vector<swq_col_def> expanded_columns;
         for (int i = 0; i < field_list->count; i++)
         {
-            swq_col_def *def;
-            int compose = (itable != -1) || bAlwaysPrefixWithTableName;
+            bool compose = (itable != -1) || bAlwaysPrefixWithTableName;
 
             // Skip this field if it isn't in the target table.
             if (itable != -1 && itable != field_list->table_ids[i])
                 continue;
 
+            auto table_id = field_list->table_ids[i];
+
+            // Skip this field if we've excluded it with SELECT * EXCEPT ()
+            if (IsFieldExcluded(isrc - columns_added,
+                                field_list->table_defs[table_id].table_name,
+                                field_list->names[i]))
+            {
+                if (field_list->types[i] == SWQ_GEOMETRY)
+                {
+                    // Need to store the fact that we explicitly excluded
+                    // the geometry so we can prevent it from being implicitly
+                    // included by OGRGenSQLResultsLayer
+                    bExcludedGeometry = true;
+                }
+
+                continue;
+            }
+
             // Set up some default values.
-            def = column_defs + iout;
+            expanded_columns.emplace_back();
+            swq_col_def *def = &expanded_columns.back();
             def->field_precision = -1;
             def->target_type = SWQ_OTHER;
             def->target_subtype = OFSTNone;
@@ -929,14 +855,11 @@ CPLErr swq_select::expand_wildcard(swq_field_list *field_list,
             // Does this field duplicate an earlier one?
             if (field_list->table_ids[i] != 0 && !compose)
             {
-                int other;
-
-                for (other = 0; other < i; other++)
+                for (int other = 0; other < i; other++)
                 {
-                    if (strcasecmp(field_list->names[i],
-                                   field_list->names[other]) == 0)
+                    if (EQUAL(field_list->names[i], field_list->names[other]))
                     {
-                        compose = 1;
+                        compose = true;
                         break;
                     }
                 }
@@ -952,17 +875,35 @@ CPLErr swq_select::expand_wildcard(swq_field_list *field_list,
             if (!compose)
                 def->field_alias = CPLStrdup(field_list->names[i]);
 
-            iout++;
-
             // All the other table info will be provided by the later
             // parse operation.
         }
 
-        // If there are several occurrences of '*', go on, but stay on the
-        // same index in case '*' is expanded to nothing.
-        // The -- is to compensate the fact that isrc will be incremented in
-        // the after statement of the for loop.
-        isrc--;
+        // Splice expanded_columns in at the position of '*'
+        CPLFree(column_defs[isrc].table_name);
+        CPLFree(column_defs[isrc].field_name);
+        CPLFree(column_defs[isrc].field_alias);
+        delete column_defs[isrc].expr;
+        auto pos = column_defs.erase(std::next(column_defs.begin(), isrc));
+
+        column_defs.insert(pos, expanded_columns.begin(),
+                           expanded_columns.end());
+
+        columns_added += static_cast<int>(expanded_columns.size()) - 1;
+
+        const auto it = m_exclude_fields.find(isrc);
+        if (it != m_exclude_fields.end())
+        {
+            if (!it->second.empty())
+            {
+                const auto &field = it->second.front();
+                CPLError(
+                    CE_Failure, CPLE_AppDefined,
+                    "Field %s specified in EXCEPT/EXCLUDE expression not found",
+                    field.field_name);
+                return CE_Failure;
+            }
+        }
     }
 
     return CE_None;
@@ -1036,9 +977,9 @@ CPLErr swq_select::parse(swq_field_list *field_list,
     /* -------------------------------------------------------------------- */
     /*      Identify field information.                                     */
     /* -------------------------------------------------------------------- */
-    for (int i = 0; i < result_columns; i++)
+    for (int i = 0; i < result_columns(); i++)
     {
-        swq_col_def *def = column_defs + i;
+        swq_col_def *def = &column_defs[i];
 
         if (def->expr != nullptr && def->expr->eNodeType != SNT_COLUMN)
         {
@@ -1063,7 +1004,8 @@ CPLErr swq_select::parse(swq_field_list *field_list,
             // Record field type.
             def->field_type = this_type;
 
-            if (def->field_index == -1 && def->col_func != SWQCF_COUNT)
+            if (def->field_index == -1 && !(def->col_func == SWQCF_COUNT &&
+                                            strcmp(def->field_name, "*") == 0))
             {
                 CPLError(
                     CE_Failure, CPLE_AppDefined, "Unrecognized field name %s.",
@@ -1075,9 +1017,11 @@ CPLErr swq_select::parse(swq_field_list *field_list,
         }
 
         // Identify column function if present.
-        if ((def->col_func == SWQCF_MIN || def->col_func == SWQCF_MAX ||
-             def->col_func == SWQCF_AVG || def->col_func == SWQCF_SUM) &&
-            (def->field_type == SWQ_STRING || def->field_type == SWQ_GEOMETRY))
+        if (def->col_func != SWQCF_NONE && def->col_func != SWQCF_CUSTOM &&
+            def->col_func != SWQCF_COUNT &&
+            (def->field_type == SWQ_GEOMETRY ||
+             (def->field_type == SWQ_STRING && def->col_func != SWQCF_MIN &&
+              def->col_func != SWQCF_MAX)))
         {
             // Possibly this is already enforced by the checker?
             const swq_operation *op = swq_op_registrar::GetOperator(
@@ -1098,7 +1042,7 @@ CPLErr swq_select::parse(swq_field_list *field_list,
 
     int bAllowDistinctOnMultipleFields =
         (poParseOptions && poParseOptions->bAllowDistinctOnMultipleFields);
-    if (query_mode == SWQM_DISTINCT_LIST && result_columns > 1 &&
+    if (query_mode == SWQM_DISTINCT_LIST && result_columns() > 1 &&
         !bAllowDistinctOnMultipleFields)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -1106,9 +1050,9 @@ CPLErr swq_select::parse(swq_field_list *field_list,
         return CE_Failure;
     }
 
-    for (int i = 0; i < result_columns; i++)
+    for (int i = 0; i < result_columns(); i++)
     {
-        swq_col_def *def = column_defs + i;
+        swq_col_def *def = &column_defs[i];
         int this_indicator = -1;
 
         if (query_mode == SWQM_DISTINCT_LIST && def->field_type == SWQ_GEOMETRY)
@@ -1123,9 +1067,17 @@ CPLErr swq_select::parse(swq_field_list *field_list,
             }
         }
 
-        if (def->col_func == SWQCF_MIN || def->col_func == SWQCF_MAX ||
-            def->col_func == SWQCF_AVG || def->col_func == SWQCF_SUM ||
-            def->col_func == SWQCF_COUNT)
+        if (def->col_func == SWQCF_NONE)
+        {
+            if (query_mode == SWQM_DISTINCT_LIST)
+            {
+                def->distinct_flag = TRUE;
+                this_indicator = SWQM_DISTINCT_LIST;
+            }
+            else
+                this_indicator = SWQM_RECORDSET;
+        }
+        else if (def->col_func != SWQCF_CUSTOM)
         {
             this_indicator = SWQM_SUMMARY_RECORD;
             if (def->col_func == SWQCF_COUNT && def->distinct_flag &&
@@ -1135,16 +1087,6 @@ CPLErr swq_select::parse(swq_field_list *field_list,
                          "SELECT COUNT DISTINCT on a geometry not supported.");
                 return CE_Failure;
             }
-        }
-        else if (def->col_func == SWQCF_NONE)
-        {
-            if (query_mode == SWQM_DISTINCT_LIST)
-            {
-                def->distinct_flag = TRUE;
-                this_indicator = SWQM_DISTINCT_LIST;
-            }
-            else
-                this_indicator = SWQM_RECORDSET;
         }
 
         if (this_indicator != query_mode && this_indicator != -1 &&
@@ -1160,7 +1102,7 @@ CPLErr swq_select::parse(swq_field_list *field_list,
             query_mode = this_indicator;
     }
 
-    if (result_columns == 0)
+    if (result_columns() == 0)
     {
         query_mode = SWQM_RECORDSET;
     }
@@ -1236,4 +1178,45 @@ CPLErr swq_select::parse(swq_field_list *field_list,
 
     return CE_None;
 }
+
+bool swq_select::IsFieldExcluded(int src_index, const char *pszTableName,
+                                 const char *pszFieldName)
+{
+    const auto list_it = m_exclude_fields.find(src_index);
+
+    if (list_it == m_exclude_fields.end())
+    {
+        return false;
+    }
+
+    auto &excluded_fields = list_it->second;
+
+    auto it = std::partition(
+        excluded_fields.begin(), excluded_fields.end(),
+        [pszTableName, pszFieldName](const swq_col_def &exclude_field)
+        {
+            if (!(EQUAL(exclude_field.table_name, "") ||
+                  EQUAL(pszTableName, exclude_field.table_name)))
+            {
+                return true;
+            }
+
+            return !EQUAL(pszFieldName, exclude_field.field_name);
+        });
+
+    if (it != excluded_fields.end())
+    {
+        CPLFree(it->table_name);
+        CPLFree(it->field_name);
+        CPLFree(it->field_alias);
+
+        delete it->expr;
+
+        excluded_fields.erase(it);
+        return true;
+    }
+
+    return false;
+}
+
 //! @endcond

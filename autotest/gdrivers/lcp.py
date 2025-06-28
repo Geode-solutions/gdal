@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for LCP driver.
@@ -10,25 +9,10 @@
 # Copyright (c) 2008-2009, Even Rouault <even dot rouault at spatialys.com>
 # Copyright (c) 2013, Kyle Shannon <kyle at pobox dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import array
 import os
 import random
 import struct
@@ -453,22 +437,22 @@ def test_lcp_7():
 #  Test create copy with invalid bands
 
 
+@gdaltest.disable_exceptions()
 def test_lcp_8():
 
     mem_drv = gdal.GetDriverByName("MEM")
     assert mem_drv is not None
     lcp_drv = gdal.GetDriverByName("LCP")
     assert lcp_drv is not None
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    co = ["LATITUDE=0", "LINEAR_UNIT=METER"]
-    for i in [0, 1, 2, 3, 4, 6, 9, 11]:
-        src_ds = mem_drv.Create("", 10, 10, i, gdal.GDT_Int16)
-        assert src_ds is not None
-        dst_ds = lcp_drv.CreateCopy("tmp/lcp_8.lcp", src_ds, False, co)
-        src_ds = None
-        assert dst_ds is None, i
-        dst_ds = None
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        co = ["LATITUDE=0", "LINEAR_UNIT=METER"]
+        for i in [0, 1, 2, 3, 4, 6, 9, 11]:
+            src_ds = mem_drv.Create("", 10, 10, i, gdal.GDT_Int16)
+            assert src_ds is not None
+            dst_ds = lcp_drv.CreateCopy("tmp/lcp_8.lcp", src_ds, False, co)
+            src_ds = None
+            assert dst_ds is None, i
+            dst_ds = None
     for ext in ["lcp", "lcp.aux.xml"]:
         try:
             os.remove("tmp/lcp_8." + ext)
@@ -488,6 +472,12 @@ def test_lcp_9():
     assert lcp_drv is not None
     src_ds = mem_drv.Create("", 10, 20, 10, gdal.GDT_Int16)
     assert src_ds is not None
+    # Test negative values
+    src_ds.GetRasterBand(1).Fill(-10000)
+    # More than 100 values
+    src_ds.GetRasterBand(2).WriteRaster(
+        0, 0, 10, 20, array.array("H", [i for i in range(200)])
+    )
     co = ["LATITUDE=0", "LINEAR_UNIT=METER"]
     lcp_ds = lcp_drv.CreateCopy("tmp/lcp_9.lcp", src_ds, False, co)
     assert lcp_ds is not None
@@ -859,6 +849,8 @@ def test_lcp_21():
 
 
 def test_lcp_22():
+
+    gdaltest.importorskip_gdal_array()
     numpy = pytest.importorskip("numpy")
 
     mem_drv = gdal.GetDriverByName("MEM")
@@ -892,6 +884,7 @@ def test_lcp_22():
 #  Test create copy and make sure invalid creation options are caught.
 
 
+@gdaltest.disable_exceptions()
 def test_lcp_23():
 
     mem_drv = gdal.GetDriverByName("MEM")
@@ -902,7 +895,7 @@ def test_lcp_23():
     assert src_ds is not None
 
     bad = "NOT_A_REAL_OPTION"
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         for option in [
             "ELEVATION_UNIT",
             "SLOPE_UNIT",

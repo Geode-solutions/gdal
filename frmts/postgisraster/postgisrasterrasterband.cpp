@@ -7,31 +7,12 @@
  *
  * Author:       David Zwarg, dzwarg@azavea.com
  *
- * Last changes: $Id$
  *
  ***********************************************************************
  * Copyright (c) 2009 - 2013, Jorge Arevalo, David Zwarg
  * Copyright (c) 2013-2018, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining
- * a copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT.IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
- * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 #include "postgisraster.h"
 
@@ -337,7 +318,7 @@ CPLErr PostGISRasterRasterBand::IRasterIO(
     GIntBig nMemoryRequiredForTiles = 0;
     CPLString osIDsToFetch;
     int nTilesToFetch = 0;
-    int nBandDataTypeSize = GDALGetDataTypeSize(eDataType) / 8;
+    const int nBandDataTypeSize = GDALGetDataTypeSizeBytes(eDataType);
 
     // Loop just over the intersecting sources
     for (i = 0; i < nFeatureCount; i++)
@@ -348,7 +329,8 @@ CPLErr PostGISRasterRasterBand::IRasterIO(
                 poTile->GetRasterBand(nBand));
 
         nMemoryRequiredForTiles +=
-            poTileBand->GetXSize() * poTileBand->GetYSize() * nBandDataTypeSize;
+            static_cast<GIntBig>(poTileBand->GetXSize()) *
+            poTileBand->GetYSize() * nBandDataTypeSize;
 
         // Missing tile: we'll need to query for it
         if (!poTileBand->IsCached())
@@ -365,8 +347,8 @@ CPLErr PostGISRasterRasterBand::IRasterIO(
             }
 
             double dfTileMinX, dfTileMinY, dfTileMaxX, dfTileMaxY;
-            poTile->GetExtent(&dfTileMinX, &dfTileMinY, &dfTileMaxX,
-                              &dfTileMaxY);
+            poTile->GetNativeExtent(&dfTileMinX, &dfTileMinY, &dfTileMaxX,
+                                    &dfTileMaxY);
 
             /**
              * We keep the general max and min values of all the missing
@@ -609,6 +591,7 @@ CPLErr PostGISRasterRasterBand::IRasterIO(
               sizeof(PostGISRasterTileDataset *), SortTilesByPKID);
     }
 
+    VRTSource::WorkingState oWorkingState;
     for (i = 0; i < nFeatureCount && eErr == CE_None; i++)
     {
         PostGISRasterTileDataset *poTile = papsMatchingTiles[i];
@@ -617,7 +600,8 @@ CPLErr PostGISRasterRasterBand::IRasterIO(
                 poTile->GetRasterBand(nBand));
         eErr = poTileBand->poSource->RasterIO(
             eDataType, nXOff, nYOff, nXSize, nYSize, pData, nBufXSize,
-            nBufYSize, eBufType, nPixelSpace, nLineSpace, nullptr);
+            nBufYSize, eBufType, nPixelSpace, nLineSpace, nullptr,
+            oWorkingState);
     }
 
     // Free the object that holds pointers to matching tiles
@@ -675,6 +659,11 @@ GDALRasterBand *PostGISRasterRasterBand::GetOverview(int i)
 
     PostGISRasterDataset *poRDS = cpl::down_cast<PostGISRasterDataset *>(poDS);
     PostGISRasterDataset *poOverviewDS = poRDS->GetOverviewDS(i);
+    if (!poOverviewDS)
+    {
+        CPLAssert(false);
+        return nullptr;
+    }
     if (poOverviewDS->nBands == 0)
     {
         if (!poOverviewDS->SetRasterProperties(nullptr) ||

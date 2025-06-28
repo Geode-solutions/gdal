@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -152,12 +136,6 @@ OGRPoint *OGRPoint::createXYM(double x, double y, double m)
 OGRPoint::OGRPoint(const OGRPoint &) = default;
 
 /************************************************************************/
-/*                             ~OGRPoint()                              */
-/************************************************************************/
-
-OGRPoint::~OGRPoint() = default;
-
-/************************************************************************/
 /*                       operator=( const OGRPoint& )                   */
 /************************************************************************/
 
@@ -174,7 +152,10 @@ OGRPoint &OGRPoint::operator=(const OGRPoint &other)
 {
     if (this != &other)
     {
-        OGRGeometry::operator=(other);
+        // Slightly more efficient to avoid OGRGeometry::operator=(other);
+        // but do what it does to avoid a call to empty()
+        assignSpatialReference(other.getSpatialReference());
+        flags = other.flags;
 
         x = other.x;
         y = other.y;
@@ -263,7 +244,7 @@ void OGRPoint::flattenTo2D()
 /*                       setCoordinateDimension()                       */
 /************************************************************************/
 
-void OGRPoint::setCoordinateDimension(int nNewDimension)
+bool OGRPoint::setCoordinateDimension(int nNewDimension)
 
 {
     if (nNewDimension == 2)
@@ -272,6 +253,7 @@ void OGRPoint::setCoordinateDimension(int nNewDimension)
         flags |= OGR_G_3D;
 
     setMeasured(FALSE);
+    return true;
 }
 
 /************************************************************************/
@@ -368,7 +350,7 @@ OGRErr OGRPoint::importFromWkb(const unsigned char *pabyData, size_t nSize,
     }
 
     // Detect coordinates are not NaN --> NOT EMPTY.
-    if (!(CPLIsNan(x) && CPLIsNan(y)))
+    if (!(std::isnan(x) && std::isnan(y)))
         flags |= OGR_G_NOT_EMPTY_POINT;
 
     return OGRERR_NONE;
@@ -380,16 +362,21 @@ OGRErr OGRPoint::importFromWkb(const unsigned char *pabyData, size_t nSize,
 /*      Build a well known binary representation of this object.        */
 /************************************************************************/
 
-OGRErr OGRPoint::exportToWkb(OGRwkbByteOrder eByteOrder,
-                             unsigned char *pabyData,
-                             OGRwkbVariant eWkbVariant) const
+OGRErr OGRPoint::exportToWkb(unsigned char *pabyData,
+                             const OGRwkbExportOptions *psOptions) const
 
 {
+    if (!psOptions)
+    {
+        static const OGRwkbExportOptions defaultOptions;
+        psOptions = &defaultOptions;
+    }
+
     /* -------------------------------------------------------------------- */
     /*      Set the byte order.                                             */
     /* -------------------------------------------------------------------- */
-    pabyData[0] =
-        DB2_V72_UNFIX_BYTE_ORDER(static_cast<unsigned char>(eByteOrder));
+    pabyData[0] = DB2_V72_UNFIX_BYTE_ORDER(
+        static_cast<unsigned char>(psOptions->eByteOrder));
     pabyData += 1;
 
     /* -------------------------------------------------------------------- */
@@ -398,7 +385,7 @@ OGRErr OGRPoint::exportToWkb(OGRwkbByteOrder eByteOrder,
 
     GUInt32 nGType = getGeometryType();
 
-    if (eWkbVariant == wkbVariantPostGIS1)
+    if (psOptions->eWkbVariant == wkbVariantPostGIS1)
     {
         nGType = wkbFlatten(nGType);
         if (Is3D())
@@ -408,12 +395,12 @@ OGRErr OGRPoint::exportToWkb(OGRwkbByteOrder eByteOrder,
         if (IsMeasured())
             nGType = static_cast<OGRwkbGeometryType>(nGType | 0x40000000);
     }
-    else if (eWkbVariant == wkbVariantIso)
+    else if (psOptions->eWkbVariant == wkbVariantIso)
     {
         nGType = getIsoGeometryType();
     }
 
-    if (eByteOrder == wkbNDR)
+    if (psOptions->eByteOrder == wkbNDR)
     {
         CPL_LSBPTR32(&nGType);
     }
@@ -429,52 +416,58 @@ OGRErr OGRPoint::exportToWkb(OGRwkbByteOrder eByteOrder,
     /*      Copy in the raw data. Swap if needed.                           */
     /* -------------------------------------------------------------------- */
 
-    if (IsEmpty() && eWkbVariant == wkbVariantIso)
+    if (IsEmpty() && psOptions->eWkbVariant == wkbVariantIso)
     {
         const double dNan = std::numeric_limits<double>::quiet_NaN();
         memcpy(pabyData, &dNan, 8);
-        if (OGR_SWAP(eByteOrder))
+        if (OGR_SWAP(psOptions->eByteOrder))
             CPL_SWAPDOUBLE(pabyData);
         pabyData += 8;
         memcpy(pabyData, &dNan, 8);
-        if (OGR_SWAP(eByteOrder))
+        if (OGR_SWAP(psOptions->eByteOrder))
             CPL_SWAPDOUBLE(pabyData);
         pabyData += 8;
         if (flags & OGR_G_3D)
         {
             memcpy(pabyData, &dNan, 8);
-            if (OGR_SWAP(eByteOrder))
+            if (OGR_SWAP(psOptions->eByteOrder))
                 CPL_SWAPDOUBLE(pabyData);
             pabyData += 8;
         }
         if (flags & OGR_G_MEASURED)
         {
             memcpy(pabyData, &dNan, 8);
-            if (OGR_SWAP(eByteOrder))
+            if (OGR_SWAP(psOptions->eByteOrder))
                 CPL_SWAPDOUBLE(pabyData);
         }
     }
     else
     {
         memcpy(pabyData, &x, 8);
-        if (OGR_SWAP(eByteOrder))
+        memcpy(pabyData + 8, &y, 8);
+        OGRRoundCoordinatesIEEE754XYValues<0>(
+            psOptions->sPrecision.nXYBitPrecision, pabyData, 1);
+        if (OGR_SWAP(psOptions->eByteOrder))
+        {
             CPL_SWAPDOUBLE(pabyData);
-        pabyData += 8;
-        memcpy(pabyData, &y, 8);
-        if (OGR_SWAP(eByteOrder))
-            CPL_SWAPDOUBLE(pabyData);
-        pabyData += 8;
+            CPL_SWAPDOUBLE(pabyData + 8);
+        }
+        pabyData += 16;
         if (flags & OGR_G_3D)
         {
             memcpy(pabyData, &z, 8);
-            if (OGR_SWAP(eByteOrder))
+            OGRRoundCoordinatesIEEE754<0>(psOptions->sPrecision.nZBitPrecision,
+                                          pabyData, 1);
+            if (OGR_SWAP(psOptions->eByteOrder))
                 CPL_SWAPDOUBLE(pabyData);
             pabyData += 8;
         }
         if (flags & OGR_G_MEASURED)
         {
             memcpy(pabyData, &m, 8);
-            if (OGR_SWAP(eByteOrder))
+            OGRRoundCoordinatesIEEE754<0>(psOptions->sPrecision.nMBitPrecision,
+                                          pabyData, 1);
+            if (OGR_SWAP(psOptions->eByteOrder))
                 CPL_SWAPDOUBLE(pabyData);
         }
     }

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  test librarified gdalinfo
@@ -10,29 +9,17 @@
 ###############################################################################
 # Copyright (c) 2015, Faza Mahamood <fazamhd at gmail dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
+import pathlib
+import shutil
+
+import gdaltest
 import pytest
 
-from osgeo import gdal
+from osgeo import gdal, osr
 
 ###############################################################################
 # Simple test
@@ -46,26 +33,16 @@ def test_gdalinfo_lib_1():
     assert ret.find("Driver: GTiff/GeoTIFF") != -1, "did not get expected string."
 
 
-###############################################################################
-# Validate json schema output
+def test_gdalinfo_lib_1_str():
+
+    ret = gdal.Info("../gcore/data/byte.tif")
+    assert ret.find("Driver: GTiff/GeoTIFF") != -1, "did not get expected string."
 
 
-def _validate_json_output(instance):
+def test_gdalinfo_lib_1_path():
 
-    try:
-        from jsonschema import validate
-    except ImportError:
-        pytest.skip("jsonschema module not available")
-
-    gdal_data = gdal.GetConfigOption("GDAL_DATA")
-    if gdal_data is None:
-        pytest.skip("GDAL_DATA not defined")
-
-    import json
-
-    schema = json.loads(open(gdal_data + "/gdalinfo_output.schema.json", "rb").read())
-
-    validate(instance=instance, schema=schema)
+    ret = gdal.Info(pathlib.Path("../gcore/data/byte.tif"))
+    assert ret.find("Driver: GTiff/GeoTIFF") != -1, "did not get expected string."
 
 
 ###############################################################################
@@ -79,7 +56,7 @@ def test_gdalinfo_lib_2():
     ret = gdal.Info(ds, format="json")
     assert ret["driverShortName"] == "GTiff", "wrong value for driverShortName."
 
-    _validate_json_output(ret)
+    gdaltest.validate_json(ret, "gdalinfo_output.schema.json")
 
 
 ###############################################################################
@@ -117,9 +94,12 @@ def test_gdalinfo_lib_4():
 # Test all options
 
 
-def test_gdalinfo_lib_5():
+def test_gdalinfo_lib_5(tmp_path):
 
-    ds = gdal.Open("../gdrivers/data/byte.tif")
+    tmp_tif = str(tmp_path / "byte.tif")
+    shutil.copy("../gcore/data/byte.tif", tmp_tif)
+
+    ds = gdal.Open(tmp_tif)
 
     ret = gdal.Info(
         ds,
@@ -128,7 +108,7 @@ def test_gdalinfo_lib_5():
         computeMinMax=True,
         reportHistograms=True,
         reportProj4=True,
-        stats=True,
+        # stats=True, this is mutually exclusive with approxStats
         approxStats=True,
         computeChecksum=True,
         showGCPs=False,
@@ -143,13 +123,12 @@ def test_gdalinfo_lib_5():
     assert "computedMin" in band
     assert "histogram" in band
     assert "checksum" in band
+    assert "stdDev" in band
     assert ret["coordinateSystem"]["dataAxisToSRSAxisMapping"] == [1, 2]
 
-    _validate_json_output(ret)
+    gdaltest.validate_json(ret, "gdalinfo_output.schema.json")
 
     ds = None
-
-    gdal.Unlink("../gdrivers/data/byte.tif.aux.xml")
 
 
 ###############################################################################
@@ -160,7 +139,7 @@ def test_gdalinfo_lib_6():
 
     ret = gdal.Info("../gcore/data/byte.tif", options="-json")
     assert ret["driverShortName"] == "GTiff", "wrong value for driverShortName."
-    assert type(ret) == dict
+    assert isinstance(ret, dict)
 
 
 ###############################################################################
@@ -174,7 +153,7 @@ def test_gdalinfo_lib_7():
         options="-json".encode("ascii").decode("ascii"),
     )
     assert ret["driverShortName"] == "GTiff", "wrong value for driverShortName."
-    assert type(ret) == dict
+    assert isinstance(ret, dict)
 
 
 ###############################################################################
@@ -185,7 +164,7 @@ def test_gdalinfo_lib_8():
 
     ret = gdal.Info("../gcore/data/byte.tif", options=["-json"])
     assert ret["driverShortName"] == "GTiff", "wrong value for driverShortName."
-    assert type(ret) == dict
+    assert isinstance(ret, dict)
 
 
 ###############################################################################
@@ -205,17 +184,18 @@ def test_gdalinfo_lib_nodatavalues():
 ###############################################################################
 
 
-def test_gdalinfo_lib_coordinate_epoch():
+@pytest.mark.parametrize("epoch", ["2021.0", "2021.3"])
+def test_gdalinfo_lib_coordinate_epoch(epoch):
 
     ds = gdal.Translate(
-        "", "../gcore/data/byte.tif", options='-of MEM -a_coord_epoch 2021.3"'
+        "", "../gcore/data/byte.tif", options=f'-of MEM -a_coord_epoch {epoch}"'
     )
     ret = gdal.Info(ds)
-    assert "Coordinate epoch: 2021.3" in ret
+    assert f"Coordinate epoch: {epoch}" in ret
 
     ret = gdal.Info(ds, format="json")
     assert "coordinateEpoch" in ret
-    assert ret["coordinateEpoch"] == 2021.3
+    assert ret["coordinateEpoch"] == float(epoch)
 
 
 ###############################################################################
@@ -255,3 +235,130 @@ def test_gdalinfo_lib_nodata_full_precision_float64():
 
     ret = gdal.Info(ds, format="json")
     assert ret["bands"][0]["noDataValue"] == float(nodata_str)
+
+
+def test_gdalinfo_lib_nodata_int():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    ds.GetRasterBand(1).SetNoDataValue(255)
+    assert "NoData Value=255\n" in gdal.Info(ds).replace("\r\n", "\n")
+
+    ret = gdal.Info(ds, format="json")
+    ndv = ret["bands"][0]["noDataValue"]
+    assert ndv == 255
+    assert isinstance(ndv, int)
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/8137
+
+
+def test_gdalinfo_lib_json_projjson_no_epsg():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    srs = osr.SpatialReference()
+    srs.SetLocalCS("foo")
+    ds.SetSpatialRef(srs)
+    ret = gdal.Info(ds, options="-json")
+    assert ret["stac"]["proj:epsg"] is None
+    assert ret["stac"]["proj:wkt2"] is not None
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/9337
+
+
+def test_gdalinfo_lib_json_proj_shape():
+
+    width = 2
+    height = 1
+    ds = gdal.GetDriverByName("MEM").Create("", width, height)
+    ret = gdal.Info(ds, options="-json")
+    assert ret["stac"]["proj:shape"] == [height, width]
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/9396
+
+
+def test_gdalinfo_lib_json_engineering_crs():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    srs = osr.SpatialReference()
+    srs.SetFromUserInput(
+        """ENGCRS["Arbitrary (m)",
+    EDATUM["Unknown engineering datum"],
+    CS[Cartesian,2],
+        AXIS["(E)",east,
+            ORDER[1],
+            LENGTHUNIT["metre",1,
+                ID["EPSG",9001]]],
+        AXIS["(N)",north,
+            ORDER[2],
+            LENGTHUNIT["metre",1,
+                ID["EPSG",9001]]]]"""
+    )
+    ds.SetSpatialRef(srs)
+    ds.SetGeoTransform([0, 1, 0, 0, 0, 1])
+    ret = gdal.Info(ds, format="json")
+    assert "coordinateSystem" in ret
+    assert "cornerCoordinates" in ret
+    assert "wgs84Extent" not in ret
+
+
+###############################################################################
+# Test -nonodata
+
+
+def test_gdalinfo_lib_nonodata(tmp_path):
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    ds.GetRasterBand(1).SetNoDataValue(1)
+
+    ret = gdal.Info(ds, format="json")
+    assert "noDataValue" in ret["bands"][0]
+
+    ret = gdal.Info(ds, format="json", showNodata=False)
+    assert "noDataValue" not in ret["bands"][0]
+
+
+###############################################################################
+# Test -nomask
+
+
+def test_gdalinfo_lib_nomask(tmp_path):
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
+
+    ret = gdal.Info(ds, format="json")
+    assert "mask" in ret["bands"][0]
+
+    ret = gdal.Info(ds, format="json", showMask=False)
+    assert "mask" not in ret["bands"][0]
+
+
+###############################################################################
+
+
+def test_gdalinfo_lib_json_stac_common_name():
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    ds.GetRasterBand(1).SetColorInterpretation(gdal.GCI_PanBand)
+    ret = gdal.Info(ds, options="-json")
+    assert ret["stac"]["eo:bands"][0]["common_name"] == "pan"
+
+
+###############################################################################
+
+
+@pytest.mark.require_driver("HFA")
+def test_gdalinfo_lib_json_color_table_and_rat():
+
+    ds = gdal.Open("../gcore/data/rat.img")
+
+    ret = gdal.Info(ds, format="json")
+    assert "colorTable" in ret["bands"][0]
+    assert "rat" in ret["bands"][0]
+
+    gdaltest.validate_json(ret, "gdalinfo_output.schema.json")

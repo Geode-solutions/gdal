@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -69,7 +53,7 @@ class XYZDataset final : public GDALPamDataset
     GIntBig nLineNum;     /* any line */
     GIntBig nDataLineNum; /* line with values (header line and empty lines
                              ignored) */
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     int bSameNumberOfValuesPerLine;
     double dfMinZ;
     double dfMaxZ;
@@ -79,11 +63,13 @@ class XYZDataset final : public GDALPamDataset
     static int IdentifyEx(GDALOpenInfo *, int &, int &nCommentLineCount,
                           int &nXIndex, int &nYIndex, int &nZIndex);
 
+    CPL_DISALLOW_COPY_ASSIGN(XYZDataset)
+
   public:
     XYZDataset();
     virtual ~XYZDataset();
 
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -268,16 +254,14 @@ CPLErr XYZRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
 
                 poGDS->nDataLineNum++;
 
-                const int nX =
-                    static_cast<int>((dfX - 0.5 * poGDS->adfGeoTransform[1] -
-                                      poGDS->adfGeoTransform[0]) /
-                                         poGDS->adfGeoTransform[1] +
-                                     0.5);
-                const int nY =
-                    static_cast<int>((dfY - 0.5 * poGDS->adfGeoTransform[5] -
-                                      poGDS->adfGeoTransform[3]) /
-                                         poGDS->adfGeoTransform[5] +
-                                     0.5);
+                const int nX = static_cast<int>(
+                    (dfX - 0.5 * poGDS->m_gt[1] - poGDS->m_gt[0]) /
+                        poGDS->m_gt[1] +
+                    0.5);
+                const int nY = static_cast<int>(
+                    (dfY - 0.5 * poGDS->m_gt[5] - poGDS->m_gt[3]) /
+                        poGDS->m_gt[5] +
+                    0.5);
                 if (nX < 0 || nX >= nRasterXSize)
                 {
                     CPLError(CE_Failure, CPLE_AppDefined,
@@ -301,10 +285,12 @@ CPLErr XYZRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
         }
 
         if (eDataType == GDT_Int16)
-            memcpy(pImage, &gasValues[nBlockYOff * nBlockXSize],
+            memcpy(pImage,
+                   &gasValues[static_cast<size_t>(nBlockYOff) * nBlockXSize],
                    sizeof(short) * nBlockXSize);
         else
-            memcpy(pImage, &gafValues[nBlockYOff * nBlockXSize],
+            memcpy(pImage,
+                   &gafValues[static_cast<size_t>(nBlockYOff) * nBlockXSize],
                    sizeof(float) * nBlockXSize);
         return CE_None;
     }
@@ -316,7 +302,7 @@ CPLErr XYZRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
         if (!bSuccess)
             dfNoDataValue = 0.0;
         GDALCopyWords(&dfNoDataValue, GDT_Float64, 0, pImage, eDataType,
-                      GDALGetDataTypeSize(eDataType) / 8, nRasterXSize);
+                      GDALGetDataTypeSizeBytes(eDataType), nRasterXSize);
     }
 
     // Only valid if bSameNumberOfValuesPerLine.
@@ -426,8 +412,8 @@ CPLErr XYZRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
         }
     }
 
-    const double dfExpectedY = poGDS->adfGeoTransform[3] +
-                               (0.5 + nBlockYOff) * poGDS->adfGeoTransform[5];
+    const double dfExpectedY =
+        poGDS->m_gt[3] + (0.5 + nBlockYOff) * poGDS->m_gt[5];
 
     int idx = -1;
     while (true)
@@ -514,20 +500,17 @@ CPLErr XYZRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
                 }
                 else
                 {
-                    if (fabs((dfY - dfExpectedY) / poGDS->adfGeoTransform[5]) >
+                    if (fabs((dfY - dfExpectedY) / poGDS->m_gt[5]) >
                         RELATIVE_ERROR)
                     {
                         if (idx < 0)
                         {
                             const double dfYDeltaOrigin =
-                                dfY + 0.5 * poGDS->adfGeoTransform[5] -
-                                poGDS->adfGeoTransform[3];
-                            if (!(fabs(dfYDeltaOrigin) >
-                                      fabs(poGDS->adfGeoTransform[5]) &&
+                                dfY + 0.5 * poGDS->m_gt[5] - poGDS->m_gt[3];
+                            if (!(fabs(dfYDeltaOrigin) > fabs(poGDS->m_gt[5]) &&
                                   fabs(std::round(dfYDeltaOrigin /
-                                                  poGDS->adfGeoTransform[5]) -
-                                       (dfYDeltaOrigin /
-                                        poGDS->adfGeoTransform[5])) <=
+                                                  poGDS->m_gt[5]) -
+                                       (dfYDeltaOrigin / poGDS->m_gt[5])) <=
                                       RELATIVE_ERROR))
                             {
                                 CPLError(CE_Failure, CPLE_AppDefined,
@@ -545,11 +528,10 @@ CPLErr XYZRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
                         return CE_None;
                     }
 
-                    idx = static_cast<int>((dfX -
-                                            0.5 * poGDS->adfGeoTransform[1] -
-                                            poGDS->adfGeoTransform[0]) /
-                                               poGDS->adfGeoTransform[1] +
-                                           0.5);
+                    idx = static_cast<int>(
+                        (dfX - 0.5 * poGDS->m_gt[1] - poGDS->m_gt[0]) /
+                            poGDS->m_gt[1] +
+                        0.5);
                 }
                 CPLAssert(idx >= 0 && idx < nRasterXSize);
 
@@ -664,12 +646,6 @@ XYZDataset::XYZDataset()
       nLineNum(0), nDataLineNum(GINTBIG_MAX), bSameNumberOfValuesPerLine(TRUE),
       dfMinZ(0), dfMaxZ(0), bEOF(false)
 {
-    adfGeoTransform[0] = 0;
-    adfGeoTransform[1] = 1;
-    adfGeoTransform[2] = 0;
-    adfGeoTransform[3] = 0;
-    adfGeoTransform[4] = 0;
-    adfGeoTransform[5] = 1;
 }
 
 /************************************************************************/
@@ -721,13 +697,14 @@ int XYZDataset::IdentifyEx(GDALOpenInfo *poOpenInfo, int &bHasHeaderLine,
     nCommentLineCount = 0;
 
     CPLString osFilename(poOpenInfo->pszFilename);
-    if (EQUAL(CPLGetExtension(osFilename), "GRA"))
+    if (EQUAL(CPLGetExtensionSafe(osFilename).c_str(), "GRA") &&
+        !poOpenInfo->IsSingleAllowedDriver("XYZ"))
     {
         // IGNFHeightASCIIGRID .GRA
         return FALSE;
     }
 
-    GDALOpenInfo *poOpenInfoToDelete = nullptr;
+    std::unique_ptr<GDALOpenInfo> poOpenInfoToDelete;  // keep in this scope
     /*  GZipped .xyz files are common, so automagically open them */
     /*  if the /vsigzip/ has not been explicitly passed */
     if (strlen(poOpenInfo->pszFilename) > 6 &&
@@ -737,13 +714,13 @@ int XYZDataset::IdentifyEx(GDALOpenInfo *poOpenInfo, int &bHasHeaderLine,
     {
         osFilename = "/vsigzip/";
         osFilename += poOpenInfo->pszFilename;
-        poOpenInfo = poOpenInfoToDelete = new GDALOpenInfo(
+        poOpenInfoToDelete = std::make_unique<GDALOpenInfo>(
             osFilename.c_str(), GA_ReadOnly, poOpenInfo->GetSiblingFiles());
+        poOpenInfo = poOpenInfoToDelete.get();
     }
 
     if (poOpenInfo->nHeaderBytes == 0)
     {
-        delete poOpenInfoToDelete;
         return FALSE;
     }
 
@@ -753,10 +730,10 @@ int XYZDataset::IdentifyEx(GDALOpenInfo *poOpenInfo, int &bHasHeaderLine,
     const char *pszData =
         reinterpret_cast<const char *>(poOpenInfo->pabyHeader);
 
-    if (poOpenInfo->nHeaderBytes >= 4 && STARTS_WITH(pszData, "DSAA"))
+    if (poOpenInfo->nHeaderBytes >= 4 && STARTS_WITH(pszData, "DSAA") &&
+        !poOpenInfo->IsSingleAllowedDriver("XYZ"))
     {
         // Do not match GSAG datasets
-        delete poOpenInfoToDelete;
         return FALSE;
     }
 
@@ -804,7 +781,6 @@ int XYZDataset::IdentifyEx(GDALOpenInfo *poOpenInfo, int &bHasHeaderLine,
             bHasHeaderLine = TRUE;
         else
         {
-            delete poOpenInfoToDelete;
             return FALSE;
         }
     }
@@ -812,6 +788,31 @@ int XYZDataset::IdentifyEx(GDALOpenInfo *poOpenInfo, int &bHasHeaderLine,
     nXIndex = -1;
     nYIndex = -1;
     nZIndex = -1;
+    const char *pszColumnOrder = CSLFetchNameValueDef(
+        poOpenInfo->papszOpenOptions, "COLUMN_ORDER", "AUTO");
+    if (EQUAL(pszColumnOrder, "XYZ"))
+    {
+        nXIndex = 0;
+        nYIndex = 1;
+        nZIndex = 2;
+        return TRUE;
+    }
+    else if (EQUAL(pszColumnOrder, "YXZ"))
+    {
+        nXIndex = 1;
+        nYIndex = 0;
+        nZIndex = 2;
+        return TRUE;
+    }
+    else if (!EQUAL(pszColumnOrder, "AUTO"))
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg,
+                 "Option COLUMN_ORDER can only be XYZ, YXZ and AUTO."
+                 "%s is not valid",
+                 pszColumnOrder);
+        return FALSE;
+    }
+
     if (bHasHeaderLine)
     {
         CPLString osHeaderLine;
@@ -835,7 +836,6 @@ int XYZDataset::IdentifyEx(GDALOpenInfo *poOpenInfo, int &bHasHeaderLine,
         CSLDestroy(papszTokens);
         if (nXIndex >= 0 && nYIndex >= 0 && nZIndex >= 0)
         {
-            delete poOpenInfoToDelete;
             return TRUE;
         }
     }
@@ -876,12 +876,10 @@ int XYZDataset::IdentifyEx(GDALOpenInfo *poOpenInfo, int &bHasHeaderLine,
         }
         else
         {
-            delete poOpenInfoToDelete;
             return FALSE;
         }
     }
 
-    delete poOpenInfoToDelete;
     return bHasFoundNewLine && nMaxCols >= 3;
 }
 
@@ -925,8 +923,7 @@ GDALDataset *XYZDataset::Open(GDALOpenInfo *poOpenInfo)
     /* For better performance of CPLReadLine2L() we create a buffered reader */
     /* (except for /vsigzip/ since it has one internally) */
     if (!STARTS_WITH_CI(poOpenInfo->pszFilename, "/vsigzip/"))
-        fp = reinterpret_cast<VSILFILE *>(VSICreateBufferedReaderHandle(
-            reinterpret_cast<VSIVirtualHandle *>(fp)));
+        fp = VSICreateBufferedReaderHandle(fp);
 
     int nMinTokens = 0;
 
@@ -959,15 +956,14 @@ GDALDataset *XYZDataset::Open(GDALOpenInfo *poOpenInfo)
             nYIndex = 1;
             nZIndex = 2;
         }
-        nMinTokens = 1 + std::max(std::max(nXIndex, nYIndex), nZIndex);
     }
-    else
+    else if (nXIndex < 0 || nYIndex < 0 || nZIndex < 0)
     {
         nXIndex = 0;
         nYIndex = 1;
         nZIndex = 2;
-        nMinTokens = 3;
     }
+    nMinTokens = 1 + std::max(std::max(nXIndex, nYIndex), nZIndex);
 
     /* -------------------------------------------------------------------- */
     /*      Parse data lines                                                */
@@ -1336,7 +1332,7 @@ GDALDataset *XYZDataset::Open(GDALOpenInfo *poOpenInfo)
                             ++oIter;
                         }
                     }
-                    adfStepX = adfStepXNew;
+                    adfStepX = std::move(adfStepXNew);
                     if (bAddNewValue)
                     {
                         CPLDebug("XYZ", "New stepX=%.15f", dfStepX);
@@ -1495,9 +1491,7 @@ GDALDataset *XYZDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The XYZ driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("XYZ");
         VSIFCloseL(fp);
         return nullptr;
     }
@@ -1516,11 +1510,10 @@ GDALDataset *XYZDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->nMinTokens = nMinTokens;
     poDS->nRasterXSize = nXSize;
     poDS->nRasterYSize = nYSize;
-    poDS->adfGeoTransform[0] = dfMinX - dfStepX / 2;
-    poDS->adfGeoTransform[1] = dfStepX;
-    poDS->adfGeoTransform[3] =
-        (dfStepY < 0) ? dfMaxY - dfStepY / 2 : dfMinY - dfStepY / 2;
-    poDS->adfGeoTransform[5] = dfStepY;
+    poDS->m_gt[0] = dfMinX - dfStepX / 2;
+    poDS->m_gt[1] = dfStepX;
+    poDS->m_gt[3] = (dfStepY < 0) ? dfMaxY - dfStepY / 2 : dfMinY - dfStepY / 2;
+    poDS->m_gt[5] = dfStepY;
     poDS->bSameNumberOfValuesPerLine = bSameNumberOfValuesPerLine;
     poDS->dfMinZ = dfMinZ;
     poDS->dfMaxZ = dfMaxZ;
@@ -1595,9 +1588,9 @@ GDALDataset *XYZDataset::CreateCopy(const char *pszFilename,
 
     int nXSize = poSrcDS->GetRasterXSize();
     int nYSize = poSrcDS->GetRasterYSize();
-    double adfGeoTransform[6];
-    poSrcDS->GetGeoTransform(adfGeoTransform);
-    if (adfGeoTransform[2] != 0 || adfGeoTransform[4] != 0)
+    GDALGeoTransform gt;
+    poSrcDS->GetGeoTransform(gt);
+    if (gt[2] != 0 || gt[4] != 0)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "XYZ driver does not support CreateCopy() from skewed or "
@@ -1655,9 +1648,9 @@ GDALDataset *XYZDataset::CreateCopy(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     char szFormat[50] = {'\0'};
     if (eReqDT == GDT_Int32)
-        strcpy(szFormat, "%.18g%c%.18g%c%d\n");
+        strcpy(szFormat, "%.17g%c%.17g%c%d\n");
     else
-        strcpy(szFormat, "%.18g%c%.18g%c%.18g\n");
+        strcpy(szFormat, "%.17g%c%.17g%c%.17g\n");
     const char *pszDecimalPrecision =
         CSLFetchNameValue(papszOptions, "DECIMAL_PRECISION");
     const char *pszSignificantDigits =
@@ -1710,12 +1703,11 @@ GDALDataset *XYZDataset::CreateCopy(const char *pszFilename,
                                                    eReqDT, 0, 0, nullptr);
         if (eErr != CE_None)
             break;
-        const double dfY = adfGeoTransform[3] + (j + 0.5) * adfGeoTransform[5];
+        const double dfY = gt[3] + (j + 0.5) * gt[5];
         CPLString osBuf;
         for (int i = 0; i < nXSize; i++)
         {
-            const double dfX =
-                adfGeoTransform[0] + (i + 0.5) * adfGeoTransform[1];
+            const double dfX = gt[0] + (i + 0.5) * gt[1];
             char szBuf[256];
             if (eReqDT == GDT_Int32)
                 CPLsnprintf(szBuf, sizeof(szBuf), szFormat, dfX, pszColSep[0],
@@ -1765,7 +1757,7 @@ GDALDataset *XYZDataset::CreateCopy(const char *pszFilename,
     CPLPushErrorHandler(CPLQuietErrorHandler);
     poXYZ_DS->fp = VSIFOpenL(pszFilename, "rb");
     CPLPopErrorHandler();
-    memcpy(&(poXYZ_DS->adfGeoTransform), adfGeoTransform, sizeof(double) * 6);
+    poXYZ_DS->m_gt = gt;
     poXYZ_DS->nXIndex = 0;
     poXYZ_DS->nYIndex = 1;
     poXYZ_DS->nZIndex = 2;
@@ -1782,10 +1774,10 @@ GDALDataset *XYZDataset::CreateCopy(const char *pszFilename,
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr XYZDataset::GetGeoTransform(double *padfTransform)
+CPLErr XYZDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, 6 * sizeof(double));
+    gt = m_gt;
 
     return CE_None;
 }
@@ -1820,6 +1812,17 @@ void GDALRegister_XYZ()
         "   <Option name='DECIMAL_PRECISION' type='int' description='Number of "
         "decimal places when writing floating-point numbers (%f format).'/>\n"
         "</CreationOptionList>");
+    poDriver->SetMetadataItem(
+        GDAL_DMD_OPENOPTIONLIST,
+        "<OpenOptionList>"
+        "   <Option name='COLUMN_ORDER' type='string-select' default='AUTO' "
+        "description='Specifies the order of the columns. It overrides the "
+        "header.'>"
+        "       <Value>AUTO</Value>"
+        "       <Value>XYZ</Value>"
+        "       <Value>YXZ</Value>"
+        "   </Option>"
+        "</OpenOptionList>");
 
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
 

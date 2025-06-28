@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  test librarified gdalmdimtranslate
@@ -10,46 +9,41 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even.rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import collections
+import os
+import pathlib
 import struct
 
 import gdaltest
+import pytest
 
 from osgeo import gdal
 
 ###############################################################################
 
 
-def test_gdalmdimtranslate_no_arg():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_no_arg(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.vrt"
+    tmpfile = tmp_vsimem / "out.vrt"
     assert gdal.MultiDimTranslate(tmpfile, "data/mdim.vrt")
 
     assert gdal.MultiDimInfo(tmpfile) == gdal.MultiDimInfo("data/mdim.vrt")
-    gdal.Unlink(tmpfile)
 
 
 ###############################################################################
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_gdalmdimtranslate_multidim_to_mem():
 
     out_ds = gdal.MultiDimTranslate("", "data/mdim.vrt", format="MEM")
@@ -64,26 +58,50 @@ def test_gdalmdimtranslate_multidim_to_mem():
 ###############################################################################
 
 
-def test_gdalmdimtranslate_multidim_to_classic():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_multidim_to_unknown_format():
 
-    tmpfile = "/vsimem/out.tif"
-
-    with gdaltest.error_handler():
-        assert not gdal.MultiDimTranslate(tmpfile, "data/mdim.vrt")
-
-    assert gdal.MultiDimTranslate(
-        tmpfile, "data/mdim.vrt", arraySpecs=["/my_subgroup/array_in_subgroup"]
-    )
-
-    gdal.Unlink(tmpfile)
+    with pytest.raises(
+        Exception,
+        match="Cannot determine output driver for dataset name 'unknown.unknown'",
+    ):
+        gdal.MultiDimTranslate("unknown.unknown", "data/mdim.vrt")
 
 
 ###############################################################################
 
 
-def test_gdalmdimtranslate_multidim_1d_to_classic():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_multidim_to_classic(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.tif"
+    tmpfile = tmp_vsimem / "out.tif"
+
+    with pytest.raises(Exception):
+        gdal.MultiDimTranslate(tmpfile, "data/mdim.vrt")
+
+    assert gdal.MultiDimTranslate(
+        tmpfile,
+        pathlib.Path("data/mdim.vrt"),
+        arraySpecs=["/my_subgroup/array_in_subgroup"],
+    )
+
+
+###############################################################################
+
+
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_multidim_1d_to_classic(tmp_vsimem):
+
+    tmpfile = tmp_vsimem / "out.tif"
 
     assert gdal.MultiDimTranslate(tmpfile, "data/mdim.vrt", arraySpecs=["latitude"])
     ds = gdal.Open(tmpfile)
@@ -93,30 +111,32 @@ def test_gdalmdimtranslate_multidim_1d_to_classic():
     assert struct.unpack("f" * 10, data)[0] == 90.0
     ds = None
 
-    gdal.Unlink(tmpfile)
-
 
 ###############################################################################
 
 
-def test_gdalmdimtranslate_classic_to_classic():
+def test_gdalmdimtranslate_classic_to_classic(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.tif"
+    tmpfile = tmp_vsimem / "out.tif"
 
     ds = gdal.MultiDimTranslate(tmpfile, "../gcore/data/byte.tif")
     assert ds.GetRasterBand(1).Checksum() == 4672
     ds = None
 
-    gdal.Unlink(tmpfile)
-
 
 ###############################################################################
 
 
-def test_gdalmdimtranslate_classic_to_multidim():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_classic_to_multidim(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.vrt"
-    tmpgtifffile = "/vsimem/tmp.tif"
+    tmpfile = tmp_vsimem / "out.vrt"
+    tmpgtifffile = tmp_vsimem / "tmp.tif"
+    if os.path.exists("../gcore/data/byte.tif.aux.xml"):
+        os.unlink("../gcore/data/byte.tif.aux.xml")
     ds = gdal.Translate(tmpgtifffile, "../gcore/data/byte.tif")
     ds.SetSpatialRef(None)
     ds = None
@@ -170,14 +190,17 @@ def test_gdalmdimtranslate_classic_to_multidim():
 ###############################################################################
 
 
-def test_gdalmdimtranslate_array():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_array(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.vrt"
-    with gdaltest.error_handler():
-        assert not gdal.MultiDimTranslate(
-            tmpfile, "data/mdim.vrt", arraySpecs=["not_existing"]
-        )
-        assert not gdal.MultiDimTranslate(
+    tmpfile = tmp_vsimem / "out.vrt"
+    with pytest.raises(Exception):
+        gdal.MultiDimTranslate(tmpfile, "data/mdim.vrt", arraySpecs=["not_existing"])
+    with pytest.raises(Exception):
+        gdal.MultiDimTranslate(
             tmpfile,
             "data/mdim.vrt",
             arraySpecs=["name=my_variable_with_time_increasing,unknown_opt=foo"],
@@ -252,9 +275,13 @@ def test_gdalmdimtranslate_array():
 ###############################################################################
 
 
-def test_gdalmdimtranslate_array_with_transpose_and_view():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_array_with_transpose_and_view(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.vrt"
+    tmpfile = tmp_vsimem / "out.vrt"
     assert gdal.MultiDimTranslate(
         tmpfile,
         "data/mdim.vrt",
@@ -327,14 +354,17 @@ def test_gdalmdimtranslate_array_with_transpose_and_view():
 ###############################################################################
 
 
-def test_gdalmdimtranslate_group():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_group(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.vrt"
-    with gdaltest.error_handler():
-        assert not gdal.MultiDimTranslate(
-            tmpfile, "data/mdim.vrt", groupSpecs=["not_existing"]
-        )
-        assert not gdal.MultiDimTranslate(
+    tmpfile = tmp_vsimem / "out.vrt"
+    with pytest.raises(Exception):
+        gdal.MultiDimTranslate(tmpfile, "data/mdim.vrt", groupSpecs=["not_existing"])
+    with pytest.raises(Exception):
+        gdal.MultiDimTranslate(
             tmpfile, "data/mdim.vrt", groupSpecs=["name=my_subgroup,unknown_opt=foo"]
         )
 
@@ -393,9 +423,13 @@ def test_gdalmdimtranslate_group():
 ###############################################################################
 
 
-def test_gdalmdimtranslate_two_groups():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_two_groups(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.vrt"
+    tmpfile = tmp_vsimem / "out.vrt"
     assert gdal.MultiDimTranslate(
         tmpfile,
         "data/mdim.vrt",
@@ -463,17 +497,19 @@ def test_gdalmdimtranslate_two_groups():
 ###############################################################################
 
 
-def test_gdalmdimtranslate_subset():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_subset(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.vrt"
-    with gdaltest.error_handler():
-        assert not gdal.MultiDimTranslate(
-            tmpfile, "data/mdim.vrt", subsetSpecs=["latitude("]
-        )
-        assert not gdal.MultiDimTranslate(
-            tmpfile, "data/mdim.vrt", subsetSpecs=["latitude(1"]
-        )
-        assert not gdal.MultiDimTranslate(
+    tmpfile = tmp_vsimem / "out.vrt"
+    with pytest.raises(Exception):
+        gdal.MultiDimTranslate(tmpfile, "data/mdim.vrt", subsetSpecs=["latitude("])
+    with pytest.raises(Exception):
+        gdal.MultiDimTranslate(tmpfile, "data/mdim.vrt", subsetSpecs=["latitude(1"])
+    with pytest.raises(Exception):
+        gdal.MultiDimTranslate(
             tmpfile, "data/mdim.vrt", subsetSpecs=["latitude(1,2,3)"]
         )
 
@@ -567,7 +603,7 @@ def test_gdalmdimtranslate_subset():
         ('time_decreasing("2013-01-01","2013-01-01")', True, "[0:1:1]"),
         ('time_decreasing("2013-01-01","2013-01-02")', True, "[0:1:1]"),
     ]:
-        with gdaltest.error_handler():
+        with gdaltest.disable_exceptions(), gdaltest.error_handler():
             res = (
                 gdal.MultiDimTranslate(
                     tmpfile,
@@ -720,9 +756,13 @@ def test_gdalmdimtranslate_subset():
 ###############################################################################
 
 
-def test_gdalmdimtranslate_scaleaxes():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_scaleaxes(tmp_vsimem):
 
-    tmpfile = "/vsimem/out.vrt"
+    tmpfile = tmp_vsimem / "out.vrt"
     assert gdal.MultiDimTranslate(
         tmpfile,
         "data/mdim.vrt",
@@ -794,9 +834,13 @@ def test_gdalmdimtranslate_scaleaxes():
     )
 
 
-def test_gdalmdimtranslate_dims_with_same_name_different_size():
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_gdalmdimtranslate_dims_with_same_name_different_size(tmp_vsimem):
 
-    srcfile = "/vsimem/in.vrt"
+    srcfile = tmp_vsimem / "in.vrt"
     gdal.FileFromMemBuffer(
         srcfile,
         """<VRTDataset>
@@ -813,7 +857,7 @@ def test_gdalmdimtranslate_dims_with_same_name_different_size():
 </VRTDataset>""",
     )
 
-    tmpfile = "/vsimem/test.vrt"
+    tmpfile = tmp_vsimem / "test.vrt"
     gdal.MultiDimTranslate(tmpfile, srcfile, groupSpecs=["/"], format="VRT")
 
     f = gdal.VSIFOpenL(tmpfile, "rb")
@@ -855,6 +899,70 @@ def test_gdalmdimtranslate_dims_with_same_name_different_size():
     gdal.Unlink(srcfile)
 
 
+@pytest.mark.require_driver("netCDF")
+def test_gdalmdimtranslate_array_with_view():
+    ds = gdal.MultiDimTranslate(
+        "",
+        "../gdrivers/data/netcdf/byte_no_cf.nc",
+        arraySpecs=["name=Band1,view=[::2,::4]"],
+        format="MEM",
+    )
+    rg = ds.GetRootGroup()
+    ar = rg.OpenMDArray("Band1")
+    dims = ar.GetDimensions()
+    assert dims[0].GetSize() == 10
+    assert dims[1].GetSize() == 5
+
+
+@pytest.mark.require_driver("netCDF")
+def test_gdalmdimtranslate_array_resample():
+    ds = gdal.MultiDimTranslate(
+        "",
+        "../gdrivers/data/netcdf/fake_EMIT_L2A.nc",
+        arraySpecs=["name=reflectance,resample=true"],
+        format="MEM",
+    )
+    rg = ds.GetRootGroup()
+    resampled_ar = rg.OpenMDArray("reflectance")
+    dims = resampled_ar.GetDimensions()
+    assert dims[0].GetName() == "lat"
+    assert dims[0].GetSize() == 3
+    assert dims[1].GetName() == "lon"
+    assert dims[1].GetSize() == 3
+    assert dims[2].GetName() == "bands"
+    assert dims[2].GetSize() == 2
+    assert resampled_ar.GetDataType() == gdal.ExtendedDataType.Create(gdal.GDT_Float32)
+    assert resampled_ar.GetSpatialRef().GetAuthorityCode(None) == "4326"
+    assert struct.unpack("f" * (3 * 3 * 2), resampled_ar.Read()) == (
+        -9999.0,
+        -9999.0,
+        -9999.0,
+        -9999.0,
+        -9999.0,
+        -9999.0,
+        -9999.0,
+        -9999.0,
+        30.0,
+        -30.0,
+        40.0,
+        -40.0,
+        -9999.0,
+        -9999.0,
+        10.0,
+        -10.0,
+        20.0,
+        -20.0,
+    )
+
+    lat = dims[0].GetIndexingVariable()
+    assert lat
+    assert struct.unpack("d" * 3, lat.Read()) == (3.5, 2.5, 1.5)
+
+    lon = dims[1].GetIndexingVariable()
+    assert lon
+    assert struct.unpack("d" * 3, lon.Read()) == (1.5, 2.5, 3.5)
+
+
 def XXXX_test_all():
     while True:
         test_gdalmdimtranslate_no_arg()
@@ -867,3 +975,21 @@ def XXXX_test_all():
         test_gdalmdimtranslate_two_groups()
         test_gdalmdimtranslate_subset()
         test_gdalmdimtranslate_scaleaxes()
+
+
+###############################################################################
+# Test option argument handling
+
+
+def test_gdalmdimtranslate_dict_arguments():
+
+    opt = gdal.MultiDimTranslateOptions(
+        "__RETURN_OPTION_LIST__",
+        creationOptions=collections.OrderedDict(
+            (("COMPRESS", "DEFLATE"), ("LEVEL", 4))
+        ),
+    )
+
+    co_idx = opt.index("-co")
+
+    assert opt[co_idx : co_idx + 4] == ["-co", "COMPRESS=DEFLATE", "-co", "LEVEL=4"]

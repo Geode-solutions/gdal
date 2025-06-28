@@ -23,9 +23,10 @@ wget -q "https://github.com/${GDAL_REPOSITORY}/archive/${GDAL_VERSION}.tar.gz" \
 
     if test "${RSYNC_REMOTE:-}" != ""; then
         echo "Downloading cache..."
-        rsync -ra "${RSYNC_REMOTE}/gdal/${GCC_ARCH}/" "$HOME/"
+        rsync -ra "${RSYNC_REMOTE}/gdal/${GCC_ARCH}/" "$HOME/.cache/"
         echo "Finished"
-
+    fi
+    if [ -n "${WITH_CCACHE:-}" ]; then
         # Little trick to avoid issues with Python bindings
         printf "#!/bin/sh\nccache %s-linux-gnu-gcc \$*" "${GCC_ARCH}" > ccache_gcc.sh
         chmod +x ccache_gcc.sh
@@ -38,44 +39,71 @@ wget -q "https://github.com/${GDAL_REPOSITORY}/archive/${GDAL_VERSION}.tar.gz" \
     fi
 
     export CFLAGS="-DPROJ_RENAME_SYMBOLS -O2 -g"
-    export CXXFLAGS="-DPROJ_RENAME_SYMBOLS -DPROJ_INTERNAL_CPP_NAMESPACE -O2 -g"
+    # -Wno-psabi avoid 'note: parameter passing for argument of type 'std::pair<double, double>' when C++17 is enabled changed to match C++14 in GCC 10.1' on arm64
+    export CXXFLAGS="-DPROJ_RENAME_SYMBOLS -DPROJ_INTERNAL_CPP_NAMESPACE -O2 -g -Wno-psabi"
 
     mkdir build
     cd build
     # GDAL_USE_TIFF_INTERNAL=ON to use JXL
     export GDAL_CMAKE_EXTRA_OPTS=""
-    if test "${GCC_ARCH}" != "x86_64"; then
+    if test "${GCC_ARCH}" = "x86_64"; then
+        export GDAL_CMAKE_EXTRA_OPTS="${GDAL_CMAKE_EXTRA_OPTS} -DENABLE_IPO=ON"
+    else
         export GDAL_CMAKE_EXTRA_OPTS="${GDAL_CMAKE_EXTRA_OPTS} -DPDFIUM_INCLUDE_DIR="
     fi
-    if test "${TARGET_ARCH:-}" != ""; then
-        export JDK_PATH="/usr/lib/jvm/java-${JAVA_VERSION}-openjdk-${TARGET_ARCH}"
-        export GDAL_CMAKE_EXTRA_OPTS="${GDAL_CMAKE_EXTRA_OPTS} -DJAVA_AWT_INCLUDE_PATH:PATH=${JDK_PATH}/include -DJAVA_AWT_LIBRARY:FILEPATH=${JDK_PATH}/lib/libjawt.so -DJAVA_INCLUDE_PATH:PATH=${JDK_PATH}/include -DJAVA_INCLUDE_PATH2:PATH=${JDK_PATH}/include/linux -DJAVA_JVM_LIBRARY:FILEPATH=${JDK_PATH}/lib/server/libjvm.so"
+    export JAVA_ARCH=""
+    if test "${GCC_ARCH}" = "x86_64"; then
+      export JAVA_ARCH="amd64";
+    elif test "${GCC_ARCH}" = "aarch64"; then
+      export JAVA_ARCH="arm64";
+    fi
+    if test "${JAVA_ARCH:-}" != ""; then
+        export GDAL_CMAKE_EXTRA_OPTS="${GDAL_CMAKE_EXTRA_OPTS} -DBUILD_JAVA_BINDINGS=ON -DJAVA_HOME=/usr/lib/jvm/java-${JAVA_VERSION}-openjdk-${JAVA_ARCH}"
     fi
     if echo "$WITH_FILEGDB" | grep -Eiq "^(y(es)?|1|true)$" ; then
       ln -s /usr/local/FileGDB_API/lib/libFileGDBAPI.so /usr/lib/x86_64-linux-gnu
       export GDAL_CMAKE_EXTRA_OPTS="${GDAL_CMAKE_EXTRA_OPTS} -DFileGDB_ROOT:PATH=/usr/local/FileGDB_API -DFileGDB_LIBRARY:FILEPATH=/usr/lib/x86_64-linux-gnu/libFileGDBAPI.so"
       export LD_LIBRARY_PATH=/usr/local/FileGDB_API/lib:${LD_LIBRARY_PATH:-}
     fi
+    if test "$(uname -p)" = "x86_64"; then
+      if echo "$WITH_ORACLE" | grep -Eiq "^(y(es)?|1|true)$" ; then
+        export GDAL_CMAKE_EXTRA_OPTS="${GDAL_CMAKE_EXTRA_OPTS} -DOracle_ROOT=/opt/instantclient_19_23"
+      fi
+      if echo "$WITH_ECW" | grep -Eiq "^(y(es)?|1|true)$" ; then
+        export GDAL_CMAKE_EXTRA_OPTS="${GDAL_CMAKE_EXTRA_OPTS} -DECW_ROOT=/opt/libecwj2-3.3"
+      fi
+      if echo "$WITH_MRSID" | grep -Eiq "^(y(es)?|1|true)$" ; then
+        export GDAL_CMAKE_EXTRA_OPTS="${GDAL_CMAKE_EXTRA_OPTS} -DMRSID_ROOT=/opt/Raster_DSDK"
+      fi
+    fi
+    echo "${GDAL_CMAKE_EXTRA_OPTS}"
     cmake .. \
+        -G Ninja \
         -DCMAKE_INSTALL_PREFIX=/usr \
+        -DGDAL_FIND_PACKAGE_PROJ_MODE=MODULE \
+        -DBUILD_TESTING=OFF \
         -DPROJ_INCLUDE_DIR="/build${PROJ_INSTALL_PREFIX-/usr/local}/include" \
         -DPROJ_LIBRARY="/build${PROJ_INSTALL_PREFIX-/usr/local}/lib/libinternalproj.so" \
+        -DGDAL_ENABLE_PLUGINS=ON \
         -DGDAL_USE_TIFF_INTERNAL=ON \
-        -DGDAL_USE_GEOTIFF_INTERNAL=ON ${GDAL_CMAKE_EXTRA_OPTS}
+        -DBUILD_PYTHON_BINDINGS=ON \
+        -DGDAL_USE_GEOTIFF_INTERNAL=ON ${GDAL_CMAKE_EXTRA_OPTS} \
+        -DOpenDrive_DIR=/usr/lib/ \
+        -DOGR_ENABLE_DRIVER_XODR_PLUGIN=TRUE \
+        -DGDAL_USE_EXPRTK:BOOL=ON \
 
-    make "-j$(nproc)"
-    make install DESTDIR="/build"
+    ninja
+    DESTDIR="/build" ninja install
 
     cd ..
 
     if [ -n "${RSYNC_REMOTE:-}" ]; then
-        ccache -s
-
         echo "Uploading cache..."
-        rsync -ra --delete "$HOME/.cache" "${RSYNC_REMOTE}/gdal/${GCC_ARCH}/"
+        rsync -ra --delete "$HOME/.cache/" "${RSYNC_REMOTE}/gdal/${GCC_ARCH}/"
         echo "Finished"
-
-        rm -rf "$HOME/.cache"
+    fi
+    if [ -n "${WITH_CCACHE:-}" ]; then
+        ccache -s
         unset CC
         unset CXX
     fi
@@ -93,7 +121,7 @@ mv /build/usr/bin                    /build_gdal_version_changing/usr
 
 if [ "${WITH_DEBUG_SYMBOLS}" = "yes" ]; then
     # separate debug symbols
-    for P in "/build_gdal_version_changing/usr/lib/${GCC_ARCH}-linux-gnu"/* /build_gdal_python/usr/lib/python3/dist-packages/osgeo/*.so /build_gdal_version_changing/usr/bin/*; do
+    for P in "/build_gdal_version_changing/usr/lib/${GCC_ARCH}-linux-gnu"/* "/build_gdal_version_changing/usr/lib/${GCC_ARCH}-linux-gnu"/gdalplugins/* /build_gdal_python/usr/lib/python3/dist-packages/osgeo/*.so /build_gdal_version_changing/usr/bin/*; do
         if file -h "$P" | grep -qi elf; then
             F=$(basename "$P")
             mkdir -p "$(dirname "$P")/.debug"
@@ -105,6 +133,7 @@ if [ "${WITH_DEBUG_SYMBOLS}" = "yes" ]; then
     done
 else
     for P in "/build_gdal_version_changing/usr/lib/${GCC_ARCH}-linux-gnu"/*; do ${GCC_ARCH}-linux-gnu-strip -s "$P" 2>/dev/null || /bin/true; done
+    for P in "/build_gdal_version_changing/usr/lib/${GCC_ARCH}-linux-gnu"/gdalplugins/*; do ${GCC_ARCH}-linux-gnu-strip -s "$P" 2>/dev/null || /bin/true; done
     for P in /build_gdal_python/usr/lib/python3/dist-packages/osgeo/*.so; do ${GCC_ARCH}-linux-gnu-strip -s "$P" 2>/dev/null || /bin/true; done
     for P in /build_gdal_version_changing/usr/bin/*; do ${GCC_ARCH}-linux-gnu-strip -s "$P" 2>/dev/null || /bin/true; done
 fi

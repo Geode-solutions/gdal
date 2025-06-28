@@ -7,28 +7,13 @@
  ******************************************************************************
  * Copyright (c) 2010-2018, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "cpl_http.h"
 #include "cpl_minixml.h"
+#include "cpl_json.h"
 #include "cpl_vsil_curl_priv.h"
 #include "cpl_vsil_curl_class.h"
 
@@ -40,6 +25,11 @@
 #include <memory>
 
 #include "cpl_google_cloud.h"
+
+// To avoid aliasing to GetDiskFreeSpace to GetDiskFreeSpaceA on Windows
+#ifdef GetDiskFreeSpace
+#undef GetDiskFreeSpace
+#endif
 
 #ifndef HAVE_CURL
 
@@ -65,23 +55,26 @@ namespace cpl
 /*                         VSIGSFSHandler                               */
 /************************************************************************/
 
-class VSIGSFSHandler final : public IVSIS3LikeFSHandler
+class VSIGSFSHandler final : public IVSIS3LikeFSHandlerWithMultipartUpload
 {
     CPL_DISALLOW_COPY_ASSIGN(VSIGSFSHandler)
     const std::string m_osPrefix;
 
   protected:
     VSICurlHandle *CreateFileHandle(const char *pszFilename) override;
+
     const char *GetDebugKey() const override
     {
         return "GS";
     }
 
-    CPLString GetFSPrefix() const override
+    std::string GetFSPrefix() const override
     {
         return m_osPrefix;
     }
-    CPLString GetURLFromFilename(const CPLString &osFilename) override;
+
+    std::string
+    GetURLFromFilename(const std::string &osFilename) const override;
 
     IVSIS3LikeHandleHelper *CreateHandleHelper(const char *pszURI,
                                                bool bAllowNoObject) override;
@@ -93,33 +86,27 @@ class VSIGSFSHandler final : public IVSIS3LikeFSHandler
         return STARTS_WITH(pszHeaderName, "x-goog-");
     }
 
+    VSIVirtualHandleUniquePtr
+    CreateWriteHandle(const char *pszFilename,
+                      CSLConstList papszOptions) override;
+
+    GIntBig GetDiskFreeSpace(const char * /* pszDirname */) override
+    {
+        // There is no limit per bucket, but a 5 TiB limit per object.
+        return static_cast<GIntBig>(5) * 1024 * 1024 * 1024 * 1024;
+    }
+
   public:
     explicit VSIGSFSHandler(const char *pszPrefix) : m_osPrefix(pszPrefix)
     {
     }
-    ~VSIGSFSHandler() override;
 
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError, CSLConstList papszOptions) override;
+    ~VSIGSFSHandler() override;
 
     const char *GetOptions() override;
 
     char *GetSignedURL(const char *pszFilename,
                        CSLConstList papszOptions) override;
-
-    // Multipart upload
-    bool SupportsParallelMultipartUpload() const override
-    {
-        return true;
-    }
-
-    bool SupportsSequentialWrite(const char * /* pszPath */,
-                                 bool /* bAllowLocalTempFile */) override
-    {
-        return true;
-    }
-    bool SupportsRandomWrite(const char * /* pszPath */,
-                             bool /* bAllowLocalTempFile */) override;
 
     char **GetFileMetadata(const char *pszFilename, const char *pszDomain,
                            CSLConstList papszOptions) override;
@@ -138,6 +125,11 @@ class VSIGSFSHandler final : public IVSIS3LikeFSHandler
     {
         return new VSIGSFSHandler(pszPrefix);
     }
+
+    bool SupportsMultipartAbort() const override
+    {
+        return true;
+    }
 };
 
 /************************************************************************/
@@ -152,7 +144,7 @@ class VSIGSHandle final : public IVSIS3LikeHandle
 
   protected:
     struct curl_slist *
-    GetCurlHeaders(const CPLString &osVerb,
+    GetCurlHeaders(const std::string &osVerb,
                    const struct curl_slist *psExistingHeaders) override;
 
   public:
@@ -168,7 +160,6 @@ class VSIGSHandle final : public IVSIS3LikeHandle
 VSIGSFSHandler::~VSIGSFSHandler()
 {
     VSICurlFilesystemHandlerBase::ClearCache();
-    VSIGSHandleHelper::CleanMutex();
 }
 
 /************************************************************************/
@@ -189,67 +180,10 @@ void VSIGSFSHandler::ClearCache()
 VSICurlHandle *VSIGSFSHandler::CreateFileHandle(const char *pszFilename)
 {
     VSIGSHandleHelper *poHandleHelper = VSIGSHandleHelper::BuildFromURI(
-        pszFilename + GetFSPrefix().size(), GetFSPrefix());
+        pszFilename + GetFSPrefix().size(), GetFSPrefix().c_str());
     if (poHandleHelper == nullptr)
         return nullptr;
     return new VSIGSHandle(this, pszFilename, poHandleHelper);
-}
-
-/************************************************************************/
-/*                                Open()                                */
-/************************************************************************/
-
-VSIVirtualHandle *VSIGSFSHandler::Open(const char *pszFilename,
-                                       const char *pszAccess, bool bSetError,
-                                       CSLConstList papszOptions)
-{
-    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix()))
-        return nullptr;
-
-    if (strchr(pszAccess, 'w') != nullptr || strchr(pszAccess, 'a') != nullptr)
-    {
-        if (strchr(pszAccess, '+') != nullptr &&
-            !SupportsRandomWrite(pszFilename, true))
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "w+ not supported for /vsigs, unless "
-                     "CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE is set to YES");
-            errno = EACCES;
-            return nullptr;
-        }
-
-        VSIGSHandleHelper *poHandleHelper = VSIGSHandleHelper::BuildFromURI(
-            pszFilename + GetFSPrefix().size(), GetFSPrefix().c_str());
-        if (poHandleHelper == nullptr)
-            return nullptr;
-        VSIS3WriteHandle *poHandle = new VSIS3WriteHandle(
-            this, pszFilename, poHandleHelper, false, papszOptions);
-        if (!poHandle->IsOK())
-        {
-            delete poHandle;
-            return nullptr;
-        }
-        if (strchr(pszAccess, '+') != nullptr)
-        {
-            return VSICreateUploadOnCloseFile(poHandle);
-        }
-        return poHandle;
-    }
-
-    return VSICurlFilesystemHandlerBase::Open(pszFilename, pszAccess, bSetError,
-                                              papszOptions);
-}
-
-/************************************************************************/
-/*                        SupportsRandomWrite()                         */
-/************************************************************************/
-
-bool VSIGSFSHandler::SupportsRandomWrite(const char *pszPath,
-                                         bool bAllowLocalTempFile)
-{
-    return bAllowLocalTempFile &&
-           CPLTestBool(VSIGetPathSpecificOption(
-               pszPath, "CPL_VSIL_USE_TEMP_FILE_FOR_RANDOM_WRITE", "NO"));
 }
 
 /************************************************************************/
@@ -258,46 +192,71 @@ bool VSIGSFSHandler::SupportsRandomWrite(const char *pszPath,
 
 const char *VSIGSFSHandler::GetOptions()
 {
-    static CPLString osOptions(
-        CPLString("<Options>") +
-        "  <Option name='GS_SECRET_ACCESS_KEY' type='string' "
-        "description='Secret access key. To use with GS_ACCESS_KEY_ID'/>"
-        "  <Option name='GS_ACCESS_KEY_ID' type='string' "
-        "description='Access key id'/>"
-        "  <Option name='GS_NO_SIGN_REQUEST' type='boolean' "
-        "description='Whether to disable signing of requests' default='NO'/>"
-        "  <Option name='GS_OAUTH2_REFRESH_TOKEN' type='string' "
-        "description='OAuth2 refresh token. For OAuth2 client authentication. "
-        "To use with GS_OAUTH2_CLIENT_ID and GS_OAUTH2_CLIENT_SECRET'/>"
-        "  <Option name='GS_OAUTH2_CLIENT_ID' type='string' "
-        "description='OAuth2 client id for OAuth2 client authentication'/>"
-        "  <Option name='GS_OAUTH2_CLIENT_SECRET' type='string' "
-        "description='OAuth2 client secret for OAuth2 client authentication'/>"
-        "  <Option name='GS_OAUTH2_PRIVATE_KEY' type='string' "
-        "description='Private key for OAuth2 service account authentication. "
-        "To use with GS_OAUTH2_CLIENT_EMAIL'/>"
-        "  <Option name='GS_OAUTH2_PRIVATE_KEY_FILE' type='string' "
-        "description='Filename that contains private key for OAuth2 service "
-        "account authentication. "
-        "To use with GS_OAUTH2_CLIENT_EMAIL'/>"
-        "  <Option name='GS_OAUTH2_CLIENT_EMAIL' type='string' "
-        "description='Client email to use with OAuth2 service account "
-        "authentication'/>"
-        "  <Option name='GS_OAUTH2_SCOPE' type='string' "
-        "description='OAuth2 authorization scope' "
-        "default='https://www.googleapis.com/auth/devstorage.read_write'/>"
-        "  <Option name='CPL_MACHINE_IS_GCE' type='boolean' "
-        "description='Whether the current machine is a Google Compute Engine "
-        "instance' default='NO'/>"
-        "  <Option name='CPL_GCE_CHECK_LOCAL_FILES' type='boolean' "
-        "description='Whether to check system logs to determine "
-        "if current machine is a GCE instance' default='YES'/>"
-        "description='Filename that contains AWS configuration' "
-        "default='~/.aws/config'/>"
-        "  <Option name='CPL_GS_CREDENTIALS_FILE' type='string' "
-        "description='Filename that contains Google Storage credentials' "
-        "default='~/.boto'/>" +
-        VSICurlFilesystemHandlerBase::GetOptionsStatic() + "</Options>");
+    static std::string osOptions(
+        std::string("<Options>")
+            .append(
+                "  <Option name='GS_SECRET_ACCESS_KEY' type='string' "
+                "description='Secret access key. To use with "
+                "GS_ACCESS_KEY_ID'/>"
+                "  <Option name='GS_ACCESS_KEY_ID' type='string' "
+                "description='Access key id'/>"
+                "  <Option name='GS_NO_SIGN_REQUEST' type='boolean' "
+                "description='Whether to disable signing of requests' "
+                "default='NO'/>"
+                "  <Option name='GS_OAUTH2_REFRESH_TOKEN' type='string' "
+                "description='OAuth2 refresh token. For OAuth2 client "
+                "authentication. "
+                "To use with GS_OAUTH2_CLIENT_ID and GS_OAUTH2_CLIENT_SECRET'/>"
+                "  <Option name='GS_OAUTH2_CLIENT_ID' type='string' "
+                "description='OAuth2 client id for OAuth2 client "
+                "authentication'/>"
+                "  <Option name='GS_OAUTH2_CLIENT_SECRET' type='string' "
+                "description='OAuth2 client secret for OAuth2 client "
+                "authentication'/>"
+                "  <Option name='GS_OAUTH2_PRIVATE_KEY' type='string' "
+                "description='Private key for OAuth2 service account "
+                "authentication. "
+                "To use with GS_OAUTH2_CLIENT_EMAIL'/>"
+                "  <Option name='GS_OAUTH2_PRIVATE_KEY_FILE' type='string' "
+                "description='Filename that contains private key for OAuth2 "
+                "service "
+                "account authentication. "
+                "To use with GS_OAUTH2_CLIENT_EMAIL'/>"
+                "  <Option name='GS_OAUTH2_CLIENT_EMAIL' type='string' "
+                "description='Client email to use with OAuth2 service account "
+                "authentication'/>"
+                "  <Option name='GS_OAUTH2_SCOPE' type='string' "
+                "description='OAuth2 authorization scope' "
+                "default='https://www.googleapis.com/auth/"
+                "devstorage.read_write'/>"
+                "  <Option name='CPL_MACHINE_IS_GCE' type='boolean' "
+                "description='Whether the current machine is a Google Compute "
+                "Engine "
+                "instance' default='NO'/>"
+                "  <Option name='CPL_GCE_CHECK_LOCAL_FILES' type='boolean' "
+                "description='Whether to check system logs to determine "
+                "if current machine is a GCE instance' default='YES'/>"
+                "description='Filename that contains AWS configuration' "
+                "default='~/.aws/config'/>"
+                "  <Option name='CPL_GS_CREDENTIALS_FILE' type='string' "
+                "description='Filename that contains Google Storage "
+                "credentials' "
+                "default='~/.boto'/>"
+                "  <Option name='VSIGS_CHUNK_SIZE' type='int' "
+                "description='Size in MiB for chunks of files that are "
+                "uploaded. The"
+                "default value allows for files up to ")
+            .append(CPLSPrintf("%d", GetDefaultPartSizeInMiB() *
+                                         GetMaximumPartCount() / 1024))
+            .append("GiB each' default='")
+            .append(CPLSPrintf("%d", GetDefaultPartSizeInMiB()))
+            .append("' min='")
+            .append(CPLSPrintf("%d", GetMinimumPartSizeInMiB()))
+            .append("' max='")
+            .append(CPLSPrintf("%d", GetMaximumPartSizeInMiB()))
+            .append("'/>")
+            .append(VSICurlFilesystemHandlerBase::GetOptionsStatic())
+            .append("</Options>"));
     return osOptions.c_str();
 }
 
@@ -308,37 +267,38 @@ const char *VSIGSFSHandler::GetOptions()
 char *VSIGSFSHandler::GetSignedURL(const char *pszFilename,
                                    CSLConstList papszOptions)
 {
-    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix()))
+    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix().c_str()))
         return nullptr;
 
-    VSIGSHandleHelper *poHandleHelper =
-        VSIGSHandleHelper::BuildFromURI(pszFilename + GetFSPrefix().size(),
-                                        GetFSPrefix().c_str(), papszOptions);
+    VSIGSHandleHelper *poHandleHelper = VSIGSHandleHelper::BuildFromURI(
+        pszFilename + GetFSPrefix().size(), GetFSPrefix().c_str(), nullptr,
+        papszOptions);
     if (poHandleHelper == nullptr)
     {
         return nullptr;
     }
 
-    CPLString osRet(poHandleHelper->GetSignedURL(papszOptions));
+    std::string osRet(poHandleHelper->GetSignedURL(papszOptions));
 
     delete poHandleHelper;
-    return osRet.empty() ? nullptr : CPLStrdup(osRet);
+    return osRet.empty() ? nullptr : CPLStrdup(osRet.c_str());
 }
 
 /************************************************************************/
 /*                          GetURLFromFilename()                         */
 /************************************************************************/
 
-CPLString VSIGSFSHandler::GetURLFromFilename(const CPLString &osFilename)
+std::string
+VSIGSFSHandler::GetURLFromFilename(const std::string &osFilename) const
 {
-    CPLString osFilenameWithoutPrefix = osFilename.substr(GetFSPrefix().size());
-    VSIGSHandleHelper *poHandleHelper =
-        VSIGSHandleHelper::BuildFromURI(osFilenameWithoutPrefix, GetFSPrefix());
+    const std::string osFilenameWithoutPrefix =
+        osFilename.substr(GetFSPrefix().size());
+    auto poHandleHelper =
+        std::unique_ptr<VSIGSHandleHelper>(VSIGSHandleHelper::BuildFromURI(
+            osFilenameWithoutPrefix.c_str(), GetFSPrefix().c_str()));
     if (poHandleHelper == nullptr)
-        return CPLString();
-    CPLString osURL(poHandleHelper->GetURL());
-    delete poHandleHelper;
-    return osURL;
+        return std::string();
+    return poHandleHelper->GetURL();
 }
 
 /************************************************************************/
@@ -352,6 +312,27 @@ IVSIS3LikeHandleHelper *VSIGSFSHandler::CreateHandleHelper(const char *pszURI,
 }
 
 /************************************************************************/
+/*                          CreateWriteHandle()                         */
+/************************************************************************/
+
+VSIVirtualHandleUniquePtr
+VSIGSFSHandler::CreateWriteHandle(const char *pszFilename,
+                                  CSLConstList papszOptions)
+{
+    auto poHandleHelper =
+        CreateHandleHelper(pszFilename + GetFSPrefix().size(), false);
+    if (poHandleHelper == nullptr)
+        return nullptr;
+    auto poHandle = std::make_unique<VSIMultipartWriteHandle>(
+        this, pszFilename, poHandleHelper, papszOptions);
+    if (!poHandle->IsOK())
+    {
+        return nullptr;
+    }
+    return VSIVirtualHandleUniquePtr(poHandle.release());
+}
+
+/************************************************************************/
 /*                          GetFileMetadata()                           */
 /************************************************************************/
 
@@ -359,8 +340,133 @@ char **VSIGSFSHandler::GetFileMetadata(const char *pszFilename,
                                        const char *pszDomain,
                                        CSLConstList papszOptions)
 {
-    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix()))
+    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix().c_str()))
         return nullptr;
+
+    if (pszDomain == nullptr)
+    {
+        // Handle case of requesting GetFileMetadata() on the bucket root
+        std::string osFilename(pszFilename);
+        if (osFilename.back() == '/')
+            osFilename.pop_back();
+        if (osFilename.find('/', GetFSPrefix().size()) == std::string::npos)
+        {
+            const std::string osBucket =
+                osFilename.substr(GetFSPrefix().size());
+            const std::string osResource =
+                std::string("storage/v1/b/").append(osBucket);
+
+            auto poHandleHelper = std::unique_ptr<VSIGSHandleHelper>(
+                VSIGSHandleHelper::BuildFromURI(osResource.c_str(),
+                                                GetFSPrefix().c_str(),
+                                                osBucket.c_str()));
+            if (!poHandleHelper)
+                return nullptr;
+
+            // Check if OAuth2 is used externally and a bearer token is passed
+            // as a header in path-specific options
+            const CPLStringList aosHTTPOptions(
+                CPLHTTPGetOptionsFromEnv(pszFilename));
+            bool bUsingBearerToken = false;
+            const char *pszHeaders = aosHTTPOptions.FetchNameValue("HEADERS");
+            if (pszHeaders && strstr(pszHeaders, "Authorization: Bearer "))
+                bUsingBearerToken = true;
+
+            // The JSON API cannot be used with HMAC keys
+            if (poHandleHelper->UsesHMACKey() && !bUsingBearerToken)
+            {
+                CPLDebug(GetDebugKey(),
+                         "GetFileMetadata() on bucket "
+                         "only available for OAuth2 authentication");
+                return VSICurlFilesystemHandlerBase::GetFileMetadata(
+                    pszFilename, pszDomain, papszOptions);
+            }
+
+            NetworkStatisticsFileSystem oContextFS(GetFSPrefix().c_str());
+            NetworkStatisticsAction oContextAction("GetFileMetadata");
+
+            const CPLHTTPRetryParameters oRetryParameters(aosHTTPOptions);
+            CPLHTTPRetryContext oRetryContext(oRetryParameters);
+
+            bool bRetry;
+            CPLStringList aosResult;
+            do
+            {
+                bRetry = false;
+                CURL *hCurlHandle = curl_easy_init();
+
+                struct curl_slist *headers =
+                    static_cast<struct curl_slist *>(CPLHTTPSetOptions(
+                        hCurlHandle, poHandleHelper->GetURL().c_str(),
+                        aosHTTPOptions.List()));
+                headers = VSICurlMergeHeaders(
+                    headers, poHandleHelper->GetCurlHeaders("GET", headers));
+
+                CurlRequestHelper requestHelper;
+                const long response_code = requestHelper.perform(
+                    hCurlHandle, headers, this, poHandleHelper.get());
+
+                NetworkStatisticsLogger::LogGET(
+                    requestHelper.sWriteFuncData.nSize);
+
+                if (response_code != 200 ||
+                    requestHelper.sWriteFuncData.pBuffer == nullptr)
+                {
+                    // Look if we should attempt a retry
+                    if (oRetryContext.CanRetry(
+                            static_cast<int>(response_code),
+                            requestHelper.sWriteFuncHeaderData.pBuffer,
+                            requestHelper.szCurlErrBuf))
+                    {
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "HTTP error code: %d - %s. "
+                                 "Retrying again in %.1f secs",
+                                 static_cast<int>(response_code),
+                                 poHandleHelper->GetURL().c_str(),
+                                 oRetryContext.GetCurrentDelay());
+                        CPLSleep(oRetryContext.GetCurrentDelay());
+                        bRetry = true;
+                    }
+                    else
+                    {
+                        CPLDebug(GetDebugKey(), "%s",
+                                 requestHelper.sWriteFuncData.pBuffer
+                                     ? requestHelper.sWriteFuncData.pBuffer
+                                     : "(null)");
+                        CPLError(CE_Failure, CPLE_AppDefined,
+                                 "GetFileMetadata failed");
+                    }
+                }
+                else
+                {
+                    CPLJSONDocument oDoc;
+                    if (oDoc.LoadMemory(
+                            reinterpret_cast<const GByte *>(
+                                requestHelper.sWriteFuncData.pBuffer),
+                            static_cast<int>(
+                                requestHelper.sWriteFuncData.nSize)) &&
+                        oDoc.GetRoot().GetType() == CPLJSONObject::Type::Object)
+                    {
+                        for (const auto &oObj : oDoc.GetRoot().GetChildren())
+                        {
+                            aosResult.SetNameValue(oObj.GetName().c_str(),
+                                                   oObj.ToString().c_str());
+                        }
+                    }
+                    else
+                    {
+                        // Shouldn't happen normally
+                        aosResult.SetNameValue(
+                            "DATA", requestHelper.sWriteFuncData.pBuffer);
+                    }
+                }
+
+                curl_easy_cleanup(hCurlHandle);
+            } while (bRetry);
+
+            return aosResult.StealList();
+        }
+    }
 
     if (pszDomain == nullptr || !EQUAL(pszDomain, "ACL"))
     {
@@ -374,21 +480,14 @@ char **VSIGSFSHandler::GetFileMetadata(const char *pszFilename,
     if (!poHandleHelper)
         return nullptr;
 
-    NetworkStatisticsFileSystem oContextFS(GetFSPrefix());
+    NetworkStatisticsFileSystem oContextFS(GetFSPrefix().c_str());
     NetworkStatisticsAction oContextAction("GetFileMetadata");
 
     const CPLStringList aosHTTPOptions(CPLHTTPGetOptionsFromEnv(pszFilename));
+    const CPLHTTPRetryParameters oRetryParameters(aosHTTPOptions);
+    CPLHTTPRetryContext oRetryContext(oRetryParameters);
 
     bool bRetry;
-    // coverity[tainted_data]
-    double dfRetryDelay = CPLAtof(
-        VSIGetPathSpecificOption(pszFilename, "GDAL_HTTP_RETRY_DELAY",
-                                 CPLSPrintf("%f", CPL_HTTP_RETRY_DELAY)));
-    const int nMaxRetry =
-        atoi(VSIGetPathSpecificOption(pszFilename, "GDAL_HTTP_MAX_RETRY",
-                                      CPLSPrintf("%d", CPL_HTTP_MAX_RETRY)));
-    int nRetryCount = 0;
-
     CPLStringList aosResult;
     do
     {
@@ -412,20 +511,18 @@ char **VSIGSFSHandler::GetFileMetadata(const char *pszFilename,
             requestHelper.sWriteFuncData.pBuffer == nullptr)
         {
             // Look if we should attempt a retry
-            const double dfNewRetryDelay = CPLHTTPGetNewRetryDelay(
-                static_cast<int>(response_code), dfRetryDelay,
-                requestHelper.sWriteFuncHeaderData.pBuffer,
-                requestHelper.szCurlErrBuf);
-            if (dfNewRetryDelay > 0 && nRetryCount < nMaxRetry)
+            if (oRetryContext.CanRetry(
+                    static_cast<int>(response_code),
+                    requestHelper.sWriteFuncHeaderData.pBuffer,
+                    requestHelper.szCurlErrBuf))
             {
                 CPLError(CE_Warning, CPLE_AppDefined,
                          "HTTP error code: %d - %s. "
                          "Retrying again in %.1f secs",
                          static_cast<int>(response_code),
-                         poHandleHelper->GetURL().c_str(), dfRetryDelay);
-                CPLSleep(dfRetryDelay);
-                dfRetryDelay = dfNewRetryDelay;
-                nRetryCount++;
+                         poHandleHelper->GetURL().c_str(),
+                         oRetryContext.GetCurrentDelay());
+                CPLSleep(oRetryContext.GetCurrentDelay());
                 bRetry = true;
             }
             else
@@ -444,7 +541,7 @@ char **VSIGSFSHandler::GetFileMetadata(const char *pszFilename,
 
         curl_easy_cleanup(hCurlHandle);
     } while (bRetry);
-    return CSLDuplicate(aosResult.List());
+    return aosResult.StealList();
 }
 
 /************************************************************************/
@@ -456,7 +553,7 @@ bool VSIGSFSHandler::SetFileMetadata(const char *pszFilename,
                                      const char *pszDomain,
                                      CSLConstList /* papszOptions */)
 {
-    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix()))
+    if (!STARTS_WITH_CI(pszFilename, GetFSPrefix().c_str()))
         return false;
 
     if (pszDomain == nullptr ||
@@ -485,22 +582,15 @@ bool VSIGSFSHandler::SetFileMetadata(const char *pszFilename,
     if (!poHandleHelper)
         return false;
 
-    NetworkStatisticsFileSystem oContextFS(GetFSPrefix());
+    NetworkStatisticsFileSystem oContextFS(GetFSPrefix().c_str());
     NetworkStatisticsAction oContextAction("SetFileMetadata");
 
     bool bRetry;
-    // coverity[tainted_data]
-    double dfRetryDelay = CPLAtof(
-        VSIGetPathSpecificOption(pszFilename, "GDAL_HTTP_RETRY_DELAY",
-                                 CPLSPrintf("%f", CPL_HTTP_RETRY_DELAY)));
-    const int nMaxRetry =
-        atoi(VSIGetPathSpecificOption(pszFilename, "GDAL_HTTP_MAX_RETRY",
-                                      CPLSPrintf("%d", CPL_HTTP_MAX_RETRY)));
-    int nRetryCount = 0;
-
     bool bRet = false;
 
     const CPLStringList aosHTTPOptions(CPLHTTPGetOptionsFromEnv(pszFilename));
+    const CPLHTTPRetryParameters oRetryParameters(aosHTTPOptions);
+    CPLHTTPRetryContext oRetryContext(oRetryParameters);
 
     do
     {
@@ -526,20 +616,18 @@ bool VSIGSFSHandler::SetFileMetadata(const char *pszFilename,
         if (response_code != 200)
         {
             // Look if we should attempt a retry
-            const double dfNewRetryDelay = CPLHTTPGetNewRetryDelay(
-                static_cast<int>(response_code), dfRetryDelay,
-                requestHelper.sWriteFuncHeaderData.pBuffer,
-                requestHelper.szCurlErrBuf);
-            if (dfNewRetryDelay > 0 && nRetryCount < nMaxRetry)
+            if (oRetryContext.CanRetry(
+                    static_cast<int>(response_code),
+                    requestHelper.sWriteFuncHeaderData.pBuffer,
+                    requestHelper.szCurlErrBuf))
             {
                 CPLError(CE_Warning, CPLE_AppDefined,
                          "HTTP error code: %d - %s. "
                          "Retrying again in %.1f secs",
                          static_cast<int>(response_code),
-                         poHandleHelper->GetURL().c_str(), dfRetryDelay);
-                CPLSleep(dfRetryDelay);
-                dfRetryDelay = dfNewRetryDelay;
-                nRetryCount++;
+                         poHandleHelper->GetURL().c_str(),
+                         oRetryContext.GetCurrentDelay());
+                CPLSleep(oRetryContext.GetCurrentDelay());
                 bRetry = true;
             }
             else
@@ -570,12 +658,29 @@ int *VSIGSFSHandler::UnlinkBatch(CSLConstList papszFiles)
     // Implemented using
     // https://cloud.google.com/storage/docs/json_api/v1/how-tos/batch
 
+    const char *pszFirstFilename =
+        papszFiles && papszFiles[0] ? papszFiles[0] : nullptr;
+
+    bool bUsingBearerToken = false;
+    if (pszFirstFilename)
+    {
+        const CPLStringList aosHTTPOptions(
+            CPLHTTPGetOptionsFromEnv(pszFirstFilename));
+        const char *pszHeaders = aosHTTPOptions.FetchNameValue("HEADERS");
+        if (pszHeaders && strstr(pszHeaders, "Authorization: Bearer "))
+            bUsingBearerToken = true;
+    }
+
     auto poHandleHelper =
         std::unique_ptr<VSIGSHandleHelper>(VSIGSHandleHelper::BuildFromURI(
-            "batch/storage/v1", GetFSPrefix().c_str()));
+            "batch/storage/v1", GetFSPrefix().c_str(),
+            pszFirstFilename &&
+                    STARTS_WITH(pszFirstFilename, GetFSPrefix().c_str())
+                ? pszFirstFilename + GetFSPrefix().size()
+                : nullptr));
 
     // The JSON API cannot be used with HMAC keys
-    if (poHandleHelper && poHandleHelper->UsesHMACKey())
+    if ((poHandleHelper && poHandleHelper->UsesHMACKey()) && !bUsingBearerToken)
     {
         CPLDebug(GetDebugKey(), "UnlinkBatch() has an efficient implementation "
                                 "only for OAuth2 authentication");
@@ -585,40 +690,32 @@ int *VSIGSFSHandler::UnlinkBatch(CSLConstList papszFiles)
     int *panRet =
         static_cast<int *>(CPLCalloc(sizeof(int), CSLCount(papszFiles)));
 
-    const char *pszFirstFilename =
-        papszFiles && papszFiles[0] ? papszFiles[0] : nullptr;
     if (!poHandleHelper || pszFirstFilename == nullptr)
         return panRet;
 
-    NetworkStatisticsFileSystem oContextFS(GetFSPrefix());
+    NetworkStatisticsFileSystem oContextFS(GetFSPrefix().c_str());
     NetworkStatisticsAction oContextAction("UnlinkBatch");
-
-    // coverity[tainted_data]
-    double dfRetryDelay = CPLAtof(
-        VSIGetPathSpecificOption(pszFirstFilename, "GDAL_HTTP_RETRY_DELAY",
-                                 CPLSPrintf("%f", CPL_HTTP_RETRY_DELAY)));
-    const int nMaxRetry =
-        atoi(VSIGetPathSpecificOption(pszFirstFilename, "GDAL_HTTP_MAX_RETRY",
-                                      CPLSPrintf("%d", CPL_HTTP_MAX_RETRY)));
 
     // For debug / testing only
     const int nBatchSize =
         std::max(1, std::min(100, atoi(CPLGetConfigOption(
                                       "CPL_VSIGS_UNLINK_BATCH_SIZE", "100"))));
-    CPLString osPOSTContent;
+    std::string osPOSTContent;
 
     const CPLStringList aosHTTPOptions(
         CPLHTTPGetOptionsFromEnv(pszFirstFilename));
+    const CPLHTTPRetryParameters oRetryParameters(aosHTTPOptions);
+    CPLHTTPRetryContext oRetryContext(oRetryParameters);
 
     for (int i = 0; papszFiles && papszFiles[i]; i++)
     {
-        CPLAssert(STARTS_WITH_CI(papszFiles[i], GetFSPrefix()));
+        CPLAssert(STARTS_WITH_CI(papszFiles[i], GetFSPrefix().c_str()));
         const char *pszFilenameWithoutPrefix =
             papszFiles[i] + GetFSPrefix().size();
         const char *pszSlash = strchr(pszFilenameWithoutPrefix, '/');
         if (!pszSlash)
             return panRet;
-        CPLString osBucket;
+        std::string osBucket;
         osBucket.assign(pszFilenameWithoutPrefix,
                         pszSlash - pszFilenameWithoutPrefix);
 
@@ -688,7 +785,6 @@ int *VSIGSFSHandler::UnlinkBatch(CSLConstList papszFiles)
 #endif
 
             // Run request
-            int nRetryCount = 0;
             bool bRetry;
             std::string osResponse;
             do
@@ -725,21 +821,18 @@ int *VSIGSFSHandler::UnlinkBatch(CSLConstList papszFiles)
                     requestHelper.sWriteFuncData.pBuffer == nullptr)
                 {
                     // Look if we should attempt a retry
-                    const double dfNewRetryDelay = CPLHTTPGetNewRetryDelay(
-                        static_cast<int>(response_code), dfRetryDelay,
-                        requestHelper.sWriteFuncHeaderData.pBuffer,
-                        requestHelper.szCurlErrBuf);
-                    if (dfNewRetryDelay > 0 && nRetryCount < nMaxRetry)
+                    if (oRetryContext.CanRetry(
+                            static_cast<int>(response_code),
+                            requestHelper.sWriteFuncHeaderData.pBuffer,
+                            requestHelper.szCurlErrBuf))
                     {
                         CPLError(CE_Warning, CPLE_AppDefined,
                                  "HTTP error code: %d - %s. "
                                  "Retrying again in %.1f secs",
                                  static_cast<int>(response_code),
                                  poHandleHelper->GetURL().c_str(),
-                                 dfRetryDelay);
-                        CPLSleep(dfRetryDelay);
-                        dfRetryDelay = dfNewRetryDelay;
-                        nRetryCount++;
+                                 oRetryContext.GetCurrentDelay());
+                        CPLSleep(oRetryContext.GetCurrentDelay());
                         bRetry = true;
                     }
                     else
@@ -818,7 +911,7 @@ VSIGSFSHandler::GetStreamingFilename(const std::string &osFilename) const
 
 VSIGSHandle::VSIGSHandle(VSIGSFSHandler *poFSIn, const char *pszFilename,
                          VSIGSHandleHelper *poHandleHelper)
-    : IVSIS3LikeHandle(poFSIn, pszFilename, poHandleHelper->GetURL()),
+    : IVSIS3LikeHandle(poFSIn, pszFilename, poHandleHelper->GetURL().c_str()),
       m_poHandleHelper(poHandleHelper)
 {
 }
@@ -837,7 +930,7 @@ VSIGSHandle::~VSIGSHandle()
 /************************************************************************/
 
 struct curl_slist *
-VSIGSHandle::GetCurlHeaders(const CPLString &osVerb,
+VSIGSHandle::GetCurlHeaders(const std::string &osVerb,
                             const struct curl_slist *psExistingHeaders)
 {
     return m_poHandleHelper->GetCurlHeaders(osVerb, psExistingHeaders);

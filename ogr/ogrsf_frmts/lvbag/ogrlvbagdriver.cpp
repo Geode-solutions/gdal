@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2020, Laixer B.V. <info at laixer dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_lvbag.h"
@@ -36,31 +20,50 @@
 static int OGRLVBAGDriverIdentify(GDALOpenInfo *poOpenInfo)
 {
     if (!poOpenInfo->bStatOK)
+    {
         return FALSE;
+    }
     if (poOpenInfo->bIsDirectory)
+    {
         return -1;  // Check later
-    if (poOpenInfo->fpL == nullptr)
+    }
+    if (poOpenInfo->fpL == nullptr || poOpenInfo->nHeaderBytes == 0)
+    {
         return FALSE;
+    }
 
     auto pszPtr = reinterpret_cast<const char *>(poOpenInfo->pabyHeader);
-    if (poOpenInfo->nHeaderBytes == 0 || pszPtr[0] != '<')
+    if (pszPtr[0] != '<')
+    {
         return FALSE;
+    }
+
+    if (poOpenInfo->IsSingleAllowedDriver("LVBAG"))
+    {
+        return TRUE;
+    }
 
     // Can't handle mutations just yet
     if (strstr(pszPtr,
                "http://www.kadaster.nl/schemas/mutatielevering-generiek/1.0") !=
         nullptr)
+    {
         return FALSE;
+    }
 
     if (strstr(pszPtr,
                "http://www.kadaster.nl/schemas/standlevering-generiek/1.0") ==
         nullptr)
+    {
         return FALSE;
+    }
 
     // Pin the driver to XSD version 'v20200601'
     if (strstr(pszPtr, "http://www.kadaster.nl/schemas/lvbag/"
                        "extract-deelbestand-lvc/v20200601") == nullptr)
+    {
         return FALSE;
+    }
 
     return TRUE;
 }
@@ -72,7 +75,9 @@ static int OGRLVBAGDriverIdentify(GDALOpenInfo *poOpenInfo)
 GDALDataset *OGRLVBAGDriverOpen(GDALOpenInfo *poOpenInfo)
 {
     if (!OGRLVBAGDriverIdentify(poOpenInfo) || poOpenInfo->eAccess == GA_Update)
+    {
         return nullptr;
+    }
 
     const char *pszFilename = poOpenInfo->pszFilename;
     auto poDS = std::unique_ptr<OGRLVBAGDataSource>{new OGRLVBAGDataSource{}};
@@ -81,7 +86,9 @@ GDALDataset *OGRLVBAGDriverOpen(GDALOpenInfo *poOpenInfo)
     if (!poOpenInfo->bIsDirectory && poOpenInfo->fpL != nullptr)
     {
         if (!poDS->Open(pszFilename, poOpenInfo->papszOpenOptions))
+        {
             poDS.reset();
+        }
     }
     else if (poOpenInfo->bIsDirectory && poOpenInfo->fpL == nullptr)
     {
@@ -90,14 +97,16 @@ GDALDataset *OGRLVBAGDriverOpen(GDALOpenInfo *poOpenInfo)
         char **papszNames = VSIReadDir(pszFilename);
         for (int i = 0; papszNames != nullptr && papszNames[i] != nullptr; ++i)
         {
-            if (!EQUAL(CPLGetExtension(papszNames[i]), "xml"))
+            if (!EQUAL(CPLGetExtensionSafe(papszNames[i]).c_str(), "xml"))
                 continue;
 
             const CPLString oSubFilename =
-                CPLFormFilename(pszFilename, papszNames[i], nullptr);
+                CPLFormFilenameSafe(pszFilename, papszNames[i], nullptr);
 
             if (EQUAL(papszNames[i], ".") || EQUAL(papszNames[i], ".."))
+            {
                 continue;
+            }
 
             // Give up on /vsi filesystems if after 10 files we haven't found
             // a single BAG file
@@ -107,13 +116,17 @@ GDALDataset *OGRLVBAGDriverOpen(GDALOpenInfo *poOpenInfo)
                 const bool bCheckAllFiles = CPLTestBool(
                     CPLGetConfigOption("OGR_LVBAG_CHECK_ALL_FILES", "NO"));
                 if (!bCheckAllFiles)
+                {
                     break;
+                }
             }
 
             nProbedFileCount++;
             GDALOpenInfo oOpenInfo{oSubFilename, GA_ReadOnly};
-            if (OGRLVBAGDriverIdentify(&oOpenInfo) != TRUE)
+            if (!OGRLVBAGDriverIdentify(&oOpenInfo))
+            {
                 continue;
+            }
 
             if (poDS->Open(oSubFilename, poOpenInfo->papszOpenOptions))
             {
@@ -143,10 +156,12 @@ GDALDataset *OGRLVBAGDriverOpen(GDALOpenInfo *poOpenInfo)
 
 void RegisterOGRLVBAG()
 {
-    if (GDALGetDriverByName("LVBAG") != nullptr)
+    if (GDALGetDriverByName("LVBAG"))
+    {
         return;
+    }
 
-    auto poDriver = cpl::make_unique<GDALDriver>();
+    auto poDriver = std::make_unique<GDALDriver>();
 
     poDriver->SetDescription("LVBAG");
     poDriver->SetMetadataItem(GDAL_DCAP_VECTOR, "YES");

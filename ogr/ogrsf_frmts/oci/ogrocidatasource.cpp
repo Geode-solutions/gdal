@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2002, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_oci.h"
@@ -52,16 +36,12 @@ constexpr int anEPSGOracleMapping[] = {
 OGROCIDataSource::OGROCIDataSource()
 
 {
-    pszName = nullptr;
     pszDBName = nullptr;
     papoLayers = nullptr;
     nLayers = 0;
     bDSUpdate = FALSE;
     bNoLogging = FALSE;
     poSession = nullptr;
-    papoSRS = nullptr;
-    panSRID = nullptr;
-    nKnownSRID = 0;
 }
 
 /************************************************************************/
@@ -73,20 +53,12 @@ OGROCIDataSource::~OGROCIDataSource()
 {
     int i;
 
-    CPLFree(pszName);
     CPLFree(pszDBName);
 
     for (i = 0; i < nLayers; i++)
         delete papoLayers[i];
 
     CPLFree(papoLayers);
-
-    for (i = 0; i < nKnownSRID; i++)
-    {
-        papoSRS[i]->Release();
-    }
-    CPLFree(papoSRS);
-    CPLFree(panSRID);
 
     if (poSession != nullptr)
         delete poSession;
@@ -208,8 +180,6 @@ int OGROCIDataSource::Open(const char *pszNewName, char **papszOpenOptionsIn,
         oValidateStmt.Execute(oValidateCmd.GetString());
     }
 
-    pszName = CPLStrdup(pszNewName);
-
     bDSUpdate = bUpdate;
 
     /* -------------------------------------------------------------------- */
@@ -321,7 +291,8 @@ void OGROCIDataSource::ValidateLayer(const char *pszLayerName)
     /* -------------------------------------------------------------------- */
     /*      Verify we have an FID and geometry column for this table.       */
     /* -------------------------------------------------------------------- */
-    OGROCITableLayer *poLayer = (OGROCITableLayer *)papoLayers[iLayer];
+    OGROCITableLayer *poLayer =
+        cpl::down_cast<OGROCITableLayer *>(papoLayers[iLayer]);
 
     if (strlen(poLayer->GetFIDColumn()) == 0)
     {
@@ -484,12 +455,16 @@ void OGROCIDataSource::TruncateLayer(const char *pszLayerName)
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *OGROCIDataSource::ICreateLayer(const char *pszLayerName,
-                                         OGRSpatialReference *poSRS,
-                                         OGRwkbGeometryType eType,
-                                         char **papszOptions)
+OGRLayer *
+OGROCIDataSource::ICreateLayer(const char *pszLayerName,
+                               const OGRGeomFieldDefn *poGeomFieldDefn,
+                               CSLConstList papszOptions)
 
 {
+    const auto eType = poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto poSRS =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
+
     char *pszSafeLayerName = CPLStrdup(pszLayerName);
 
     poSession->CleanName(pszSafeLayerName);
@@ -710,8 +685,8 @@ OGRLayer *OGROCIDataSource::ExecuteSQL(const char *pszSQLCommand,
     /*      Use generic implementation for recognized dialects              */
     /* -------------------------------------------------------------------- */
     if (IsGenericSQLDialect(pszDialect))
-        return OGRDataSource::ExecuteSQL(pszSQLCommand, poSpatialFilter,
-                                         pszDialect);
+        return GDALDataset::ExecuteSQL(pszSQLCommand, poSpatialFilter,
+                                       pszDialect);
 
     /* -------------------------------------------------------------------- */
     /*      Ensure any pending stuff is flushed to the database.            */
@@ -801,12 +776,10 @@ OGRSpatialReference *OGROCIDataSource::FetchSRS(int nId)
     /* -------------------------------------------------------------------- */
     /*      First, we look through our SRID cache, is it there?             */
     /* -------------------------------------------------------------------- */
-    int i;
-
-    for (i = 0; i < nKnownSRID; i++)
+    auto oIter = m_oSRSCache.find(nId);
+    if (oIter != m_oSRSCache.end())
     {
-        if (panSRID[i] == nId)
-            return papoSRS[i];
+        return oIter->second.get();
     }
 
     /* -------------------------------------------------------------------- */
@@ -830,12 +803,33 @@ OGRSpatialReference *OGROCIDataSource::FetchSRS(int nId)
     /* -------------------------------------------------------------------- */
     /*      Turn into a spatial reference.                                  */
     /* -------------------------------------------------------------------- */
-    OGRSpatialReference *poSRS = new OGRSpatialReference();
+    std::unique_ptr<OGRSpatialReference, OGRSpatialReferenceReleaser> poSRS(
+        new OGRSpatialReference());
     poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     if (poSRS->importFromWkt(papszResult[0]) != OGRERR_NONE)
     {
-        delete poSRS;
         return nullptr;
+    }
+
+    /* -------------------------------------------------------------------- */
+    /*      If the WKTEXT definition is equivalent to the EPSG SRS of code  */
+    /*      nId, return that EPSG SRS.                                      */
+    /* -------------------------------------------------------------------- */
+    constexpr int LARGEST_EPSG_CRS_CODE = 32767;
+    if (nId < LARGEST_EPSG_CRS_CODE && papszResult[1] != nullptr &&
+        atoi(papszResult[1]) == nId)
+    {
+        CPLErrorStateBackuper oErrorStateBackuper(CPLQuietErrorHandler);
+        OGRSpatialReference oSRS_EPSG;
+        oSRS_EPSG.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+        const char *const apszOptions[] = {
+            "IGNORE_DATA_AXIS_TO_SRS_AXIS_MAPPING=YES", nullptr};
+        if (oSRS_EPSG.importFromEPSG(nId) == OGRERR_NONE &&
+            oSRS_EPSG.IsSame(poSRS.get(), apszOptions))
+        {
+            *poSRS = oSRS_EPSG;
+            return poSRS.release();
+        }
     }
 
     /* -------------------------------------------------------------------- */
@@ -843,7 +837,7 @@ OGRSpatialReference *OGROCIDataSource::FetchSRS(int nId)
     /*      authority.                                                      */
     /* -------------------------------------------------------------------- */
     int bGotEPSGMapping = FALSE;
-    for (i = 0; anEPSGOracleMapping[i] != 0; i += 2)
+    for (int i = 0; anEPSGOracleMapping[i] != 0; i += 2)
     {
         if (anEPSGOracleMapping[i] == nId)
         {
@@ -868,15 +862,8 @@ OGRSpatialReference *OGROCIDataSource::FetchSRS(int nId)
     /* -------------------------------------------------------------------- */
     /*      Add to the cache.                                               */
     /* -------------------------------------------------------------------- */
-    panSRID = (int *)CPLRealloc(panSRID, sizeof(int) * (nKnownSRID + 1));
-    papoSRS = (OGRSpatialReference **)CPLRealloc(papoSRS, sizeof(void *) *
-                                                              (nKnownSRID + 1));
-    panSRID[nKnownSRID] = nId;
-    papoSRS[nKnownSRID] = poSRS;
-
-    nKnownSRID++;
-
-    return poSRS;
+    oIter = m_oSRSCache.emplace(nId, std::move(poSRS)).first;
+    return oIter->second.get();
 }
 
 /************************************************************************/
@@ -886,7 +873,7 @@ OGRSpatialReference *OGROCIDataSource::FetchSRS(int nId)
 /*      it to the table.                                                */
 /************************************************************************/
 
-int OGROCIDataSource::FetchSRSId(OGRSpatialReference *poSRS)
+int OGROCIDataSource::FetchSRSId(const OGRSpatialReference *poSRS)
 
 {
     char *pszWKT = nullptr;
@@ -900,33 +887,56 @@ int OGROCIDataSource::FetchSRSId(OGRSpatialReference *poSRS)
 
     /* ==================================================================== */
     /*      The first strategy is to see if we can identify it by           */
-    /*      authority information within the SRS.  Either using ORACLE      */
-    /*      authority values directly, or check if there is a known         */
-    /*      translation for an EPSG authority code.                         */
+    /*      authority information within the SRS.                           */
     /* ==================================================================== */
     const char *pszAuthName = nullptr, *pszAuthCode = nullptr;
 
-    if (poSRS->IsGeographic())
+    if (poSRS->IsGeographic() || poSRS->IsProjected())
     {
-        pszAuthName = poSRS->GetAuthorityName("GEOGCS");
-        pszAuthCode = poSRS->GetAuthorityCode("GEOGCS");
+        pszAuthName = poSRS->GetAuthorityName(nullptr);
+        pszAuthCode = poSRS->GetAuthorityCode(nullptr);
     }
-    else if (poSRS->IsProjected())
-    {
-        pszAuthName = poSRS->GetAuthorityName("PROJCS");
-        pszAuthCode = poSRS->GetAuthorityCode("PROJCS");
-    }
+
+    OGROCIStatement oCmdStatement(GetSession());
 
     if (pszAuthName != nullptr && pszAuthCode != nullptr)
     {
+        // If the authority is Oracle, use the code as the SRID
         if (EQUAL(pszAuthName, "Oracle") && atoi(pszAuthCode) != 0)
             return atoi(pszAuthCode);
 
+        // If the authority is EPSG, try to retrieve the record of CS_SRS
+        // whose SRID is the EPSG code. And if the WKT definition from the
+        // CS_SRS record is equivalent to the one of poSRS, use the EPSG code
+        // as the SRID. This works for a number of EPSG CRS (4326, 3857, etc.)
         if (EQUAL(pszAuthName, "EPSG"))
         {
-            int i, nEPSGCode = atoi(pszAuthCode);
+            const int nEPSGCode = atoi(pszAuthCode);
+            char szSelect[100];
+            snprintf(szSelect, sizeof(szSelect),
+                     "SELECT WKTEXT FROM MDSYS.CS_SRS WHERE SRID = %d "
+                     "AND WKTEXT IS NOT NULL AND SRID = AUTH_SRID",
+                     nEPSGCode);
+            if (oCmdStatement.Execute(szSelect) == CE_None)
+            {
+                CSLConstList papszResult = oCmdStatement.SimpleFetchRow();
+                if (papszResult != nullptr && papszResult[0] != nullptr &&
+                    papszResult[1] == nullptr)
+                {
+                    OGRSpatialReference oSRS;
+                    const char *const apszOptions[] = {
+                        "IGNORE_DATA_AXIS_TO_SRS_AXIS_MAPPING=YES", nullptr};
+                    if (oSRS.importFromWkt(papszResult[0]) == OGRERR_NONE &&
+                        oSRS.IsSame(poSRS, apszOptions))
+                    {
+                        return nEPSGCode;
+                    }
+                }
+            }
 
-            for (i = 0; anEPSGOracleMapping[i] != 0; i += 2)
+            // Otherwise try to fallback to a hard-coded table that maps
+            // EPSG code to Oracle SRID. This is probably somewhat be legacy.
+            for (int i = 0; anEPSGOracleMapping[i] != 0; i += 2)
             {
                 if (nEPSGCode == anEPSGOracleMapping[i + 1])
                     return anEPSGOracleMapping[i];
@@ -968,7 +978,6 @@ int OGROCIDataSource::FetchSRSId(OGRSpatialReference *poSRS)
     /*      Try to find in the existing table.                              */
     /* -------------------------------------------------------------------- */
     OGROCIStringBuf oCmdText;
-    OGROCIStatement oCmdStatement(GetSession());
     char **papszResult = nullptr;
 
     oCmdText.Append("SELECT SRID FROM MDSYS.CS_SRS WHERE WKTEXT = '");
@@ -1015,7 +1024,7 @@ int OGROCIDataSource::FetchSRSId(OGRSpatialReference *poSRS)
     oCmdText.Appendf(100, " VALUES (%d,'", nSRSId);
     oCmdText.Append(pszWKT);
     oCmdText.Append("', '");
-    oCmdText.Append(poSRS->GetRoot()->GetChild(0)->GetValue());
+    oCmdText.Append(poSRS->GetName());
     oCmdText.Append("' )");
 
     CPLFree(pszWKT);

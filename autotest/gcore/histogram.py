@@ -10,23 +10,7 @@
 # Copyright (c) 2008, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import math
@@ -40,13 +24,30 @@ import pytest
 
 from osgeo import gdal
 
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
+@pytest.fixture()
+def utmsmall_tif(tmp_path):
+    fname = str(tmp_path / "utmsmall.tif")
+
+    shutil.copyfile("data/utmsmall.tif", fname)
+
+    return fname
+
+
 ###############################################################################
 # Fetch simple histogram.
 
 
-def test_histogram_1():
+def test_histogram_1(utmsmall_tif):
 
-    ds = gdal.Open("data/utmsmall.tif")
+    ds = gdal.Open(utmsmall_tif)
     hist = ds.GetRasterBand(1).GetHistogram()
 
     exp_hist = [
@@ -315,9 +316,9 @@ def test_histogram_1():
 # Fetch histogram with specified sampling, using keywords.
 
 
-def test_histogram_2():
+def test_histogram_2(utmsmall_tif):
 
-    ds = gdal.Open("data/utmsmall.tif")
+    ds = gdal.Open(utmsmall_tif)
     hist = ds.GetRasterBand(1).GetHistogram(buckets=16, max=255.5, min=-0.5)
 
     exp_hist = [
@@ -384,9 +385,9 @@ def test_histogram_4():
 # Test GetDefaultHistogram() on the file.
 
 
-def test_histogram_5():
+def test_histogram_5(utmsmall_tif):
 
-    ds = gdal.Open("data/utmsmall.tif")
+    ds = gdal.Open(utmsmall_tif)
     hist = ds.GetRasterBand(1).GetDefaultHistogram(force=1)
 
     exp_hist = (
@@ -657,8 +658,6 @@ def test_histogram_5():
 
     ds = None
 
-    gdal.Unlink("data/utmsmall.tif.aux.xml")
-
 
 ###############################################################################
 # Test GetDefaultHistogram( force = 0 ) on a JPG file (#3304)
@@ -732,7 +731,7 @@ def test_histogram_errors():
 def test_histogram_invalid_min_max(min, max):
 
     ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.ErrorReset()
         ret = ds.GetRasterBand(1).GetHistogram(
             buckets=2, min=min, max=max, include_out_of_range=1, approx_ok=0

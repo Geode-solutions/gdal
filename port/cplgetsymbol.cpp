@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -41,11 +25,14 @@
 /* ==================================================================== */
 
 /* MinGW32 might define HAVE_DLFCN_H, so skip the unix implementation */
-#if defined(HAVE_DLFCN_H) && !defined(WIN32)
+#if defined(HAVE_DLFCN_H) && !defined(_WIN32)
 
 #define GOT_GETSYMBOL
 
 #include <dlfcn.h>
+
+#include <map>
+#include <mutex>
 
 /************************************************************************/
 /*                            CPLGetSymbol()                            */
@@ -87,11 +74,26 @@
 void *CPLGetSymbol(const char *pszLibrary, const char *pszSymbolName)
 
 {
-    void *pLibrary = dlopen(pszLibrary, RTLD_LAZY);
-    if (pLibrary == nullptr)
+    static std::mutex mutex;
+    static std::map<std::string, void *> mapLibraryNameToHandle;
+    std::lock_guard oLock(mutex);
+
+    void *pLibrary;
+    const char *pszNonNullLibrary = pszLibrary ? pszLibrary : "";
+    auto oIter = mapLibraryNameToHandle.find(pszNonNullLibrary);
+    if (oIter == mapLibraryNameToHandle.end())
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "%s", dlerror());
-        return nullptr;
+        pLibrary = dlopen(pszLibrary, RTLD_LAZY);
+        if (pLibrary == nullptr)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "%s", dlerror());
+            return nullptr;
+        }
+        mapLibraryNameToHandle[pszNonNullLibrary] = pLibrary;
+    }
+    else
+    {
+        pLibrary = oIter->second;
     }
 
     void *pSymbol = dlsym(pLibrary, pszSymbolName);
@@ -112,12 +114,9 @@ void *CPLGetSymbol(const char *pszLibrary, const char *pszSymbolName)
     if (pSymbol == nullptr)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "%s", dlerror());
-        // Do not call dlclose here.  misc.py:misc_6() demonstrates the crash.
-        // coverity[leaked_storage]
         return nullptr;
     }
 
-    // coverity[leaked_storage]  It is not safe to call dlclose.
     return (pSymbol);
 }
 
@@ -126,7 +125,7 @@ void *CPLGetSymbol(const char *pszLibrary, const char *pszSymbolName)
 /* ==================================================================== */
 /*                 Windows Implementation                               */
 /* ==================================================================== */
-#if defined(WIN32)
+#if defined(_WIN32)
 
 #define GOT_GETSYMBOL
 

@@ -9,23 +9,7 @@
  * Copyright (c) 2001, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -33,7 +17,6 @@
 #include "ogr_swq.h"
 
 #include <cstddef>
-#include <cstdlib>
 #include <algorithm>
 
 #include "cpl_conv.h"
@@ -49,6 +32,7 @@
 /************************************************************************/
 /*     Support for special attributes (feature query and selection)     */
 /************************************************************************/
+extern const swq_field_type SpecialFieldTypes[SPECIAL_FIELD_COUNT];
 
 const char *const SpecialFieldNames[SPECIAL_FIELD_COUNT] = {
     "FID", "OGR_GEOMETRY", "OGR_STYLE", "OGR_GEOM_WKT", "OGR_GEOM_AREA"};
@@ -59,7 +43,9 @@ const swq_field_type SpecialFieldTypes[SPECIAL_FIELD_COUNT] = {
 /*                          OGRFeatureQuery()                           */
 /************************************************************************/
 
-OGRFeatureQuery::OGRFeatureQuery() : poTargetDefn(nullptr), pSWQExpr(nullptr)
+OGRFeatureQuery::OGRFeatureQuery()
+    : poTargetDefn(nullptr), pSWQExpr(nullptr),
+      m_psContext(new swq_evaluation_context())
 {
 }
 
@@ -70,6 +56,7 @@ OGRFeatureQuery::OGRFeatureQuery() : poTargetDefn(nullptr), pSWQExpr(nullptr)
 OGRFeatureQuery::~OGRFeatureQuery()
 
 {
+    delete m_psContext;
     delete static_cast<swq_expr_node *>(pSWQExpr);
 }
 
@@ -83,6 +70,8 @@ OGRFeatureQuery::Compile(OGRLayer *poLayer, const char *pszExpression,
                          swq_custom_func_registrar *poCustomFuncRegistrar)
 
 {
+    if (poLayer->TestCapability(OLCStringsAsUTF8))
+        m_psContext->bUTF8Strings = true;
     return Compile(poLayer, poLayer->GetLayerDefn(), pszExpression, bCheck,
                    poCustomFuncRegistrar);
 }
@@ -143,6 +132,11 @@ OGRFeatureQuery::Compile(OGRLayer *poLayer, OGRFeatureDefn *poDefn,
     for (int iField = 0; iField < poDefn->GetFieldCount(); iField++)
     {
         OGRFieldDefn *poField = poDefn->GetFieldDefn(iField);
+        if (!poField)
+        {
+            CPLAssert(0);
+            break;
+        }
 
         papszFieldNames[iField] = const_cast<char *>(poField->GetNameRef());
 
@@ -318,7 +312,7 @@ int OGRFeatureQuery::Evaluate(OGRFeature *poFeature)
         return FALSE;
 
     swq_expr_node *poResult = static_cast<swq_expr_node *>(pSWQExpr)->Evaluate(
-        OGRFeatureFetcher, poFeature);
+        OGRFeatureFetcher, poFeature, *m_psContext);
 
     if (poResult == nullptr)
         return FALSE;
@@ -349,7 +343,7 @@ int OGRFeatureQuery::CanUseIndex(OGRLayer *poLayer)
     return CanUseIndex(psExpr, poLayer);
 }
 
-int OGRFeatureQuery::CanUseIndex(swq_expr_node *psExpr, OGRLayer *poLayer)
+int OGRFeatureQuery::CanUseIndex(const swq_expr_node *psExpr, OGRLayer *poLayer)
 {
     // Does the expression meet our requirements?
     if (psExpr == nullptr || psExpr->eNodeType != SNT_OPERATION)
@@ -395,18 +389,6 @@ int OGRFeatureQuery::CanUseIndex(swq_expr_node *psExpr, OGRLayer *poLayer)
 /*      attribute field.  Eventually we should make this support        */
 /*      multi-part queries with ranges.                                 */
 /************************************************************************/
-
-static int CompareGIntBig(const void *pa, const void *pb)
-{
-    const GIntBig a = *(reinterpret_cast<const GIntBig *>(pa));
-    const GIntBig b = *(reinterpret_cast<const GIntBig *>(pb));
-    if (a < b)
-        return -1;
-    else if (a > b)
-        return 1;
-    else
-        return 0;
-}
 
 GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(OGRLayer *poLayer,
                                                  OGRErr *peErr)
@@ -548,7 +530,7 @@ static GIntBig *OGRANDGIntBigArray(GIntBig panFIDList1[], GIntBig nFIDCount1,
     return panFIDList;
 }
 
-GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(swq_expr_node *psExpr,
+GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(const swq_expr_node *psExpr,
                                                  OGRLayer *poLayer,
                                                  GIntBig &nFIDCount)
 {
@@ -589,8 +571,8 @@ GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(swq_expr_node *psExpr,
         psExpr->nSubExprCount < 2)
         return nullptr;
 
-    swq_expr_node *poColumn = psExpr->papoSubExpr[0];
-    swq_expr_node *poValue = psExpr->papoSubExpr[1];
+    const swq_expr_node *poColumn = psExpr->papoSubExpr[0];
+    const swq_expr_node *poValue = psExpr->papoSubExpr[1];
 
     if (poColumn->eNodeType != SNT_COLUMN || poValue->eNodeType != SNT_CONSTANT)
         return nullptr;
@@ -604,7 +586,8 @@ GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(swq_expr_node *psExpr,
 
     // Have an index, now we need to query it.
     OGRField sValue;
-    OGRFieldDefn *poFieldDefn = poLayer->GetLayerDefn()->GetFieldDefn(nIdx);
+    const OGRFieldDefn *poFieldDefn =
+        poLayer->GetLayerDefn()->GetFieldDefn(nIdx);
 
     // Handle the case of an IN operation.
     if (psExpr->nOperation == SWQ_IN)
@@ -656,8 +639,7 @@ GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(swq_expr_node *psExpr,
         if (nFIDCount > 1)
         {
             // The returned FIDs are expected to be in sorted order.
-            qsort(panFIDs, static_cast<size_t>(nFIDCount), sizeof(GIntBig),
-                  CompareGIntBig);
+            std::sort(panFIDs, panFIDs + nFIDCount);
         }
         return panFIDs;
     }
@@ -700,9 +682,7 @@ GIntBig *OGRFeatureQuery::EvaluateAgainstIndices(swq_expr_node *psExpr,
     if (nFIDCount > 1)
     {
         // The returned FIDs are expected to be sorted.
-        // TODO(schwehr): Use std::sort.
-        qsort(panFIDs, static_cast<size_t>(nFIDCount), sizeof(GIntBig),
-              CompareGIntBig);
+        std::sort(panFIDs, panFIDs + nFIDCount);
     }
     return panFIDs;
 }
@@ -742,7 +722,14 @@ char **OGRFeatureQuery::FieldCollector(void *pBareOp, char **papszList)
         }
         else if (nIdx >= 0 && nIdx < poTargetDefn->GetFieldCount())
         {
-            pszFieldName = poTargetDefn->GetFieldDefn(nIdx)->GetNameRef();
+            auto poFieldDefn = poTargetDefn->GetFieldDefn(nIdx);
+            if (!poFieldDefn)
+            {
+                CPLAssert(false);
+                CSLDestroy(papszList);
+                return nullptr;
+            }
+            pszFieldName = poFieldDefn->GetNameRef();
         }
         else
         {

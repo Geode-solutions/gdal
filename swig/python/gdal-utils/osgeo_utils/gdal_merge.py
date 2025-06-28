@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 ###############################################################################
-# $Id$
 #
 # Project:  InSAR Peppers
 # Purpose:  Module to extract data from many rasters into one output.
@@ -219,7 +218,7 @@ def names_to_fileinfos(names):
 # *****************************************************************************
 
 
-class file_info(object):
+class file_info:
     """A class holding information about a GDAL file."""
 
     def __init__(self):
@@ -364,20 +363,40 @@ class file_info(object):
 
 
 # =============================================================================
-def Usage():
-    print("Usage: gdal_merge.py [-o out_filename] [-of out_format] [-co NAME=VALUE]*")
+def Usage(isError):
+    f = sys.stderr if isError else sys.stdout
+    print("Usage: gdal_merge [--help] [--help-general]", file=f)
     print(
-        "                     [-ps pixelsize_x pixelsize_y] [-tap] [-separate] [-q] [-v] [-pct]"
+        "                     [-o <out_filename>] [-of <out_format>] [-co <NAME>=<VALUE>]...",
+        file=f,
     )
-    print('                     [-ul_lr ulx uly lrx lry] [-init "value [value...]"]')
-    print("                     [-n nodata_value] [-a_nodata output_nodata_value]")
-    print("                     [-ot datatype] [-createonly] input_files")
-    print("                     [--help-general]")
-    print("")
-    return 2
+    print(
+        "                     [-ps <pixelsize_x> <pixelsize_y>] [-tap] [-separate] [-q] [-v] [-pct]",
+        file=f,
+    )
+    print(
+        '                     [-ul_lr <ulx> <uly> <lrx> <lry>] [-init "<value>[ <value>]..."]',
+        file=f,
+    )
+    print(
+        "                     [-n <nodata_value>] [-a_nodata <output_nodata_value>]",
+        file=f,
+    )
+    print(
+        "                     [-ot <datatype>] [-createonly] <input_file> [<input_file>]...",
+        file=f,
+    )
+    print("                     [--help-general]", file=f)
+    print("", file=f)
+    return 2 if isError else 0
 
 
 def gdal_merge(argv=None):
+    with gdal.ExceptionMgr():
+        return _gdal_merge(argv=argv)
+
+
+def _gdal_merge(argv=None):
     verbose = 0
     quiet = 0
     names = []
@@ -408,7 +427,10 @@ def gdal_merge(argv=None):
     while i < len(argv):
         arg = argv[i]
 
-        if arg == "-o":
+        if arg == "--help":
+            return Usage(isError=False)
+
+        elif arg == "-o":
             i = i + 1
             out_file = argv[i]
 
@@ -476,7 +498,7 @@ def gdal_merge(argv=None):
 
         elif arg[:1] == "-":
             print("Unrecognized command option: %s" % arg)
-            return Usage()
+            return Usage(isError=True)
 
         else:
             names.append(arg)
@@ -485,7 +507,7 @@ def gdal_merge(argv=None):
 
     if not names:
         print("No input files selected.")
-        return Usage()
+        return Usage(isError=True)
 
     if driver_name is None:
         driver_name = GetOutputDriverFor(out_file)
@@ -526,9 +548,10 @@ def gdal_merge(argv=None):
         band_type = file_infos[0].band_type
 
     # Try opening as an existing file.
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    t_fh = gdal.Open(out_file, gdal.GA_Update)
-    gdal.PopErrorHandler()
+    try:
+        t_fh = gdal.Open(out_file, gdal.GA_Update)
+    except Exception:
+        t_fh = None
 
     # Create output file if it does not already exist.
     if t_fh is None:

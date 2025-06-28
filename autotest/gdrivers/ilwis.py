@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test ILWIS format driver.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -62,7 +45,7 @@ def test_ilwis_1():
 
     gt = (795480, 20, 0, 8090520, 0, -20)
 
-    return tst.testOpen(check_gt=gt, check_prj=srs)
+    tst.testOpen(check_gt=gt, check_prj=srs)
 
 
 ###############################################################################
@@ -73,7 +56,7 @@ def test_ilwis_2():
 
     tst = gdaltest.GDALTest("ilwis", "byte.tif", 1, 4672)
 
-    return tst.testCreateCopy(check_srs=1, check_gt=1, new_filename="tmp/byte.mpr")
+    tst.testCreateCopy(check_srs=1, check_gt=1, new_filename="tmp/byte.mpr")
 
 
 ###############################################################################
@@ -84,7 +67,7 @@ def test_ilwis_3():
 
     tst = gdaltest.GDALTest("ilwis", "hfa/float.img", 1, 23529)
 
-    return tst.testCreate(new_filename="tmp/float.mpr", out_bands=1)
+    tst.testCreate(new_filename="tmp/float.mpr", out_bands=1)
 
 
 ###############################################################################
@@ -95,7 +78,7 @@ def test_ilwis_4():
 
     tst = gdaltest.GDALTest("ilwis", "rgbsmall.tif", 2, 21053)
 
-    return tst.testCreate(new_filename="tmp/rgb.mpl", check_minmax=0, out_bands=3)
+    tst.testCreate(new_filename="tmp/rgb.mpl", check_minmax=0, out_bands=3)
 
 
 ###############################################################################
@@ -106,7 +89,7 @@ def test_ilwis_5():
 
     tst = gdaltest.GDALTest("ilwis", "byte.tif", 1, 4672)
 
-    return tst.testCreateCopy(
+    tst.testCreateCopy(
         check_srs=1, check_gt=1, vsimem=1, new_filename="/vsimem/ilwis/byte.mpr"
     )
 

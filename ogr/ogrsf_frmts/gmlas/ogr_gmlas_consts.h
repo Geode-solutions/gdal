@@ -9,37 +9,15 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
-#ifndef OGR_GMLAS_CONSTS_INCLUDED_REDEFINABLE
-#define OGR_GMLAS_CONSTS_INCLUDED_REDEFINABLE
+#ifndef OGR_GMLAS_CONSTS_INCLUDED
+#define OGR_GMLAS_CONSTS_INCLUDED
 
-#ifdef CONSTANT_DEFINITION
-#define STRING_CONST(x, y) const char *const x = y
-#define BOOL_CONST(x, y) const bool x = y
-#define INT_CONST(x, y) const int x = y
-#else
-#define STRING_CONST(x, y) extern const char *const x
-#define BOOL_CONST(x, y) extern const bool x
-#define INT_CONST(x, y) extern const int x
-#endif
+#define STRING_CONST(x, y) static constexpr const char *const x = y
+#define BOOL_CONST(x, y) static constexpr bool x = y
+#define INT_CONST(x, y) static constexpr int x = y
 
 namespace GMLASConstants
 {
@@ -311,4 +289,4 @@ STRING_CONST(szEXTRA_SUFFIX, ";extra=");
 
 using namespace GMLASConstants;
 
-#endif  // OGR_GMLAS_CONSTS_INCLUDED_REDEFINABLE
+#endif  // OGR_GMLAS_CONSTS_INCLUDED

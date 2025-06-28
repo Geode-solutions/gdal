@@ -47,7 +47,7 @@ force: int, default=False
 can_return_null: int, default=False
     Whether None can be returned in the response.
 geom_field: int, default=0
-    Ithe index of the geometry field on which to compute the extent.
+    The index of the geometry field on which to compute the extent.
     Can be iterated over using :py:func:`range` and :py:func:`GetGeomFieldCount`.
 
 Returns
@@ -783,6 +783,17 @@ Returns
 dict:
     A dictionary whose keys are :py:const:`osgeo.ogr.wkbXXXX` constants and
     values the corresponding number of geometries of that type in the layer.
+";
+
+%feature("docstring")  GetDataset "
+Return the dataset associated with this layer.
+
+For more details: :cpp:func:`OGR_L_GetDataset`
+
+Returns
+-------
+Dataset:
+    Dataset or None
 ";
 
 }

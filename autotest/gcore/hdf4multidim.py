@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test multidimensional support in HDF4 driver
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import struct
@@ -36,6 +19,12 @@ import pytest
 from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("HDF4")
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 ###############################################################################
@@ -219,7 +208,7 @@ def test_hdf4multidim_gdal_sds_2d():
     ds = gdal.OpenEx("data/byte_2.hdf", gdal.OF_MULTIDIM_RASTER)
     assert ds
     rg = ds.GetRootGroup()
-    assert rg.GetGroupNames() is None
+    assert len(rg.GetGroupNames()) == 0
     assert rg.OpenGroup("scientific_datasets") is None
     assert rg.GetMDArrayNames() == ["Band0", "X", "Y"]
     dims = rg.GetDimensions()
@@ -265,7 +254,7 @@ def test_hdf4multidim_gdal_sds_3d():
     ds = gdal.OpenEx("data/byte_3.hdf", gdal.OF_MULTIDIM_RASTER)
     assert ds
     rg = ds.GetRootGroup()
-    assert rg.GetGroupNames() is None
+    assert len(rg.GetGroupNames()) == 0
     assert rg.OpenGroup("scientific_datasets") is None
     assert rg.GetMDArrayNames() == ["3-dimensional Scientific Dataset", "X", "Y"]
     dims = rg.GetDimensions()

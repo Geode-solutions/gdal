@@ -15,22 +15,26 @@ All GDAL command line programs support the following common options.
     Report detailed information about GDAL in use.
 
 .. _raster_common_options_formats:
-.. option:: --formats
+.. include:: options/formats_raster.rst
 
-    List all raster formats supported by this GDAL build (read-only and read-write) and exit. The format support is indicated as follows: 'ro' is read-only driver; 'rw' is read or write (i.e. supports CreateCopy); 'rw+' is read, write and update (i.e. supports Create). A 'v' is appended for formats supporting virtual IO (/vsimem, /vsigzip, /vsizip, etc). A 's' is appended for formats supporting subdatasets. Note: The valid formats for the output of gdalwarp are formats that support the Create() method (marked as rw+), not just the CreateCopy() method.
-
+.. _raster_common_options_format:
 .. option:: --format <format>
 
     List detailed information about a single format driver. The format should be the short name reported in the --formats list, such as GTiff.
 
+.. option:: --formats
+
+    List all drivers. Can be combined with ``-json`` switch of :program:`gdalinfo` of since GDAL 3.10
+
 .. _raster_common_options_optfile:
 .. option:: --optfile <filename>
 
-    Read the named file and substitute the contents into the command line options list. Lines beginning with # will be ignored. Multi-word arguments may be kept together with double quotes.
+    Read the named file and substitute the contents into the command line options list. Lines beginning with # will be ignored. Multi-word arguments may be kept together with double quotes. Multiple --optfiles may be used: --optfile file1 --optfile file2...
+
 
 .. option:: --config <key> <value>
 
-    Sets the named configuration keyword to the given value, as opposed to setting them as environment variables. Some common configuration keywords are GDAL_CACHEMAX (memory used internally for caching in megabytes) and :decl_configoption:`GDAL_DATA` (path of the GDAL "data" directory). Individual drivers may be influenced by other :ref:`configuration options <list_config_options>`.
+    Sets the named configuration keyword to the given value, as opposed to setting them as environment variables. Some common configuration keywords are :config:`GDAL_CACHEMAX` (memory used internally for caching in megabytes) and :config:`GDAL_DATA` (path of the GDAL "data" directory). Individual drivers may be influenced by other :ref:`configuration options <list_config_options>`.
 
 .. option:: --debug <value>
 

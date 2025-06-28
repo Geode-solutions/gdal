@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef DOXYGEN_SKIP
@@ -31,7 +15,7 @@
 #include "ogrmutexeddatasource.h"
 #include "cpl_multiproc.h"
 
-OGRMutexedDataSource::OGRMutexedDataSource(OGRDataSource *poBaseDataSource,
+OGRMutexedDataSource::OGRMutexedDataSource(GDALDataset *poBaseDataSource,
                                            int bTakeOwnership,
                                            CPLMutex *hMutexIn,
                                            int bWrapLayersInMutexedLayer)
@@ -39,6 +23,8 @@ OGRMutexedDataSource::OGRMutexedDataSource(OGRDataSource *poBaseDataSource,
       m_hGlobalMutex(hMutexIn),
       m_bWrapLayersInMutexedLayer(bWrapLayersInMutexedLayer)
 {
+    SetDescription(poBaseDataSource->GetDescription());
+    poDriver = poBaseDataSource->GetDriver();
 }
 
 OGRMutexedDataSource::~OGRMutexedDataSource()
@@ -50,12 +36,6 @@ OGRMutexedDataSource::~OGRMutexedDataSource()
 
     if (m_bHasOwnership)
         delete m_poBaseDataSource;
-}
-
-const char *OGRMutexedDataSource::GetName()
-{
-    CPLMutexHolderOptionalLockD(m_hGlobalMutex);
-    return m_poBaseDataSource->GetName();
 }
 
 int OGRMutexedDataSource::GetLayerCount()
@@ -127,14 +107,14 @@ int OGRMutexedDataSource::TestCapability(const char *pszCap)
     return m_poBaseDataSource->TestCapability(pszCap);
 }
 
-OGRLayer *OGRMutexedDataSource::ICreateLayer(const char *pszName,
-                                             OGRSpatialReference *poSpatialRef,
-                                             OGRwkbGeometryType eGType,
-                                             char **papszOptions)
+OGRLayer *
+OGRMutexedDataSource::ICreateLayer(const char *pszName,
+                                   const OGRGeomFieldDefn *poGeomFieldDefn,
+                                   CSLConstList papszOptions)
 {
     CPLMutexHolderOptionalLockD(m_hGlobalMutex);
     return WrapLayerIfNecessary(m_poBaseDataSource->CreateLayer(
-        pszName, poSpatialRef, eGType, papszOptions));
+        pszName, poGeomFieldDefn, papszOptions));
 }
 
 OGRLayer *OGRMutexedDataSource::CopyLayer(OGRLayer *poSrcLayer,
@@ -180,7 +160,7 @@ void OGRMutexedDataSource::ReleaseResultSet(OGRLayer *poResultsSet)
     {
         std::map<OGRMutexedLayer *, OGRLayer *>::iterator oIter =
             m_oReverseMapLayers.find(
-                cpl::down_cast<OGRMutexedLayer *>(poResultsSet));
+                dynamic_cast<OGRMutexedLayer *>(poResultsSet));
         CPLAssert(oIter != m_oReverseMapLayers.end());
         delete poResultsSet;
         poResultsSet = oIter->second;
@@ -298,15 +278,5 @@ std::shared_ptr<GDALGroup> OGRMutexedDataSource::GetRootGroup() const
     CPLMutexHolderOptionalLockD(m_hGlobalMutex);
     return m_poBaseDataSource->GetRootGroup();
 }
-
-#if defined(WIN32) && defined(_MSC_VER)
-// Horrible hack: for some reason MSVC doesn't export the class
-// if it is not referenced from the DLL itself
-void OGRRegisterMutexedDataSource();
-void OGRRegisterMutexedDataSource()
-{
-    delete new OGRMutexedDataSource(NULL, FALSE, NULL, FALSE);
-}
-#endif
 
 #endif /* #ifndef DOXYGEN_SKIP */

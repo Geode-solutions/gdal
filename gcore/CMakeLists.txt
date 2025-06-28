@@ -1,12 +1,15 @@
 # CMake4GDAL project is distributed under MIT license. See accompanying file LICENSE.txt.
 add_library(
   gcore OBJECT
+  gdal_adbc.cpp
+  gdalalgorithm.cpp
+  gdalalgorithmregistry.cpp
+  gdalcomputedrasterband.cpp
   gdalopeninfo.cpp
   gdaldriver.cpp
   gdaldrivermanager.cpp
   gdaldataset.cpp
   gdalrasterband.cpp
-  gdal_misc.cpp
   gdalrasterblock.cpp
   gdalcolortable.cpp
   gdalmajorobject.cpp
@@ -17,6 +20,7 @@ add_library(
   gdaljp2box.cpp
   gdalmultidomainmetadata.cpp
   gdal_rat.cpp
+  gdal_rat_vat_dbf.cpp
   gdalpamproxydb.cpp
   gdalallvalidmaskband.cpp
   gdalnodatamaskband.cpp
@@ -38,26 +42,52 @@ add_library(
   gdalarraybandblockcache.cpp
   gdalhashsetbandblockcache.cpp
   gdalrelationship.cpp
+  gdalsubdatasetinfo.cpp
   gdalorienteddataset.cpp
+  gdalthreadsafedataset.cpp
+  geoheif.cpp
   overview.cpp
   rasterio.cpp
   rawdataset.cpp
   gdalmultidim.cpp
   gdalmultidim_gridded.cpp
+  gdalmultidim_gltorthorectification.cpp
+  gdalmultidim_meshgrid.cpp
+  gdalmultidim_subsetdimension.cpp
+  gdalmultidim_rat.cpp
   gdalpython.cpp
   gdalpythondriverloader.cpp
   tilematrixset.cpp
   gdal_thread_pool.cpp
-  nasakeywordhandler.cpp)
+  nasakeywordhandler.cpp
+  tiff_common.cpp
+)
+
+add_library(gcore_gdal_misc OBJECT gdal_misc.cpp)
+gdal_standard_includes(gcore_gdal_misc)
+add_dependencies(gcore_gdal_misc generate_gdal_version_h)
+set_property(TARGET gcore_gdal_misc PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
+target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:gcore_gdal_misc>)
+target_link_libraries(gcore_gdal_misc PRIVATE PROJ::proj)
+target_link_libraries(gcore PRIVATE PROJ::proj)
+
 gdal_standard_includes(gcore)
+target_compile_definitions(gcore PUBLIC $<$<CONFIG:DEBUG>:GDAL_DEBUG>)
+if (USE_PRECOMPILED_HEADERS)
+    target_precompile_headers(gcore REUSE_FROM gdal_priv_header)
+endif()
 add_dependencies(gcore generate_gdal_version_h)
 target_compile_options(gcore PRIVATE ${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX})
 target_include_directories(
   gcore
-  PRIVATE $<TARGET_PROPERTY:ogrsf_generic,SOURCE_DIR> $<TARGET_PROPERTY:ogr_geojson,SOURCE_DIR>
-          $<TARGET_PROPERTY:gdal_GTIFF,SOURCE_DIR> $<TARGET_PROPERTY:gdal_MEM,SOURCE_DIR>
+  PRIVATE $<TARGET_PROPERTY:ogrsf_generic,SOURCE_DIR> $<TARGET_PROPERTY:gdal_MEM,SOURCE_DIR>
           $<TARGET_PROPERTY:gdal_vrt,SOURCE_DIR>)
 set_property(TARGET gcore PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
+
+if (GDAL_ENABLE_DRIVER_GTIFF)
+  target_include_directories(gcore PRIVATE $<TARGET_PROPERTY:gdal_GTIFF,SOURCE_DIR>)
+  target_compile_definitions(gcore PRIVATE -DHAVE_TIFF)
+endif()
 
 if (NOT DEFINED GDAL_RESOURCE_PATH)
   message(FATAL_ERROR "GDAL_RESOURCE_PATH not set")
@@ -84,14 +114,35 @@ if (NOT GDAL_AUTOLOAD_PLUGINS)
     PROPERTY COMPILE_DEFINITIONS GDAL_NO_AUTOLOAD)
 endif ()
 
-if (HAVE_SSSE3_AT_COMPILE_TIME)
-  target_compile_definitions(gcore PRIVATE -DHAVE_SSSE3_AT_COMPILE_TIME)
+if (GDAL_ENABLE_ARM_NEON_OPTIMIZATIONS)
+  target_compile_definitions(gcore PRIVATE -DHAVE_SSSE3_AT_COMPILE_TIME -DUSE_NEON_OPTIMIZATIONS)
   target_sources(gcore PRIVATE rasterio_ssse3.cpp)
+elseif (HAVE_SSSE3_AT_COMPILE_TIME)
+  add_library(gcore_rasterio_ssse3 OBJECT rasterio_ssse3.cpp)
+  add_dependencies(gcore_rasterio_ssse3 generate_gdal_version_h)
+  target_compile_definitions(gcore_rasterio_ssse3 PRIVATE -DHAVE_SSSE3_AT_COMPILE_TIME)
+  gdal_standard_includes(gcore_rasterio_ssse3)
+  set_property(TARGET gcore_rasterio_ssse3 PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
+  target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:gcore_rasterio_ssse3>)
   set_property(
     SOURCE rasterio_ssse3.cpp
     APPEND
     PROPERTY COMPILE_FLAGS ${GDAL_SSSE3_FLAG})
 endif ()
+
+if (EMBED_RESOURCE_FILES)
+    add_library(gcore_resources OBJECT embedded_resources.c)
+    gdal_standard_includes(gcore_resources)
+    set_property(TARGET gcore_resources PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
+    target_compile_definitions(gcore PRIVATE EMBED_RESOURCE_FILES)
+    target_compile_definitions(gcore_gdal_misc PRIVATE EMBED_RESOURCE_FILES)
+    set_target_properties(gcore_resources PROPERTIES C_STANDARD 23)
+    target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:gcore_resources>)
+endif()
+if (USE_ONLY_EMBEDDED_RESOURCE_FILES)
+    target_compile_definitions(gcore PRIVATE USE_ONLY_EMBEDDED_RESOURCE_FILES)
+    target_compile_definitions(gcore_gdal_misc PRIVATE USE_ONLY_EMBEDDED_RESOURCE_FILES)
+endif()
 
 target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:gcore>)
 
@@ -102,6 +153,18 @@ endif ()
 if (ENABLE_PAM)
   target_compile_definitions(gcore PRIVATE -DPAM_ENABLED)
 endif ()
+
+if (GDAL_USE_MUPARSER)
+  target_compile_definitions(gcore PRIVATE -DHAVE_MUPARSER)
+endif()
+
+if (NOT GDAL_ENABLE_DRIVER_DERIVED)
+  target_compile_definitions(gcore PRIVATE -DWITHOUT_DERIVED)
+endif ()
+
+if (NOT GDAL_ENABLE_DRIVER_HFA OR GDAL_ENABLE_DRIVER_HFA_PLUGIN)
+  target_compile_definitions(gcore PRIVATE -DNO_HFA_SUPPORT)
+endif()
 
 add_subdirectory(mdreader)
 
@@ -132,15 +195,15 @@ endif ()
 if (GDAL_USE_GEOS)
   target_compile_definitions(gcore PRIVATE -DHAVE_GEOS)
   gdal_target_link_libraries(gcore PRIVATE ${GEOS_TARGET})
+  target_compile_definitions(gcore_gdal_misc PRIVATE -DHAVE_GEOS)
+  gdal_target_link_libraries(gcore_gdal_misc PRIVATE ${GEOS_TARGET})
 endif ()
 
 if (GDAL_USE_CURL)
   # Just for gdal_misc.cpp in fact
-  target_compile_definitions(gcore PRIVATE -DHAVE_CURL)
-  gdal_target_link_libraries(gcore PRIVATE CURL::libcurl)
+  target_compile_definitions(gcore_gdal_misc PRIVATE -DHAVE_CURL)
+  gdal_target_link_libraries(gcore_gdal_misc PRIVATE CURL::libcurl)
 endif ()
-
-gdal_target_link_libraries(gcore PRIVATE PROJ::proj)
 
 # Windows(Mingw/MSVC) link libraries
 if (CMAKE_SYSTEM_NAME MATCHES "Windows")
@@ -155,6 +218,8 @@ target_public_header(
   HEADERS
   ${CMAKE_CURRENT_BINARY_DIR}/gdal_version_full/gdal_version.h
   gdal.h
+  gdal_fwd.h
+  gdalalgorithm.h
   gdaljp2metadata.h
   gdaljp2abstractdataset.h
   gdal_frmts.h
@@ -165,4 +230,23 @@ target_public_header(
   gdalcachedpixelaccessor.h
   rawdataset.h
   gdalgeorefpamdataset.h
-  gdal_mdreader.h)
+  gdal_mdreader.h
+  gdalsubdatasetinfo.h
+  gdal_typetraits.h
+  gdal_adbc.h
+  gdal_minmax_element.hpp
+  gdal_priv_templates.hpp  # Required by gdal_minmax_element.hpp
+  geoheif.h
+)
+
+set(GDAL_DATA_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/tms_LINZAntarticaMapTileGrid.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/tms_MapML_APSTILE.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/tms_MapML_CBMTILE.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/tms_NZTM2000.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/data/template_tiles.mapml
+)
+set_property(
+  TARGET ${GDAL_LIB_TARGET_NAME}
+  APPEND
+  PROPERTY RESOURCE "${GDAL_DATA_FILES}")

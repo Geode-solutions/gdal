@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test Python drivers
@@ -9,40 +8,41 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
 import gdaltest
+import pytest
 
 from osgeo import gdal, ogr
 
 
-def test_pythondrivers_init():
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
+
+@pytest.fixture(autouse=True, scope="module")
+def setup_and_cleanup():
     with gdaltest.config_option("GDAL_PYTHON_DRIVER_PATH", "data/pydrivers"):
         gdal.AllRegister()
     assert ogr.GetDriverByName("DUMMY")
 
+    yield
 
-def test_pythondrivers_test_dummy():
+    with gdaltest.config_option("GDAL_SKIP", "DUMMY"):
+        gdal.AllRegister()
+    assert not ogr.GetDriverByName("DUMMY")
+
+
+@pytest.mark.parametrize("geomformat", ["WKT", "WKB", "WKB/bytearray"])
+def test_pythondrivers_test_dummy(geomformat):
     assert not ogr.Open("UNRELATED:")
-    ds = ogr.Open("DUMMY:")
+
+    ds = gdal.OpenEx("DUMMY:", open_options=["GEOMFORMAT=" + geomformat])
     assert ds
     assert ds.GetLayerCount() == 1
     assert not ds.GetLayer(-1)
@@ -70,7 +70,9 @@ def test_pythondrivers_test_dummy():
         assert f["timeField"] == "12:34:56.789"
         assert f["dateField"] == "2017/04/26"
         assert f["datetimeField"] == "2017/04/26 12:34:56.789+00"
-        assert f.GetGeometryRef()
+        g = f.GetGeometryRef()
+        assert g is not None
+        assert g.GetPoint() == (2.0, 49.0, 0.0)
         count += 1
     assert count == 5
     assert lyr.TestCapability(ogr.OLCFastFeatureCount)
@@ -100,7 +102,7 @@ def test_pythondrivers_missing_metadata():
     with gdaltest.config_option(
         "GDAL_PYTHON_DRIVER_PATH", "data/pydrivers/missingmetadata"
     ):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             gdal.AllRegister()
     assert gdal.GetLastErrorMsg() != ""
     assert gdal.GetDriverCount() == count_before
@@ -122,7 +124,7 @@ def test_pythondrivers_no_driver_class():
         gdal.AllRegister()
     drv = ogr.GetDriverByName("NO_DRIVER_CLASS")
     assert drv
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ogr.Open("FOO:")
     assert gdal.GetLastErrorMsg() != ""
 
@@ -137,15 +139,9 @@ def test_pythondrivers_missing_identify():
         gdal.AllRegister()
     drv = ogr.GetDriverByName("MISSING_IDENTIFY")
     assert drv
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ogr.Open("FOO:")
     assert gdal.GetLastErrorMsg() != ""
 
     with gdaltest.config_option("GDAL_SKIP", "MISSING_IDENTIFY"):
         gdal.AllRegister()
-
-
-def test_pythondrivers_cleanup():
-    with gdaltest.config_option("GDAL_SKIP", "DUMMY"):
-        gdal.AllRegister()
-    assert not ogr.GetDriverByName("DUMMY")

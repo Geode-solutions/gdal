@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Arc/Info Binary Grid Translator
  * Purpose:  Grid file access cover API for non-GDAL use.
@@ -9,30 +8,18 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2009-2010, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "aigrid.h"
 
+#ifndef CPL_IGNORE_RET_VAL_INT_defined
+#define CPL_IGNORE_RET_VAL_INT_defined
+
 CPL_INLINE static void CPL_IGNORE_RET_VAL_INT(CPL_UNUSED int unused)
 {
 }
+#endif
 
 /************************************************************************/
 /*                              AIGOpen()                               */
@@ -166,7 +153,8 @@ AIGInfo_t *AIGOpen(const char *pszInputName, const char *pszAccess)
     /*      Setup tile infos, but defer reading of tile data.               */
     /* -------------------------------------------------------------------- */
     psInfo->pasTileInfo = (AIGTileInfo *)VSI_CALLOC_VERBOSE(
-        sizeof(AIGTileInfo), psInfo->nTilesPerRow * psInfo->nTilesPerColumn);
+        sizeof(AIGTileInfo),
+        (size_t)psInfo->nTilesPerRow * psInfo->nTilesPerColumn);
     if (psInfo->pasTileInfo == NULL)
     {
         AIGClose(psInfo);
@@ -493,7 +481,7 @@ VSILFILE *AIGLLOpen(const char *pszFilename, const char *pszAccess)
         for (i = (int)strlen(pszUCFilename) - 1;
              pszUCFilename[i] != '/' && pszUCFilename[i] != '\\'; i--)
         {
-            pszUCFilename[i] = (char)toupper(pszUCFilename[i]);
+            pszUCFilename[i] = (char)toupper((unsigned char)(pszUCFilename[i]));
         }
 
         fp = VSIFOpenL(pszUCFilename, pszAccess);

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # ******************************************************************************
-#  $Id$
 #
 #  Name:     gdalproximity
 #  Project:  GDAL Python Interface
@@ -12,46 +11,35 @@
 #  Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
 #  Copyright (c) 2021, Idan Miara <idan@miara.com>
 #
-#  Permission is hereby granted, free of charge, to any person obtaining a
-#  copy of this software and associated documentation files (the "Software"),
-#  to deal in the Software without restriction, including without limitation
-#  the rights to use, copy, modify, merge, publish, distribute, sublicense,
-#  and/or sell copies of the Software, and to permit persons to whom the
-#  Software is furnished to do so, subject to the following conditions:
-#
-#  The above copyright notice and this permission notice shall be included
-#  in all copies or substantial portions of the Software.
-#
-#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-#  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-#  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-#  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-#  DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 # ******************************************************************************
 
 import sys
 from typing import Optional, Sequence
 
 from osgeo import gdal
-from osgeo_utils.auxiliary.util import GetOutputDriverFor
+from osgeo_utils.auxiliary.util import GetOutputDriverFor, enable_gdal_exceptions
 
 
-def Usage():
+def Usage(isError):
+    f = sys.stderr if isError else sys.stdout
     print(
         """
-Usage: gdal_proximity.py srcfile dstfile [-srcband n] [-dstband n]
-                  [-of format] [-co name=value]*
-                  [-ot Byte/UInt16/UInt32/Float32/etc]
-                  [-values n,n,n] [-distunits PIXEL/GEO]
-                  [-maxdist n] [-nodata n] [-use_input_nodata YES/NO]
-                  [-fixed-buf-val n] [-q] """
+Usage: gdal_proximity [--help] [--help-general]
+                  <srcfile> <dstfile> [-srcband <n>] [-dstband <n>]
+                  [-of <format>] [-co <name>=<value>]...
+                  [-ot {Byte|UInt16|UInt32|Float32|etc}]
+                  [-values <n>,<n>,<n>] [-distunits {PIXEL|GEO}]
+                  [-maxdist <n>] [-nodata <n>] [-use_input_nodata {YES|NO}]
+                  [-fixed-buf-val <n>] [-q] """,
+        file=f,
     )
-    return 2
+    return 2 if isError else 0
 
 
+@enable_gdal_exceptions
 def main(argv=sys.argv):
+
     driver_name = None
     creation_options = []
     alg_options = []
@@ -71,7 +59,10 @@ def main(argv=sys.argv):
     while i < len(argv):
         arg = argv[i]
 
-        if arg == "-of" or arg == "-f":
+        if arg == "--help":
+            return Usage(isError=False)
+
+        elif arg == "-of" or arg == "-f":
             i = i + 1
             driver_name = argv[i]
 
@@ -118,6 +109,10 @@ def main(argv=sys.argv):
         elif arg == "-q" or arg == "-quiet":
             quiet = True
 
+        elif arg[0] == "-":
+            sys.stderr.write("Unrecognized option : %s\n" % argv[i])
+            return Usage(isError=True)
+
         elif src_filename is None:
             src_filename = argv[i]
 
@@ -125,12 +120,17 @@ def main(argv=sys.argv):
             dst_filename = argv[i]
 
         else:
-            return Usage()
+            return Usage(isError=True)
 
         i = i + 1
 
-    if src_filename is None or dst_filename is None:
-        return Usage()
+    if src_filename is None:
+        sys.stderr.write("Missing <srcfile>\n")
+        return Usage(isError=True)
+
+    if dst_filename is None:
+        sys.stderr.write("Missing <dstfile>\n")
+        return Usage(isError=True)
 
     return gdal_proximity(
         src_filename=src_filename,

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read/write functionality for L1B driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -174,11 +157,10 @@ def test_l1b_metadata_before_noaa_15():
     except OSError:
         pytest.skip()
 
-    gdal.SetConfigOption("L1B_FETCH_METADATA", "YES")
-    gdal.SetConfigOption("L1B_METADATA_DIRECTORY", "tmp")
-    ds = gdal.Open("tmp/cache/n12gac10bit.l1b")
-    gdal.SetConfigOption("L1B_FETCH_METADATA", None)
-    gdal.SetConfigOption("L1B_METADATA_DIRECTORY", None)
+    with gdal.config_options(
+        {"L1B_FETCH_METADATA": "YES", "L1B_METADATA_DIRECTORY": "tmp"}
+    ):
+        ds = gdal.Open("tmp/cache/n12gac10bit.l1b")
     del ds
 
     f = open("tmp/n12gac10bit.l1b_metadata.csv", "rb")
@@ -261,11 +243,10 @@ def test_l1b_metadata_after_noaa_15():
     except OSError:
         pytest.skip()
 
-    gdal.SetConfigOption("L1B_FETCH_METADATA", "YES")
-    gdal.SetConfigOption("L1B_METADATA_DIRECTORY", "tmp")
-    ds = gdal.Open("tmp/cache/n16gac10bit.l1b")
-    gdal.SetConfigOption("L1B_FETCH_METADATA", None)
-    gdal.SetConfigOption("L1B_METADATA_DIRECTORY", None)
+    with gdal.config_options(
+        {"L1B_FETCH_METADATA": "YES", "L1B_METADATA_DIRECTORY": "tmp"}
+    ):
+        ds = gdal.Open("tmp/cache/n16gac10bit.l1b")
     del ds
 
     f = open("tmp/n16gac10bit.l1b_metadata.csv", "rb")

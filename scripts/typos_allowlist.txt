@@ -30,7 +30,6 @@
     VSIFPrintfL(fp, "     UN=Metres,SD=HHWLT,DX=2.500000,DY=2.500000\n");
         pszUnitsPer = CPLGetXMLValue( psSrcXML, "metresPerUnit", NULL );
     {"kilometre", /* 15 */ 12, 13, 1000.0},
-                    oSRS.SetLinearUnits( "kilometre", 1000.0 );
 { "kilometre", SRS_UL_KILOMETER_CONV, "km" }, // Leave as 'kilometre' instead of SRS_UL_KILOMETER due to historical usage
             passport.stMapDescription.eUnitInPlan = SXF_COORD_MU_CENTIMETRE;
             passport.stMapDescription.eUnitInPlan = SXF_COORD_MU_MILLIMETRE;
@@ -215,8 +214,8 @@ OM, SOM). Contact me if you have troubles with proper projection
             oDict.Add("DecodeParms", &((new GDALPDFDictionaryRW())
             else if (EQUAL(pszDatum, "HEN")) /* HERAT North, Afghanistan */
     else if (EQUAL(pszMnemonic, "SOM"))
- * Author:   Trent Hare (thare@usgs.gov),
  * Author:   Trent Hare (thare@usgs.gov)
+ * Author:   Trent Hare (thare at usgs.gov),
             PLACE(achTSH + 0, TE, "TE");
             nTreIndex--;
     for (psIter = psTreNode->psChild; psIter != NULL && *pbError == FALSE;
@@ -267,7 +266,7 @@ int CPL_DLL creat(const char *path, mode_t mode)
     msg = msg.replace("overfow", "overflow")
     msg = msg.replace("divison", "division")
     msg = msg.replace("behaviour", "behavior")
-scan-build -o $GDAL_TOPDIR/scanbuildoutput -sarif -v -enable-checker alpha.unix.cstring.OutOfBounds,alpha.unix.cstring.BufferOverlap,optin.cplusplus.VirtualCall,optin.cplusplus.UninitializedObject make -j4
+scan-build -o $GDAL_TOPDIR/scanbuildoutput -sarif -v -enable-checker alpha.unix.cstring.OutOfBounds,alpha.unix.cstring.BufferOverlap,optin.cplusplus.VirtualCall,optin.cplusplus.UninitializedObject make -j$(nproc)
         "JPNG",
         "       <Value>JPNG</Value>"
              || poDS->current.comp == IL_JPNG
@@ -290,3 +289,67 @@ scan-build -o $GDAL_TOPDIR/scanbuildoutput -sarif -v -enable-checker alpha.unix.
      * The Paeth function predicts d to be whichever of a, b, or c is nearest to
         /* Paeth breaks ties favoring a over b over c. */
     ned_ds = gdal.Open("data/dimap2/vhr2020_ms_fs/MS-FS/IMG_NED_R1C1.TIF")
+``a_scale``, ``a_offset``, ``ot``, ``gcp``, ``if``, ``scale``, ``exponent``, and ``outsize``.
+The effect of the ``ot`` option (added in GDAL 3.7) is to force the output image bands to have a
+        "HE5_GCTP_ROBIN",  "HE5_GCTP_SOM",    "HE5_GCTP_ALASKA",
+            else if (EQUAL(pszKey, "ot"))
+    ds = gdal.Open("vrt://data/float32.tif?ot=Int32")
+                    "NUM_ADJ_PARM", "(NUM_ADJ_PARM+1)*(NUM_ADJ_PARM)/2",
+    affiliation: Koordinates
+``a_scale``, ``a_offset``, ``ot``, ``gcp``, ``if``, ``scale``, ``exponent``, ``outsize``, ``projwin``,
+The effect of the ``unscale`` option (added in GDAL 3.8) is to apply the scale/offset metadata for the bands to convert scaled values to unscaled values. To apply this use syntax ``unscale=true``, or ``unscale=false`` (which is the default if not specified). Do consider the need for also using ``ot`` option in order to accommodate the intended output range, see more details for the same argument as with (:ref:`gdal_translate`).
+either 2 or 4 comma separated values. The same rules apply for the source and destination ranges, and ``scale_bn`` syntax may be used as it is with (:ref:`gdal_translate`).  The option ``scale=true`` (default if unspecified is ``scale=false``) may also be used without value arguments (added in GDAL 3.8), where it results in the output range 0,255 from whatever the source range is. Do consider the need for also using ``ot`` option in order to accommodate the intended output range.
+                        oSRS.SetLinearUnits("kilometre",
+    ds = gdal.Open("vrt://" + dsn_unscale + "?unscale=true&ot=int16")
+     FAIL_REGEX "[Uu]nknown option"                         # HP
+     FAIL_REGEX "[Uu]nknown switch"                         # PGI
+* Esben Mose Hansen, Ange Optimization ApS
+            SetLinearUnits("kilometre", 1000.0);
+    // F(ixed) S(ize) L(ist) of (x,y[,z][,m]) values / Interleaved layout
+ *           https://www.miramon.cat/eng/QuiSom.htm
+#define SECTION_VERSIO "VERSIO"
+#define szMMNomCampPerimetreDefecte "PERIMETRE"
+#define szMMNomCampNPoligonsDefecte "N_POLIG"
+#define MM_MIN_WIDTH_LONG 14  // For LONG_ARC and PERIMETRE
+#define MM_MIN_WIDTH_AREA 19  // For LONG_ARC and PERIMETRE
+    // of decimals to be used in the reserved fields as LONG_ARC, PERIMETRE,
+    CPLStrlcpy(szPerimeterOfThePolygonCat, "Perimetre del poligon",
+    CPLStrlcpy(szPerimeterOfThePolygonCat, "Perimetre del poligon",
+    CPLStrlcpy(szAreaOfThePolygonCat, "Area del poligon",
+    CPLStrlcpy(szNumberOfElementaryPolygonsCat, "Nombre de poligons elementals",
+                    VSIFPrintfL(m_MMMap.fMMMap, "[VERSIO]\n");
+#define MM_IsDoubleInfinite(x) EsDoubleInfinit((x))
+    https://www.miramon.cat/help/eng/GeMPlus/ClausREL.htm
+    fprintf_function(pF, "[%s]" LineReturn, SECTION_VERSIO);
+        VSIFPrintfL(pF, "NomCampPerimetre=%s" LineReturn,
+        VSIFPrintfL(pF, "NomCampNPoligons=%s" LineReturn,
+        MMReturnValueFromSectionINIFile(szREL_file, SECTION_VERSIO, nullptr);
+        MMReturnValueFromSectionINIFile(szREL_file, SECTION_VERSIO, KEY_Vers);
+    pszLine = MMReturnValueFromSectionINIFile(szREL_file, SECTION_VERSIO,
+    assert f.GetField("PERIMETRE") == pytest.approx(1289.866489495, abs=1e-5)
+    assert f.GetField("PERIMETRE") == pytest.approx(1123.514024, abs=1e-5)
+    assert f.GetField("PERIMETRE") == pytest.approx(680.544697, abs=1e-5)
+    assert f["PERIMETRE"] == [3.414, 3.414]
+    assert f["PERIMETRE"] == [32, 32]
+# Package substitutefont no longer exists since TeXLive 2023 later than August 2023
+        .GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex("LOGICALY"))
+    assert f.GetField("LOGICALY") == 1
+ * <li>JOIN_STYLE=ROUND/MITRE/BEVEL</li>
+ * <li>MITRE_LIMIT=double</li>
+            else if (EQUAL(pszValue, "MITRE"))
+                nStyle = GEOSBUF_JOIN_MITRE;
+        else if (EQUAL(pszParam, "MITRE_LIMIT"))
+                         "Invalid value for MITRE_LIMIT: %s", pszValue);
+* <li>JOIN_STYLE=ROUND/MITRE/BEVEL</li>
+* <li>MITRE_LIMIT=double</li>
+        DESCRIPTION=Staatliche Verwaltungs- und Sozialdienste wie öffentliche Verwaltung, Katastrophenschutz, Schulen und Krankenhäuser, die von öffentlichen oder privaten Einrichtungen erbracht werden, soweit sie in den Anwendungsbereich der Richtlinie 2007/2/EG fallen. Dieser Datensatz enthält Informationen zu Feuerwehrleitstellen.
+    # Disable cfchecker validation as it fails with a '(5): co-ordinate variable not monotonic'
+* do not emit warnings about not having used [Dont]UseExceptions() if run under
+                // Hack for a file called MANAL_2023030103.grb2 that
+            .AddAlias("ot")
+        EXPECT_EQ(raster->InstantiateSubAlgorithm("pipleine"), nullptr);
+.. include:: gdal_options/ot.rst
+for Bosnia and Herzegovina (country code "BA"), limited to the "county" subtype.
+- Koordinates
+    Koordinates
+%apply (int *INOUT) {int *buf_xsize, int *buf_ysize};

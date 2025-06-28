@@ -10,31 +10,32 @@ best of our knowledge and not guaranteed. Users should check by themselves.
 # Alpine based
 
 Alpine version:
-* 3.17 for GDAL 3.7
-* 3.16 for GDAL 3.6
-* 3.15 for GDAL 3.5
+* 3.22 for GDAL 3.12
+* 3.21 for GDAL 3.11
+* 3.20 for GDAL 3.10
 
-## Small: `osgeo/gdal:alpine-small-latest`
+## Small: `ghcr.io/osgeo/gdal:alpine-small-latest`
 
 * Image size: ~ 59 MB
 * Raster drivers: ultrasmall + built-in + SQLite-based ones + network-based ones
 * Vector drivers: ultrasmall + built-in + most XML-based ones + network-based ones + PostgreSQL
 * Using internal libtiff and libgeotiff
-* External libraries enabled: ultrasmall + libexpat, libpq, libssl
+* External libraries enabled: ultrasmall + libexpat, libpq, libssl, muparser
 * *No* GDAL Python
 * Base PROJ grid package (http://download.osgeo.org/proj/proj-datumgrid-1.8.zip)
 * Overall licensing terms of the GDAL build: permissive (MIT, BSD style, Apache, etc..)
 
 See [alpine-small/Dockerfile](alpine-small/Dockerfile)
 
-## Normal: `osgeo/gdal:alpine-normal-latest`
+## Normal: `ghcr.io/osgeo/gdal:alpine-normal-latest`
 
 * Image size: ~ 282 MB
 * Raster drivers: small + netCDF, HDF5, BAG
 * Vector drivers: small + Spatialite, XLS
 * Using internal libtiff and libgeotiff
 * External libraries enabled: small + libgeos, libhdf5, libhdf5, libkea, libnetcdf, libfreexl,
-  libspatialite, libxml2, libkml, libpoppler, openexr, libheif, libdeflate, libparquet, libjxl
+  libspatialite, libxml2, libkml, libpoppler, openexr, libheif, libdeflate, libparquet, libjxl,
+  muparser, exprtk
 * GDAL Python
 * Base PROJ grid package (http://download.osgeo.org/proj/proj-datumgrid-1.8.zip)
 * Overall licensing terms of the GDAL build: copy-left (GPL) + LGPL + permissive
@@ -44,24 +45,26 @@ See [alpine-normal/Dockerfile](alpine-normal/Dockerfile)
 # Ubuntu based
 
 Ubuntu version:
-* 22.04 for GDAL 3.6
+* 24.04 for GDAL 3.9 and 3.10
+* 22.04 for GDAL 3.6, 3.7 and 3.8
 * 20.04 for GDAL 3.4 and 3.5
 
-## Small: `osgeo/gdal:ubuntu-small-latest`
+## Small: `ghcr.io/osgeo/gdal:ubuntu-small-latest`
 
 * Image size: ~ 385 MB
 * Raster drivers: all built-in + JPEG + PNG + JP2OpenJPEG + WEBP +SQLite-based ones + network-based ones
 * Vector drivers: all built-in + XML based ones + SQLite-based ones + network-based ones + PostgreSQL
 * Using internal libtiff and libgeotiff
 * External libraries enabled: libsqlite3, libproj, libcurl, libjpeg, libpng, libwebp,
-  libzstd, libexpat, libxerces-c, libpq, libssl, libgeos, libspatialite
-* GDAL Python (Python 3.8 for Ubuntu 20.04, Python 3.10 for Ubuntu 22.04)
+  libzstd, libdeflate, libexpat, libxerces-c, libpq, libssl, libgeos, libspatialite,
+  muparser
+* GDAL Python (Python 3.8 for Ubuntu 20.04, Python 3.10 for Ubuntu 22.04, Python 3.12 for Ubuntu 24.04)
 * Base PROJ grid package (http://download.osgeo.org/proj/proj-datumgrid-1.8.zip)
 * Overall licensing terms of the GDAL build: LGPL + permissive (MIT, BSD style, Apache, etc..)
 
 See [ubuntu-small/Dockerfile](ubuntu-small/Dockerfile)
 
-## Full: `osgeo/gdal:ubuntu-full-latest` (aliased to `osgeo/gdal`)
+## Full: `ghcr.io/osgeo/gdal:ubuntu-full-latest` (aliased to `osgeo/gdal`)
 
 * Image size: ~ 1.48 GB
 * Raster drivers: all based on almost all possible free and open-source dependencies
@@ -69,8 +72,10 @@ See [ubuntu-small/Dockerfile](ubuntu-small/Dockerfile)
 * Using internal libtiff and libgeotiff
 * External libraries enabled: small + libnetcdf, libhdf4, libhdf5, libtiledb, libkea,
   mongocxx 3.4, libspatialite, unixodbc, libxml2, libcfitsio, libmysqlclient,
-  libkml, libpoppler, pdfium, openexr, libheif, libdeflate, libparquet, libjxl
-* GDAL Python (Python 3.8 for Ubuntu 20.04, Python 3.10 for Ubuntu 22.04)
+  libkml, libpoppler, pdfium, openexr, libheif, libdeflate, libparquet, libjxl,
+  muparser, exprtk
+* GDAL Python (Python 3.8 for Ubuntu 20.04, Python 3.10 for Ubuntu 22.04, Python 3.12 for Ubuntu 24.04)
+* GDAL Java JNI bindings
 * *All* PROJ grid packages (equivalent of latest of proj-data-X.zip from http://download.osgeo.org/proj/ at time of generation, > 500 MB)
 * Overall licensing terms of the GDAL build: copy-left (GPL) + LGPL + permissive
 
@@ -86,8 +91,8 @@ Note: you should *not* try to install GDAL (directly or indirectly through other
 ## Example:
 
 ```shell
-docker pull osgeo/gdal:alpine-small-latest
-docker run --rm -v /home:/home osgeo/gdal:alpine-small-latest gdalinfo $PWD/my.tif
+docker pull ghcr.io/osgeo/gdal:alpine-small-latest
+docker run --rm -v /home:/home ghcr.io/osgeo/gdal:alpine-small-latest gdalinfo $PWD/my.tif
 ```
 
 ## Troubleshooting
@@ -96,11 +101,11 @@ If you are getting a ``<jemalloc>: arena 0 background thread creation failed (1)
 
 # Images of releases
 
-Tagged images of recent past releases are available. The last ones (at time of writing) are for GDAL 3.6.3 and PROJ 9.2.0, for linux/amd64 and linux/arm64:
-* osgeo/gdal:alpine-small-3.6.3
-* osgeo/gdal:alpine-normal-3.6.3
-* osgeo/gdal:ubuntu-small-3.6.3
-* osgeo/gdal:ubuntu-full-3.6.3
+Tagged images of recent past releases are available. The last ones (at time of writing) are for GDAL 3.11.0 and PROJ 9.6.0, for linux/amd64 and linux/arm64:
+* ghcr.io/osgeo/gdal:alpine-small-3.11.0
+* ghcr.io/osgeo/gdal:alpine-normal-3.11.0
+* ghcr.io/osgeo/gdal:ubuntu-small-3.11.0
+* ghcr.io/osgeo/gdal:ubuntu-full-3.11.0
 
 ## Multi-arch Images
 
@@ -147,3 +152,13 @@ Override the image and repository of the final image by setting the environment 
 **Example**
 
 `TARGET_IMAGE="YOU_DOCKER_USERNAME/gdal" alpine-small/build.sh --release --gdal v3.2.0 --proj master`
+
+## Drivers based on proprietary software development kits
+
+For the `ubuntu-full` amd64 image,
+
+* The OCI and GeoRaster based drivers can be enabled by passing ``--with-oracle`` to util.sh
+* The ECW and JP2ECW drivers can be enabled by passing ``--with-ecw`` to util.sh
+* The MrSID driver can be enabled by passing ``--with-mrsid`` to util.sh
+
+Note: those are not enabled in the official images provided by the project.

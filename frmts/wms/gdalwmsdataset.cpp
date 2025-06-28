@@ -11,23 +11,7 @@
  * Copyright (c) 2017, Dmitry Baryshnikov, <polimax@mail.ru>
  * Copyright (c) 2017, NextGIS, <info@nextgis.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************
  *
  * dataset.cpp:
@@ -186,7 +170,8 @@ CPLErr GDALWMSDataset::Initialize(CPLXMLNode *config, char **l_papszOpenOptions)
         }
         else
         {
-            m_http_timeout = 300;
+            m_http_timeout =
+                atoi(CPLGetConfigOption("GDAL_HTTP_TIMEOUT", "300"));
         }
     }
 
@@ -471,6 +456,13 @@ CPLErr GDALWMSDataset::Initialize(CPLXMLNode *config, char **l_papszOpenOptions)
                 }
 
                 m_data_window.m_tlevel = atoi(tlevel);
+                // Limit to 30 to avoid 1 << m_tlevel overflow
+                if (m_data_window.m_tlevel < 0 || m_data_window.m_tlevel > 30)
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Invalid value for TileLevel");
+                    return CE_Failure;
+                }
 
                 if (ret == CE_None)
                 {
@@ -483,10 +475,43 @@ CPLErr GDALWMSDataset::Initialize(CPLXMLNode *config, char **l_papszOpenOptions)
                              (str_tile_count_x[0] != '\0') &&
                              (str_tile_count_y[0] != '\0'))
                     {
-                        int tile_count_x = atoi(str_tile_count_x);
-                        int tile_count_y = atoi(str_tile_count_y);
+                        const int tile_count_x = atoi(str_tile_count_x);
+                        if (tile_count_x <= 0)
+                        {
+                            CPLError(CE_Failure, CPLE_AppDefined,
+                                     "Invalid value for TileCountX");
+                            return CE_Failure;
+                        }
+                        if (tile_count_x > INT_MAX / m_block_size_x ||
+                            tile_count_x * m_block_size_x >
+                                INT_MAX / (1 << m_data_window.m_tlevel))
+                        {
+                            CPLError(CE_Failure, CPLE_AppDefined,
+                                     "Integer overflow in tile_count_x * "
+                                     "m_block_size_x * (1 << "
+                                     "m_data_window.m_tlevel)");
+                            return CE_Failure;
+                        }
                         m_data_window.m_sx = tile_count_x * m_block_size_x *
                                              (1 << m_data_window.m_tlevel);
+
+                        const int tile_count_y = atoi(str_tile_count_y);
+                        if (tile_count_y <= 0)
+                        {
+                            CPLError(CE_Failure, CPLE_AppDefined,
+                                     "Invalid value for TileCountY");
+                            return CE_Failure;
+                        }
+                        if (tile_count_y > INT_MAX / m_block_size_y ||
+                            tile_count_y * m_block_size_y >
+                                INT_MAX / (1 << m_data_window.m_tlevel))
+                        {
+                            CPLError(CE_Failure, CPLE_AppDefined,
+                                     "Integer overflow in tile_count_y * "
+                                     "m_block_size_y * (1 << "
+                                     "m_data_window.m_tlevel)");
+                            return CE_Failure;
+                        }
                         m_data_window.m_sy = tile_count_y * m_block_size_y *
                                              (1 << m_data_window.m_tlevel);
                     }
@@ -675,7 +700,7 @@ CPLErr GDALWMSDataset::Initialize(CPLXMLNode *config, char **l_papszOpenOptions)
     {
         if (m_oSRS.IsEmpty())
         {
-            const auto oSRS = m_mini_driver->GetSpatialRef();
+            const auto &oSRS = m_mini_driver->GetSpatialRef();
             if (!oSRS.IsEmpty())
             {
                 m_oSRS = oSRS;
@@ -696,7 +721,7 @@ CPLErr GDALWMSDataset::Initialize(CPLXMLNode *config, char **l_papszOpenOptions)
 CPLErr GDALWMSDataset::IRasterIO(GDALRWFlag rw, int x0, int y0, int sx, int sy,
                                  void *buffer, int bsx, int bsy,
                                  GDALDataType bdt, int band_count,
-                                 int *band_map, GSpacing nPixelSpace,
+                                 BANDMAP_TYPE band_map, GSpacing nPixelSpace,
                                  GSpacing nLineSpace, GSpacing nBandSpace,
                                  GDALRasterIOExtraArg *psExtraArg)
 {
@@ -745,16 +770,11 @@ CPLErr GDALWMSDataset::SetSpatialRef(const OGRSpatialReference *)
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
-CPLErr GDALWMSDataset::GetGeoTransform(double *gt)
+CPLErr GDALWMSDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
     if (!(m_mini_driver_caps.m_has_geotransform))
     {
-        gt[0] = 0;
-        gt[1] = 1;
-        gt[2] = 0;
-        gt[3] = 0;
-        gt[4] = 0;
-        gt[5] = 1;
+        gt = GDALGeoTransform();
         return CE_Failure;
     }
     gt[0] = m_data_window.m_x0;
@@ -771,7 +791,7 @@ CPLErr GDALWMSDataset::GetGeoTransform(double *gt)
 /************************************************************************/
 /*                          SetGeoTransform()                           */
 /************************************************************************/
-CPLErr GDALWMSDataset::SetGeoTransform(CPL_UNUSED double *gt)
+CPLErr GDALWMSDataset::SetGeoTransform(const GDALGeoTransform &)
 {
     return CE_Failure;
 }
@@ -835,8 +855,7 @@ const char *const *GDALWMSDataset::GetHTTPRequestOpts()
         opts = CSLAddNameValue(opts, "USERAGENT", m_osUserAgent);
     else
         opts = CSLAddString(
-            opts,
-            "USERAGENT=GDAL WMS driver (http://www.gdal.org/frmt_wms.html)");
+            opts, "USERAGENT=GDAL WMS driver (https://gdal.org/frmt_wms.html)");
 
     if (!m_osReferer.empty())
         opts = CSLAddNameValue(opts, "REFERER", m_osReferer);

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # ******************************************************************************
-#  $Id$
 #
 #  Name:     pct2rgb
 #  Project:  GDAL Python Interface
@@ -12,23 +11,7 @@
 #  Copyright (c) 2009-2010, Even Rouault <even dot rouault at spatialys.com>
 #  Copyright (c) 2020-2021, Idan Miara <idan@miara.com>
 #
-#  Permission is hereby granted, free of charge, to any person obtaining a
-#  copy of this software and associated documentation files (the "Software"),
-#  to deal in the Software without restriction, including without limitation
-#  the rights to use, copy, modify, merge, publish, distribute, sublicense,
-#  and/or sell copies of the Software, and to permit persons to whom the
-#  Software is furnished to do so, subject to the following conditions:
-#
-#  The above copyright notice and this permission notice shall be included
-#  in all copies or substantial portions of the Software.
-#
-#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-#  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-#  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-#  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-#  DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 # ******************************************************************************
 
 import sys
@@ -42,11 +25,16 @@ from osgeo_utils.auxiliary.base import PathLikeOrStr
 from osgeo_utils.auxiliary.color_palette import get_color_palette
 from osgeo_utils.auxiliary.color_table import get_color_table
 from osgeo_utils.auxiliary.gdal_argparse import GDALArgumentParser, GDALScript
-from osgeo_utils.auxiliary.util import GetOutputDriverFor, open_ds
+from osgeo_utils.auxiliary.util import (
+    GetOutputDriverFor,
+    enable_gdal_exceptions,
+    open_ds,
+)
 
 progress = gdal.TermProgress_nocb
 
 
+@enable_gdal_exceptions
 def pct2rgb(
     src_filename: PathLikeOrStr,
     pct_filename: Optional[PathLikeOrStr],
@@ -84,6 +72,8 @@ def pct2rgb(
         ct = get_color_table(pal)
     else:
         ct = src_band.GetRasterColorTable()
+        if ct is None:
+            raise Exception(f"{src_filename} has no color table")
 
     ct_size = ct.GetCount()
     lookup = [

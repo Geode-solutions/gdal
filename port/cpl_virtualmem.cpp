@@ -8,23 +8,7 @@
  **********************************************************************
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef _GNU_SOURCE
@@ -38,9 +22,8 @@
 
 #include "cpl_virtualmem.h"
 
+#include <algorithm>
 #include <cassert>
-// TODO(schwehr): Should ucontext.h be included?
-// #include <ucontext.h>
 
 #include "cpl_atomic_ops.h"
 #include "cpl_config.h"
@@ -141,7 +124,7 @@ struct CPLVirtualMem
                              (pagesize))
 #define ALIGN_UP(p, pagesize)                                                  \
     reinterpret_cast<void *>(                                                  \
-        (reinterpret_cast<GUIntptr_t>(p) + (pagesize)-1) / (pagesize) *        \
+        cpl::div_round_up(reinterpret_cast<GUIntptr_t>(p), (pagesize)) *       \
         (pagesize))
 
 #define DEFAULT_PAGE_SIZE (256 * 256)
@@ -1623,7 +1606,6 @@ static void CPLVirtualMemManagerSIGSEGVHandler(int the_signal,
     memset(&msg, 0, sizeof(msg));
     msg.pFaultAddr = the_info->si_addr;
     msg.hRequesterThread = pthread_self();
-    msg.opType = OP_UNKNOWN;
 
 #if defined(__x86_64__) || defined(__i386__)
     ucontext_t *the_ucontext = static_cast<ucontext_t *>(the_ctxt);
@@ -1671,6 +1653,8 @@ static void CPLVirtualMemManagerSIGSEGVHandler(int the_signal,
         }
     }
 #endif
+#else
+    msg.opType = OP_UNKNOWN;
 #endif
 
 #if defined DEBUG_VIRTUALMEM && defined DEBUG_VERBOSE
@@ -2139,7 +2123,7 @@ CPLVirtualMem *CPLVirtualMemFileMapNew(
 size_t CPLGetPageSize(void)
 {
 #if defined(HAVE_MMAP) || defined(HAVE_VIRTUAL_MEM_VMA)
-    return static_cast<size_t>(sysconf(_SC_PAGESIZE));
+    return static_cast<size_t>(std::max(0L, sysconf(_SC_PAGESIZE)));
 #else
     return 0;
 #endif

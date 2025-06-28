@@ -8,23 +8,7 @@
  * Copyright (c) 1999, 2001, Frank Warmerdam
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -1071,8 +1055,10 @@ void S57Reader::GenerateLNAMAndRefs(DDFRecord *poRecord, OGRFeature *poFeature)
     /* -------------------------------------------------------------------- */
     const int nRefCount = poFFPT->GetRepeatCount();
 
-    DDFSubfieldDefn *poLNAM = poFFPT->GetFieldDefn()->FindSubfieldDefn("LNAM");
-    DDFSubfieldDefn *poRIND = poFFPT->GetFieldDefn()->FindSubfieldDefn("RIND");
+    const DDFSubfieldDefn *poLNAM =
+        poFFPT->GetFieldDefn()->FindSubfieldDefn("LNAM");
+    const DDFSubfieldDefn *poRIND =
+        poFFPT->GetFieldDefn()->FindSubfieldDefn("RIND");
     if (poLNAM == nullptr || poRIND == nullptr)
     {
         return;
@@ -1730,11 +1716,6 @@ bool S57Reader::FetchLine(DDFRecord *poSRecord, int iStartVertex,
 
 {
     int nPoints = 0;
-    DDFField *poSG2D = nullptr;
-    DDFField *poAR2D = nullptr;
-    DDFSubfieldDefn *poXCOO = nullptr;
-    DDFSubfieldDefn *poYCOO = nullptr;
-    bool bStandardFormat = true;
 
     /* -------------------------------------------------------------------- */
     /*      Points may be multiple rows in one SG2D/AR2D field or           */
@@ -1744,7 +1725,8 @@ bool S57Reader::FetchLine(DDFRecord *poSRecord, int iStartVertex,
 
     for (int iField = 0; iField < poSRecord->GetFieldCount(); ++iField)
     {
-        poSG2D = poSRecord->GetField(iField);
+        const DDFField *poSG2D = poSRecord->GetField(iField);
+        const DDFField *poAR2D = nullptr;
 
         if (EQUAL(poSG2D->GetFieldDefn()->GetName(), "SG2D"))
         {
@@ -1766,8 +1748,10 @@ bool S57Reader::FetchLine(DDFRecord *poSRecord, int iStartVertex,
         /* --------------------------------------------------------------------
          */
 
-        poXCOO = poSG2D->GetFieldDefn()->FindSubfieldDefn("XCOO");
-        poYCOO = poSG2D->GetFieldDefn()->FindSubfieldDefn("YCOO");
+        const DDFSubfieldDefn *poXCOO =
+            poSG2D->GetFieldDefn()->FindSubfieldDefn("XCOO");
+        const DDFSubfieldDefn *poYCOO =
+            poSG2D->GetFieldDefn()->FindSubfieldDefn("YCOO");
 
         if (poXCOO == nullptr || poYCOO == nullptr)
         {
@@ -1811,9 +1795,10 @@ bool S57Reader::FetchLine(DDFRecord *poSRecord, int iStartVertex,
         /*      Are the SG2D and XCOO/YCOO definitions in the form we expect? */
         /* --------------------------------------------------------------------
          */
-        bStandardFormat = (poSG2D->GetFieldDefn()->GetSubfieldCount() == 2) &&
-                          EQUAL(poXCOO->GetFormat(), "b24") &&
-                          EQUAL(poYCOO->GetFormat(), "b24");
+        const bool bStandardFormat =
+            (poSG2D->GetFieldDefn()->GetSubfieldCount() == 2) &&
+            EQUAL(poXCOO->GetFormat(), "b24") &&
+            EQUAL(poYCOO->GetFormat(), "b24");
 
         /* --------------------------------------------------------------------
          */
@@ -2009,15 +1994,17 @@ void S57Reader::AssembleSoundingGeometry(DDFRecord *poFRecord,
         return;
     }
 
-    DDFSubfieldDefn *poXCOO = poField->GetFieldDefn()->FindSubfieldDefn("XCOO");
-    DDFSubfieldDefn *poYCOO = poField->GetFieldDefn()->FindSubfieldDefn("YCOO");
+    const DDFSubfieldDefn *poXCOO =
+        poField->GetFieldDefn()->FindSubfieldDefn("XCOO");
+    const DDFSubfieldDefn *poYCOO =
+        poField->GetFieldDefn()->FindSubfieldDefn("YCOO");
     if (poXCOO == nullptr || poYCOO == nullptr)
     {
         CPLDebug("S57", "XCOO or YCOO are NULL");
         delete poMP;
         return;
     }
-    DDFSubfieldDefn *const poVE3D =
+    const DDFSubfieldDefn *const poVE3D =
         poField->GetFieldDefn()->FindSubfieldDefn("VE3D");
 
     const int nPointCount = poField->GetRepeatCount();
@@ -2061,10 +2048,10 @@ void S57Reader::AssembleSoundingGeometry(DDFRecord *poFRecord,
 /*                            GetIntSubfield()                          */
 /************************************************************************/
 
-static int GetIntSubfield(DDFField *poField, const char *pszSubfield,
+static int GetIntSubfield(const DDFField *poField, const char *pszSubfield,
                           int iSubfieldIndex)
 {
-    DDFSubfieldDefn *poSFDefn =
+    const DDFSubfieldDefn *poSFDefn =
         poField->GetFieldDefn()->FindSubfieldDefn(pszSubfield);
 
     if (poSFDefn == nullptr)
@@ -2103,9 +2090,10 @@ void S57Reader::AssembleLineGeometry(DDFRecord *poFRecord,
         double dlastfX = 0.0;
         double dlastfY = 0.0;
 
-        DDFField *poFSPT = poFRecord->GetField(iField);
+        const DDFField *poFSPT = poFRecord->GetField(iField);
 
-        if (!EQUAL(poFSPT->GetFieldDefn()->GetName(), "FSPT"))
+        const auto poFieldDefn = poFSPT->GetFieldDefn();
+        if (!poFieldDefn || !EQUAL(poFieldDefn->GetName(), "FSPT"))
             continue;
 
         /* --------------------------------------------------------------------
@@ -2248,14 +2236,14 @@ void S57Reader::AssembleLineGeometry(DDFRecord *poFRecord,
             for (int iSField = 0; iSField < poSRecord->GetFieldCount();
                  ++iSField)
             {
-                DDFField *poSG2D = poSRecord->GetField(iSField);
+                const DDFField *poSG2D = poSRecord->GetField(iSField);
 
                 if (EQUAL(poSG2D->GetFieldDefn()->GetName(), "SG2D") ||
                     EQUAL(poSG2D->GetFieldDefn()->GetName(), "AR2D"))
                 {
-                    DDFSubfieldDefn *poXCOO =
+                    const DDFSubfieldDefn *poXCOO =
                         poSG2D->GetFieldDefn()->FindSubfieldDefn("XCOO");
-                    DDFSubfieldDefn *poYCOO =
+                    const DDFSubfieldDefn *poYCOO =
                         poSG2D->GetFieldDefn()->FindSubfieldDefn("YCOO");
 
                     if (poXCOO == nullptr || poYCOO == nullptr)
@@ -2363,7 +2351,7 @@ void S57Reader::AssembleLineGeometry(DDFRecord *poFRecord,
 /*                        AssembleAreaGeometry()                        */
 /************************************************************************/
 
-void S57Reader::AssembleAreaGeometry(DDFRecord *poFRecord,
+void S57Reader::AssembleAreaGeometry(const DDFRecord *poFRecord,
                                      OGRFeature *poFeature)
 
 {
@@ -2376,9 +2364,10 @@ void S57Reader::AssembleAreaGeometry(DDFRecord *poFRecord,
 
     for (int iFSPT = 0; iFSPT < nFieldCount; ++iFSPT)
     {
-        DDFField *poFSPT = poFRecord->GetField(iFSPT);
+        const DDFField *poFSPT = poFRecord->GetField(iFSPT);
 
-        if (!EQUAL(poFSPT->GetFieldDefn()->GetName(), "FSPT"))
+        const auto poFieldDefn = poFSPT->GetFieldDefn();
+        if (!poFieldDefn || !EQUAL(poFieldDefn->GetName(), "FSPT"))
             continue;
 
         const int nEdgeCount = poFSPT->GetRepeatCount();
@@ -2564,7 +2553,7 @@ OGRFeatureDefn *S57Reader::FindFDefn(DDFRecord *poRecord)
 /*      Note: nIndex is the index of the requested 'NAME' instance      */
 /************************************************************************/
 
-int S57Reader::ParseName(DDFField *poField, int nIndex, int *pnRCNM)
+int S57Reader::ParseName(const DDFField *poField, int nIndex, int *pnRCNM)
 
 {
     if (poField == nullptr)
@@ -2573,7 +2562,8 @@ int S57Reader::ParseName(DDFField *poField, int nIndex, int *pnRCNM)
         return -1;
     }
 
-    DDFSubfieldDefn *poName = poField->GetFieldDefn()->FindSubfieldDefn("NAME");
+    const DDFSubfieldDefn *poName =
+        poField->GetFieldDefn()->FindSubfieldDefn("NAME");
     if (poName == nullptr)
         return -1;
 
@@ -2680,7 +2670,7 @@ bool S57Reader::ApplyRecordUpdate(DDFRecord *poTarget, DDFRecord *poUpdate)
     /* -------------------------------------------------------------------- */
     /*      Update the target version.                                      */
     /* -------------------------------------------------------------------- */
-    DDFField *poKey = poTarget->FindField(pszKey);
+    const DDFField *poKey = poTarget->FindField(pszKey);
 
     if (poKey == nullptr)
     {
@@ -2688,7 +2678,7 @@ bool S57Reader::ApplyRecordUpdate(DDFRecord *poTarget, DDFRecord *poUpdate)
         return false;
     }
 
-    DDFSubfieldDefn *poRVER_SFD =
+    const DDFSubfieldDefn *poRVER_SFD =
         poKey->GetFieldDefn()->FindSubfieldDefn("RVER");
     if (poRVER_SFD == nullptr)
         return false;
@@ -3221,7 +3211,7 @@ bool S57Reader::ApplyUpdates(DDFModule *poUpdateModule)
 
     while ((poRecord = poUpdateModule->ReadRecord()) != nullptr)
     {
-        DDFField *poKeyField = poRecord->GetField(1);
+        const DDFField *poKeyField = poRecord->GetField(1);
         if (poKeyField == nullptr)
             return false;
 
@@ -3385,7 +3375,7 @@ bool S57Reader::FindAndApplyUpdates(const char *pszPath)
     if (pszPath == nullptr)
         pszPath = pszModuleName;
 
-    if (!EQUAL(CPLGetExtension(pszPath), "000"))
+    if (!EQUAL(CPLGetExtensionSafe(pszPath).c_str(), "000"))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Can't apply updates to a base file with a different\n"
@@ -3401,7 +3391,7 @@ bool S57Reader::FindAndApplyUpdates(const char *pszPath)
         CPLString extension;
         CPLString dirname;
 
-        if (1 <= iUpdate && iUpdate < 10)
+        if (iUpdate < 10)
         {
             char buf[2];
             CPLsnprintf(buf, sizeof(buf), "%i", iUpdate);
@@ -3409,7 +3399,7 @@ bool S57Reader::FindAndApplyUpdates(const char *pszPath)
             extension.append(buf);
             dirname.append(buf);
         }
-        else if (10 <= iUpdate && iUpdate < 100)
+        else if (iUpdate < 100)
         {
             char buf[3];
             CPLsnprintf(buf, sizeof(buf), "%i", iUpdate);
@@ -3417,7 +3407,7 @@ bool S57Reader::FindAndApplyUpdates(const char *pszPath)
             extension.append(buf);
             dirname.append(buf);
         }
-        else if (100 <= iUpdate && iUpdate < 1000)
+        else if (iUpdate < 1000)
         {
             char buf[4];
             CPLsnprintf(buf, sizeof(buf), "%i", iUpdate);
@@ -3428,8 +3418,8 @@ bool S57Reader::FindAndApplyUpdates(const char *pszPath)
         DDFModule oUpdateModule;
 
         // trying current dir first
-        char *pszUpdateFilename =
-            CPLStrdup(CPLResetExtension(pszPath, extension.c_str()));
+        char *pszUpdateFilename = CPLStrdup(
+            CPLResetExtensionSafe(pszPath, extension.c_str()).c_str());
 
         VSILFILE *file = VSIFOpenL(pszUpdateFilename, "r");
         if (file)
@@ -3446,14 +3436,16 @@ bool S57Reader::FindAndApplyUpdates(const char *pszPath)
         }
         else  // File is store on Primar generated CD.
         {
-            char *pszBaseFileDir = CPLStrdup(CPLGetDirname(pszPath));
-            char *pszFileDir = CPLStrdup(CPLGetDirname(pszBaseFileDir));
+            char *pszBaseFileDir =
+                CPLStrdup(CPLGetDirnameSafe(pszPath).c_str());
+            char *pszFileDir =
+                CPLStrdup(CPLGetDirnameSafe(pszBaseFileDir).c_str());
 
             CPLString remotefile(pszFileDir);
             remotefile.append("/");
             remotefile.append(dirname);
             remotefile.append("/");
-            remotefile.append(CPLGetBasename(pszPath));
+            remotefile.append(CPLGetBasenameSafe(pszPath).c_str());
             remotefile.append(".");
             remotefile.append(extension);
             bSuccess =

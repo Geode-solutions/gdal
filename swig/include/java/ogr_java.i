@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     ogr_java.i
  * Project:  GDAL SWIG Interface
@@ -24,7 +23,6 @@
 %}
 
 
-%rename (GetFieldType) GetType;
 %rename (GetDriverCount) OGRGetDriverCount;
 %rename (GetOpenDSCount) OGRGetOpenDSCount;
 %rename (SetGenerate_DB2_V72_BYTE_ORDER) OGRSetGenerate_DB2_V72_BYTE_ORDER;
@@ -49,6 +47,7 @@ import org.gdal.gdal.MajorObject;
 %typemap(javaimports) OGRLayerShadow %{
 import org.gdal.osr.SpatialReference;
 import org.gdal.gdal.MajorObject;
+import org.gdal.gdal.Dataset;
 %}
 %typemap(javaimports) OGRDataSourceShadow %{
 import org.gdal.osr.SpatialReference;
@@ -62,6 +61,9 @@ import org.gdal.osr.SpatialReference;
 %}
 %typemap(javaimports) OGRGeomTransformerShadow %{
 import org.gdal.osr.CoordinateTransformation;
+%}
+%typemap(javaimports) OGRGeomCoordinatePrecisionShadow %{
+import org.gdal.osr.SpatialReference;
 %}
 
 %typemap(javacode) OGRDataSourceShadow %{
@@ -138,6 +140,22 @@ import org.gdal.osr.CoordinateTransformation;
 %}
 
 %typemap(javabody) OGRFieldDomainShadow %{
+  private boolean swigCMemOwn;
+  private long swigCPtr;
+
+  public $javaclassname(long cPtr, boolean cMemoryOwn) {
+    if (cPtr == 0)
+        throw new RuntimeException();
+    swigCMemOwn = cMemoryOwn;
+    swigCPtr = cPtr;
+  }
+
+  public static long getCPtr($javaclassname obj) {
+    return (obj == null) ? 0 : obj.swigCPtr;
+  }
+%}
+
+%typemap(javabody) OGRGeomFieldDefnShadow %{
   private boolean swigCMemOwn;
   private long swigCPtr;
 

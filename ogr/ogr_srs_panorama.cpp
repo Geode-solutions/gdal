@@ -10,23 +10,7 @@
  * Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
  * Copyright (c) 2020-2022, Dmitry Baryshnikov <polimax@mail.ru>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_spatialref.h"
@@ -36,8 +20,8 @@
 
 #include <cmath>
 
-constexpr double TO_DEGREES = 57.2957795130823208766;
-constexpr double TO_RADIANS = 0.017453292519943295769;
+constexpr double TO_DEGREES = 180.0 / M_PI;
+constexpr double TO_RADIANS = M_PI / 180.0;
 constexpr int NONE_VAL = -1L;
 
 // This function computes zone number from the central meridian parameter.
@@ -45,6 +29,7 @@ static int GetZoneNumberGK(double dfCenterLong)
 {
     return static_cast<int>((dfCenterLong + 363.0) / 6.0 + 0.5) % 60;
 }
+
 static int GetZoneNumberUTM(double dfCenterLong)
 {
     return static_cast<int>((dfCenterLong + 186.0) / 6.0);
@@ -131,7 +116,7 @@ constexpr int NUMBER_OF_DATUMS = static_cast<int>(CPL_ARRAYSIZE(aoDatums));
 /*  Correspondence between "Panorama" and EPSG ellipsoid codes.         */
 /************************************************************************/
 
-constexpr int aoEllips[] = {
+constexpr int aoPanoramaEllips[] = {
     0,     // 0. Undefined
     7024,  // 1. Krassovsky, 1940
     7043,  // 2. WGS, 1972
@@ -182,7 +167,8 @@ constexpr int aoEllips[] = {
     7054   // 47. PZ-90
 };
 
-constexpr int NUMBER_OF_ELLIPSOIDS = static_cast<int>(CPL_ARRAYSIZE(aoEllips));
+constexpr int NUMBER_OF_PANORAM_ELLIPSOIDS =
+    static_cast<int>(CPL_ARRAYSIZE(aoPanoramaEllips));
 
 /************************************************************************/
 /*  Correspondence between "Panorama" and EPSG vertical CS.             */
@@ -350,7 +336,7 @@ OGRErr OSRImportFromPanorama(OGRSpatialReferenceH hSRS, long iProjSys,
  * <li>[6]  False Northing</li>
  * <li>[7]  Zone number</li>
  * </ul>
- * 
+ *
  * @param bNorth If northern hemisphere true, else false. Defaults to true.
  *
  * Particular projection uses different parameters, unused ones may be set to
@@ -620,14 +606,15 @@ OGRErr OGRSpatialReference::importFromPanorama(long iProjSys, long iDatum,
             oGCS.importFromEPSG(aoDatums[iDatum]);
             CopyGeogCSFrom(&oGCS);
         }
-        else if (iEllips > 0 && iEllips < NUMBER_OF_ELLIPSOIDS &&
-                 aoEllips[iEllips])
+        else if (iEllips > 0 && iEllips < NUMBER_OF_PANORAM_ELLIPSOIDS &&
+                 aoPanoramaEllips[iEllips])
         {
             char *pszName = nullptr;
             double dfSemiMajor = 0.0;
             double dfInvFlattening = 0.0;
 
-            if (OSRGetEllipsoidInfo(aoEllips[iEllips], &pszName, &dfSemiMajor,
+            if (OSRGetEllipsoidInfo(aoPanoramaEllips[iEllips], &pszName,
+                                    &dfSemiMajor,
                                     &dfInvFlattening) == OGRERR_NONE)
             {
                 SetGeogCS(
@@ -637,7 +624,7 @@ OGRErr OGRSpatialReference::importFromPanorama(long iProjSys, long iDatum,
                                        pszName),
                     pszName, dfSemiMajor, dfInvFlattening, nullptr, 0.0,
                     nullptr, 0.0);
-                SetAuthority("SPHEROID", "EPSG", aoEllips[iEllips]);
+                SetAuthority("SPHEROID", "EPSG", aoPanoramaEllips[iEllips]);
             }
             else
             {
@@ -797,6 +784,7 @@ OGRErr OGRSpatialReference::exportVertCSToPanorama(int *piVert) const
              "Vertical coordinate system not supported by Panorama");
     return OGRERR_UNSUPPORTED_SRS;
 }
+
 /************************************************************************/
 /*                      OSRExportToPanorama()                           */
 /************************************************************************/
@@ -1128,15 +1116,15 @@ OGRErr OGRSpatialReference::exportToPanorama(long *piProjSys, long *piDatum,
 #endif
 
         int i = 0;  // Used after for.
-        for (; i < NUMBER_OF_ELLIPSOIDS; i++)
+        for (; i < NUMBER_OF_PANORAM_ELLIPSOIDS; i++)
         {
-            if (aoEllips[i])
+            if (aoPanoramaEllips[i])
             {
                 double dfSM = 0.0;
                 double dfIF = 1.0;
 
-                if (OSRGetEllipsoidInfo(aoEllips[i], nullptr, &dfSM, &dfIF) ==
-                        OGRERR_NONE &&
+                if (OSRGetEllipsoidInfo(aoPanoramaEllips[i], nullptr, &dfSM,
+                                        &dfIF) == OGRERR_NONE &&
                     std::abs(dfSemiMajor - dfSM) < 1e-10 * dfSemiMajor &&
                     std::abs(dfInvFlattening - dfIF) < 1e-10 * dfInvFlattening)
                 {
@@ -1146,7 +1134,7 @@ OGRErr OGRSpatialReference::exportToPanorama(long *piProjSys, long *piDatum,
             }
         }
 
-        if (i == NUMBER_OF_ELLIPSOIDS)  // Didn't found matches.
+        if (i == NUMBER_OF_PANORAM_ELLIPSOIDS)  // Didn't found matches.
         {
 #ifdef DEBUG
             CPLDebug("OSR_Panorama",

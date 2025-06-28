@@ -8,28 +8,13 @@
  * Copyright (c) 2004, ITC
  * Copyright (c) 2009, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************/
 #include "cpl_port.h"  // Must be first.
 
 #include "gdal_frmts.h"
 #include "msgdataset.h"
+#include "msgdrivercore.h"
 #include "prologue.h"
 #include "xritheaderparser.h"
 #include "reflectancecalculator.h"
@@ -72,12 +57,6 @@ MSGDataset::MSGDataset()
 
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -94,10 +73,10 @@ MSGDataset::~MSGDataset()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr MSGDataset::GetGeoTransform(double *padfTransform)
+CPLErr MSGDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 
@@ -247,12 +226,12 @@ GDALDataset *MSGDataset::Open(GDALOpenInfo *poOpenInfo)
                  iCentralPixelVIS_IR +
                  0.5);  // The y scan direction is always south -> north
     }
-    poDS->adfGeoTransform[0] = rMinX;
-    poDS->adfGeoTransform[3] = rMaxY;
-    poDS->adfGeoTransform[1] = rPixelSizeX;
-    poDS->adfGeoTransform[5] = -rPixelSizeY;
-    poDS->adfGeoTransform[2] = 0.0;
-    poDS->adfGeoTransform[4] = 0.0;
+    poDS->m_gt[0] = rMinX;
+    poDS->m_gt[3] = rMaxY;
+    poDS->m_gt[1] = rPixelSizeX;
+    poDS->m_gt[5] = -rPixelSizeY;
+    poDS->m_gt[2] = 0.0;
+    poDS->m_gt[4] = 0.0;
 
     /* -------------------------------------------------------------------- */
     /*      Set Projection Information                                      */
@@ -320,9 +299,7 @@ GDALDataset *MSGDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         delete poDS;
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The MSG driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("MSG");
         return nullptr;
     }
 
@@ -435,7 +412,7 @@ MSGRasterBand::MSGRasterBand(MSGDataset *poDSIn, int nBandIn)
     {
         // missing entire band .. take data from first band
         MSGRasterBand *pFirstRasterBand =
-            (MSGRasterBand *)poDSIn->GetRasterBand(1);
+            cpl::down_cast<MSGRasterBand *>(poDSIn->GetRasterBand(1));
         eDataType = pFirstRasterBand->eDataType;
         nBlockYSize = pFirstRasterBand->nBlockYSize;
         fScanNorth = pFirstRasterBand->fScanNorth;
@@ -520,7 +497,7 @@ CPLErr MSGRasterBand::IReadBlock(int /*nBlockXOff*/, int nBlockYOff,
 
 {
 
-    MSGDataset *poGDS = (MSGDataset *)poDS;
+    MSGDataset *poGDS = cpl::down_cast<MSGDataset *>(poDS);
 
     int iBytesPerPixel = 1;
     if (eDataType == GDT_UInt16)
@@ -847,11 +824,9 @@ double MSGRasterBand::rRadiometricCorrection(unsigned int iDN, int iChannel,
         else  // Channels 1,2,3 and 12 (visual): Reflectance
         {
             double rLon =
-                poGDS->adfGeoTransform[0] +
-                iCol * poGDS->adfGeoTransform[1];  // X, in "geos" meters
+                poGDS->m_gt[0] + iCol * poGDS->m_gt[1];  // X, in "geos" meters
             double rLat =
-                poGDS->adfGeoTransform[3] +
-                iRow * poGDS->adfGeoTransform[5];  // Y, in "geos" meters
+                poGDS->m_gt[3] + iRow * poGDS->m_gt[5];  // Y, in "geos" meters
             if ((poGDS->poTransform != nullptr) &&
                 poGDS->poTransform->Transform(1, &rLon,
                                               &rLat))  // transform it to latlon
@@ -879,14 +854,11 @@ double MSGRasterBand::rRadiometricCorrection(unsigned int iDN, int iChannel,
 void GDALRegister_MSG()
 
 {
-    if (GDALGetDriverByName("MSG") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
-
-    poDriver->SetDescription("MSG");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "MSG HRIT Data");
+    MSGDriverSetCommonMetadata(poDriver);
 
     poDriver->pfnOpen = MSGDataset::Open;
 

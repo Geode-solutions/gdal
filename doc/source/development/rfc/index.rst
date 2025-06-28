@@ -100,3 +100,18 @@ RFC list
     rfc91_dataset_close
     rfc92_wkb_only_geometries
     rfc93_update_feature
+    rfc94_field_precision_width_metadata
+    rfc95_standard_int_types
+    rfc96_deferred_plugin_loading
+    rfc97_feature_and_fielddefn_sealing
+    rfc98_build_requirements_gdal_3_9
+    rfc99_geometry_coordinate_precision
+    rfc100_float16_support
+    rfc101_raster_dataset_threadsafety
+    rfc102_embedded_resources
+    rfc103_schema_open_option
+    rfc104_gdal_cli
+    rfc105_safe_path_manipulation_functions
+    rfc106_update_metadata
+    rfc107_igetextent_isetspatialfilter
+    rfc108_driver_removal_3_11

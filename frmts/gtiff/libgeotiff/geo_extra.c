@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  libgeotiff
  * Purpose:  Code to normalize a few common PCS values
@@ -8,30 +7,10 @@
  ******************************************************************************
  * Copyright (c) 1999, Frank Warmerdam
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
-/*
-#include "geotiff.h"
-#include "geo_tiffp.h"
-#include "geo_keyp.h"
-*/
+#include <stddef.h>
 
 #include "geo_normalize.h"
 #include "geovalues.h"
@@ -428,10 +407,8 @@ int	GTIFMapSysToPCS( int MapSys, int Datum, int nZone )
     }
     else if( MapSys == MapSys_State_Plane_27 )
     {
-	int		i;
-
         PCSCode = 10000 + nZone;
-	for( i = 0; StatePlaneTable[i] != KvUserDefined; i += 2 )
+	for( int i = 0; StatePlaneTable[i] != KvUserDefined; i += 2 )
 	{
 	    if( StatePlaneTable[i+1] == PCSCode )
 	        PCSCode = StatePlaneTable[i];
@@ -443,11 +420,9 @@ int	GTIFMapSysToPCS( int MapSys, int Datum, int nZone )
     }
     else if( MapSys == MapSys_State_Plane_83 )
     {
-	int		i;
-
         PCSCode = 10000 + nZone + 30;
 
-	for( i = 0; StatePlaneTable[i] != KvUserDefined; i += 2 )
+	for( int i = 0; StatePlaneTable[i] != KvUserDefined; i += 2 )
 	{
 	    if( StatePlaneTable[i+1] == PCSCode )
 	        PCSCode = StatePlaneTable[i];
@@ -540,7 +515,7 @@ int GTIFPCSToMapSys( int PCSCode, int * pDatum, int * pZone )
 
 {
     int		Datum = KvUserDefined, Proj = KvUserDefined;
-    int		nZone = KvUserDefined, i;
+    int		nZone = KvUserDefined;
 
 /* -------------------------------------------------------------------- */
 /*      UTM with various datums.  Note there are lots of PCS UTM        */
@@ -623,7 +598,7 @@ int GTIFPCSToMapSys( int PCSCode, int * pDatum, int * pZone )
 /*      State Plane zones, first we translate any PCS_ codes to		*/
 /*	a Proj_ code that we can get a handle on.			*/
 /* -------------------------------------------------------------------- */
-    for( i = 0; StatePlaneTable[i] != KvUserDefined; i += 2 )
+    for( int i = 0; StatePlaneTable[i] != KvUserDefined; i += 2 )
     {
 	if( StatePlaneTable[i] == PCSCode )
 	    PCSCode = StatePlaneTable[i+1];

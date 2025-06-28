@@ -9,23 +9,7 @@
  * Copyright (c) 2001, Frank Warmerdam
  * Copyright (c) 2007, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************
  *
  * Notes:
@@ -61,13 +45,16 @@
 #include "gdal.h"
 #include "gdal_priv.h"
 
-#if defined(__x86_64) || defined(_M_X64)
+#ifdef USE_NEON_OPTIMIZATIONS
 #define USE_SSE2
+#include "include_sse2neon.h"
+#elif defined(__x86_64) || defined(_M_X64)
+#define USE_SSE2
+#include <emmintrin.h>
 #endif
 
 #ifdef USE_SSE2
 
-#include <emmintrin.h>
 #define CAST_PCT(x) reinterpret_cast<GByte *>(x)
 #define ALIGN_INT_ARRAY_ON_16_BYTE(x)                                          \
     (((reinterpret_cast<GUIntptr_t>(x) % 16) != 0)                             \
@@ -78,12 +65,14 @@
 #define CAST_PCT(x) x
 #endif
 
-CPL_CVSID("$Id$")
+#ifndef MAKE_COLOR_CODE_defined
+#define MAKE_COLOR_CODE_defined
 
 static int MAKE_COLOR_CODE(int r, int g, int b)
 {
     return r | (g << 8) | (b << 16);
 }
+#endif
 
 static void FindNearestColor(int nColors, int *panPCT, GByte *pabyColorMap,
                              int nCLevels);
@@ -111,10 +100,14 @@ typedef struct
 /*                         GDALDitherRGB2PCT()                          */
 /************************************************************************/
 
+#ifndef IsColorCodeSet_defined
+#define IsColorCodeSet_defined
+
 static inline bool IsColorCodeSet(GUInt32 nColorCode)
 {
     return (nColorCode >> 31) == 0;
 }
+#endif
 
 /**
  * 24bit to 8bit conversion with dithering.
@@ -259,7 +252,8 @@ int GDALDitherRGB2PCTInternal(
     /* -------------------------------------------------------------------- */
     /*      Setup various variables.                                        */
     /* -------------------------------------------------------------------- */
-    int nCLevels = 1 << nBits;
+    const int nCLevels = 1 << nBits;
+    const int nCLevelsCube = nCLevels * nCLevels * nCLevels;
     ColorIndex *psColorIndexMap = nullptr;
 
     GByte *pabyRed = static_cast<GByte *>(VSI_MALLOC_VERBOSE(nXSize));
@@ -293,7 +287,7 @@ int GDALDitherRGB2PCTInternal(
          */
 
         pabyColorMap = static_cast<GByte *>(
-            VSI_MALLOC_VERBOSE(nCLevels * nCLevels * nCLevels * sizeof(GByte)));
+            VSI_MALLOC_VERBOSE(nCLevelsCube * sizeof(GByte)));
         if (pabyColorMap == nullptr)
         {
             CPLFree(pabyRed);

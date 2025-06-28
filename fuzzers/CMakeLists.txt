@@ -3,12 +3,6 @@
 if (NOT TARGET ogr_SQLite)
   return()
 endif ()
-if (CMAKE_CROSSCOMPILING OR WIN32)
-  return()
-endif ()
-if (NOT CMAKE_VERSION VERSION_GREATER_EQUAL 3.12)
-  return()
-endif ()
 
 include(GdalStandardIncludes)
 add_library(fuzzingengine EXCLUDE_FROM_ALL OBJECT fuzzingengine.cpp)
@@ -32,7 +26,6 @@ function (build_fuzzer)
   endif ()
   target_link_libraries(${_FUZZ_NAME} PRIVATE $<TARGET_NAME:fuzzingengine> $<TARGET_NAME:${GDAL_LIB_TARGET_NAME}>)
   gdal_standard_includes(${_FUZZ_NAME})
-  set_target_properties(${_FUZZ_NAME} PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED YES)
   target_include_directories(${_FUZZ_NAME} PRIVATE $<TARGET_PROPERTY:ogr_SQLite,SOURCE_DIR>)
   # Windows(Mingw/MSVC) link libraries
   if (CMAKE_SYSTEM_NAME MATCHES "Windows")
@@ -80,9 +73,9 @@ function (build_ogr_specialized_fuzzer _format _registerFunc _memfile _gdalfile)
     -DMEM_FILENAME="${_memfile}"
     -DGDAL_FILENAME="${_gdalfile}")
 endfunction ()
+build_fuzzer(NAME gdal_algorithm_fuzzer SOURCES gdal_algorithm_fuzzer.cpp)
 
 build_ogr_specialized_fuzzer(dxf RegisterOGRDXF "/vsimem/test" "/vsimem/test")
-build_ogr_specialized_fuzzer(ogr_sdts RegisterOGRSDTS "/vsimem/test.tar" "/vsitar//vsimem/test.tar/TR01CATD.DDF")
 build_ogr_specialized_fuzzer(openfilegdb RegisterOGROpenFileGDB "/vsimem/test.gdb.tar" "/vsimem/test.gdb.tar")
 build_ogr_specialized_fuzzer(shape OGRRegisterAll "/vsimem/test.tar" "/vsitar//vsimem/test.tar/my.shp")
 build_ogr_specialized_fuzzer(mitab_mif OGRRegisterAll "/vsimem/test.tar" "/vsitar//vsimem/test.tar/my.mif")
@@ -97,6 +90,7 @@ build_ogr_specialized_fuzzer(avcbin RegisterOGRAVCBin "/vsimem/test.tar" "/vsita
 build_ogr_specialized_fuzzer(gml RegisterOGRGML "/vsimem/test.tar" "/vsitar//vsimem/test.tar/test.gml")
 
 build_fuzzer(NAME cad_fuzzer SOURCES ogr_fuzzer.cpp DEFINITIONS -DREGISTER_FUNC=RegisterOGRCAD)
+build_fuzzer(NAME ogr_miramon_fuzzer SOURCES ogr_fuzzer.cpp DEFINITIONS -DREGISTER_FUNC=RegisterOGRMiraMon -DMEM_FILENAME="/vsimem/test.tar" -DFOR_OGR_MIRAMON)
 
 function (build_gdal_specialized_fuzzer _format _registerFunc _memfile _gdalfile)
   build_fuzzer(
@@ -126,9 +120,18 @@ build_gdal_specialized_fuzzer(aig GDALRegister_AIGrid "/vsimem/test.tar" "/vsita
 # mrf can use indirectly the GTiff driver
 build_gdal_specialized_fuzzer(mrf "GDALRegister_mrf();GDALRegister_GTiff" "/vsimem/test.tar"
                               "/vsitar//vsimem/test.tar/byte.mrf")
-build_gdal_specialized_fuzzer(gdal_sdts GDALRegister_SDTS "/vsimem/test.tar" "/vsitar//vsimem/test.tar/1107CATD.DDF")
 build_gdal_specialized_fuzzer(gdal_vrt GDALAllRegister "/vsimem/test.tar" "/vsitar//vsimem/test.tar/test.vrt")
 build_gdal_specialized_fuzzer(ers GDALRegister_ERS "/vsimem/test.tar" "/vsitar//vsimem/test.tar/test.ers")
+
+build_fuzzer(
+    NAME
+    libertiff_fuzzer
+    SOURCES
+    gdal_fuzzer.cpp
+    DEFINITIONS
+    -DREGISTER_FUNC=GDALRegister_LIBERTIFF
+    -DDRIVER_NAME="LIBERTIFF"
+)
 
 build_fuzzer(
   NAME
@@ -147,12 +150,16 @@ build_fuzzer(
   DEFINITIONS
   -DUSE_FILESYSTEM)
 
-add_custom_command(
-  OUTPUT ${FUZZ_CORPUS}
-  COMMAND env OUT=${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/build_seed_corpus.sh
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-  USES_TERMINAL)
-add_custom_target(fuzzers DEPENDS ${FUZZ_TARGETS} ${FUZZ_CORPUS})
+if (UNIX)
+    add_custom_command(
+      OUTPUT ${FUZZ_CORPUS}
+      COMMAND env OUT=${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/build_seed_corpus.sh
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+      USES_TERMINAL)
+    add_custom_target(fuzzers DEPENDS ${FUZZ_TARGETS} ${FUZZ_CORPUS})
+else()
+    add_custom_target(fuzzers DEPENDS ${FUZZ_TARGETS})
+endif()
 
 unset(FUZZ_TARGETS)
 unset(FUZZ_CORPUS)

@@ -8,23 +8,7 @@
  * Copyright (c) 2001, Frank Warmerdam
  * Copyright (c) 2007-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gifabstractdataset.h"
@@ -32,6 +16,7 @@
 #include "cpl_string.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gifdrivercore.h"
 
 CPL_C_START
 #if !(defined(GIFLIB_MAJOR) && GIFLIB_MAJOR >= 5)
@@ -46,9 +31,6 @@ GifFileType *EGifOpen(void *userData, OutputFunc writeFunc);
 #endif  // defined(GIFLIB_MAJOR) && GIFLIB_MAJOR < 5
 
 CPL_C_END
-
-constexpr int InterlacedOffset[] = {0, 4, 2, 1};
-constexpr int InterlacedJumps[] = {8, 8, 4, 2};
 
 /************************************************************************/
 /*                          VSIGIFWriteFunc()                           */
@@ -97,6 +79,7 @@ class GIFDataset final : public GIFAbstractDataset
 
   public:
     GIFDataset();
+    ~GIFDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
 
@@ -106,6 +89,8 @@ class GIFDataset final : public GIFAbstractDataset
                                    GDALProgressFunc pfnProgress,
                                    void *pProgressData);
 };
+
+GIFDataset::~GIFDataset() = default;
 
 /************************************************************************/
 /* ==================================================================== */
@@ -174,14 +159,12 @@ GIFDataset::GIFDataset()
 GDALDataset *GIFDataset::Open(GDALOpenInfo *poOpenInfo)
 
 {
-    if (!Identify(poOpenInfo) || poOpenInfo->fpL == nullptr)
+    if (!GIFDriverIdentify(poOpenInfo))
         return nullptr;
 
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The GIF driver does not support update access to existing"
-                 " files.");
+        ReportUpdateNotSupportedByDriver("GIF");
         return nullptr;
     }
 
@@ -560,7 +543,7 @@ GDALDataset *GIFDataset::CreateCopy(const char *pszFilename,
         {
             const CPLErr eErr = poBand->RasterIO(
                 GF_Read, 0, iLine, nXSize, 1, pabyScanline, nXSize, 1, GDT_Byte,
-                nBands, nBands * nXSize, nullptr);
+                nBands, static_cast<GSpacing>(nBands) * nXSize, nullptr);
 
             if (eErr != CE_None ||
                 EGifPutLine(hGifFile, pabyScanline, nXSize) == GIF_ERROR)
@@ -630,10 +613,9 @@ GDALDataset *GIFDataset::CreateCopy(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     if (CPLFetchBool(papszOptions, "WORLDFILE", false))
     {
-        double adfGeoTransform[6] = {};
-
-        if (poSrcDS->GetGeoTransform(adfGeoTransform) == CE_None)
-            GDALWriteWorldFile(pszFilename, "wld", adfGeoTransform);
+        GDALGeoTransform gt;
+        if (poSrcDS->GetGeoTransform(gt) == CE_None)
+            GDALWriteWorldFile(pszFilename, "wld", gt.data());
     }
 
     /* -------------------------------------------------------------------- */
@@ -680,31 +662,18 @@ error:
 void GDALRegister_GIF()
 
 {
-    if (GDALGetDriverByName("GIF") != nullptr)
+    if (GDALGetDriverByName(GIF_DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
 
-    poDriver->SetDescription("GIF");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                              "Graphics Interchange Format (.gif)");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/gif.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "gif");
-    poDriver->SetMetadataItem(GDAL_DMD_MIMETYPE, "image/gif");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES, "Byte");
-
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONOPTIONLIST,
-                              "<CreationOptionList>\n"
-                              "   <Option name='INTERLACING' type='boolean'/>\n"
-                              "   <Option name='WORLDFILE' type='boolean'/>\n"
-                              "</CreationOptionList>\n");
-
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-
+    GIFDriverSetCommonMetadata(poDriver);
     poDriver->pfnOpen = GIFDataset::Open;
     poDriver->pfnCreateCopy = GIFDataset::CreateCopy;
-    poDriver->pfnIdentify = GIFAbstractDataset::Identify;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
+
+#ifdef GIF_PLUGIN
+    GDALRegister_BIGGIF();
+#endif
 }

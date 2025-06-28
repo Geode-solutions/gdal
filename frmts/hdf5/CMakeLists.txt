@@ -10,9 +10,40 @@ set(SOURCE
     bagdataset.cpp
     hdf5multidim.cpp
     hdf5eosparser.cpp
+    rat.cpp
+    s100.cpp
+    s100.h
+    s102dataset.cpp
+    s104dataset.cpp
+    s111dataset.cpp
 )
 
-add_gdal_driver(TARGET gdal_HDF5 SOURCES ${SOURCE} PLUGIN_CAPABLE)
+add_gdal_driver(TARGET gdal_HDF5
+                SOURCES ${SOURCE}
+                CORE_SOURCES hdf5drivercore.cpp
+                PLUGIN_CAPABLE
+                NO_SHARED_SYMBOL_WITH_CORE)
+
+if (NOT USE_ONLY_EMBEDDED_RESOURCE_FILES)
+    set(GDAL_DATA_FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/data/bag_template.xml
+    )
+    set_property(
+      TARGET ${GDAL_LIB_TARGET_NAME}
+      APPEND
+      PROPERTY RESOURCE "${GDAL_DATA_FILES}")
+endif()
+
+if(NOT TARGET gdal_HDF5)
+    return()
+endif()
+
+if (EMBED_RESOURCE_FILES)
+    add_driver_embedded_resources(gdal_HDF5 GDAL_ENABLE_DRIVER_HDF5_PLUGIN embedded_resources.c)
+endif()
+if (USE_ONLY_EMBEDDED_RESOURCE_FILES)
+    target_compile_definitions(gdal_HDF5 PRIVATE USE_ONLY_EMBEDDED_RESOURCE_FILES)
+endif()
 
 # Try to detect if libhdf5 has thread-safety enabled
 if(NOT DEFINED GDAL_ENABLE_HDF5_GLOBAL_LOCK AND UNIX AND

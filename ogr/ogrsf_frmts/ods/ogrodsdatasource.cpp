@@ -7,27 +7,11 @@
  ******************************************************************************
  * Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_ods.h"
-#include "ogr_mem.h"
+#include "memdataset.h"
 #include "ogr_p.h"
 #include "cpl_conv.h"
 #include "cpl_vsi_error.h"
@@ -38,6 +22,8 @@
 
 namespace OGRODS
 {
+
+constexpr int PARSER_BUF_SIZE = 8192;
 
 /************************************************************************/
 /*                          ODSCellEvaluator                            */
@@ -70,6 +56,7 @@ OGRODSLayer::OGRODSLayer(OGRODSDataSource *poDSIn, const char *pszName,
       bUpdated(CPL_TO_BOOL(bUpdatedIn)), bHasHeaderLine(false),
       m_poAttrQueryODS(nullptr)
 {
+    SetAdvertizeUTF8(true);
 }
 
 /************************************************************************/
@@ -109,6 +96,28 @@ OGRErr OGRODSLayer::SyncToDisk()
 }
 
 /************************************************************************/
+/*                      TranslateFIDFromMemLayer()                      */
+/************************************************************************/
+
+// Translate a FID from MEM convention (0-based) to ODS convention
+GIntBig OGRODSLayer::TranslateFIDFromMemLayer(GIntBig nFID) const
+{
+    return nFID + (1 + (bHasHeaderLine ? 1 : 0));
+}
+
+/************************************************************************/
+/*                        TranslateFIDToMemLayer()                      */
+/************************************************************************/
+
+// Translate a FID from ODS convention to MEM convention (0-based)
+GIntBig OGRODSLayer::TranslateFIDToMemLayer(GIntBig nFID) const
+{
+    if (nFID > 0)
+        return nFID - (1 + (bHasHeaderLine ? 1 : 0));
+    return OGRNullFID;
+}
+
+/************************************************************************/
 /*                          GetNextFeature()                            */
 /************************************************************************/
 
@@ -119,7 +128,7 @@ OGRFeature *OGRODSLayer::GetNextFeature()
         OGRFeature *poFeature = OGRMemLayer::GetNextFeature();
         if (poFeature == nullptr)
             return nullptr;
-        poFeature->SetFID(poFeature->GetFID() + 1 + (bHasHeaderLine ? 1 : 0));
+        poFeature->SetFID(TranslateFIDFromMemLayer(poFeature->GetFID()));
         if (m_poAttrQueryODS == nullptr ||
             m_poAttrQueryODS->Evaluate(poFeature))
         {
@@ -136,7 +145,7 @@ OGRFeature *OGRODSLayer::GetNextFeature()
 OGRFeature *OGRODSLayer::GetFeature(GIntBig nFeatureId)
 {
     OGRFeature *poFeature =
-        OGRMemLayer::GetFeature(nFeatureId - (1 + (bHasHeaderLine ? 1 : 0)));
+        OGRMemLayer::GetFeature(TranslateFIDToMemLayer(nFeatureId));
     if (poFeature)
         poFeature->SetFID(nFeatureId);
     return poFeature;
@@ -154,20 +163,74 @@ GIntBig OGRODSLayer::GetFeatureCount(int bForce)
 }
 
 /************************************************************************/
-/*                           ISetFeature()                               */
+/*                           ISetFeature()                              */
 /************************************************************************/
 
 OGRErr OGRODSLayer::ISetFeature(OGRFeature *poFeature)
 {
-    if (poFeature == nullptr)
-        return OGRMemLayer::ISetFeature(poFeature);
-
-    GIntBig nFID = poFeature->GetFID();
-    if (nFID != OGRNullFID)
-        poFeature->SetFID(nFID - (1 + (bHasHeaderLine ? 1 : 0)));
+    const GIntBig nFIDOrigin = poFeature->GetFID();
+    if (nFIDOrigin > 0)
+    {
+        const GIntBig nFIDMemLayer = TranslateFIDToMemLayer(nFIDOrigin);
+        if (!GetFeatureRef(nFIDMemLayer))
+            return OGRERR_NON_EXISTING_FEATURE;
+        poFeature->SetFID(nFIDMemLayer);
+    }
+    else
+    {
+        return OGRERR_NON_EXISTING_FEATURE;
+    }
     SetUpdated();
     OGRErr eErr = OGRMemLayer::ISetFeature(poFeature);
-    poFeature->SetFID(nFID);
+    poFeature->SetFID(nFIDOrigin);
+    return eErr;
+}
+
+/************************************************************************/
+/*                         IUpdateFeature()                             */
+/************************************************************************/
+
+OGRErr OGRODSLayer::IUpdateFeature(OGRFeature *poFeature,
+                                   int nUpdatedFieldsCount,
+                                   const int *panUpdatedFieldsIdx,
+                                   int nUpdatedGeomFieldsCount,
+                                   const int *panUpdatedGeomFieldsIdx,
+                                   bool bUpdateStyleString)
+{
+    const GIntBig nFIDOrigin = poFeature->GetFID();
+    if (nFIDOrigin != OGRNullFID)
+        poFeature->SetFID(TranslateFIDToMemLayer(nFIDOrigin));
+    SetUpdated();
+    OGRErr eErr = OGRMemLayer::IUpdateFeature(
+        poFeature, nUpdatedFieldsCount, panUpdatedFieldsIdx,
+        nUpdatedGeomFieldsCount, panUpdatedGeomFieldsIdx, bUpdateStyleString);
+    poFeature->SetFID(nFIDOrigin);
+    return eErr;
+}
+
+/************************************************************************/
+/*                          ICreateFeature()                            */
+/************************************************************************/
+
+OGRErr OGRODSLayer::ICreateFeature(OGRFeature *poFeature)
+{
+    const GIntBig nFIDOrigin = poFeature->GetFID();
+    if (nFIDOrigin > 0)
+    {
+        const GIntBig nFIDModified = TranslateFIDToMemLayer(nFIDOrigin);
+        if (GetFeatureRef(nFIDModified))
+        {
+            SetUpdated();
+            poFeature->SetFID(nFIDModified);
+            OGRErr eErr = OGRMemLayer::ISetFeature(poFeature);
+            poFeature->SetFID(nFIDOrigin);
+            return eErr;
+        }
+    }
+    SetUpdated();
+    poFeature->SetFID(OGRNullFID);
+    OGRErr eErr = OGRMemLayer::ICreateFeature(poFeature);
+    poFeature->SetFID(TranslateFIDFromMemLayer(poFeature->GetFID()));
     return eErr;
 }
 
@@ -178,7 +241,7 @@ OGRErr OGRODSLayer::ISetFeature(OGRFeature *poFeature)
 OGRErr OGRODSLayer::DeleteFeature(GIntBig nFID)
 {
     SetUpdated();
-    return OGRMemLayer::DeleteFeature(nFID - (1 + (bHasHeaderLine ? 1 : 0)));
+    return OGRMemLayer::DeleteFeature(TranslateFIDToMemLayer(nFID));
 }
 
 /************************************************************************/
@@ -209,16 +272,27 @@ int OGRODSLayer::TestCapability(const char *pszCap)
 }
 
 /************************************************************************/
+/*                             GetDataset()                             */
+/************************************************************************/
+
+GDALDataset *OGRODSLayer::GetDataset()
+{
+    return poDS;
+}
+
+/************************************************************************/
 /*                          OGRODSDataSource()                          */
 /************************************************************************/
 
-OGRODSDataSource::OGRODSDataSource()
+OGRODSDataSource::OGRODSDataSource(CSLConstList papszOpenOptionsIn)
     : pszName(nullptr), bUpdatable(false), bUpdated(false),
       bAnalysedFile(false), nLayers(0), papoLayers(nullptr),
       fpSettings(nullptr), nVerticalSplitFlags(0), fpContent(nullptr),
       bFirstLineIsHeaders(false),
-      bAutodetectTypes(
-          !EQUAL(CPLGetConfigOption("OGR_ODS_FIELD_TYPES", ""), "STRING")),
+      bAutodetectTypes(!EQUAL(
+          CSLFetchNameValueDef(papszOpenOptionsIn, "FIELD_TYPES",
+                               CPLGetConfigOption("OGR_ODS_FIELD_TYPES", "")),
+          "STRING")),
       oParser(nullptr), bStopParsing(false), nWithoutEventCounter(0),
       nDataHandlerCounter(0), nCurLine(0), nEmptyRowsAccumulated(0),
       nRowsRepeated(1), nCurCol(0), nCellsRepeated(0), bEndTableParsing(false),
@@ -445,7 +519,7 @@ void OGRODSDataSource::dataHandlerCbk(const char *data, int nLen)
         return;
 
     nDataHandlerCounter++;
-    if (nDataHandlerCounter >= BUFSIZ)
+    if (nDataHandlerCounter >= PARSER_BUF_SIZE)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "File probably corrupted (million laugh pattern)");
@@ -636,7 +710,8 @@ void OGRODSDataSource::DetectHeaderLine()
         }
     }
 
-    const char *pszODSHeaders = CPLGetConfigOption("OGR_ODS_HEADERS", "");
+    const char *pszODSHeaders = CSLFetchNameValueDef(
+        papszOpenOptions, "HEADERS", CPLGetConfigOption("OGR_ODS_HEADERS", ""));
     bFirstLineIsHeaders = false;
     if (EQUAL(pszODSHeaders, "FORCE"))
         bFirstLineIsHeaders = true;
@@ -739,8 +814,8 @@ static void ReserveAndLimitFieldCount(OGRLayer *poLayer,
                                       std::vector<std::string> &aosValues)
 {
     int nMaxCols = atoi(CPLGetConfigOption("OGR_ODS_MAX_FIELD_COUNT", "2000"));
-    // Arbitrary limit to please Coverity Scan that would complain about
-    // tainted_data to resize aosValues.
+    if (nMaxCols < 0)
+        nMaxCols = 0;
     constexpr int MAXCOLS_LIMIT = 1000000;
     if (nMaxCols > MAXCOLS_LIMIT)
         nMaxCols = MAXCOLS_LIMIT;
@@ -841,7 +916,6 @@ void OGRODSDataSource::endElementTable(
 
             reinterpret_cast<OGRMemLayer *>(poCurLayer)
                 ->SetUpdatable(bUpdatable);
-            reinterpret_cast<OGRMemLayer *>(poCurLayer)->SetAdvertizeUTF8(true);
             reinterpret_cast<OGRODSLayer *>(poCurLayer)->SetUpdated(false);
         }
 
@@ -1209,7 +1283,7 @@ void OGRODSDataSource::endElementRow(
                                  eValType == OFTInteger &&
                                  eValSubType != OFSTBoolean)
                         {
-                            poFieldDefn->SetSubType(OFSTNone);
+                            whileUnsealing(poFieldDefn)->SetSubType(OFSTNone);
                         }
                     }
                 }
@@ -1297,15 +1371,15 @@ void OGRODSDataSource::AnalyseFile()
 
     VSIFSeekL(fpContent, 0, SEEK_SET);
 
-    char aBuf[BUFSIZ];
+    std::vector<char> aBuf(PARSER_BUF_SIZE);
     int nDone = 0;
     do
     {
         nDataHandlerCounter = 0;
         unsigned int nLen = static_cast<unsigned int>(
-            VSIFReadL(aBuf, 1, sizeof(aBuf), fpContent));
-        nDone = VSIFEofL(fpContent);
-        if (XML_Parse(oParser, aBuf, nLen, nDone) == XML_STATUS_ERROR)
+            VSIFReadL(aBuf.data(), 1, aBuf.size(), fpContent));
+        nDone = (nLen < aBuf.size());
+        if (XML_Parse(oParser, aBuf.data(), nLen, nDone) == XML_STATUS_ERROR)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "XML parsing of ODS file failed : %s at line %d, "
@@ -1438,7 +1512,7 @@ void OGRODSDataSource::dataHandlerStylesCbk(const char *data, int nLen)
         return;
 
     nDataHandlerCounter++;
-    if (nDataHandlerCounter >= BUFSIZ)
+    if (nDataHandlerCounter >= PARSER_BUF_SIZE)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "File probably corrupted (million laugh pattern)");
@@ -1480,15 +1554,15 @@ void OGRODSDataSource::AnalyseSettings()
 
     VSIFSeekL(fpSettings, 0, SEEK_SET);
 
-    char aBuf[BUFSIZ];
+    std::vector<char> aBuf(PARSER_BUF_SIZE);
     int nDone = 0;
     do
     {
         nDataHandlerCounter = 0;
         unsigned int nLen =
-            (unsigned int)VSIFReadL(aBuf, 1, sizeof(aBuf), fpSettings);
-        nDone = VSIFEofL(fpSettings);
-        if (XML_Parse(oParser, aBuf, nLen, nDone) == XML_STATUS_ERROR)
+            (unsigned int)VSIFReadL(aBuf.data(), 1, aBuf.size(), fpSettings);
+        nDone = (nLen < aBuf.size());
+        if (XML_Parse(oParser, aBuf.data(), nLen, nDone) == XML_STATUS_ERROR)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "XML parsing of styles.xml file failed : %s at line %d, "
@@ -1519,10 +1593,10 @@ void OGRODSDataSource::AnalyseSettings()
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *OGRODSDataSource::ICreateLayer(const char *pszLayerName,
-                                         OGRSpatialReference * /* poSRS */,
-                                         OGRwkbGeometryType /* eType */,
-                                         char **papszOptions)
+OGRLayer *
+OGRODSDataSource::ICreateLayer(const char *pszLayerName,
+                               const OGRGeomFieldDefn * /*poGeomFieldDefn*/,
+                               CSLConstList papszOptions)
 {
     /* -------------------------------------------------------------------- */
     /*      Verify we are in update mode.                                   */
@@ -2325,8 +2399,7 @@ int ODSCellEvaluator::EvaluateRange(int nRow1, int nCol1, int nRow2, int nCol2,
 
 int ODSCellEvaluator::Evaluate(int nRow, int nCol)
 {
-    if (oVisisitedCells.find(std::pair<int, int>(nRow, nCol)) !=
-        oVisisitedCells.end())
+    if (oVisisitedCells.find(std::pair(nRow, nCol)) != oVisisitedCells.end())
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Circular dependency with (row=%d, col=%d)", nRow + 1,
@@ -2334,7 +2407,7 @@ int ODSCellEvaluator::Evaluate(int nRow, int nCol)
         return FALSE;
     }
 
-    oVisisitedCells.insert(std::pair<int, int>(nRow, nCol));
+    oVisisitedCells.insert(std::pair(nRow, nCol));
 
     if (poLayer->SetNextByIndex(nRow) != OGRERR_NONE)
     {

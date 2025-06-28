@@ -8,23 +8,7 @@
  * Copyright (c) 2004, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -56,6 +40,9 @@ static int OGRCSVDriverIdentify(GDALOpenInfo *poOpenInfo)
 {
     if (poOpenInfo->fpL != nullptr)
     {
+        if (poOpenInfo->IsSingleAllowedDriver("CSV"))
+            return TRUE;
+
         const CPLString osBaseFilename =
             CPLGetFilename(poOpenInfo->pszFilename);
         const CPLString osExt =
@@ -114,6 +101,9 @@ static int OGRCSVDriverIdentify(GDALOpenInfo *poOpenInfo)
     }
     else if (poOpenInfo->bIsDirectory)
     {
+        if (poOpenInfo->IsSingleAllowedDriver("CSV"))
+            return TRUE;
+
         return -1;  // Unsure.
     }
 
@@ -160,14 +150,17 @@ static GDALDataset *OGRCSVDriverOpen(GDALOpenInfo *poOpenInfo)
         }
     }
 
-    OGRCSVDataSource *poDS = new OGRCSVDataSource();
+    auto poDSUniquePtr = std::make_unique<OGRCSVDataSource>();
 
-    if (!poDS->Open(poOpenInfo->pszFilename, poOpenInfo->eAccess == GA_Update,
-                    FALSE, poOpenInfo->papszOpenOptions))
+    if (!poDSUniquePtr->Open(poOpenInfo->pszFilename,
+                             poOpenInfo->eAccess == GA_Update, false,
+                             poOpenInfo->papszOpenOptions,
+                             poOpenInfo->IsSingleAllowedDriver("CSV")))
     {
-        delete poDS;
-        poDS = nullptr;
+        poDSUniquePtr.reset();
     }
+
+    auto poDS = poDSUniquePtr.release();
 
     if (poOpenInfo->eAccess == GA_Update && poDS != nullptr)
     {
@@ -210,13 +203,13 @@ OGRCSVDriverCreate(const char *pszName, CPL_UNUSED int nBands,
     // If the target is not a simple .csv then create it as a directory.
     CPLString osDirName;
 
-    if (EQUAL(CPLGetExtension(pszName), "csv"))
+    if (EQUAL(CPLGetExtensionSafe(pszName).c_str(), "csv"))
     {
-        osDirName = CPLGetPath(pszName);
+        osDirName = CPLGetPathSafe(pszName);
         if (osDirName == "")
             osDirName = ".";
 
-        // HACK: CPLGetPath("/vsimem/foo.csv") = "/vsimem", but this is not
+        // HACK: CPLGetPathSafe("/vsimem/foo.csv") = "/vsimem", but this is not
         // recognized afterwards as a valid directory name.
         if (osDirName == "/vsimem")
             osDirName = "/vsimem/";
@@ -238,15 +231,16 @@ OGRCSVDriverCreate(const char *pszName, CPL_UNUSED int nBands,
     }
 
     // Force it to open as a datasource.
-    OGRCSVDataSource *poDS = new OGRCSVDataSource();
+    auto poDS = std::make_unique<OGRCSVDataSource>();
 
-    if (EQUAL(CPLGetExtension(pszName), "csv"))
+    if (EQUAL(CPLGetExtensionSafe(pszName).c_str(), "csv"))
     {
         poDS->CreateForSingleFile(osDirName, pszName);
     }
-    else if (!poDS->Open(osDirName, TRUE, TRUE))
+    else if (!poDS->Open(osDirName, /* bUpdate = */ true,
+                         /* bForceAccept = */ true, nullptr,
+                         /* bSingleDriver = */ true))
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -254,7 +248,7 @@ OGRCSVDriverCreate(const char *pszName, CPL_UNUSED int nBands,
     if (pszGeometry != nullptr && EQUAL(pszGeometry, "AS_WKT"))
         poDS->EnableGeometryFields();
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/
@@ -302,6 +296,8 @@ void RegisterOGRCSV()
     poDriver->SetMetadataItem(GDAL_DCAP_CREATE_FIELD, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_DELETE_FIELD, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_REORDER_FIELDS, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_CREATION_FIELD_DEFN_FLAGS,
+                              "WidthPrecision");
     poDriver->SetMetadataItem(GDAL_DMD_ALTER_FIELD_DEFN_FLAGS,
                               "Name Type WidthPrecision");
 
@@ -314,6 +310,10 @@ void RegisterOGRCSV()
     poDriver->SetMetadataItem(GDAL_DMD_EXTENSIONS, "csv tsv psv");
     poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/vector/csv.html");
     poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
+    poDriver->SetMetadataItem(GDAL_DMD_NUMERIC_FIELD_WIDTH_INCLUDES_SIGN,
+                              "YES");
+    poDriver->SetMetadataItem(
+        GDAL_DMD_NUMERIC_FIELD_WIDTH_INCLUDES_DECIMAL_SEPARATOR, "YES");
 
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONOPTIONLIST,
                               "<CreationOptionList>"
@@ -333,7 +333,7 @@ void RegisterOGRCSV()
         "    <Value>TAB</Value>"
         "    <Value>SPACE</Value>"
         "  </Option>"
-#ifdef WIN32
+#ifdef _WIN32
         "  <Option name='LINEFORMAT' type='string-select' "
         "description='end-of-line sequence' default='CRLF'>"
 #else
@@ -352,6 +352,9 @@ void RegisterOGRCSV()
         "  </Option>"
         "  <Option name='CREATE_CSVT' type='boolean' description='whether to "
         "create a .csvt file' default='NO'/>"
+        "  <Option name='HEADER' alias='HEADERS' type='boolean' "
+        "description='Whether the first line of the file contains column names "
+        "or not' default='YES'/>"
         "  <Option name='WRITE_BOM' type='boolean' description='whether to "
         "write a UTF-8 BOM prefix' default='NO'/>"
         "  <Option name='GEOMETRY_NAME' type='string' description='Name of "
@@ -369,15 +372,15 @@ void RegisterOGRCSV()
     poDriver->SetMetadataItem(
         GDAL_DMD_OPENOPTIONLIST,
         "<OpenOptionList>"
-#if 0
-"  <Option name='SEPARATOR' type='string-select' description='field separator' default='AUTO'>"
-"    <Value>AUTO</Value>"
-"    <Value>COMMA</Value>"
-"    <Value>SEMICOLON</Value>"
-"    <Value>TAB</Value>"
-"    <Value>SPACE</Value>"
-"  </Option>"
-#endif
+        "  <Option name='SEPARATOR' type='string-select' "
+        "description='field separator' default='AUTO'>"
+        "    <Value>AUTO</Value>"
+        "    <Value>COMMA</Value>"
+        "    <Value>SEMICOLON</Value>"
+        "    <Value>TAB</Value>"
+        "    <Value>SPACE</Value>"
+        "    <Value>PIPE</Value>"
+        "  </Option>"
         "  <Option name='MERGE_SEPARATOR' type='boolean' description='whether "
         "to merge consecutive separators' default='NO'/>"
         "  <Option name='AUTODETECT_TYPE' type='boolean' description='whether "
@@ -426,6 +429,15 @@ void RegisterOGRCSV()
         "  <Option name='MAX_LINE_SIZE' type='int' description='Maximum number "
         "of bytes for a line (-1=unlimited)' default='" STRINGIFY(
             OGR_CSV_DEFAULT_MAX_LINE_SIZE) "'/>"
+                                           "  <Option name='OGR_SCHEMA' "
+                                           "type='string' description='"
+                                           "Partially or totally overrides the "
+                                           "auto-detected schema to use for "
+                                           "creating the layer. "
+                                           "The overrides are defined as a "
+                                           "JSON list of field definitions. "
+                                           "This can be a filename or a JSON "
+                                           "string or a URL.'/>"
                                            "</OpenOptionList>");
 
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
@@ -435,6 +447,10 @@ void RegisterOGRCSV()
                               "StringList");
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES,
                               "Boolean Int16 Float32");
+    poDriver->SetMetadataItem(GDAL_DCAP_HONOR_GEOM_COORDINATE_PRECISION, "YES");
+
+    poDriver->SetMetadataItem(GDAL_DCAP_UPDATE, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_UPDATE_ITEMS, "Features");
 
     poDriver->pfnOpen = OGRCSVDriverOpen;
     poDriver->pfnIdentify = OGRCSVDriverIdentify;

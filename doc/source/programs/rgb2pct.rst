@@ -1,7 +1,7 @@
 .. _rgb2pct:
 
 ================================================================================
-rgb2pct.py
+rgb2pct
 ================================================================================
 
 .. only:: html
@@ -15,7 +15,8 @@ Synopsis
 
 .. code-block::
 
-    rgb2pct.py [-n colors | -pct palette_file] [-of format] <source_file> <dest_file>
+    rgb2pct [--help] [--help-general] [--creation-option OPTION]
+               [-n colors | -pct palette_file] [-of format] <source_file> <dest_file>
 
 Description
 -----------
@@ -26,12 +27,23 @@ converts the image into a pseudo-colored image using the color table.
 This conversion utilizes Floyd-Steinberg dithering (error diffusion) to
 maximize output image visual quality.
 
+.. note::
+
+    rgb2pct is a Python utility, and is only available if GDAL Python bindings are available.
+
 .. program:: rgb2pct
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: -n <color>
 
     Select the number of colors in the generated
     color table.  Defaults to 256.  Must be between 2 and 256.
+
+.. option:: --creation-option OPTION
+
+    Optional creation parameters for the GeoTIFF driver,
+    for example "COMPRESS=LZW". Can be specified multiple times.
 
 .. option:: -pct <palette_file>
 
@@ -55,8 +67,6 @@ maximize output image visual quality.
 
     The output pseudo-colored file that will be created.
 
-NOTE: rgb2pct.py is a Python script, and will only work if GDAL was built with Python support.
-
 Example
 -------
 
@@ -65,10 +75,10 @@ is the GDAL VRT format.  In the following example a VRT was created in a
 text editor with a small 4 color palette with the RGBA colors 238/238/238/255,
 237/237/237/255, 236/236/236/255 and 229/229/229/255.
 
-::
+.. code-block:: console
 
-    rgb2pct.py -pct palette.vrt rgb.tif pseudo-colored.tif
-    more < palette.vrt
+    $ rgb2pct -pct palette.vrt rgb.tif pseudo-colored.tif
+    $ more < palette.vrt
     <VRTDataset rasterXSize="226" rasterYSize="271">
         <VRTRasterBand dataType="Byte" band="1">
             <ColorInterp>Palette</ColorInterp>

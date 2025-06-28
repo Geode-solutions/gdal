@@ -6,23 +6,7 @@
  * Copyright (c) 2011
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "blockdir/asciitiledir.h"
@@ -354,7 +338,7 @@ void AsciiTileDir::ReadFullDir(void)
         return ThrowPCIDSKException("Out of memory in AsciiTileDir::ReadFullDir().");
 
     PCIDSKBuffer oBlockDirAutoPtr;
-    oBlockDirAutoPtr.buffer = (char *) pabyBlockDir;
+    oBlockDirAutoPtr.buffer = reinterpret_cast<char *>(pabyBlockDir);
 
     uint8 * pabyBlockDirIter = pabyBlockDir;
 
@@ -453,7 +437,7 @@ void AsciiTileDir::ReadPartialDir(void)
         return ThrowPCIDSKException("Out of memory in AsciiTileDir::ReadPartialDir().");
 
     PCIDSKBuffer oBlockDirAutoPtr;
-    oBlockDirAutoPtr.buffer = (char *) pabyBlockDir;
+    oBlockDirAutoPtr.buffer = reinterpret_cast<char *>(pabyBlockDir);
 
     uint8 * pabyBlockDirIter = pabyBlockDir;
 
@@ -498,7 +482,7 @@ void AsciiTileDir::ReadPartialDir(void)
     for (uint32 iLayer = 0; iLayer < msBlockDir.nLayerCount; iLayer++)
     {
         size_t nSize = sizeof(TileLayerInfo);
-        SwapTileLayer((TileLayerInfo *) pabyBlockDirIter);
+        SwapTileLayer(reinterpret_cast<TileLayerInfo *>(pabyBlockDirIter));
         memcpy(moTileLayerInfoList[iLayer], pabyBlockDirIter, nSize);
         pabyBlockDirIter += nSize;
     }
@@ -657,7 +641,7 @@ void AsciiTileDir::InitBlockList(AsciiTileLayer * poLayer)
         return ThrowPCIDSKException("Out of memory in AsciiTileDir::InitBlockList().");
 
     PCIDSKBuffer oBlockDirAutoPtr;
-    oBlockDirAutoPtr.buffer = (char *) pabyBlockDir;
+    oBlockDirAutoPtr.buffer =  reinterpret_cast<char *>(pabyBlockDir);
 
     uint8 * pabyBlockDirIter = pabyBlockDir;
 
@@ -860,7 +844,7 @@ void AsciiTileDir::WriteDir(void)
     {
         size_t nSize = sizeof(TileLayerInfo);
         memcpy(pabyBlockDirIter, moTileLayerInfoList[iLayer], nSize);
-        SwapTileLayer((TileLayerInfo *) pabyBlockDirIter);
+        SwapTileLayer(reinterpret_cast<TileLayerInfo *>(pabyBlockDirIter));
         pabyBlockDirIter += nSize;
     }
 

@@ -6,14 +6,15 @@ C2F *poTypes = nullptr;
 /*** class definitions ***/
 
 OGRSOSIDataType::OGRSOSIDataType(int nSize)
+    : poElements(new OGRSOSISimpleDataType[nSize]), nElementCount(nSize)
 {
-    poElements = new OGRSOSISimpleDataType[nSize];
-    nElementCount = nSize;
 }
+
 OGRSOSIDataType::~OGRSOSIDataType()
 {
     delete[] poElements;
 }
+
 void OGRSOSIDataType::setElement(int nIndex, const char *name,
                                  OGRFieldType type)
 {
@@ -29,13 +30,11 @@ OGRSOSISimpleDataType::OGRSOSISimpleDataType(const char *name,
 {
     setType(name, type);
 }
+
 void OGRSOSISimpleDataType::setType(const char *name, OGRFieldType type)
 {
     osName = name;
     nType = type;
-}
-OGRSOSISimpleDataType::~OGRSOSISimpleDataType()
-{
 }
 
 /*** utility methods ***/
@@ -44,6 +43,7 @@ static void addType(C2F *map, const char *key, OGRSOSIDataType *type)
 {
     map->insert(std::pair<CPLString, OGRSOSIDataType>(CPLString(key), *type));
 }
+
 static void addSimpleType(C2F *map, const char *key, const char *gmlKey,
                           OGRFieldType type)
 {
@@ -78,6 +78,7 @@ int SOSITypeToInt(const char *value)
 {
     return atoi(value);
 }
+
 double SOSITypeToReal(const char *value)
 {
     return CPLAtof(value);

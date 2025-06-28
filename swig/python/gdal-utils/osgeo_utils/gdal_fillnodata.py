@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # ******************************************************************************
-#  $Id$
 #
 #  Project:  GDAL Python Interface
 #  Purpose:  Application for filling nodata areas in a raster by interpolation
@@ -11,23 +10,7 @@
 #  Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
 #  Copyright (c) 2021, Idan Miara <idan@miara.com>
 #
-#  Permission is hereby granted, free of charge, to any person obtaining a
-#  copy of this software and associated documentation files (the "Software"),
-#  to deal in the Software without restriction, including without limitation
-#  the rights to use, copy, modify, merge, publish, distribute, sublicense,
-#  and/or sell copies of the Software, and to permit persons to whom the
-#  Software is furnished to do so, subject to the following conditions:
-#
-#  The above copyright notice and this permission notice shall be included
-#  in all copies or substantial portions of the Software.
-#
-#  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-#  OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-#  THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-#  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-#  DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 # ******************************************************************************
 
 import sys
@@ -37,6 +20,7 @@ from typing import Optional
 
 from osgeo import gdal
 from osgeo_utils.auxiliary.gdal_argparse import GDALArgumentParser, GDALScript
+from osgeo_utils.auxiliary.util import enable_gdal_exceptions
 
 
 def CopyBand(srcband, dstband):
@@ -47,6 +31,7 @@ def CopyBand(srcband, dstband):
         )
 
 
+@enable_gdal_exceptions
 def gdal_fillnodata(
     src_filename: Optional[str] = None,
     band_number: int = 1,
@@ -57,10 +42,14 @@ def gdal_fillnodata(
     mask: str = "default",
     max_distance: Real = 100,
     smoothing_iterations: int = 0,
+    interpolation: Optional[str] = None,
     options: Optional[list] = None,
 ):
     options = options or []
     creation_options = creation_options or []
+
+    if interpolation:
+        options.append("INTERPOLATION=" + interpolation)
 
     # =============================================================================
     # 	Verify we have next gen bindings with the sievefilter method.
@@ -223,6 +212,14 @@ class GDALFillNoData(GDALScript):
         )
 
         parser.add_argument(
+            "-interp",
+            "--interpolation",
+            dest="interpolation",
+            choices=["inv_dist", "nearest"],
+            help="Interpolation method.",
+        )
+
+        parser.add_argument(
             "-b",
             "-band",
             dest="band_number",
@@ -244,10 +241,12 @@ class GDALFillNoData(GDALScript):
             "-co",
             dest="creation_options",
             type=str,
-            action="extend",
-            nargs="*",
+            default=[],
+            action="append",
             metavar="name=value",
-            help="Creation options for the destination dataset.",
+            help="Passes a creation option to the output format driver. Multiple "
+            "options may be listed. See format specific documentation for legal "
+            "creation options for each format.",
         )
 
         parser.add_argument(

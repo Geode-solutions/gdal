@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GeoTIFF Driver
  * Purpose:  GDAL GeoTIFF support.
@@ -9,23 +8,7 @@
  * Copyright (c) 1998, 2002, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GTIFF_H_INCLUDED
@@ -37,9 +20,10 @@
 
 #include "gdal.h"
 #include "tiffio.h"
+#include "tiffvers.h"
 
 CPL_C_START
-int GTiffOneTimeInit();
+void CPL_DLL GTiffOneTimeInit();
 void CPL_DLL LibgeotiffOneTimeInit();
 CPL_C_END
 
@@ -53,6 +37,13 @@ void GTIFFSetWebPLossless(GDALDatasetH hGTIFFDS, bool bWebpLossless);
 void GTIFFSetZLevel(GDALDatasetH hGTIFFDS, int nZLevel);
 void GTIFFSetZSTDLevel(GDALDatasetH hGTIFFDS, int nZSTDLevel);
 void GTIFFSetMaxZError(GDALDatasetH hGTIFFDS, double dfMaxZError);
+#if HAVE_JXL
+void GTIFFSetJXLLossless(GDALDatasetH hGTIFFDS, bool bIsLossless);
+void GTIFFSetJXLEffort(GDALDatasetH hGTIFFDS, int nEffort);
+void GTIFFSetJXLDistance(GDALDatasetH hGTIFFDS, float fDistance);
+void GTIFFSetJXLAlphaDistance(GDALDatasetH hGTIFFDS, float fAlphaDistance);
+#endif
+const char *GTIFFGetCompressionMethodName(int nCompressionCode);
 int GTIFFGetCompressionMethod(const char *pszValue,
                               const char *pszVariableName);
 bool GTIFFSupportsPredictor(int nCompression);
@@ -69,8 +60,6 @@ void GTiffWriteJPEGTables(TIFF *hTIFF, const char *pszPhotometric,
                           const char *pszJPEGTablesMode);
 CPLString GTiffFormatGDALNoDataTagValue(double dfNoData);
 
-const int knGTIFFJpegTablesModeDefault = 1; /* JPEGTABLESMODE_QUANT */
-
 // Note: Was EXTRASAMPLE_ASSOCALPHA in GDAL < 1.10.
 constexpr uint16_t DEFAULT_ALPHA_TYPE = EXTRASAMPLE_UNASSALPHA;
 
@@ -84,6 +73,8 @@ CPLString CPL_DLL GTiffGetCompressValues(bool &bHasLZW, bool &bHasDEFLATE,
                                          bool &bHasLZMA, bool &bHasZSTD,
                                          bool &bHasJPEG, bool &bHasWebP,
                                          bool &bHasLERC, bool bForCOG);
+
+int &GTIFFGetThreadLocalLibtiffError();
 
 #if !defined(TIFFTAG_GDAL_METADATA)
 // The following 5 tags are now defined in tiff.h of libtiff > 4.1.0
@@ -151,5 +142,11 @@ CPLString CPL_DLL GTiffGetCompressValues(bool &bHasLZW, bool &bHasDEFLATE,
 #if !defined(TIFFTAG_WEBP_LOSSLESS)
 #define TIFFTAG_WEBP_LOSSLESS 65569 /* WebP lossless/lossy */
 #endif
+
+#if (TIFFLIB_VERSION > 20220520) || defined(INTERNAL_LIBTIFF)  // > 4.4.0
+#define SUPPORTS_LIBTIFF_OPEN_OPTIONS
+#endif
+
+constexpr double DEFAULT_NODATA_VALUE = -9999.0;
 
 #endif  // GTIFF_H_INCLUDED

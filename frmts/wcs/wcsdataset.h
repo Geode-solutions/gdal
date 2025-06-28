@@ -10,24 +10,11 @@
  * Copyright (c) 2017, Ari Jolma
  * Copyright (c) 2017, Finnish Environment Institute
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
+
+#ifndef WCSDATASET_H_INCLUDED
+#define WCSDATASET_H_INCLUDED
 
 /************************************************************************/
 /* ==================================================================== */
@@ -47,7 +34,7 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
     friend class WCSDataset110;
     friend class WCSDataset201;
 
-    CPLString m_cache_dir;
+    std::string m_cache_dir;
     bool bServiceDirty;
     CPLXMLNode *psService;
 
@@ -58,51 +45,54 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
     int m_Version;  // eg 100 for 1.0.0, 110 for 1.1.0
     const char *Version() const;
 
-    CPLString osCRS;  // name of the CRS
+    std::string osCRS;  // name of the CRS
     OGRSpatialReference m_oSRS{};
     bool native_crs;       // the CRS is the native CRS of the server
     bool axis_order_swap;  // the CRS requires x and y coordinates to be swapped
                            // for requests
-    double adfGeoTransform[6];
-    bool SetCRS(const CPLString &crs, bool native);
+    GDALGeoTransform m_gt{};
+    bool SetCRS(const std::string &crs, bool native);
     void SetGeometry(const std::vector<int> &size,
                      const std::vector<double> &origin,
                      const std::vector<std::vector<double>> &offsets);
 
-    CPLString osBandIdentifier;
+    std::string osBandIdentifier;
 
-    CPLString osDefaultTime;
-    std::vector<CPLString> aosTimePositions;
+    std::string osDefaultTime;
+    std::vector<std::string> aosTimePositions;
 
     int TestUseBlockIO(int, int, int, int, int, int) const;
     CPLErr DirectRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                          GDALDataType, int, int *, GSpacing nPixelSpace,
+                          GDALDataType, int, const int *, GSpacing nPixelSpace,
                           GSpacing nLineSpace, GSpacing nBandSpace,
                           GDALRasterIOExtraArg *psExtraArg);
 
     virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, int, int *, GSpacing nPixelSpace,
-                             GSpacing nLineSpace, GSpacing nBandSpace,
+                             GDALDataType, int, BANDMAP_TYPE,
+                             GSpacing nPixelSpace, GSpacing nLineSpace,
+                             GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg) override;
 
-    virtual std::vector<double> GetExtent(int nXOff, int nYOff, int nXSize,
-                                          int nYSize, int nBufXSize,
-                                          int nBufYSize) = 0;
+    virtual std::vector<double> GetNativeExtent(int nXOff, int nYOff,
+                                                int nXSize, int nYSize,
+                                                int nBufXSize,
+                                                int nBufYSize) = 0;
 
-    virtual CPLString GetCoverageRequest(bool scaled, int nBufXSize,
-                                         int nBufYSize,
-                                         const std::vector<double> &extent,
-                                         CPLString osBandList) = 0;
+    virtual std::string GetCoverageRequest(bool scaled, int nBufXSize,
+                                           int nBufYSize,
+                                           const std::vector<double> &extent,
+                                           const std::string &osBandList) = 0;
 
     CPLErr GetCoverage(int nXOff, int nYOff, int nXSize, int nYSize,
                        int nBufXSize, int nBufYSize, int nBandCount,
-                       int *panBandList, GDALRasterIOExtraArg *psExtraArg,
+                       const int *panBandList, GDALRasterIOExtraArg *psExtraArg,
                        CPLHTTPResult **ppsResult);
 
-    virtual CPLString DescribeCoverageRequest()
+    virtual std::string DescribeCoverageRequest()
     {
         return "";
     }
+
     virtual CPLXMLNode *CoverageOffering(CPLXMLNode *psDC) = 0;
 
     int DescribeCoverage();
@@ -111,15 +101,15 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
 
     int EstablishRasterDetails();
 
-    virtual CPLErr ParseCapabilities(CPLXMLNode *, CPLString) = 0;
-    virtual void ParseCoverageCapabilities(CPLXMLNode *, const CPLString &,
+    virtual CPLErr ParseCapabilities(CPLXMLNode *, const std::string &) = 0;
+    virtual void ParseCoverageCapabilities(CPLXMLNode *, const std::string &,
                                            CPLXMLNode *) = 0;
 
     GDALDataset *GDALOpenResult(CPLHTTPResult *psResult);
 
     void FlushMemoryResult();
 
-    CPLString osResultFilename;
+    std::string osResultFilename;
 
     GByte *pabySavedDataBuffer;
 
@@ -132,13 +122,16 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
     WCSDataset(int version, const char *cache_dir);
     virtual ~WCSDataset();
 
-    static WCSDataset *CreateFromMetadata(const CPLString &, CPLString);
-    static WCSDataset *CreateFromCapabilities(CPLString, CPLString, CPLString);
+    static WCSDataset *CreateFromMetadata(const std::string &,
+                                          const std::string &);
+    static WCSDataset *CreateFromCapabilities(const std::string &,
+                                              const std::string &,
+                                              const std::string &);
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
 
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
     virtual char **GetFileList(void) override;
 
@@ -148,16 +141,17 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
 
 class WCSDataset100 final : public WCSDataset
 {
-    std::vector<double> GetExtent(int nXOff, int nYOff, int nXSize, int nYSize,
-                                  int nBufXSize, int nBufYSize) override;
-    CPLString GetCoverageRequest(bool scaled, int nBufXSize, int nBufYSize,
-                                 const std::vector<double> &extent,
-                                 CPLString osBandList) override;
-    CPLString DescribeCoverageRequest() override;
+    std::vector<double> GetNativeExtent(int nXOff, int nYOff, int nXSize,
+                                        int nYSize, int nBufXSize,
+                                        int nBufYSize) override;
+    std::string GetCoverageRequest(bool scaled, int nBufXSize, int nBufYSize,
+                                   const std::vector<double> &extent,
+                                   const std::string &osBandList) override;
+    std::string DescribeCoverageRequest() override;
     CPLXMLNode *CoverageOffering(CPLXMLNode *psDC) override;
     bool ExtractGridInfo() override;
-    CPLErr ParseCapabilities(CPLXMLNode *, CPLString) override;
-    void ParseCoverageCapabilities(CPLXMLNode *, const CPLString &,
+    CPLErr ParseCapabilities(CPLXMLNode *, const std::string &) override;
+    void ParseCoverageCapabilities(CPLXMLNode *, const std::string &,
                                    CPLXMLNode *) override;
 
   public:
@@ -168,16 +162,17 @@ class WCSDataset100 final : public WCSDataset
 
 class WCSDataset110 CPL_NON_FINAL : public WCSDataset
 {
-    std::vector<double> GetExtent(int nXOff, int nYOff, int nXSize, int nYSize,
-                                  int nBufXSize, int nBufYSize) override;
-    CPLString GetCoverageRequest(bool scaled, int nBufXSize, int nBufYSize,
-                                 const std::vector<double> &extent,
-                                 CPLString osBandList) override;
-    CPLString DescribeCoverageRequest() override;
+    std::vector<double> GetNativeExtent(int nXOff, int nYOff, int nXSize,
+                                        int nYSize, int nBufXSize,
+                                        int nBufYSize) override;
+    std::string GetCoverageRequest(bool scaled, int nBufXSize, int nBufYSize,
+                                   const std::vector<double> &extent,
+                                   const std::string &) override;
+    std::string DescribeCoverageRequest() override;
     CPLXMLNode *CoverageOffering(CPLXMLNode *psDC) override;
     bool ExtractGridInfo() override;
-    CPLErr ParseCapabilities(CPLXMLNode *, CPLString) override;
-    void ParseCoverageCapabilities(CPLXMLNode *, const CPLString &,
+    CPLErr ParseCapabilities(CPLXMLNode *, const std::string &) override;
+    void ParseCoverageCapabilities(CPLXMLNode *, const std::string &,
                                    CPLXMLNode *) override;
 
   public:
@@ -189,24 +184,25 @@ class WCSDataset110 CPL_NON_FINAL : public WCSDataset
 
 class WCSDataset201 final : public WCSDataset110
 {
-    std::vector<double> GetExtent(int nXOff, int nYOff, int nXSize, int nYSize,
-                                  int nBufXSize, int nBufYSize) override;
-    CPLString GetSubdataset(const CPLString &coverage);
+    std::vector<double> GetNativeExtent(int nXOff, int nYOff, int nXSize,
+                                        int nYSize, int nBufXSize,
+                                        int nBufYSize) override;
+    std::string GetSubdataset(const std::string &coverage);
     bool SetFormat(CPLXMLNode *coverage);
     static bool ParseGridFunction(CPLXMLNode *coverage,
                                   std::vector<int> &axisOrder);
-    int ParseRange(CPLXMLNode *coverage, const CPLString &range_subset,
+    int ParseRange(CPLXMLNode *coverage, const std::string &range_subset,
                    char ***metadata);
-    CPLString GetCoverageRequest(bool scaled, int nBufXSize, int nBufYSize,
-                                 const std::vector<double> &extent,
-                                 CPLString osBandList) override;
-    CPLString DescribeCoverageRequest() override;
-    bool GridOffsets(CPLXMLNode *grid, CPLString subtype, bool swap_grid_axis,
-                     std::vector<double> &origin,
+    std::string GetCoverageRequest(bool scaled, int nBufXSize, int nBufYSize,
+                                   const std::vector<double> &extent,
+                                   const std::string &osBandList) override;
+    std::string DescribeCoverageRequest() override;
+    bool GridOffsets(CPLXMLNode *grid, const std::string &subtype,
+                     bool swap_grid_axis, std::vector<double> &origin,
                      std::vector<std::vector<double>> &offset,
-                     std::vector<CPLString> labels, char ***metadata);
-    bool Offset2GeoTransform(std::vector<double> origin,
-                             std::vector<std::vector<double>> offset);
+                     std::vector<std::string> labels, char ***metadata);
+    bool Offset2GeoTransform(const std::vector<double> &origin,
+                             const std::vector<std::vector<double>> &offset);
     bool ExtractGridInfo() override;
 
   public:
@@ -231,3 +227,5 @@ class WCSDataset201 final : public WCSDataset110
     "Format", "Interpolation", "MediaType", "UpdateSequence",                  \
         "GEOTIFF:COMPRESSION", "GEOTIFF:JPEG_QUALITY", "GEOTIFF:PREDICTOR",    \
         "GEOTIFF:INTERLEAVE", "GEOTIFF:TILING", "GEOTIFF:TILEWIDTH"
+
+#endif /* WCSDATASET_H_INCLUDED */

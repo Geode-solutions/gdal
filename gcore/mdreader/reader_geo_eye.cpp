@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2014-2015, NextGIS info@nextgis.ru
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -49,8 +33,8 @@ GDALMDReaderGeoEye::GDALMDReaderGeoEye(const char *pszPath,
     : GDALMDReaderBase(pszPath, papszSiblingFiles)
 {
 
-    const CPLString osBaseName = CPLGetBasename(pszPath);
-    const CPLString osDirName = CPLGetDirname(pszPath);
+    const CPLString osBaseName = CPLGetBasenameSafe(pszPath);
+    const CPLString osDirName = CPLGetDirnameSafe(pszPath);
 
     // get _metadata.txt file
 
@@ -63,38 +47,38 @@ GDALMDReaderGeoEye::GDALMDReaderGeoEye(const char *pszPath,
         osRadixMetadataName.resize(i);
 
     // form metadata file name
-    CPLString osIMDSourceFilename = CPLFormFilename(
+    std::string osIMDSourceFilename = CPLFormFilenameSafe(
         osDirName, (osRadixMetadataName + "_metadata.txt").c_str(), nullptr);
     if (CPLCheckForFile(&osIMDSourceFilename[0], papszSiblingFiles))
     {
-        m_osIMDSourceFilename = osIMDSourceFilename;
+        m_osIMDSourceFilename = std::move(osIMDSourceFilename);
     }
     else
     {
-        osIMDSourceFilename = CPLFormFilename(
+        osIMDSourceFilename = CPLFormFilenameSafe(
             osDirName, (osRadixMetadataName + "_METADATA.txt").c_str(),
             nullptr);
         if (CPLCheckForFile(&osIMDSourceFilename[0], papszSiblingFiles))
         {
-            m_osIMDSourceFilename = osIMDSourceFilename;
+            m_osIMDSourceFilename = std::move(osIMDSourceFilename);
         }
     }
 
     // get _rpc.txt file
 
-    CPLString osRPBSourceFilename =
-        CPLFormFilename(osDirName, (osBaseName + "_rpc").c_str(), "txt");
+    std::string osRPBSourceFilename =
+        CPLFormFilenameSafe(osDirName, (osBaseName + "_rpc").c_str(), "txt");
     if (CPLCheckForFile(&osRPBSourceFilename[0], papszSiblingFiles))
     {
-        m_osRPBSourceFilename = osRPBSourceFilename;
+        m_osRPBSourceFilename = std::move(osRPBSourceFilename);
     }
     else
     {
-        osRPBSourceFilename =
-            CPLFormFilename(osDirName, (osBaseName + "_RPC").c_str(), "TXT");
+        osRPBSourceFilename = CPLFormFilenameSafe(
+            osDirName, (osBaseName + "_RPC").c_str(), "TXT");
         if (CPLCheckForFile(&osRPBSourceFilename[0], papszSiblingFiles))
         {
-            m_osRPBSourceFilename = osRPBSourceFilename;
+            m_osRPBSourceFilename = std::move(osRPBSourceFilename);
         }
     }
 

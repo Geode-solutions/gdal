@@ -38,13 +38,13 @@
 #include <unistd.h>
 #endif /* HAVE_UNISTD_H */
 
-#ifdef WIN32
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <io.h>
 #include <windows.h>
-#endif /* defined(WIN32) */
+#endif /* defined(_WIN32) */
 
-#if !defined(HAVE_OPEN) && defined(WIN32)
+#if !defined(HAVE_OPEN) && defined(_WIN32)
 #define open _open
 #endif
 
@@ -58,7 +58,11 @@
 #include "json_util.h"
 #include "printbuf.h"
 
+#include "cpl_string.h"
+
+#if 0
 static int _json_object_to_fd(int fd, struct json_object *obj, int flags, const char *filename);
+#endif
 
 static char _last_err[256] = "";
 
@@ -148,8 +152,9 @@ struct json_object *json_object_from_file(const char *filename)
 	return obj;
 }
 
+// Unused by GDAL, and avoid a Coverity Scan warning in _json_object_to_fd()s
+#if 0
 /* extended "format and write to file" function */
-
 int json_object_to_file_ext(const char *filename, struct json_object *obj, int flags)
 {
 	int fd, ret;
@@ -186,7 +191,7 @@ int json_object_to_fd(int fd, struct json_object *obj, int flags)
 }
 static int _json_object_to_fd(int fd, struct json_object *obj, int flags, const char *filename)
 {
-	int ret;
+	ssize_t ret;
 	const char *json_str;
 	unsigned int wpos, wsize;
 
@@ -202,7 +207,8 @@ static int _json_object_to_fd(int fd, struct json_object *obj, int flags, const 
 	wpos = 0;
 	while (wpos < wsize)
 	{
-		if ((ret = (int)write(fd, json_str + wpos, wsize - wpos)) < 0)
+		/* coverity[overflow_sink] */
+		if ((ret = write(fd, json_str + wpos, wsize - wpos)) < 0)
 		{
 			_json_c_set_last_err("json_object_to_file: error writing file %s: %s\n",
 			                     filename, strerror(errno));
@@ -222,12 +228,13 @@ int json_object_to_file(const char *filename, struct json_object *obj)
 {
 	return json_object_to_file_ext(filename, obj, JSON_C_TO_STRING_PLAIN);
 }
+#endif
 
 // Deprecated json_parse_double function.  See json_tokener_parse_double instead.
 int json_parse_double(const char *buf, double *retval)
 {
 	char *end;
-	*retval = strtod(buf, &end);
+	*retval = CPLStrtod(buf, &end);
 	return end == buf ? 1 : 0;
 }
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test Geolocation warper.
@@ -10,27 +9,12 @@
 ###############################################################################
 # Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import array
 import random
+import struct
 
 import gdaltest
 import pytest
@@ -41,10 +25,14 @@ from osgeo import gdal, osr
 # Verify warped result.
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_geoloc_1():
 
     tst = gdaltest.GDALTest("VRT", "warpsst.vrt", 1, 63034)
-    return tst.testOpen(check_filelist=False)
+    tst.testOpen(check_filelist=False)
 
 
 ###############################################################################
@@ -129,12 +117,13 @@ def test_geoloc_fill_line(use_temp_datasets):
     ds.SetMetadata(md, "GEOLOCATION")
     ds.GetRasterBand(1).Fill(1)
     with gdaltest.config_option("GDAL_GEOLOC_USE_TEMP_DATASETS", use_temp_datasets):
-        warped_ds = gdal.Warp("", ds, format="MEM")
+        warped_ds = gdal.Warp(
+            "",
+            ds,
+            format="MEM",
+        )
         assert warped_ds
-        assert warped_ds.GetRasterBand(1).Checksum() in (
-            22339,
-            22336,
-        )  # 22336 with Intel(R) oneAPI DPC++/C++ Compiler 2022.1.0
+        assert warped_ds.GetRasterBand(1).Checksum() == 20177
 
 
 ###############################################################################
@@ -247,13 +236,11 @@ def test_geoloc_error_cases():
     ds = gdal.GetDriverByName("MEM").Create("", 10, 10)
     ds.SetMetadata({"invalid": "content"}, "GEOLOCATION")
 
-    with gdaltest.error_handler():
-        transformer = gdal.Transformer(ds, None, [])
-    assert transformer is None
+    with pytest.raises(Exception):
+        gdal.Transformer(ds, None, [])
 
-    with gdaltest.error_handler():
-        transformer = gdal.Transformer(None, ds, [])
-    assert transformer is None
+    with pytest.raises(Exception):
+        gdal.Transformer(None, ds, [])
 
 
 ###############################################################################
@@ -423,12 +410,12 @@ def test_geoloc_GEOLOC_ARRAY_transformer_option():
     ds = gdal.GetDriverByName("MEM").Create("", 20, 20)
 
     # Non-existing GEOLOC_ARRAY
-    with gdaltest.error_handler():
-        assert gdal.Transformer(ds, None, ["GEOLOC_ARRAY=/vsimem/invalid.tif"]) is None
+    with pytest.raises(Exception):
+        gdal.Transformer(ds, None, ["GEOLOC_ARRAY=/vsimem/invalid.tif"])
 
     # Existing GEOLOC_ARRAY but single band
-    with gdaltest.error_handler():
-        assert gdal.Transformer(ds, None, ["GEOLOC_ARRAY=data/byte.tif"]) is None
+    with pytest.raises(Exception):
+        gdal.Transformer(ds, None, ["GEOLOC_ARRAY=data/byte.tif"])
 
     # Test SRC_GEOLOC_ARRAY transformer option
     tr = gdal.Transformer(ds, None, ["SRC_GEOLOC_ARRAY=/vsimem/lonlat.tif"])
@@ -524,11 +511,8 @@ def test_geoloc_DST_GEOLOC_ARRAY_transformer_option():
     input_ds.SetSpatialRef(srs)
 
     # Non-existing DST_GEOLOC_ARRAY
-    with gdaltest.error_handler():
-        assert (
-            gdal.Transformer(input_ds, ds, ["DST_GEOLOC_ARRAY=/vsimem/invalid.tif"])
-            is None
-        )
+    with pytest.raises(Exception):
+        gdal.Transformer(input_ds, ds, ["DST_GEOLOC_ARRAY=/vsimem/invalid.tif"])
 
     tr = gdal.Transformer(
         input_ds, ds, ["DST_GEOLOC_ARRAY=/vsimem/lonlat_DST_GEOLOC_ARRAY.tif"]
@@ -555,3 +539,91 @@ def test_geoloc_triangles():
     success, pnt = tr.TransformPoint(True, -108376.74703465727, -6257.884312873284)
     assert success
     assert pnt == pytest.approx((6.151710889520756, 7.225915929816924, 0))
+
+
+###############################################################################
+# Test that we emit a warning when inconsistent geoloc vs data sizes are
+# detected
+
+
+@pytest.mark.parametrize(
+    "geoloc_xsize,geoloc_ysize,data_xsize,data_ysize,warning_expected",
+    [
+        (2, 4, 2, 4, False),
+        (2, 4, 2, 5, True),
+        (2, 4, 3, 4, True),
+        (2, 4, 1, 4, False),  # we don't emit warning in that situation. should we?
+        (2, 4, 2, 3, False),  # we don't emit warning in that situation. should we?
+    ],
+)
+def test_geoloc_warnings_inconsistent_size(
+    geoloc_xsize, geoloc_ysize, data_xsize, data_ysize, warning_expected
+):
+
+    geoloc_filename = "/vsimem/test_geoloc_warnings_inconsistent_size_geoloc.tif"
+    geoloc_ds = gdal.GetDriverByName("GTiff").Create(
+        geoloc_filename, geoloc_xsize, geoloc_ysize, 2, gdal.GDT_Float64
+    )
+    x0 = -80
+    y0 = 50
+    for y in range(geoloc_ds.RasterYSize):
+        geoloc_ds.GetRasterBand(1).WriteRaster(
+            0,
+            0,
+            geoloc_ds.RasterXSize,
+            1,
+            array.array("d", [x0 + 0.5 + 1 * x for x in range(geoloc_ds.RasterXSize)]),
+        )
+        geoloc_ds.GetRasterBand(2).WriteRaster(
+            0,
+            0,
+            geoloc_ds.RasterXSize,
+            1,
+            array.array("d", [y0 - 0.5 - 1 * x for x in range(geoloc_ds.RasterXSize)]),
+        )
+    geoloc_ds = None
+    ds = gdal.GetDriverByName("MEM").Create("", data_xsize, data_ysize)
+    md = {
+        "LINE_OFFSET": "0",
+        "LINE_STEP": "1",
+        "PIXEL_OFFSET": "0",
+        "PIXEL_STEP": "1",
+        "X_DATASET": geoloc_filename,
+        "X_BAND": "1",
+        "Y_DATASET": geoloc_filename,
+        "Y_BAND": "2",
+        "SRS": 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","4326"]]',
+    }
+    ds.SetMetadata(md, "GEOLOCATION")
+
+    with gdal.quiet_errors():
+        gdal.ErrorReset()
+        tr = gdal.Transformer(ds, None, [])
+        if warning_expected:
+            assert gdal.GetLastErrorMsg() != ""
+        else:
+            assert gdal.GetLastErrorMsg() == ""
+        assert tr
+
+
+###############################################################################
+# Test effect of normalizing longitude from geolocation arrays
+
+
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_geoloc_normalize_longitude():
+    vrt = "../gcore/data/geolocation_arrays_lon180_lon360.vrt"
+    warped_ds = gdal.Warp(
+        "",
+        vrt,
+        format="MEM",
+        outputBounds=(-180, -90, 180, 90),
+        width=6,
+        height=3,
+        dstSRS="EPSG:4326",
+        transformerOptions=["GEOLOC_NORMALIZE_LONGITUDE_MINUS_180_PLUS_180=YES"],
+    )
+    assert struct.unpack("f", warped_ds.ReadRaster(2, 0, 1, 1)) == (12.0,)

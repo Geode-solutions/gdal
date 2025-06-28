@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_frmts.h"
@@ -123,7 +107,8 @@ class CTGDataset final : public GDALPamDataset
     CTGDataset();
     ~CTGDataset() override;
 
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+
     const OGRSpatialReference *GetSpatialRef() const override
     {
         return &m_oSRS;
@@ -179,20 +164,21 @@ CTGRasterBand::~CTGRasterBand()
 {
     CSLDestroy(papszCategories);
 }
+
 /************************************************************************/
 /*                             IReadBlock()                             */
 /************************************************************************/
 
-CPLErr CTGRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff,
-                                 CPL_UNUSED int nBlockYOff, void *pImage)
+CPLErr CTGRasterBand::IReadBlock(int /* nBlockXOff */, int /* nBlockYOff */,
+                                 void *pImage)
 {
-    CTGDataset *poGDS = (CTGDataset *)poDS;
+    CTGDataset *poGDS = cpl::down_cast<CTGDataset *>(poDS);
 
     poGDS->ReadImagery();
     memcpy(pImage,
            poGDS->pabyImage +
-               (nBand - 1) * nBlockXSize * nBlockYSize * sizeof(int),
-           nBlockXSize * nBlockYSize * sizeof(int));
+               sizeof(int) * (nBand - 1) * nBlockXSize * nBlockYSize,
+           sizeof(int) * nBlockXSize * nBlockYSize);
 
     return CE_None;
 }
@@ -290,10 +276,10 @@ int CTGDataset::ReadImagery()
     szLine[80] = 0;
     int nLine = HEADER_LINE_COUNT;
     VSIFSeekL(fp, nLine * 80, SEEK_SET);
-    int nCells = nRasterXSize * nRasterYSize;
+    const int nCells = nRasterXSize * nRasterYSize;
     while (VSIFReadL(szLine, 1, 80, fp) == 80)
     {
-        int nZone = atoi(ExtractField(szField, szLine, 0, 3));
+        const int nZone = atoi(ExtractField(szField, szLine, 0, 3));
         if (nZone != nUTMZone)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
@@ -301,10 +287,12 @@ int CTGDataset::ReadImagery()
                      nLine, szLine, nZone);
             return FALSE;
         }
-        int nX = atoi(ExtractField(szField, szLine, 3, 8)) - nCellSize / 2;
-        int nY = atoi(ExtractField(szField, szLine, 11, 8)) + nCellSize / 2;
-        GIntBig nDiffX = static_cast<GIntBig>(nX) - nNWEasting;
-        GIntBig nDiffY = static_cast<GIntBig>(nNWNorthing) - nY;
+        const int nX =
+            atoi(ExtractField(szField, szLine, 3, 8)) - nCellSize / 2;
+        const int nY =
+            atoi(ExtractField(szField, szLine, 11, 8)) + nCellSize / 2;
+        const GIntBig nDiffX = static_cast<GIntBig>(nX) - nNWEasting;
+        const GIntBig nDiffY = static_cast<GIntBig>(nNWNorthing) - nY;
         if (nDiffX < 0 || (nDiffX % nCellSize) != 0 || nDiffY < 0 ||
             (nDiffY % nCellSize) != 0)
         {
@@ -313,8 +301,8 @@ int CTGDataset::ReadImagery()
                      nLine, szLine);
             return FALSE;
         }
-        GIntBig nCellX = nDiffX / nCellSize;
-        GIntBig nCellY = nDiffY / nCellSize;
+        const GIntBig nCellX = nDiffX / nCellSize;
+        const GIntBig nCellY = nDiffY / nCellSize;
         if (nCellX >= nRasterXSize || nCellY >= nRasterYSize)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
@@ -327,7 +315,9 @@ int CTGDataset::ReadImagery()
             int nVal = atoi(ExtractField(szField, szLine, 20 + 10 * i, 10));
             if (nVal >= 2000000000)
                 nVal = 0;
-            ((int *)pabyImage)[i * nCells + nCellY * nRasterXSize + nCellX] =
+            reinterpret_cast<int *>(
+                pabyImage)[i * nCells +
+                           static_cast<int>(nCellY) * nRasterXSize + nCellX] =
                 nVal;
         }
 
@@ -425,9 +415,7 @@ GDALDataset *CTGDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The CTG driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("CTG");
         return nullptr;
     }
 
@@ -496,7 +484,8 @@ GDALDataset *CTGDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Read the imagery                                                */
     /* -------------------------------------------------------------------- */
-    GByte *pabyImage = (GByte *)VSICalloc(nCols * nRows, 6 * sizeof(int));
+    GByte *pabyImage =
+        (GByte *)VSICalloc(static_cast<size_t>(nCols) * nRows, 6 * sizeof(int));
     if (pabyImage == nullptr)
     {
         delete poDS;
@@ -532,15 +521,15 @@ GDALDataset *CTGDataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr CTGDataset::GetGeoTransform(double *padfTransform)
+CPLErr CTGDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    padfTransform[0] = static_cast<double>(nNWEasting) - nCellSize / 2;
-    padfTransform[1] = nCellSize;
-    padfTransform[2] = 0;
-    padfTransform[3] = static_cast<double>(nNWNorthing) + nCellSize / 2;
-    padfTransform[4] = 0.;
-    padfTransform[5] = -nCellSize;
+    gt[0] = static_cast<double>(nNWEasting) - nCellSize / 2;
+    gt[1] = nCellSize;
+    gt[2] = 0;
+    gt[3] = static_cast<double>(nNWNorthing) + nCellSize / 2;
+    gt[4] = 0.;
+    gt[5] = -nCellSize;
 
     return CE_None;
 }

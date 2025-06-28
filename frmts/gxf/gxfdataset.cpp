@@ -8,23 +8,7 @@
  * Copyright (c) 1998, Frank Warmerdam
  * Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_frmts.h"
@@ -55,7 +39,7 @@ class GXFDataset final : public GDALPamDataset
 
     static GDALDataset *Open(GDALOpenInfo *);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 };
 
@@ -99,7 +83,7 @@ GXFRasterBand::GXFRasterBand(GXFDataset *poDSIn, int nBandIn)
 double GXFRasterBand::GetNoDataValue(int *bGotNoDataValue)
 
 {
-    GXFDataset *poGXF_DS = (GXFDataset *)poDS;
+    GXFDataset *poGXF_DS = cpl::down_cast<GXFDataset *>(poDS);
     if (bGotNoDataValue)
         *bGotNoDataValue = (fabs(poGXF_DS->dfNoDataValue - -1e12) > .1);
     if (eDataType == GDT_Float32)
@@ -115,7 +99,7 @@ double GXFRasterBand::GetNoDataValue(int *bGotNoDataValue)
 CPLErr GXFRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
                                  void *pImage)
 {
-    GXFDataset *const poGXF_DS = (GXFDataset *)poDS;
+    GXFDataset *const poGXF_DS = cpl::down_cast<GXFDataset *>(poDS);
 
     if (eDataType == GDT_Float32)
     {
@@ -174,7 +158,7 @@ GXFDataset::~GXFDataset()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GXFDataset::GetGeoTransform(double *padfTransform)
+CPLErr GXFDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     double dfXOrigin = 0.0;
@@ -192,16 +176,14 @@ CPLErr GXFDataset::GetGeoTransform(double *padfTransform)
     // Transform to radians.
     dfRotation = (dfRotation / 360.0) * 2.0 * M_PI;
 
-    padfTransform[1] = dfXSize * cos(dfRotation);
-    padfTransform[2] = dfYSize * sin(dfRotation);
-    padfTransform[4] = dfXSize * sin(dfRotation);
-    padfTransform[5] = -1 * dfYSize * cos(dfRotation);
+    gt[1] = dfXSize * cos(dfRotation);
+    gt[2] = dfYSize * sin(dfRotation);
+    gt[4] = dfXSize * sin(dfRotation);
+    gt[5] = -1 * dfYSize * cos(dfRotation);
 
     // take into account that GXF is point or center of pixel oriented.
-    padfTransform[0] =
-        dfXOrigin - 0.5 * padfTransform[1] - 0.5 * padfTransform[2];
-    padfTransform[3] =
-        dfYOrigin - 0.5 * padfTransform[4] - 0.5 * padfTransform[5];
+    gt[0] = dfXOrigin - 0.5 * gt[1] - 0.5 * gt[2];
+    gt[3] = dfYOrigin - 0.5 * gt[4] - 0.5 * gt[5];
 
     return CE_None;
 }
@@ -295,9 +277,7 @@ GDALDataset *GXFDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         GXFClose(l_hGXF);
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The GXF driver does not support update access to existing"
-                 " datasets.");
+        ReportUpdateNotSupportedByDriver("GXF");
         return nullptr;
     }
 

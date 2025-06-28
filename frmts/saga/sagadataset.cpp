@@ -8,23 +8,7 @@
  * Copyright (c) 2009, Volker Wichmann <wichmann@laserdata.at>
  * Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -63,10 +47,11 @@ class SAGADataset final : public GDALPamDataset
 {
     friend class SAGARasterBand;
 
-    static CPLErr WriteHeader(CPLString osHDRFilename, GDALDataType eType,
-                              int nXSize, int nYSize, double dfMinX,
-                              double dfMinY, double dfCellsize, double dfNoData,
-                              double dfZFactor, bool bTopToBottom);
+    static CPLErr WriteHeader(const CPLString &osHDRFilename,
+                              GDALDataType eType, int nXSize, int nYSize,
+                              double dfMinX, double dfMinY, double dfCellsize,
+                              double dfNoData, double dfZFactor,
+                              bool bTopToBottom);
     VSILFILE *fp;
     OGRSpatialReference m_oSRS{};
     bool headerDirty = false;
@@ -90,8 +75,8 @@ class SAGADataset final : public GDALPamDataset
 
     virtual char **GetFileList() override;
 
-    CPLErr GetGeoTransform(double *padfGeoTransform) override;
-    CPLErr SetGeoTransform(double *padfGeoTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 };
 
 /************************************************************************/
@@ -321,9 +306,10 @@ SAGADataset::~SAGADataset()
     if (headerDirty)
     {
         SAGARasterBand *poGRB = static_cast<SAGARasterBand *>(GetRasterBand(1));
-        const CPLString osPath = CPLGetPath(GetDescription());
-        const CPLString osName = CPLGetBasename(GetDescription());
-        const CPLString osFilename = CPLFormCIFilename(osPath, osName, ".sgrd");
+        const CPLString osPath = CPLGetPathSafe(GetDescription());
+        const CPLString osName = CPLGetBasenameSafe(GetDescription());
+        const CPLString osFilename =
+            CPLFormCIFilenameSafe(osPath, osName, ".sgrd");
         WriteHeader(osFilename, poGRB->GetRasterDataType(), poGRB->nRasterXSize,
                     poGRB->nRasterYSize, poGRB->m_Xmin, poGRB->m_Ymin,
                     poGRB->m_Cellsize, poGRB->m_NoData, 1.0, false);
@@ -339,20 +325,20 @@ SAGADataset::~SAGADataset()
 
 char **SAGADataset::GetFileList()
 {
-    const CPLString osPath = CPLGetPath(GetDescription());
-    const CPLString osName = CPLGetBasename(GetDescription());
+    const CPLString osPath = CPLGetPathSafe(GetDescription());
+    const CPLString osName = CPLGetBasenameSafe(GetDescription());
 
     // Main data file, etc.
     char **papszFileList = GDALPamDataset::GetFileList();
 
-    if (!EQUAL(CPLGetExtension(GetDescription()), "sg-grd-z"))
+    if (!EQUAL(CPLGetExtensionSafe(GetDescription()).c_str(), "sg-grd-z"))
     {
         // Header file.
-        CPLString osFilename = CPLFormCIFilename(osPath, osName, ".sgrd");
+        CPLString osFilename = CPLFormCIFilenameSafe(osPath, osName, ".sgrd");
         papszFileList = CSLAddString(papszFileList, osFilename);
 
         // projections file.
-        osFilename = CPLFormCIFilename(osPath, osName, "prj");
+        osFilename = CPLFormCIFilenameSafe(osPath, osName, "prj");
         VSIStatBufL sStatBuf;
         if (VSIStatExL(osFilename, &sStatBuf, VSI_STAT_EXISTS_FLAG) == 0)
             papszFileList = CSLAddString(papszFileList, osFilename);
@@ -399,7 +385,8 @@ CPLErr SAGADataset::SetSpatialRef(const OGRSpatialReference *poSRS)
     /* -------------------------------------------------------------------- */
     /*      Write to .prj file.                                             */
     /* -------------------------------------------------------------------- */
-    const CPLString osPrjFilename = CPLResetExtension(GetDescription(), "prj");
+    const CPLString osPrjFilename =
+        CPLResetExtensionSafe(GetDescription(), "prj");
     VSILFILE *l_fp = VSIFOpenL(osPrjFilename.c_str(), "wt");
     if (l_fp != nullptr)
     {
@@ -425,16 +412,17 @@ GDALDataset *SAGADataset::Open(GDALOpenInfo *poOpenInfo)
     /*  We assume the user is pointing to the binary (i.e. .sdat) file or a */
     /*  compressed raster (.sg-grd-z) file.                                 */
     /* -------------------------------------------------------------------- */
-    CPLString osExtension(CPLGetExtension(poOpenInfo->pszFilename));
+    const auto &osExtension = poOpenInfo->osExtension;
 
-    if (!EQUAL(osExtension, "sdat") && !EQUAL(osExtension, "sg-grd-z"))
+    if (!EQUAL(osExtension.c_str(), "sdat") &&
+        !EQUAL(osExtension.c_str(), "sg-grd-z"))
     {
         return nullptr;
     }
 
     CPLString osPath, osFullname, osName, osHDRFilename;
 
-    if (EQUAL(osExtension, "sg-grd-z") &&
+    if (EQUAL(osExtension.c_str(), "sg-grd-z") &&
         !STARTS_WITH(poOpenInfo->pszFilename, "/vsizip"))
     {
         osPath = "/vsizip/{";
@@ -448,7 +436,7 @@ GDALDataset *SAGADataset::Open(GDALOpenInfo *poOpenInfo)
         CPLString file;
         for (int iFile = 0; filesinzip[iFile] != nullptr; iFile++)
         {
-            if (EQUAL(CPLGetExtension(filesinzip[iFile]), "sdat"))
+            if (EQUAL(CPLGetExtensionSafe(filesinzip[iFile]).c_str(), "sdat"))
             {
                 file = filesinzip[iFile];
                 break;
@@ -457,17 +445,19 @@ GDALDataset *SAGADataset::Open(GDALOpenInfo *poOpenInfo)
 
         CSLDestroy(filesinzip);
 
-        osFullname = CPLFormFilename(osPath, file, nullptr);
-        osName = CPLGetBasename(file);
-        osHDRFilename = CPLFormFilename(osPath, CPLGetBasename(file), "sgrd");
+        osFullname = CPLFormFilenameSafe(osPath, file, nullptr);
+        osName = CPLGetBasenameSafe(file);
+        osHDRFilename = CPLFormFilenameSafe(
+            osPath, CPLGetBasenameSafe(file).c_str(), "sgrd");
     }
     else
     {
         osFullname = poOpenInfo->pszFilename;
-        osPath = CPLGetPath(poOpenInfo->pszFilename);
-        osName = CPLGetBasename(poOpenInfo->pszFilename);
-        osHDRFilename = CPLFormCIFilename(
-            osPath, CPLGetBasename(poOpenInfo->pszFilename), "sgrd");
+        osPath = CPLGetPathSafe(poOpenInfo->pszFilename);
+        osName = CPLGetBasenameSafe(poOpenInfo->pszFilename);
+        osHDRFilename = CPLFormCIFilenameSafe(
+            osPath, CPLGetBasenameSafe(poOpenInfo->pszFilename).c_str(),
+            "sgrd");
     }
 
     VSILFILE *fp = VSIFOpenL(osHDRFilename, "r");
@@ -675,15 +665,16 @@ GDALDataset *SAGADataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for a .prj file.                                          */
     /* -------------------------------------------------------------------- */
-    const char *pszPrjFilename = CPLFormCIFilename(osPath, osName, "prj");
+    const std::string osPrjFilename =
+        CPLFormCIFilenameSafe(osPath, osName, "prj");
 
-    fp = VSIFOpenL(pszPrjFilename, "r");
+    fp = VSIFOpenL(osPrjFilename.c_str(), "r");
 
     if (fp != nullptr)
     {
         VSIFCloseL(fp);
 
-        char **papszLines = CSLLoad(pszPrjFilename);
+        char **papszLines = CSLLoad(osPrjFilename.c_str());
 
         poDS->m_oSRS.importFromESRI(papszLines);
 
@@ -703,42 +694,34 @@ GDALDataset *SAGADataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr SAGADataset::GetGeoTransform(double *padfGeoTransform)
+CPLErr SAGADataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    if (padfGeoTransform == nullptr)
-        return CE_Failure;
-
-    SAGARasterBand *poGRB = static_cast<SAGARasterBand *>(GetRasterBand(1));
+    const SAGARasterBand *poGRB =
+        cpl::down_cast<const SAGARasterBand *>(GetRasterBand(1));
 
     if (poGRB == nullptr)
     {
-        padfGeoTransform[0] = 0;
-        padfGeoTransform[1] = 1;
-        padfGeoTransform[2] = 0;
-        padfGeoTransform[3] = 0;
-        padfGeoTransform[4] = 0;
-        padfGeoTransform[5] = 1;
+        gt = GDALGeoTransform();
         return CE_Failure;
     }
 
     /* check if we have a PAM GeoTransform stored */
     CPLPushErrorHandler(CPLQuietErrorHandler);
-    CPLErr eErr = GDALPamDataset::GetGeoTransform(padfGeoTransform);
+    CPLErr eErr = GDALPamDataset::GetGeoTransform(gt);
     CPLPopErrorHandler();
 
     if (eErr == CE_None)
         return CE_None;
 
-    padfGeoTransform[1] = poGRB->m_Cellsize;
-    padfGeoTransform[5] = poGRB->m_Cellsize * -1.0;
-    padfGeoTransform[0] = poGRB->m_Xmin - poGRB->m_Cellsize / 2;
-    padfGeoTransform[3] = poGRB->m_Ymin +
-                          (nRasterYSize - 1) * poGRB->m_Cellsize +
-                          poGRB->m_Cellsize / 2;
+    gt[1] = poGRB->m_Cellsize;
+    gt[5] = poGRB->m_Cellsize * -1.0;
+    gt[0] = poGRB->m_Xmin - poGRB->m_Cellsize / 2;
+    gt[3] = poGRB->m_Ymin + (nRasterYSize - 1) * poGRB->m_Cellsize +
+            poGRB->m_Cellsize / 2;
 
     /* tilt/rotation is not supported by SAGA grids */
-    padfGeoTransform[4] = 0.0;
-    padfGeoTransform[2] = 0.0;
+    gt[4] = 0.0;
+    gt[2] = 0.0;
 
     return CE_None;
 }
@@ -747,7 +730,7 @@ CPLErr SAGADataset::GetGeoTransform(double *padfGeoTransform)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr SAGADataset::SetGeoTransform(double *padfGeoTransform)
+CPLErr SAGADataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
 
     if (eAccess == GA_ReadOnly)
@@ -759,10 +742,10 @@ CPLErr SAGADataset::SetGeoTransform(double *padfGeoTransform)
 
     SAGARasterBand *poGRB = static_cast<SAGARasterBand *>(GetRasterBand(1));
 
-    if (poGRB == nullptr || padfGeoTransform == nullptr)
+    if (poGRB == nullptr)
         return CE_Failure;
 
-    if (padfGeoTransform[1] != padfGeoTransform[5] * -1.0)
+    if (gt[1] != gt[5] * -1.0)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "Unable to set GeoTransform, SAGA binary grids only support "
@@ -770,13 +753,12 @@ CPLErr SAGADataset::SetGeoTransform(double *padfGeoTransform)
         return CE_Failure;
     }
 
-    const double dfMinX = padfGeoTransform[0] + padfGeoTransform[1] / 2;
-    const double dfMinY =
-        padfGeoTransform[5] * (nRasterYSize - 0.5) + padfGeoTransform[3];
+    const double dfMinX = gt[0] + gt[1] / 2;
+    const double dfMinY = gt[5] * (nRasterYSize - 0.5) + gt[3];
 
     poGRB->m_Xmin = dfMinX;
     poGRB->m_Ymin = dfMinY;
-    poGRB->m_Cellsize = padfGeoTransform[1];
+    poGRB->m_Cellsize = gt[1];
     headerDirty = true;
 
     return CE_None;
@@ -786,9 +768,9 @@ CPLErr SAGADataset::SetGeoTransform(double *padfGeoTransform)
 /*                             WriteHeader()                            */
 /************************************************************************/
 
-CPLErr SAGADataset::WriteHeader(CPLString osHDRFilename, GDALDataType eType,
-                                int nXSize, int nYSize, double dfMinX,
-                                double dfMinY, double dfCellsize,
+CPLErr SAGADataset::WriteHeader(const CPLString &osHDRFilename,
+                                GDALDataType eType, int nXSize, int nYSize,
+                                double dfMinX, double dfMinY, double dfCellsize,
                                 double dfNoData, double dfZFactor,
                                 bool bTopToBottom)
 
@@ -802,7 +784,7 @@ CPLErr SAGADataset::WriteHeader(CPLString osHDRFilename, GDALDataType eType,
         return CE_Failure;
     }
 
-    VSIFPrintfL(fp, "NAME\t= %s\n", CPLGetBasename(osHDRFilename));
+    VSIFPrintfL(fp, "NAME\t= %s\n", CPLGetBasenameSafe(osHDRFilename).c_str());
     VSIFPrintfL(fp, "DESCRIPTION\t=\n");
     VSIFPrintfL(fp, "UNIT\t=\n");
     VSIFPrintfL(fp, "DATAFILE_OFFSET\t= 0\n");
@@ -946,7 +928,7 @@ GDALDataset *SAGADataset::Create(const char *pszFilename, int nXSize,
     void *abyNoData = &dfNoDataForAlignment;
     GDALCopyWords(&dfNoDataVal, GDT_Float64, 0, abyNoData, eType, 0, 1);
 
-    const CPLString osHdrFilename = CPLResetExtension(pszFilename, "sgrd");
+    const CPLString osHdrFilename = CPLResetExtensionSafe(pszFilename, "sgrd");
     CPLErr eErr = WriteHeader(osHdrFilename, eType, nXSize, nYSize, 0.0, 0.0,
                               1.0, dfNoDataVal, 1.0, false);
 
@@ -958,7 +940,7 @@ GDALDataset *SAGADataset::Create(const char *pszFilename, int nXSize,
 
     if (CPLFetchBool(papszParamList, "FILL_NODATA", true))
     {
-        const int nDataTypeSize = GDALGetDataTypeSize(eType) / 8;
+        const int nDataTypeSize = GDALGetDataTypeSizeBytes(eType);
         GByte *pabyNoDataBuf =
             reinterpret_cast<GByte *>(VSIMalloc2(nDataTypeSize, nXSize));
         if (pabyNoDataBuf == nullptr)
@@ -969,8 +951,8 @@ GDALDataset *SAGADataset::Create(const char *pszFilename, int nXSize,
 
         for (int iCol = 0; iCol < nXSize; iCol++)
         {
-            memcpy(pabyNoDataBuf + iCol * nDataTypeSize, abyNoData,
-                   nDataTypeSize);
+            memcpy(pabyNoDataBuf + static_cast<size_t>(iCol) * nDataTypeSize,
+                   abyNoData, nDataTypeSize);
         }
 
         for (int iRow = 0; iRow < nYSize; iRow++)
@@ -1063,10 +1045,9 @@ GDALDataset *SAGADataset::CreateCopy(const char *pszFilename,
         return nullptr;
     }
 
-    double adfGeoTransform[6];
-
-    poSrcDS->GetGeoTransform(adfGeoTransform);
-    poDstDS->SetGeoTransform(adfGeoTransform);
+    GDALGeoTransform gt;
+    if (poSrcDS->GetGeoTransform(gt) == CE_None)
+        poDstDS->SetGeoTransform(gt);
 
     poDstDS->SetProjection(poSrcDS->GetProjectionRef());
 

@@ -8,23 +8,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // Copyright (c) 2006, Mateusz Loskot <mateusz@loskot.net>
 /*
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_unit_test.h"
@@ -281,6 +265,42 @@ TEST_F(test_ogr_geos, OGR_G_Union)
 
     // Compare operation result against expected geometry
     EXPECT_TRUE(CheckEqualGeometries(g3_, expect, 0.0001));
+
+    OGR_G_DestroyGeometry(expect);
+}
+
+// Test OGR_G_UnaryUnion function
+TEST_F(test_ogr_geos, OGR_G_UnaryUnion)
+{
+    char *wkt = const_cast<char *>("GEOMETRYCOLLECTION(POINT(0.5 0.5),"
+                                   "POLYGON((0 0,0 1,1 1,1 0,0 0)),"
+                                   "POLYGON((1 0,1 1,2 1,2 0,1 0)))");
+    err_ = OGR_G_CreateFromWkt(&wkt, nullptr, &g1_);
+
+    g3_ = OGR_G_UnaryUnion(g1_);
+    ASSERT_TRUE(nullptr != g3_);
+
+    OGRGeometryH expect = nullptr;
+    char *wktExpect =
+        const_cast<char *>("POLYGON ((0 1,1 1,2 1,2 0,1 0,0 0,0 1))");
+    err_ = OGR_G_CreateFromWkt(&wktExpect, nullptr, &expect);
+    ASSERT_EQ(OGRERR_NONE, err_);
+    ASSERT_TRUE(nullptr != expect);
+
+    OGREnvelope sEnvelopeIn;
+    OGREnvelope sEnvelopeOut;
+    OGR_G_GetEnvelope(g1_, &sEnvelopeIn);
+    OGR_G_GetEnvelope(g3_, &sEnvelopeOut);
+
+    // CheckEqualGeometries() doesn't work with GEOS 3.6 with the above
+    // expected polygon, because of the order of the nodes, and for some
+    // reason OGR_G_Normalize() in CheckEqualGeometries() doesn't fix this,
+    // so just fallback to bounding box and area comparison
+    EXPECT_EQ(sEnvelopeIn.MinX, sEnvelopeOut.MinX);
+    EXPECT_EQ(sEnvelopeIn.MinY, sEnvelopeOut.MinY);
+    EXPECT_EQ(sEnvelopeIn.MaxX, sEnvelopeOut.MaxX);
+    EXPECT_EQ(sEnvelopeIn.MaxY, sEnvelopeOut.MaxY);
+    EXPECT_EQ(OGR_G_Area(g1_), OGR_G_Area(g3_));
 
     OGR_G_DestroyGeometry(expect);
 }

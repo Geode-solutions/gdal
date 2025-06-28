@@ -22,7 +22,7 @@ The build environment has the following dependencies:
 * nmake / Visual Studio
 * SWIG 3/4
 
-.. note:: The `GDAL test scripts <https://github.com/OSGeo/gdal/blob/master/.github/workflows/windows_build.yml>`__ use VS 2019 (MSVC Ver 1920) so it would make sense to use the same versions.
+.. note:: The GDAL test scripts :source_file:`.github/workflows/windows_build.yml` use VS 2019 (MSVC Ver 1920) so it would make sense to use the same versions.
 
 .. note:: `SWIG <http://www.swig.org/>`__ is used to build the API bindings. The GDAL test scripts use version 3 and the conda build use version 4. Both Work.
 
@@ -84,7 +84,7 @@ To test the compiled binaries, you can use:
 
     nmake /f makefile.vc test`
 
-This command will invoke some of the sample applications. 
+This command will invoke some of the sample applications.
 
 .. note:: For the tests to work the location of the proj and gdal DLLs should be available in the PATH.
 
@@ -93,7 +93,7 @@ Using MONO on Windows
 
 If you have the Windows version of the MONO package installed you can compile the C# code using the MONO compiler. In this case uncomment the following entry in csharp.opt:
 
-:program:`MONO = YES` 
+:program:`MONO = YES`
 
 .. note:: mcs.exe must be in the PATH.
 
@@ -165,7 +165,7 @@ To test the compiled binaries, you can use:
 
     nmake test
 
-This command will invoke some of the sample applications. 
+This command will invoke some of the sample applications.
 
 .. note:: For the tests to work the location of the proj and gdal libraries should be available in the PATH.
 
@@ -179,8 +179,4 @@ To run one of the prebuilt executables - you can run them with Mono as follows :
 :program:`mono GDALInfo.exe`
 
 Both the managed libraries (i.e. the DLLs) and the unmanaged libraries must be available to Mono.
-This is in more detail in `the Mono documentation <https://www.mono-project.com/docs/advanced/pinvoke/>`__ 
-
-.. note:: This document was amended from the previous version at `https://trac.osgeo.org/gdal/wiki/GdalOgrCsharpCompile <https://trac.osgeo.org/gdal/wiki/GdalOgrCsharpCompile>`__
-
-
+This is in more detail in `the Mono documentation <https://www.mono-project.com/docs/advanced/pinvoke/>`__

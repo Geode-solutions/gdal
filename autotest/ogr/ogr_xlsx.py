@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for OGR XLSX driver.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -50,6 +33,7 @@ def ogr_xlsx_check(ds):
 
     lyr = ds.GetLayer(0)
     assert lyr.GetName() == "Feuille1", "bad layer name"
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
 
     assert lyr.GetGeomType() == ogr.wkbNone, "bad layer geometry type"
 
@@ -58,6 +42,8 @@ def ogr_xlsx_check(ds):
     assert lyr.GetFeatureCount() == 26
 
     assert lyr.TestCapability("foo") == 0
+
+    assert lyr.TestCapability(ogr.OLCStringsAsUTF8) == 1
 
     lyr = ds.GetLayer(6)
     assert lyr.GetName() == "Feuille7", "bad layer name"
@@ -120,14 +106,25 @@ def test_ogr_xlsx_1():
 
 def test_ogr_xlsx_2():
 
-    gdal.SetConfigOption("OGR_XLSX_HEADERS", "DISABLE")
-    ds = ogr.Open("data/xlsx/test.xlsx")
+    with gdal.config_option("OGR_XLSX_HEADERS", "DISABLE"):
+        ds = ogr.Open("data/xlsx/test.xlsx")
+
+        lyr = ds.GetLayerByName("Feuille7")
+
+        assert lyr.GetFeatureCount() == 3
+
+
+###############################################################################
+# Test HEADERS = DISABLE open option
+
+
+def test_ogr_xlsx_headers_open_option():
+
+    ds = gdal.OpenEx("data/xlsx/test.xlsx", open_options=["HEADERS=DISABLE"])
 
     lyr = ds.GetLayerByName("Feuille7")
 
     assert lyr.GetFeatureCount() == 3
-
-    gdal.SetConfigOption("OGR_XLSX_HEADERS", None)
 
 
 ###############################################################################
@@ -136,14 +133,25 @@ def test_ogr_xlsx_2():
 
 def test_ogr_xlsx_3():
 
-    gdal.SetConfigOption("OGR_XLSX_FIELD_TYPES", "STRING")
-    ds = ogr.Open("data/xlsx/test.xlsx")
+    with gdal.config_option("OGR_XLSX_FIELD_TYPES", "STRING"):
+        ds = ogr.Open("data/xlsx/test.xlsx")
+
+        lyr = ds.GetLayerByName("Feuille7")
+
+        assert lyr.GetLayerDefn().GetFieldDefn(1).GetType() == ogr.OFTString
+
+
+###############################################################################
+# Test FIELD_TYPES = STRING open option
+
+
+def test_ogr_xlsx_field_types_open_option():
+
+    ds = gdal.OpenEx("data/xlsx/test.xlsx", open_options=["FIELD_TYPES=STRING"])
 
     lyr = ds.GetLayerByName("Feuille7")
 
     assert lyr.GetLayerDefn().GetFieldDefn(1).GetType() == ogr.OFTString
-
-    gdal.SetConfigOption("OGR_XLSX_FIELD_TYPES", None)
 
 
 ###############################################################################
@@ -165,6 +173,28 @@ def test_ogr_xlsx_4():
 
 
 ###############################################################################
+# Run test_ogrsf
+
+
+def test_ogr_xlsx_test_ogrsf_update(tmp_path):
+
+    import test_cli_utilities
+
+    if test_cli_utilities.get_test_ogrsf_path() is None:
+        pytest.skip()
+
+    filename = str(tmp_path / "out.xlsx")
+    gdal.VectorTranslate(filename, "data/poly.shp", format="XLSX")
+
+    ret = gdaltest.runexternal(
+        test_cli_utilities.get_test_ogrsf_path() + f" {filename}"
+    )
+
+    assert "INFO" in ret
+    assert "ERROR" not in ret
+
+
+###############################################################################
 # Test write support
 
 
@@ -181,12 +211,10 @@ def test_ogr_xlsx_5():
     )
 
     ds = ogr.Open("tmp/test.xlsx")
-    ret = ogr_xlsx_check(ds)
+    ogr_xlsx_check(ds)
     ds = None
 
     os.unlink("tmp/test.xlsx")
-
-    return ret
 
 
 ###############################################################################
@@ -196,22 +224,20 @@ def test_ogr_xlsx_5():
 def test_ogr_xlsx_6():
 
     # In this dataset the column titles are not recognised by default.
-    gdal.SetConfigOption("OGR_XLSX_HEADERS", "FORCE")
-    ds = ogr.Open("data/xlsx/inlineStr.xlsx")
+    with gdal.config_option("OGR_XLSX_HEADERS", "FORCE"):
+        ds = ogr.Open("data/xlsx/inlineStr.xlsx")
 
-    lyr = ds.GetLayerByName("inlineStr")
+        lyr = ds.GetLayerByName("inlineStr")
 
-    assert lyr.GetFeatureCount() == 1
+        assert lyr.GetFeatureCount() == 1
 
-    lyr.ResetReading()
-    feat = lyr.GetNextFeature()
-    assert feat.Bl_District_t == "text6", "Did not get expected value(1)"
+        lyr.ResetReading()
+        feat = lyr.GetNextFeature()
+        assert feat.Bl_District_t == "text6", "Did not get expected value(1)"
 
-    assert float(feat.GetField("Lat")) == pytest.approx(
-        23.6247122, abs=0.00001
-    ), "Did not get expected value(2)"
-
-    gdal.SetConfigOption("OGR_XLSX_HEADERS", None)
+        assert float(feat.GetField("Lat")) == pytest.approx(
+            23.6247122, abs=0.00001
+        ), "Did not get expected value(2)"
 
 
 ###############################################################################
@@ -220,7 +246,8 @@ def test_ogr_xlsx_6():
 
 def test_ogr_xlsx_7():
 
-    gdal.Unlink("tmp/ogr_xlsx_7.xlsx")
+    if os.path.exists("tmp/ogr_xlsx_7.xlsx"):
+        gdal.Unlink("tmp/ogr_xlsx_7.xlsx")
     shutil.copy("data/xlsx/test.xlsx", "tmp/ogr_xlsx_7.xlsx")
 
     ds = gdal.OpenEx("tmp/ogr_xlsx_7.xlsx", gdal.OF_VECTOR | gdal.OF_UPDATE)
@@ -258,6 +285,8 @@ def test_ogr_xlsx_8():
 
     ds = ogr.GetDriverByName("XLSX").CreateDataSource("/vsimem/ogr_xlsx_8.xlsx")
     lyr = ds.CreateLayer("foo")
+    assert lyr.GetDataset().GetDescription() == ds.GetDescription()
+    assert lyr.TestCapability(ogr.OLCStringsAsUTF8) == 1
     for i in range(30):
         lyr.CreateField(ogr.FieldDefn("Field%d" % (i + 1)))
     f = ogr.Feature(lyr.GetLayerDefn())
@@ -382,7 +411,6 @@ def test_ogr_xlsx_12():
 
 def test_ogr_xlsx_13():
 
-    gdal.SetConfigOption("OGR_XLSX_FIELD_TYPES", None)
     ds = ogr.Open("data/xlsx/test_missing_row1_data.xlsx")
 
     lyr = ds.GetLayer(0)
@@ -429,7 +457,6 @@ def test_ogr_xlsx_13():
 
 def test_ogr_xlsx_14():
 
-    gdal.SetConfigOption("OGR_XLSX_FIELD_TYPES", None)
     ds = ogr.Open("data/xlsx/test_empty_last_field.xlsx")
 
     lyr = ds.GetLayer(0)
@@ -576,3 +603,61 @@ def test_ogr_xlsx_read_xlsx_prefix():
         tmpfilename, open("data/xlsx/cells_with_inline_formatting.xlsx", "rb").read()
     ):
         assert ogr.Open("XLSX:" + tmpfilename) is not None
+
+
+###############################################################################
+# Test writing sheets without rows
+
+
+def test_ogr_xlsx_write_sheet_without_row():
+
+    tmpfilename = "/vsimem/temp.xlsx"
+    ds = ogr.GetDriverByName("XLSX").CreateDataSource(tmpfilename)
+    lyr = ds.CreateLayer("L1")
+    lyr.CreateField(ogr.FieldDefn("foo"))
+    lyr = ds.CreateLayer("L2")
+    lyr.CreateField(ogr.FieldDefn("bar"))
+    ds = None
+    ds = ogr.Open(tmpfilename, update=1)
+    assert ds.GetLayerCount() == 2
+    lyr = ds.CreateLayer("L3")
+    lyr.CreateField(ogr.FieldDefn("baz", ogr.OFTInteger))
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f["baz"] = 123
+    lyr.CreateFeature(f)
+    ds = None
+    ds = ogr.Open(tmpfilename)
+    assert ds.GetLayerCount() == 3
+    assert ds.GetLayer(0).GetFeatureCount() == 0
+    assert ds.GetLayer(1).GetFeatureCount() == 0
+    assert ds.GetLayer(2).GetFeatureCount() == 1
+    ds = None
+    gdal.Unlink(tmpfilename)
+
+
+###############################################################################
+# Test reading a XLSX file with XML element prefixes
+
+
+def test_ogr_xlsx_read_xml_prefix():
+
+    ds = ogr.Open("data/xlsx/with_xml_prefix.xlsx")
+    lyr = ds.GetLayer(0)
+    assert lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "Col1"
+    assert lyr.GetLayerDefn().GetFieldDefn(1).GetName() == "Col2"
+    f = lyr.GetNextFeature()
+    assert f["Col1"] == "foo"
+    assert f["Col2"] == "bar"
+
+
+###############################################################################
+# Test reading a XLSX file with <row> without "r" attribute
+
+
+def test_ogr_xlsx_read_row_without_r_attribute():
+
+    ds = ogr.Open("data/xlsx/row_without_r_attribute.xlsx")
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    assert f["ID"] == 1
+    assert f["NAME"] == "TEST123"

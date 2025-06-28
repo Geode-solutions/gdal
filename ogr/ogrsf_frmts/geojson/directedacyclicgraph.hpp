@@ -7,24 +7,11 @@
  ******************************************************************************
  * Copyright (c) 2021, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
+
+#ifndef DIRECTEDACYCLICGRAPH_INCLUDED_H
+#define DIRECTEDACYCLICGRAPH_INCLUDED_H
 
 #include <algorithm>
 #include <list>
@@ -42,12 +29,12 @@ namespace gdal
 // See https://en.wikipedia.org/wiki/Directed_acyclic_graph
 template <class T, class V = std::string> class DirectedAcyclicGraph
 {
-    std::set<T> nodes;
+    std::set<T> nodes{};
     std::map<T, std::set<T>>
-        incomingNodes;  // incomingNodes[j][i] means an edge from i to j
+        incomingNodes{};  // incomingNodes[j][i] means an edge from i to j
     std::map<T, std::set<T>>
-        outgoingNodes;  // outgoingNodes[i][j] means an edge from i to j
-    std::map<T, V> names;
+        outgoingNodes{};  // outgoingNodes[i][j] means an edge from i to j
+    std::map<T, V> names{};
 
   public:
     DirectedAcyclicGraph() = default;
@@ -59,11 +46,13 @@ template <class T, class V = std::string> class DirectedAcyclicGraph
         outgoingNodes.clear();
         names.clear();
     }
+
     void addNode(const T &i, const V &s)
     {
         nodes.insert(i);
         names[i] = s;
     }
+
     void removeNode(const T &i);
     const char *addEdge(const T &i, const T &j);
     const char *removeEdge(const T &i, const T &j);
@@ -129,11 +118,11 @@ const char *DirectedAcyclicGraph<T, V>::addEdge(const T &i, const T &j)
         return "already inserted edge";
     }
 
-    if (nodes.find(i) == nodes.end())
+    if (!cpl::contains(nodes, i))
     {
         return "node i unknown";
     }
-    if (nodes.find(j) == nodes.end())
+    if (!cpl::contains(nodes, j))
     {
         return "node j unknown";
     }
@@ -190,7 +179,7 @@ bool DirectedAcyclicGraph<T, V>::isTherePathFromTo(const T &i, const T &j) const
         {
             for (const T &k : iter->second)
             {
-                if (plannedForVisit.find(k) == plannedForVisit.end())
+                if (!cpl::contains(plannedForVisit, k))
                 {
                     plannedForVisit.insert(k);
                     toVisit.push(k);
@@ -207,7 +196,7 @@ std::vector<T> DirectedAcyclicGraph<T, V>::findStartingNodes() const
     std::vector<T> ret;
     for (const auto &i : nodes)
     {
-        if (incomingNodes.find(i) == incomingNodes.end())
+        if (!cpl::contains(incomingNodes, i))
             ret.emplace_back(i);
     }
     return ret;
@@ -242,13 +231,13 @@ std::vector<T> DirectedAcyclicGraph<T, V>::getTopologicalOrdering()
         if (iter != outgoingNodes.end())
         {
             // Need to take a copy as we remove edges during iteration
-            const auto myOutgoingNodes = iter->second;
+            const std::set<T> myOutgoingNodes = iter->second;
             for (const T &m : myOutgoingNodes)
             {
                 const char *retRemoveEdge = removeEdge(n, m);
                 (void)retRemoveEdge;
                 assert(retRemoveEdge == nullptr);
-                if (incomingNodes.find(m) == incomingNodes.end())
+                if (!cpl::contains(incomingNodes, m))
                 {
                     S.insert(m);
                 }
@@ -264,3 +253,5 @@ std::vector<T> DirectedAcyclicGraph<T, V>::getTopologicalOrdering()
 }
 
 }  // namespace gdal
+
+#endif  // DIRECTEDACYCLICGRAPH_INCLUDED_H

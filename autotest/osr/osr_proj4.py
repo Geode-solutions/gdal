@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test some PROJ.4 specific translation issues.
@@ -12,23 +11,7 @@
 # Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
 # Copyright (c) 2014, Kyle Shannon <kyle at pobox dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -64,16 +47,11 @@ def test_osr_proj4_2():
 
     srs = osr.SpatialReference()
     srs.ImportFromProj4(
-        "+proj=lcc +x_0=0.6096012192024384e+06 +y_0=0 +lon_0=90dw +lat_0=42dn +lat_1=44d4'n +lat_2=42d44'n +a=6378206.400000 +rf=294.978698 +nadgrids=conus,ntv1_can.dat +units=m"
+        "+proj=lcc +x_0=0.6096012192024384e+06 +y_0=0 +lon_0=90dw +lat_0=42dn +lat_1=44d4'n +lat_2=42d44'n +a=6378206.400000 +rf=294.978698 +units=m"
     )
-
-    assert srs.GetProjParm(osr.SRS_PP_FALSE_EASTING) == pytest.approx(
-        609601.219, abs=0.0005
-    ), "Parsing exponents not supported?"
-
-    if srs.Validate() != 0:
-        print(srs.ExportToPrettyWkt())
-        pytest.fail("does not validate")
+    assert srs.ExportToProj4().startswith(
+        "+proj=lcc +lat_0=42 +lon_0=-90 +lat_1=44.0666666666667 +lat_2=42.7333333333333 +x_0=609601.219202438"
+    )
 
 
 ###############################################################################
@@ -88,18 +66,10 @@ def test_osr_proj4_4():
     srs.SetFromUserInput("+proj=utm +zone=11 +datum=WGS84")
     srs.SetAttrValue("PROJCS|PROJECTION", "FakeTransverseMercator")
 
-    try:
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
+    with pytest.raises(Exception):
         srs.ExportToProj4()
-        gdal.PopErrorHandler()
 
-    except RuntimeError:
-        gdal.PopErrorHandler()
-
-    if gdal.GetLastErrorMsg().find("Unsupported conversion method") != -1:
-        return
-
-    pytest.fail("unknown srs not handled properly")
+    assert "Unsupported conversion method" in gdal.GetLastErrorMsg()
 
 
 ###############################################################################
@@ -122,10 +92,7 @@ def test_osr_proj4_5():
 
     p4 = srs.ExportToProj4()
 
-    if p4 != input_p4:
-        gdaltest.post_reason("round trip via PROJ.4 damaged srs?")
-        print(p4)
-        return "fail"
+    assert p4 == input_p4, "round trip via PROJ.4 damaged srs?"
 
 
 ###############################################################################
@@ -240,6 +207,11 @@ def test_osr_proj4_10():
     # PROJ >= 9.0.1 returns 'Unknown based on WGS84 ellipsoid using towgs84=0,0,0,0,0,0,0'
     wkt = wkt.replace(
         "Unknown based on WGS84 ellipsoid using towgs84=0,0,0,0,0,0,0",
+        "Unknown_based_on_WGS84_ellipsoid",
+    )
+    # PROJ >= 9.2.1 returns the below
+    wkt = wkt.replace(
+        "Unknown based on WGS 84 ellipsoid using towgs84=0,0,0,0,0,0,0",
         "Unknown_based_on_WGS84_ellipsoid",
     )
 
@@ -393,17 +365,10 @@ def test_osr_proj4_13():
         "+proj=longlat +ellps=wgs72 +towgs84=3",
     ]
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-
     for proj4str in proj4strlist:
         srs = osr.SpatialReference()
-        gdal.ErrorReset()
-        if srs.ImportFromProj4(proj4str) == 0 and gdal.GetLastErrorMsg() == "":
-            gdal.PopErrorHandler()
-            print(proj4str)
-            pytest.fail()
-
-    gdal.PopErrorHandler()
+        with pytest.raises(Exception):
+            srs.ImportFromProj4(proj4str)
 
 
 ###############################################################################
@@ -811,9 +776,8 @@ def test_osr_proj4_error_cases_export_mercator():
     srs.SetFromUserInput("WGS84")
     srs.SetMercator(30.0, 0.0, 0.99, 0.0, 0.0)
     srs.SetLinearUnits("metre", 1)
-    with gdaltest.error_handler():
-        got = srs.ExportToProj4()
-    assert got == ""
+    with pytest.raises(Exception):
+        srs.ExportToProj4()
 
     # latitude_of_origin != 0.0
 
@@ -821,12 +785,10 @@ def test_osr_proj4_error_cases_export_mercator():
     srs.SetFromUserInput("WGS84")
     srs.SetMercator2SP(0.0, 40.0, 0.0, 0.0, 0.0)
     srs.SetLinearUnits("metre", 1)
-    with gdaltest.error_handler():
-        got = srs.ExportToProj4()
-    assert got == ""
+    with pytest.raises(Exception):
+        srs.ExportToProj4()
 
 
-@gdaltest.require_proj_version(6, 2)
 def test_osr_unknown_member_id_in_datum_ensemble():
 
     # Test workaround fix for https://github.com/OSGeo/PROJ/pull/3221
@@ -838,5 +800,5 @@ def test_osr_unknown_member_id_in_datum_ensemble():
     # Test that it doesn't crash on invalid datum_ensemble (test case for https://bugs.chromium.org/p/oss-fuzz/issues/detail?id=49204)
     projjson = '{"type":"GeographicCRS","name":"WGS 84","datum_ensemble":{"name":"World Geodetic System 1984 ensemble","members":[null],"ellipsoid":{"name":"WGS 84","semi_major_axis":6378137,"inverse_flattening":298.257223563},"accuracy":"2.0","id":{"authority":"EPSG","code":6326}},"coordinate_system":{"subtype":"ellipsoidal","axis":[{"name":"Geodetic latitude","abbreviation":"Lat","direction":"north","unit":"degree"},{"name":"Geodetic longitude","abbreviation":"Lon","direction":"east","unit":"degree"}]}}'
     sr = osr.SpatialReference()
-    with gdaltest.error_handler():
+    with pytest.raises(Exception):
         sr.SetFromUserInput(projjson)

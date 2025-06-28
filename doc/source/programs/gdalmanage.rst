@@ -6,7 +6,7 @@ gdalmanage
 
 .. only:: html
 
-    Identify, delete, rename and copy raster data files.
+    Identify, delete, rename and copy dataset files.
 
 .. Index:: gdalmanage
 
@@ -15,32 +15,37 @@ Synopsis
 
 .. code-block::
 
-    Usage: gdalmanage mode [-r] [-u] [-f format]
-                      datasetname [newdatasetname]
+    Usage: gdalmanage [--help] [--help-general]
+                      <mode> [-r] [-fr] [-u] [-f <format>]
+                      <datasetname> [<newdatasetname>]
 
 Description
 -----------
 
-The :program:`gdalmanage` program can perform various operations on raster data
-files, depending on the chosen *mode*. This includes identifying raster
-data types and deleting, renaming or copying the files.
+The :program:`gdalmanage` program can perform various operations on dataset
+files, depending on the chosen *mode*. This includes identifying dataset
+types and deleting, renaming or copying the files.
 
 .. option:: <mode>
 
     Mode of operation
 
     **identify** *<datasetname>*:
-        List data format of file.
+        List data format of file(s).
     **copy** *<datasetname>* *<newdatasetname>*:
-        Create a copy of the raster file with a new name.
+        Create a copy of the dataset file with a new name.
     **rename** *<datasetname>* *<newdatasetname>*:
-        Change the name of the raster file.
+        Change the name of the dataset file.
     **delete** *<datasetname>*:
-        Delete raster file.
+        Delete dataset file(s).
 
 .. option:: -r
 
-    Recursively scan files/folders for raster files.
+    Recursively scan files/folders for dataset files.
+
+.. option:: -fr
+
+    Recursively scan folders for dataset files, forcing recursion in folders recognized as valid formats.
 
 .. option:: -u
 
@@ -48,12 +53,12 @@ data types and deleting, renaming or copying the files.
 
 .. option:: -f <format>
 
-    Specify format of raster file if unknown by the application. Uses
+    Specify format of dataset file if unknown by the application. Uses
     short data format name (e.g. *GTiff*).
 
 .. option:: <datasetname>
 
-    Raster file to operate on.
+    Raster file to operate on. With **identify** may be repeated for multiple files.
 
 .. option:: <newdatasetname>
 
@@ -67,7 +72,7 @@ Examples
 Using identify mode
 ~~~~~~~~~~~~~~~~~~~
 
-Report the data format of the raster file by using the *identify* mode
+Report the data format of the dataset file by using the *identify* mode
 and specifying a data file name:
 
 .. code-block::
@@ -95,7 +100,7 @@ Recursive mode will scan subfolders and report the data format:
 Using copy mode
 ~~~~~~~~~~~~~~~
 
-Copy the raster data:
+Copy the dataset:
 
 .. code-block::
 
@@ -104,7 +109,7 @@ Copy the raster data:
 Using rename mode
 ~~~~~~~~~~~~~~~~~
 
-Rename raster data:
+Rename dataset:
 
 .. code-block::
 
@@ -113,7 +118,7 @@ Rename raster data:
 Using delete mode
 ~~~~~~~~~~~~~~~~~
 
-Delete the raster data:
+Delete the dataset:
 
 .. code-block::
 

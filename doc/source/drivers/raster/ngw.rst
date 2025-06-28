@@ -47,6 +47,12 @@ NextGIS Web supports several raster types:
 -  WMS layer
 -  WMS Service
 -  Web map as combination of raster and vector styles
+-  Base map resource
+-  QML Raster style
+-  QML Vector style
+-  Raster layer
+-  Raster mosaic
+-  Tileset
 
 Each NextGIS Web raster layer can have one or more raster styles.
 Each NextGIS Web vector or PostGIS layer can have one or more vector
@@ -54,9 +60,10 @@ styles (QGIS qml or MapServer xml).
 WMS layers from external WMS service have no styles.
 WMS Service is usual WMS protocol implementation.
 
-NGW driver supports only raster and vector styles and WMS layers.
-You can get raster data as tiles or image (only tiles are supported
-now).
+NGW driver supports raster, vector, QML raster, QML vector styles, web map, 
+base map layer, WMS layers and raster layer as COG.
+You can get raster data as tiles or image or COG (only tiles and COG are 
+supported now).
 
 The driver supports read and copy from existing source dataset
 operations on rasters.
@@ -82,19 +89,53 @@ will be a separate raster.
 Configuration options
 ---------------------
 
+|about-config-options|
 The following configuration options are available:
 
--  **NGW_USERPWD**: User name and password separated with colon.
-   Optional and can be set using open options.
--  **NGW_CACHE_EXPIRES**: Time in seconds cached files will stay valid.
-   If cached file expires it is deleted when maximum size of cache is
-   reached. Also expired file can be overwritten by the new one from
-   web. Defaults to 604800 (7 days).
--  **NGW_CACHE_MAX_SIZE**: The cache maximum size in bytes. If cache
-   reached maximum size, expired cached files will be deleted. Defaults
-   to 67108864 (64Mb).
--  **NGW_JSON_DEPTH**: The depth of json response that can be parsed. If
-   depth is greater than this value, parse error occurs.
+-  .. config:: NGW_USERPWD
+
+      User name and password separated with colon.
+      Optional and can be set using open options.
+
+-  .. config:: NGW_CACHE_EXPIRES
+      :choices: <seconds>
+      :default: 604800 (7 days)
+
+      Time in seconds cached files will stay valid.
+      If cached file expires it is deleted when maximum size of cache is
+      reached. Also expired file can be overwritten by the new one from
+      web.
+
+-  .. config:: NGW_CACHE_MAX_SIZE
+      :choices: <bytes>
+      :default: 67108864 (64 Mb)
+
+      The cache maximum size in bytes. If cache
+      reached maximum size, expired cached files will be deleted.
+
+-  .. config:: NGW_JSON_DEPTH
+
+      The depth of json response that can be parsed. If
+      depth is greater than this value, parse error occurs.
+
+-  .. config:: NGW_CONNECTTIMEOUT
+
+      Maximum delay for the connection to be established before being aborted in 
+      seconds.
+
+-  .. config:: NGW_TIMEOUT
+
+      Maximum delay for the whole request to complete before being aborted in
+      seconds.
+
+-  .. config:: NGW_MAX_RETRY
+
+      Maximum number of retry attempts if a 429, 502, 503 or 504 HTTP error
+      occurs.
+
+-  .. config:: NGW_RETRY_DELAY
+
+      Number of seconds between retry attempts.
 
 Authentication
 --------------
@@ -107,18 +148,53 @@ options.
 Open options
 ------------
 
+|about-open-options|
 The following open options are available:
 
--  USERPWD - Username and password, separated by colon.
--  CACHE_EXPIRES=604800 - Time in seconds cached files will stay valid.
-   If cached file expires it is deleted when maximum size of cache is
-   reached. Also expired file can be overwritten by the new one from
-   web. Defaults to 604800 (7 days).
--  CACHE_MAX_SIZE=67108864 - The cache maximum size in bytes. If cache
-   reached maximum size, expired cached files will be deleted. Defaults
-   to 67108864 (64Mb).
--  JSON_DEPTH=32 - The depth of json response that can be parsed. If
-   depth is greater than this value, parse error occurs.
+-  .. oo:: USERPWD
+
+      Username and password, separated by colon.
+
+-  .. oo:: CACHE_EXPIRES
+      :choices: <seconds>
+      :default: 604800 (7 days)
+
+      Time in seconds cached files will stay valid.
+      If cached file expires it is deleted when maximum size of cache is
+      reached. Also expired file can be overwritten by the new one from
+      web.
+
+-  .. oo:: CACHE_MAX_SIZE
+      :choices: <bytes>
+      :default: 67108864 (64 Mb)
+
+      The cache maximum size in bytes. If cache
+      reached maximum size, expired cached files will be deleted.
+-  .. oo:: JSON_DEPTH
+      :default: 32
+
+      The depth of json response that can be parsed. If
+      depth is greater than this value, parse error occurs.
+
+-  .. oo:: CONNECTTIMEOUT
+
+      Maximum delay for the connection to be established before being aborted in 
+      seconds.
+
+-  .. oo:: TIMEOUT
+
+      Maximum delay for the whole request to complete before being aborted in 
+      seconds.
+
+-  .. oo:: MAX_RETRY
+
+      Maximum number of retry attempts if a 429, 502, 503 or 504 HTTP error 
+      occurs.
+
+-  .. oo:: RETRY_DELAY
+
+      Number of seconds between retry attempts.
+
 
 Create copy options
 -------------------

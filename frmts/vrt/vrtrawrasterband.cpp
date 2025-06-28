@@ -8,23 +8,7 @@
  * Copyright (c) 2004, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -195,8 +179,8 @@ CPLErr VRTRawRasterBand::SetRawLink(const char *pszFilename,
     char *pszExpandedFilename = nullptr;
     if (pszVRTPath != nullptr && bRelativeToVRTIn)
     {
-        pszExpandedFilename =
-            CPLStrdup(CPLProjectRelativeFilename(pszVRTPath, pszFilename));
+        pszExpandedFilename = CPLStrdup(
+            CPLProjectRelativeFilenameSafe(pszVRTPath, pszFilename).c_str());
     }
     else
     {
@@ -274,10 +258,17 @@ CPLErr VRTRawRasterBand::SetRawLink(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding RawRasterBand.                           */
     /* -------------------------------------------------------------------- */
-    m_poRawRaster = new RawRasterBand(
-        reinterpret_cast<VSILFILE *>(fp), nImageOffset, nPixelOffset,
-        nLineOffset, GetRasterDataType(), eByteOrder, GetXSize(), GetYSize(),
-        RawRasterBand::OwnFP::NO);
+    m_poRawRaster =
+        RawRasterBand::Create(reinterpret_cast<VSILFILE *>(fp), nImageOffset,
+                              nPixelOffset, nLineOffset, GetRasterDataType(),
+                              eByteOrder, GetXSize(), GetYSize(),
+                              RawRasterBand::OwnFP::NO)
+            .release();
+    if (!m_poRawRaster)
+    {
+        CPLCloseShared(fp);
+        return CE_Failure;
+    }
 
     /* -------------------------------------------------------------------- */
     /*      Reset block size to match the raw raster.                       */
@@ -336,9 +327,9 @@ CPLVirtualMem *VRTRawRasterBand::GetVirtualMemAuto(GDALRWFlag eRWFlag,
 /*                              XMLInit()                               */
 /************************************************************************/
 
-CPLErr
-VRTRawRasterBand::XMLInit(CPLXMLNode *psTree, const char *pszVRTPath,
-                          std::map<CPLString, GDALDataset *> &oMapSharedSources)
+CPLErr VRTRawRasterBand::XMLInit(const CPLXMLNode *psTree,
+                                 const char *pszVRTPath,
+                                 VRTMapSharedResources &oMapSharedSources)
 
 {
     const CPLErr eErr =
@@ -422,7 +413,9 @@ VRTRawRasterBand::XMLInit(CPLXMLNode *psTree, const char *pszVRTPath,
 /*                           SerializeToXML()                           */
 /************************************************************************/
 
-CPLXMLNode *VRTRawRasterBand::SerializeToXML(const char *pszVRTPath)
+CPLXMLNode *VRTRawRasterBand::SerializeToXML(const char *pszVRTPath,
+                                             bool &bHasWarnedAboutRAMUsage,
+                                             size_t &nAccRAMUsage)
 
 {
 
@@ -437,7 +430,8 @@ CPLXMLNode *VRTRawRasterBand::SerializeToXML(const char *pszVRTPath)
         return nullptr;
     }
 
-    CPLXMLNode *psTree = VRTRasterBand::SerializeToXML(pszVRTPath);
+    CPLXMLNode *psTree = VRTRasterBand::SerializeToXML(
+        pszVRTPath, bHasWarnedAboutRAMUsage, nAccRAMUsage);
 
     /* -------------------------------------------------------------------- */
     /*      Set subclass.                                                   */
@@ -500,9 +494,9 @@ void VRTRawRasterBand::GetFileList(char ***ppapszFileList, int *pnSize,
     /* -------------------------------------------------------------------- */
     CPLString osSourceFilename;
     if (m_bRelativeToVRT && strlen(poDS->GetDescription()) > 0)
-        osSourceFilename =
-            CPLFormFilename(CPLGetDirname(poDS->GetDescription()),
-                            m_pszSourceFilename, nullptr);
+        osSourceFilename = CPLFormFilenameSafe(
+            CPLGetDirnameSafe(poDS->GetDescription()).c_str(),
+            m_pszSourceFilename, nullptr);
     else
         osSourceFilename = m_pszSourceFilename;
 

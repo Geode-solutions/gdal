@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test EOSAT FAST Format support.
@@ -10,29 +9,13 @@
 # Copyright (c) 2007, Mateusz Loskot <mateusz@loskot.net>
 # Copyright (c) 2008-2009, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
 import pytest
 
-from osgeo import gdal
+from osgeo import gdal, osr
 
 pytestmark = pytest.mark.require_driver("FAST")
 
@@ -48,18 +31,25 @@ def test_fast_2():
     tst = gdaltest.GDALTest(
         "fast", "fast/L71118038_03820020111_HPN.FST", 1, 60323, 0, 0, 5000, 1
     )
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
 # Verify metadata.
 
 
-def test_fast_3():
+@pytest.fixture()
+def fast_ds():
+    ds = gdal.Open("data/fast/L71118038_03820020111_HPN.FST")
 
-    gdaltest.fast_ds = gdal.Open("data/fast/L71118038_03820020111_HPN.FST")
-    ds = gdaltest.fast_ds
     assert ds is not None, "Missing test dataset"
+
+    return ds
+
+
+def test_fast_3(fast_ds):
+
+    ds = fast_ds
 
     md = ds.GetMetadata()
     assert md is not None, "Missing metadata in test dataset"
@@ -88,15 +78,9 @@ def test_fast_3():
 # Test geotransform data.
 
 
-def test_fast_4():
+def test_fast_4(fast_ds):
 
-    ds = gdaltest.fast_ds
-    assert ds is not None, "Missing test dataset"
-
-    gt = ds.GetGeoTransform()
-
-    gdaltest.fast_ds = None
-    ds = None
+    gt = fast_ds.GetGeoTransform()
 
     tolerance = 0.01
     assert (
@@ -144,7 +128,7 @@ def test_fast_5():
         PARAMETER["false_northing",10002288.3],
         UNIT["Meter",1]]"""
 
-    return tst.testOpen(check_gt=gt, check_prj=proj)
+    tst.testOpen(check_gt=gt, check_prj=proj)
 
 
 ###############################################################################
@@ -169,7 +153,7 @@ def test_fast_6():
     proj = """LOCAL_CS["GCTP projection number 22",
     UNIT["Meter",1]]"""
 
-    return tst.testOpen(check_gt=gt, check_prj=proj)
+    tst.testOpen(check_gt=gt, check_prj=proj)
 
 
 ###############################################################################
@@ -184,22 +168,11 @@ def test_fast_7():
     gt = (676565.09, 5, 0, 5348341.5, 0, -5)
 
     # Expected definition of the projection
-    proj = """PROJCS["UTM Zone 32, Northern Hemisphere",
-    GEOGCS["Unknown datum based upon the WGS 84 ellipsoid",
-        DATUM["Not specified (based on WGS 84 spheroid)",
-            SPHEROID["WGS 84",6378137,298.257223563,
-                AUTHORITY["EPSG","7030"]]],
-        PRIMEM["Greenwich",0],
-        UNIT["degree",0.0174532925199433]],
-    PROJECTION["Transverse_Mercator"],
-    PARAMETER["latitude_of_origin",0],
-    PARAMETER["central_meridian",9],
-    PARAMETER["scale_factor",0.9996],
-    PARAMETER["false_easting",500000],
-    PARAMETER["false_northing",0],
-    UNIT["Meter",1]]"""
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(32632)
+    proj = srs.ExportToWkt()
 
-    return tst.testOpen(check_gt=gt, check_prj=proj)
+    tst.testOpen(check_gt=gt, check_prj=proj)
 
 
 ###############################################################################
@@ -237,7 +210,7 @@ def test_fast_8():
     PARAMETER["false_northing",0],
     UNIT["Meter",1]]"""
 
-    return tst.testOpen(check_gt=gt, check_prj=proj)
+    tst.testOpen(check_gt=gt, check_prj=proj)
 
 
 ###############################################################################

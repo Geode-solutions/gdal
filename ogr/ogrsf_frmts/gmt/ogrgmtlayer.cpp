@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_gmt.h"
@@ -36,9 +20,11 @@
 /*                            OGRGmtLayer()                             */
 /************************************************************************/
 
-OGRGmtLayer::OGRGmtLayer(const char *pszFilename, VSILFILE *fp,
-                         const OGRSpatialReference *poSRS, int bUpdateIn)
-    : poFeatureDefn(nullptr), iNextFID(0), bUpdate(CPL_TO_BOOL(bUpdateIn)),
+OGRGmtLayer::OGRGmtLayer(GDALDataset *poDS, const char *pszFilename,
+                         VSILFILE *fp, const OGRSpatialReference *poSRS,
+                         int bUpdateIn)
+    : m_poDS(poDS), poFeatureDefn(nullptr), iNextFID(0),
+      bUpdate(CPL_TO_BOOL(bUpdateIn)),
       // Assume header complete in readonly mode.
       bHeaderComplete(CPL_TO_BOOL(!bUpdate)), bRegionComplete(false),
       nRegionOffset(0),
@@ -51,7 +37,7 @@ OGRGmtLayer::OGRGmtLayer(const char *pszFilename, VSILFILE *fp,
     /* -------------------------------------------------------------------- */
     /*      Create the feature definition                                   */
     /* -------------------------------------------------------------------- */
-    poFeatureDefn = new OGRFeatureDefn(CPLGetBasename(pszFilename));
+    poFeatureDefn = new OGRFeatureDefn(CPLGetBasenameSafe(pszFilename).c_str());
     SetDescription(poFeatureDefn->GetName());
     poFeatureDefn->Reference();
 
@@ -99,23 +85,23 @@ OGRGmtLayer::OGRGmtLayer(const char *pszFilename, VSILFILE *fp,
                     papszKeyedValues[iKey][1] != 0 &&
                     papszKeyedValues[iKey][2] != 0)
                 {
-                    CPLString osArg = papszKeyedValues[iKey] + 2;
+                    std::string osArg = papszKeyedValues[iKey] + 2;
                     if (osArg[0] == '"' && osArg.size() >= 2 &&
                         osArg.back() == '"')
                     {
                         osArg = osArg.substr(1, osArg.length() - 2);
                         char *pszArg = CPLUnescapeString(
-                            osArg, nullptr, CPLES_BackslashQuotable);
+                            osArg.c_str(), nullptr, CPLES_BackslashQuotable);
                         osArg = pszArg;
                         CPLFree(pszArg);
                     }
 
                     if (papszKeyedValues[iKey][1] == 'e')
-                        osEPSG = osArg;
+                        osEPSG = std::move(osArg);
                     if (papszKeyedValues[iKey][1] == 'p')
-                        osProj4 = osArg;
+                        osProj4 = std::move(osArg);
                     if (papszKeyedValues[iKey][1] == 'w')
-                        osWKT = osArg;
+                        osWKT = std::move(osArg);
                 }
             }
 
@@ -335,7 +321,8 @@ bool OGRGmtLayer::ReadLine()
             size_t iValEnd = i + 2;  // Used after for.
             for (; iValEnd < osLine.length(); iValEnd++)
             {
-                if (!bInQuotes && isspace((unsigned char)osLine[iValEnd]))
+                if (!bInQuotes &&
+                    isspace(static_cast<unsigned char>(osLine[iValEnd])))
                     break;
 
                 if (bInQuotes && iValEnd < osLine.length() - 1 &&
@@ -392,7 +379,7 @@ void OGRGmtLayer::ResetReading()
 bool OGRGmtLayer::ScanAheadForHole()
 
 {
-    const CPLString osSavedLine = osLine;
+    CPLString osSavedLine = osLine;
     const vsi_l_offset nSavedLocation = VSIFTellL(m_fp);
 
     while (ReadLine() && osLine[0] == '#')
@@ -402,7 +389,7 @@ bool OGRGmtLayer::ScanAheadForHole()
     }
 
     VSIFSeekL(m_fp, nSavedLocation, SEEK_SET);
-    osLine = osSavedLine;
+    osLine = std::move(osSavedLine);
 
     // We do not actually restore papszKeyedValues, but we
     // assume it does not matter since this method is only called
@@ -422,7 +409,7 @@ bool OGRGmtLayer::ScanAheadForHole()
 bool OGRGmtLayer::NextIsFeature()
 
 {
-    const CPLString osSavedLine = osLine;
+    CPLString osSavedLine = osLine;
     const vsi_l_offset nSavedLocation = VSIFTellL(m_fp);
     bool bReturn = false;
 
@@ -432,7 +419,7 @@ bool OGRGmtLayer::NextIsFeature()
         bReturn = true;
 
     VSIFSeekL(m_fp, nSavedLocation, SEEK_SET);
-    osLine = osSavedLine;
+    osLine = std::move(osSavedLine);
 
     // We do not actually restore papszKeyedValues, but we
     // assume it does not matter since this method is only called
@@ -972,7 +959,7 @@ OGRErr OGRGmtLayer::WriteGeometry(OGRGeometryH hGeom, bool bHaveAngle)
 }
 
 /************************************************************************/
-/*                             GetExtent()                              */
+/*                            IGetExtent()                              */
 /*                                                                      */
 /*      Fetch extent of the data currently stored in the dataset.       */
 /*      The bForce flag has no effect on SHO files since that value     */
@@ -981,7 +968,8 @@ OGRErr OGRGmtLayer::WriteGeometry(OGRGeometryH hGeom, bool bHaveAngle)
 /*      Returns OGRERR_NONE/OGRRERR_FAILURE.                            */
 /************************************************************************/
 
-OGRErr OGRGmtLayer::GetExtent(OGREnvelope *psExtent, int bForce)
+OGRErr OGRGmtLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                               bool bForce)
 
 {
     if (bRegionComplete && sRegion.IsInit())
@@ -990,7 +978,7 @@ OGRErr OGRGmtLayer::GetExtent(OGREnvelope *psExtent, int bForce)
         return OGRERR_NONE;
     }
 
-    return OGRLayer::GetExtent(psExtent, bForce);
+    return OGRLayer::IGetExtent(iGeomField, psExtent, bForce);
 }
 
 /************************************************************************/
@@ -1025,7 +1013,7 @@ int OGRGmtLayer::TestCapability(const char *pszCap)
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRGmtLayer::CreateField(OGRFieldDefn *poField, int bApproxOK)
+OGRErr OGRGmtLayer::CreateField(const OGRFieldDefn *poField, int bApproxOK)
 
 {
     if (!bUpdate)

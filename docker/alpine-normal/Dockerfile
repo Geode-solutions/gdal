@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 ##
 # osgeo/gdal:alpine-normal
 
@@ -5,14 +7,16 @@
 # Public domain
 # or licensed under MIT (LICENSE.TXT) Copyright 2019 Even Rouault <even.rouault@spatialys.com>
 
-ARG ALPINE_VERSION=3.17
-FROM alpine:${ALPINE_VERSION} as builder
+ARG ALPINE_VERSION=3.22
+FROM alpine:${ALPINE_VERSION} AS builder
 
 # Derived from osgeo/proj by Howard Butler <howard@hobu.co>
 LABEL maintainer="Even Rouault <even.rouault@spatialys.com>"
 
+ENV HOME="/root"
+
 # Setup build env for PROJ
-RUN apk add --no-cache  wget curl unzip make libtool autoconf automake pkgconfig g++ sqlite sqlite-dev
+RUN apk add --no-cache  wget curl unzip cmake make libtool autoconf automake pkgconfig gcc g++ sqlite sqlite-dev tiff-dev
 
 ARG PROJ_DATUMGRID_LATEST_LAST_MODIFIED
 RUN \
@@ -24,53 +28,90 @@ RUN \
 # For PROJ and GDAL
 ARG POPPLER_DEV=poppler-dev
 RUN apk add --no-cache \
-    cmake linux-headers gnu-libiconv-dev \
-    curl-dev tiff-dev \
-    zlib-dev zstd-dev xz-dev snappy-dev \
-    libjpeg-turbo-dev libpng-dev openjpeg-dev libwebp-dev expat-dev libkml-dev \
-    py3-numpy-dev python3-dev py3-setuptools py3-numpy swig \
-    ${POPPLER_DEV} postgresql-dev \
-    openexr-dev libheif-dev xerces-c-dev geos-dev cfitsio-dev \
-    netcdf-dev hdf5-dev freexl-dev \
-    lz4-dev blosc-dev libdeflate-dev brotli-dev uriparser-dev \
-    libarchive-dev \
-    kealib-dev libjxl-dev \
-    json-c-dev giflib-dev \
-    mariadb-connector-c-dev \
-    pcre2-dev \
-    qhull-dev \
-    unixodbc-dev \
-    libpq-dev \
     apache-arrow-dev \
-    # For spatialite (and GDAL)
+    armadillo-dev \
+    basisu-dev \
+    blosc-dev \
+    brunsli-dev \
+    ccache \
+    cfitsio-dev \
+    cmake \
+    curl-dev \
+    expat-dev \
+    freexl-dev \
+    geos-dev \
+    giflib-dev \
+    gnu-libiconv-dev \
+    hdf5-dev \
+    json-c-dev \
+    kealib-dev \
+    lerc-dev \
+    libaec-dev \
+    libarchive-dev \
+    libavif-dev \
+    libdeflate-dev \
+    libgeotiff-dev \
+    libheif-dev \
+    libjpeg-turbo-dev \
+    libjxl-dev \
+    libkml-dev \
+    libpng-dev \
+    libpq-dev \
+    libspatialite-dev \
+    libtirpc-dev \
+    libwebp-dev \
     libxml2-dev \
+    linux-headers \
+    lz4-dev \
+    make \
+    mariadb-connector-c-dev \
+    muparser-dev \
+    netcdf-dev \
+    ninja-build \
+    odbc-cpp-wrapper-dev \
+    openexr-dev \
+    openjpeg-dev \
+    openssl-dev \
+    pcre2-dev \
+    poppler-dev \
+    proj-dev \
+    proj-util \
+    py3-numpy \
+    py3-numpy-dev \
+    py3-pip \
+    py3-setuptools \
+    python3-dev \
+    qhull-dev \
+    rsync \
+    sfcgal-dev \
+    snappy-dev \
+    sqlite-dev \
+    swig \
+    tiledb-dev \
+    tiff-dev \
+    unixodbc-dev \
+    xerces-c-dev \
+    xz-dev \
+    zlib-dev \
+    zstd-dev \
     && mkdir -p /build_thirdparty/usr/lib
 
-# Build szip
-ARG SZIP_VERSION=2.1.1
-RUN if test "${SZIP_VERSION}" != ""; then ( \
-    wget -q https://support.hdfgroup.org/ftp/lib-external/szip/${SZIP_VERSION}/src/szip-${SZIP_VERSION}.tar.gz \
-    && tar xzf szip-${SZIP_VERSION}.tar.gz \
-    && rm -f szip-${SZIP_VERSION}.tar.gz \
-    && cd szip-${SZIP_VERSION} \
-    && CFLAGS=-O2 ./configure --prefix=/usr --disable-static \
-    && make -j$(nproc) \
-    && make install \
-    && cp -P /usr/lib/libsz*.so* /build_thirdparty/usr/lib \
-    && for i in /build_thirdparty/usr/lib/*; do strip -s $i 2>/dev/null || /bin/true; done \
-    && cd .. \
-    && rm -rf szip-${SZIP_VERSION} \
+# Ninja is not in the default path on Alpine.
+ENV PATH=/usr/lib/ninja-build/bin:$PATH
+
+RUN if test "$(uname -m)" = "x86_64"; then ( \
+    apk add --no-cache librasterlite2-dev \
     ); fi
 
 # Build hdf4
-ARG HDF4_VERSION=4.2.16
+ARG HDF4_VERSION=4.3.0
 RUN if test "${HDF4_VERSION}" != "" -a "$(uname -m)" = "x86_64"; then ( \
-    apk add --no-cache byacc flex portablexdr-dev \
+    apk add --no-cache byacc flex libtirpc-dev \
     && mkdir hdf4 \
-    && wget -q https://support.hdfgroup.org/ftp/HDF/releases/HDF${HDF4_VERSION}/src/hdf-${HDF4_VERSION}.tar.gz -O - \
-        | tar xz -C hdf4 --strip-components=2 \
+    && curl -L -fsS https://github.com/HDFGroup/hdf4/archive/refs/tags/hdf${HDF4_VERSION}.tar.gz \
+        | tar xz -C hdf4 --strip-components=1 \
     && cd hdf4 \
-    && LDFLAGS=-lportablexdr ./configure --prefix=/usr --enable-shared --disable-static \
+    && LDFLAGS=-ltirpc ./configure --prefix=/usr --enable-shared --disable-static \
         --with-szlib=/usr --disable-fortran --disable-netcdf \
     && make -j$(nproc) \
     && make install \
@@ -79,61 +120,67 @@ RUN if test "${HDF4_VERSION}" != "" -a "$(uname -m)" = "x86_64"; then ( \
     && for i in /build_thirdparty/usr/lib/*; do strip -s $i 2>/dev/null || /bin/true; done \
     && cd .. \
     && rm -rf hdf4 \
-    && apk del byacc flex portablexdr-dev \
+    && apk del byacc flex libtirpc-dev \
     ); fi
 
-# Build openjpeg
-# ARG OPENJPEG_VERSION=2.3.1
-RUN if test "${OPENJPEG_VERSION}" != ""; then ( \
-    wget -q https://github.com/uclouvain/openjpeg/archive/v${OPENJPEG_VERSION}.tar.gz \
-    && tar xzf v${OPENJPEG_VERSION}.tar.gz \
-    && rm -f v${OPENJPEG_VERSION}.tar.gz \
-    && cd openjpeg-${OPENJPEG_VERSION} \
-    && cmake . -DBUILD_SHARED_LIBS=ON  -DBUILD_STATIC_LIBS=OFF -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-    && make -j$(nproc) \
-    && make install \
-    && rm -f /usr/lib/libopenjp2.so.2.3.0 \
-    && cp -P /usr/lib/libopenjp2*.so* /build_thirdparty/usr/lib \
+# Build libOpenDRIVE
+ARG OPENDRIVE_VERSION=0.6.0-gdal
+RUN if test "${OPENDRIVE_VERSION}" != ""; then ( \
+    curl -LO -fsS https://github.com/DLR-TS/libOpenDRIVE/archive/refs/tags/${OPENDRIVE_VERSION}.tar.gz \
+    && tar xzf ${OPENDRIVE_VERSION}.tar.gz \
+    && rm -f ${OPENDRIVE_VERSION}.tar.gz \
+    && cd libOpenDRIVE-${OPENDRIVE_VERSION} \
+    && cmake . -G Ninja -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr/ \
+    && ninja \
+    && ninja install \
+    && mkdir -p /build_thirdparty/usr/lib \
+    && cp -P /usr/lib/libOpenDrive*.so* /build_thirdparty/usr/lib \
     && for i in /build_thirdparty/usr/lib/*; do strip -s $i 2>/dev/null || /bin/true; done \
     && cd .. \
-    && rm -rf openjpeg-${OPENJPEG_VERSION} \
+    && rm -rf libOpenDRIVE-${OPENDRIVE_VERSION} \
     ); fi
 
-RUN apk add --no-cache rsync ccache
 ARG RSYNC_REMOTE
+ARG WITH_CCACHE
 
 # Build PROJ
 ARG PROJ_VERSION=master
-RUN mkdir proj \
-    && wget -q https://github.com/OSGeo/PROJ/archive/${PROJ_VERSION}.tar.gz -O - \
+RUN --mount=type=cache,id=alpine-normal-proj,target=$HOME/.cache \
+    mkdir proj \
+    && curl -L -fsS https://github.com/OSGeo/PROJ/archive/${PROJ_VERSION}.tar.gz \
         | tar xz -C proj --strip-components=1 \
     && cd proj \
     && if test "${RSYNC_REMOTE}" != ""; then \
         echo "Downloading cache..."; \
-        rsync -ra ${RSYNC_REMOTE}/proj/$(uname -m)/ $HOME/; \
+        rsync -ra ${RSYNC_REMOTE}/proj/$(uname -m)/ $HOME/.cache/; \
         echo "Finished"; \
+    fi \
+    && if [ -n "${WITH_CCACHE:-}" ]; then \
         export CC="ccache gcc"; \
         export CXX="ccache g++"; \
-        mkdir -p "$HOME/.ccache"; \
-        export PROJ_DB_CACHE_DIR="$HOME/.ccache"; \
+        export PROJ_DB_CACHE_PARAM="-DPROJ_DB_CACHE_DIR=$HOME/.cache"; \
         ccache -M 100M; \
     fi \
+    # IPO disabled since it crashes with gcc 13.2.1
     && cmake . \
+        -G Ninja \
         -DBUILD_SHARED_LIBS=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr \
-        -DENABLE_IPO=ON \
+        -DENABLE_IPO=OFF \
         -DBUILD_TESTING=OFF \
-    && make -j$(nproc) \
-    && make install \
-    && make install DESTDIR="/build_proj" \
+        $PROJ_DB_CACHE_PARAM \
+    && ninja \
+    && ninja install \
+    && DESTDIR="/build_proj" ninja install \
     && if test "${RSYNC_REMOTE}" != ""; then \
-        ccache -s; \
         echo "Uploading cache..."; \
-        rsync -ra --delete $HOME/.ccache ${RSYNC_REMOTE}/proj/$(uname -m)/; \
+        rsync -ra --delete $HOME/.cache/ ${RSYNC_REMOTE}/proj/$(uname -m)/; \
         echo "Finished"; \
-        rm -rf $HOME/.ccache; \
+    fi \
+    && if [ -n "${WITH_CCACHE:-}" ]; then \
+        ccache -s; \
         unset CC; \
         unset CXX; \
     fi \
@@ -143,31 +190,34 @@ RUN mkdir proj \
     && for i in /build_proj/usr/bin/*; do strip -s $i 2>/dev/null || /bin/true; done
 
 # Build spatialite
-ARG SPATIALITE_VERSION=5.0.1
-RUN if test "${SPATIALITE_VERSION}" != "" -a "$(uname -m)" = "x86_64"; then ( \
-    wget -q http://www.gaia-gis.it/gaia-sins/libspatialite-${SPATIALITE_VERSION}.tar.gz \
+ARG SPATIALITE_VERSION=5.1.0
+RUN --mount=type=cache,id=alpine-normal-spatialite,target=$HOME/.cache \
+    if test "${SPATIALITE_VERSION}" != "" -a "$(uname -m)" = "x86_64"; then ( \
+    curl -LO -fsS https://www.gaia-gis.it/gaia-sins/libspatialite-sources/libspatialite-${SPATIALITE_VERSION}.tar.gz \
     && tar xzf libspatialite-${SPATIALITE_VERSION}.tar.gz \
     && rm -f libspatialite-${SPATIALITE_VERSION}.tar.gz \
     && cd libspatialite-${SPATIALITE_VERSION} \
     && apk add --no-cache minizip-dev \
     && if test "${RSYNC_REMOTE}" != ""; then \
         echo "Downloading cache..."; \
-        rsync -ra ${RSYNC_REMOTE}/spatialite/ $HOME/; \
+        rsync -ra ${RSYNC_REMOTE}/spatialite/ $HOME/.cache/; \
         echo "Finished"; \
+    fi \
+    && if [ -n "${WITH_CCACHE:-}" ]; then \
         export CC="ccache gcc"; \
         export CXX="ccache g++"; \
-        mkdir -p "$HOME/.ccache"; \
         ccache -M 100M; \
     fi \
     && ./configure --prefix=/usr --disable-static --disable-rttopo \
     && make -j$(nproc) \
     && make install \
     && if test "${RSYNC_REMOTE}" != ""; then \
-        ccache -s; \
         echo "Uploading cache..."; \
-        rsync -ra --delete $HOME/.ccache ${RSYNC_REMOTE}/spatialite/; \
+        rsync -ra --delete $HOME/.cache/ ${RSYNC_REMOTE}/spatialite/; \
         echo "Finished"; \
-        rm -rf $HOME/.ccache; \
+    fi \
+    && if [ -n "${WITH_CCACHE:-}" ]; then \
+        ccache -s; \
         unset CC; \
         unset CXX; \
     fi \
@@ -180,13 +230,18 @@ RUN if test "${SPATIALITE_VERSION}" != "" -a "$(uname -m)" = "x86_64"; then ( \
         mkdir -p /build_spatialite/usr/lib; \
     fi
 
+# Download exprtk
+RUN curl -LO -fsS https://github.com/ArashPartow/exprtk/raw/refs/heads/release/exprtk.hpp \
+    && mv exprtk.hpp /usr/include
+
 # Build GDAL
 ARG GDAL_VERSION=master
 ARG GDAL_RELEASE_DATE
 ARG GDAL_BUILD_IS_RELEASE
 ARG GDAL_REPOSITORY=OSGeo/gdal
 
-RUN if test "${GDAL_VERSION}" = "master"; then \
+RUN --mount=type=cache,id=alpine-normal-gdal,target=$HOME/.cache \
+    if test "${GDAL_VERSION}" = "master"; then \
         export GDAL_VERSION=$(curl -Ls https://api.github.com/repos/${GDAL_REPOSITORY}/commits/HEAD -H "Accept: application/vnd.github.VERSION.sha"); \
         export GDAL_RELEASE_DATE=$(date "+%Y%m%d"); \
     fi \
@@ -194,17 +249,19 @@ RUN if test "${GDAL_VERSION}" = "master"; then \
         export GDAL_SHA1SUM=${GDAL_VERSION}; \
     fi \
     && if test "${HDF4_VERSION}" != "" -a "$(uname -m)" = "x86_64"; then \
-        apk add --no-cache portablexdr-dev \
-        && export LDFLAGS="-lportablexdr ${LDFLAGS}"; \
+        apk add --no-cache libtirpc-dev \
+        && export LDFLAGS="-ltirpc ${LDFLAGS}"; \
     fi \
     && mkdir gdal \
-    && wget -q https://github.com/${GDAL_REPOSITORY}/archive/${GDAL_VERSION}.tar.gz -O - \
+    && curl -L -fsS https://github.com/${GDAL_REPOSITORY}/archive/${GDAL_VERSION}.tar.gz \
         | tar xz -C gdal --strip-components=1 \
     && cd gdal \
     && if test "${RSYNC_REMOTE}" != ""; then \
         echo "Downloading cache..."; \
-        rsync -ra ${RSYNC_REMOTE}/gdal/$(uname -m)/ $HOME/; \
+        rsync -ra ${RSYNC_REMOTE}/gdal/$(uname -m)/ $HOME/.cache/; \
         echo "Finished"; \
+    fi \
+    && if [ -n "${WITH_CCACHE:-}" ]; then \
         # Little trick to avoid issues with Python bindings
         printf "#!/bin/sh\nccache gcc \$*" > ccache_gcc.sh; \
         chmod +x ccache_gcc.sh; \
@@ -212,28 +269,33 @@ RUN if test "${GDAL_VERSION}" = "master"; then \
         chmod +x ccache_g++.sh; \
         export CC=$PWD/ccache_gcc.sh; \
         export CXX=$PWD/ccache_g++.sh; \
-        mkdir -p "$HOME/.ccache"; \
         ccache -M 1G; \
     fi \
     && mkdir build \
     && cd build \
     && cmake .. \
+        -G Ninja \
         -DCMAKE_INSTALL_PREFIX=/usr \
         -DCMAKE_BUILD_TYPE=Release \
         -DGDAL_USE_TIFF_INTERNAL=ON \
         -DGDAL_USE_GEOTIFF_INTERNAL=ON \
         -DIconv_INCLUDE_DIR=/usr/include/gnu-libiconv \
         -DIconv_LIBRARY=/usr/lib/libiconv.so \
-    && make -j$(nproc) \
-    && make install DESTDIR="/build" \
-    && (make -j$(nproc) multireadtest && cp apps/multireadtest /build/usr/bin) \
+        -DBUILD_TESTING=OFF \
+        -DOpenDrive_DIR=/usr/lib/ \
+        -DOGR_ENABLE_DRIVER_XODR_PLUGIN=TRUE \
+        -DGDAL_USE_EXPRTK:BOOL=ON \
+    && ninja \
+    && DESTDIR="/build" ninja install \
+    && (ninja multireadtest && cp apps/multireadtest /build/usr/bin) \
     && cd .. \
     && if test "${RSYNC_REMOTE}" != ""; then \
-        ccache -s; \
         echo "Uploading cache..."; \
-        rsync -ra --delete $HOME/.ccache ${RSYNC_REMOTE}/gdal/$(uname -m)/; \
+        rsync -ra --delete $HOME/.cache/ ${RSYNC_REMOTE}/gdal/$(uname -m)/; \
         echo "Finished"; \
-        rm -rf $HOME/.ccache; \
+    fi \
+    && if [ -n "${WITH_CCACHE:-}" ]; then \
+        ccache -s; \
         unset CC; \
         unset CXX; \
     fi \
@@ -260,33 +322,77 @@ RUN if test "${GDAL_VERSION}" = "master"; then \
        ;do rm $i; done)
 
 # Build final image
-FROM alpine:${ALPINE_VERSION} as runner
+FROM alpine:${ALPINE_VERSION} AS runner
 
 RUN date
 
-ARG POPPLER=poppler
 RUN apk add --no-cache \
-        libstdc++ \
-        gnu-libiconv \
-        sqlite-libs \
-        libcurl tiff \
-        zlib zstd-libs xz-libs snappy \
-        libjpeg-turbo libpng libwebp expat libkml \
+        armadillo \
+        bash-completion \
+        basisu \
+        blosc \
+        brotli-libs \
+        brunsli-libs \
+        cfitsio \
+        expat \
+        freexl \
+        geos \
+        giflib \
+        gnu-libiconv-libs \
+        hdf5 \
         icu-libs \
-        python3 py3-numpy ${POPPLER} pcre2 libpq libxml2 portablexdr openjpeg \
-        netcdf hdf5 freexl \
-        openexr libheif xerces-c geos cfitsio minizip \
-        lz4-libs blosc libdeflate brotli-libs liburiparser \
+        imath \
+        json-c \
+        kealib \
+        lerc \
+        libaec \
         libarchive \
-        kealib libjxl \
-        json-c giflib \
-        mariadb-connector-c \
-        qhull \
-        unixodbc \
+        libarrow \
+        libarrow_dataset \
+        libavif \
+        libcrypto3 \
+        libcurl \
+        libdeflate \
+        libexpat \
+        libgcc \
+        libheif \
+        libjpeg-turbo \
+        libjxl \
+        libkml \
+        libparquet \
+        libpng \
         libpq \
-        apache-arrow \
-    # Remove /usr/lib/libopenjp2.so.2.3.0 since we are building v2.3.1 manually
-    # && rm -f /usr/lib/libopenjp2.so.2.3.0 \
+        libspatialite \
+        libstdc++ \
+        liburiparser \
+        libwebp \
+        libxml2 \
+        lz4-libs \
+        mariadb-connector-c \
+        muparser \
+        netcdf \
+        minizip \
+        musl \
+        odbc-cpp-wrapper \
+        openexr-libopenexr \
+        openjpeg \
+        pcre2 \
+        poppler \
+        libtirpc \
+        proj \
+        python3 \
+        py3-numpy \
+        qhull \
+        sfcgal \
+        snappy \
+        sqlite-libs \
+        tiff \
+        tiledb \
+        unixodbc \
+        xerces-c \
+        xz-libs \
+        zlib \
+        zstd-libs \
     # libturbojpeg.so is not used by GDAL. Only libjpeg.so*
     && rm -f /usr/lib/libturbojpeg.so* \
     # libpoppler-cpp.so is not used by GDAL. Only libpoppler.so*
@@ -294,10 +400,9 @@ RUN apk add --no-cache \
     # Only libwebp.so is used by GDAL
     && rm -f /usr/lib/libwebpmux.so* /usr/lib/libwebpdemux.so* /usr/lib/libwebpdecoder.so*
 
-# Install Pillow for -antialias option of gdal2tiles
-RUN apk add --no-cache py3-pip \
-    && pip3 install Pillow \
-    && apk del py3-pip
+RUN if test "$(uname -m)" = "x86_64"; then ( \
+    apk add --no-cache librasterlite2 \
+    ); fi
 
 # Order layers starting with less frequently varying ones
 COPY --from=builder  /build_thirdparty/usr/ /usr/
@@ -311,7 +416,10 @@ COPY --from=builder  /build_proj/usr/include/ /usr/include/
 COPY --from=builder  /build_proj/usr/bin/ /usr/bin/
 COPY --from=builder  /build_proj/usr/lib/ /usr/lib/
 
+COPY --from=builder  /build/usr/share/bash-completion/ /usr/share/bash-completion/
 COPY --from=builder  /build/usr/share/gdal/ /usr/share/gdal/
 COPY --from=builder  /build/usr/include/ /usr/include/
 COPY --from=builder  /build_gdal_python/usr/ /usr/
 COPY --from=builder  /build_gdal_version_changing/usr/ /usr/
+
+CMD ["/bin/bash", "-l"]

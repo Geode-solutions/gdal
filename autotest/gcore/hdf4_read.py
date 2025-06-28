@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test basic read support for a all datatypes from a HDF file.
@@ -143,7 +142,7 @@ def test_hdf4_read_online_1():
         filename_absolute=1,
     )
 
-    return tst.testOpen()
+    tst.testOpen()
 
 
 ###############################################################################
@@ -259,7 +258,7 @@ def test_hdf4_read_online_5():
 
     # 13 MB
     gdaltest.download_or_skip(
-        "ftp://data.nodc.noaa.gov/pub/data.nodc/pathfinder/Version5.0/Monthly/1991/199101.s04m1pfv50-sst-16b.hdf",
+        "https://www.ncei.noaa.gov/data/oceans/pathfinder/Version5.0/Monthly/1991/199101.s04m1pfv50-sst-16b.hdf",
         "199101.s04m1pfv50-sst-16b.hdf",
     )
 
@@ -365,26 +364,26 @@ def test_hdf4_read_online_8():
 
     # 5 MB
     gdaltest.download_or_skip(
-        "https://e4ftl01.cr.usgs.gov/MOLT/MOD13Q1.006/2006.06.10/MOD13Q1.A2006161.h34v09.006.2015161173716.hdf",
-        "MOD13Q1.A2006161.h34v09.006.2015161173716.hdf",
+        "https://e4ftl01.cr.usgs.gov/MOLT/MOD13Q1.061/2006.06.10/MOD13Q1.A2006161.h34v09.061.2020265043931.hdf",
+        "MOD13Q1.A2006161.h34v09.061.2020265043931.hdf",
     )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
-        "HDF4_EOS:EOS_GRID:tmp/cache/MOD13Q1.A2006161.h34v09.006.2015161173716.hdf:MODIS_Grid_16DAY_250m_500m_VI:250m 16 days NDVI",
+        "HDF4_EOS:EOS_GRID:tmp/cache/MOD13Q1.A2006161.h34v09.061.2020265043931.hdf:MODIS_Grid_16DAY_250m_500m_VI:250m 16 days NDVI",
         1,
-        44174,
+        45111,
         filename_absolute=1,
     )
 
     tst.testOpen()
 
     ds = gdal.Open(
-        "HDF4_EOS:EOS_GRID:tmp/cache/MOD13Q1.A2006161.h34v09.006.2015161173716.hdf:MODIS_Grid_16DAY_250m_500m_VI:250m 16 days NDVI"
+        "HDF4_EOS:EOS_GRID:tmp/cache/MOD13Q1.A2006161.h34v09.061.2020265043931.hdf:MODIS_Grid_16DAY_250m_500m_VI:250m 16 days NDVI"
     )
 
     cs = ds.GetRasterBand(1).Checksum()
-    assert cs == 44174, "did not get expected checksum"
+    assert cs == 45111, "did not get expected checksum"
 
     if "GetBlockSize" in dir(gdal.Band):
         (blockx, blocky) = ds.GetRasterBand(1).GetBlockSize()
@@ -481,3 +480,90 @@ def test_hdf4_read_online_11():
         open_options=["LIST_SDS=YES"],
     )
     assert len(ds.GetSubDatasets()) == 16
+
+
+###############################################################################
+# Test gdal subdataset informational functions
+
+
+@pytest.mark.parametrize(
+    "filename,path_component",
+    (
+        (
+            'HDF4_EOS:EOS_SWATH:"AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Low_res_sst',
+            "AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            r'HDF4_EOS:EOS_SWATH:"C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Low_res_sst',
+            r"C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            "HDF4_EOS:EOS_SWATH:AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+            "AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            r"HDF4_EOS:EOS_SWATH:C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+            r"C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            r"HDF4_EOS:EOS_SWATH:C:/AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+            r"C:/AMSR_E_L2_Ocean_B01_200206182340_A.hdf",
+        ),
+        (
+            r'HDF4_EOS:EOS_SWATH:"/vsicurl/http://www.my.com/OMI-Aura_L2-OMTO3_2005m0113t0224-o02648_v002-2005m0625t035355.he5":Swath1:Low_res_sst',
+            r"/vsicurl/http://www.my.com/OMI-Aura_L2-OMTO3_2005m0113t0224-o02648_v002-2005m0625t035355.he5",
+        ),
+        (
+            r"HDF4_EOS:EOS_SWATH:a:Swath1:Low_res_sst",
+            r"a",
+        ),
+        ("", ""),
+    ),
+)
+def test_gdal_subdataset_get_filename(filename, path_component):
+
+    info = gdal.GetSubdatasetInfo(filename)
+    if filename == "":
+        assert info is None
+    else:
+        assert info.GetPathComponent() == path_component
+        assert info.GetSubdatasetComponent() == "Swath1:Low_res_sst"
+
+
+@pytest.mark.parametrize(
+    "filename",
+    (
+        'HDF4_EOS:EOS_SWATH:"AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Low_res_sst',
+        r'HDF4_EOS:EOS_SWATH:"C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf":Swath1:Low_res_sst',
+        "HDF4_EOS:EOS_SWATH:AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+        r"HDF4_EOS:EOS_SWATH:C:\AMSR_E_L2_Ocean_B01_200206182340_A.hdf:Swath1:Low_res_sst",
+        "",
+    ),
+)
+def test_gdal_subdataset_modify_filename(filename):
+
+    info = gdal.GetSubdatasetInfo(filename)
+    if filename == "":
+        assert info is None
+    else:
+        assert (
+            info.ModifyPathComponent('"/path/to.hdf"')
+            == 'HDF4_EOS:EOS_SWATH:"/path/to.hdf":Swath1:Low_res_sst'
+        )
+
+
+@pytest.mark.parametrize(
+    "bogus",
+    (
+        "HDF4_EOS:a:c",
+        "HDF4_EOS:a",
+        "HDF4_EOS:",
+        "HDF4_EOS:EOS_SWATH:a:c",
+        "HDF4_EOS:EOS_SWATH:a",
+        "HDF4_EOS:EOS_SWATH",
+    ),
+)
+def test_gdal_subdataset_bogus(bogus):
+    """Test it doesn't crash"""
+
+    gdal.GetSubdatasetInfo(bogus)

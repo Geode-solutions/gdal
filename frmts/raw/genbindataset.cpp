@@ -8,23 +8,7 @@
  * Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -32,36 +16,10 @@
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
+#include <algorithm>
 #include <cstdlib>
 
-/* ==================================================================== */
-/*      Table relating USGS and ESRI state plane zones.                 */
-/* ==================================================================== */
-constexpr int anUsgsEsriZones[] = {
-    101,  3101, 102,  3126, 201,  3151, 202,  3176, 203,  3201, 301,  3226,
-    302,  3251, 401,  3276, 402,  3301, 403,  3326, 404,  3351, 405,  3376,
-    406,  3401, 407,  3426, 501,  3451, 502,  3476, 503,  3501, 600,  3526,
-    700,  3551, 901,  3601, 902,  3626, 903,  3576, 1001, 3651, 1002, 3676,
-    1101, 3701, 1102, 3726, 1103, 3751, 1201, 3776, 1202, 3801, 1301, 3826,
-    1302, 3851, 1401, 3876, 1402, 3901, 1501, 3926, 1502, 3951, 1601, 3976,
-    1602, 4001, 1701, 4026, 1702, 4051, 1703, 6426, 1801, 4076, 1802, 4101,
-    1900, 4126, 2001, 4151, 2002, 4176, 2101, 4201, 2102, 4226, 2103, 4251,
-    2111, 6351, 2112, 6376, 2113, 6401, 2201, 4276, 2202, 4301, 2203, 4326,
-    2301, 4351, 2302, 4376, 2401, 4401, 2402, 4426, 2403, 4451, 2500, 0,
-    2501, 4476, 2502, 4501, 2503, 4526, 2600, 0,    2601, 4551, 2602, 4576,
-    2701, 4601, 2702, 4626, 2703, 4651, 2800, 4676, 2900, 4701, 3001, 4726,
-    3002, 4751, 3003, 4776, 3101, 4801, 3102, 4826, 3103, 4851, 3104, 4876,
-    3200, 4901, 3301, 4926, 3302, 4951, 3401, 4976, 3402, 5001, 3501, 5026,
-    3502, 5051, 3601, 5076, 3602, 5101, 3701, 5126, 3702, 5151, 3800, 5176,
-    3900, 0,    3901, 5201, 3902, 5226, 4001, 5251, 4002, 5276, 4100, 5301,
-    4201, 5326, 4202, 5351, 4203, 5376, 4204, 5401, 4205, 5426, 4301, 5451,
-    4302, 5476, 4303, 5501, 4400, 5526, 4501, 5551, 4502, 5576, 4601, 5601,
-    4602, 5626, 4701, 5651, 4702, 5676, 4801, 5701, 4802, 5726, 4803, 5751,
-    4901, 5776, 4902, 5801, 4903, 5826, 4904, 5851, 5001, 6101, 5002, 6126,
-    5003, 6151, 5004, 6176, 5005, 6201, 5006, 6226, 5007, 6251, 5008, 6276,
-    5009, 6301, 5010, 6326, 5101, 5876, 5102, 5901, 5103, 5926, 5104, 5951,
-    5105, 5976, 5201, 6001, 5200, 6026, 5200, 6076, 5201, 6051, 5202, 6051,
-    5300, 0,    5400, 0};
+#include "usgs_esri_zones.h"
 
 /************************************************************************/
 /* ==================================================================== */
@@ -75,8 +33,8 @@ class GenBinDataset final : public RawDataset
 
     VSILFILE *fpImage;  // image data file.
 
-    bool bGotTransform;
-    double adfGeoTransform[6];
+    bool bGotTransform{};
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
 
     char **papszHDR;
@@ -91,7 +49,7 @@ class GenBinDataset final : public RawDataset
     GenBinDataset();
     ~GenBinDataset() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     const OGRSpatialReference *GetSpatialRef() const override
     {
@@ -117,6 +75,7 @@ class GenBinBitRasterBand final : public GDALPamRasterBand
 
   public:
     GenBinBitRasterBand(GenBinDataset *poDS, int nBits);
+
     ~GenBinBitRasterBand() override
     {
     }
@@ -237,12 +196,6 @@ GenBinDataset::GenBinDataset()
     : fpImage(nullptr), bGotTransform(false), papszHDR(nullptr)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -288,16 +241,16 @@ CPLErr GenBinDataset::Close()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GenBinDataset::GetGeoTransform(double *padfTransform)
+CPLErr GenBinDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (bGotTransform)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
-    return GDALPamDataset::GetGeoTransform(padfTransform);
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -307,14 +260,14 @@ CPLErr GenBinDataset::GetGeoTransform(double *padfTransform)
 char **GenBinDataset::GetFileList()
 
 {
-    const CPLString osPath = CPLGetPath(GetDescription());
-    const CPLString osName = CPLGetBasename(GetDescription());
+    const CPLString osPath = CPLGetPathSafe(GetDescription());
+    const CPLString osName = CPLGetBasenameSafe(GetDescription());
 
     // Main data file, etc.
     char **papszFileList = GDALPamDataset::GetFileList();
 
     // Header file.
-    const CPLString osFilename = CPLFormCIFilename(osPath, osName, "hdr");
+    const CPLString osFilename = CPLFormCIFilenameSafe(osPath, osName, "hdr");
     papszFileList = CSLAddString(papszFileList, osFilename);
 
     return papszFileList;
@@ -335,8 +288,9 @@ void GenBinDataset::ParseCoordinateSystem(char **papszHdr)
     /*      Translate zone and parameters into numeric form.                */
     /* -------------------------------------------------------------------- */
     int nZone = 0;
-    if (CSLFetchNameValue(papszHdr, "PROJECTION_ZONE"))
-        nZone = atoi(CSLFetchNameValue(papszHdr, "PROJECTION_ZONE"));
+    if (const char *pszProjectionZone =
+            CSLFetchNameValue(papszHdr, "PROJECTION_ZONE"))
+        nZone = atoi(pszProjectionZone);
 
 #if 0
     // TODO(schwehr): Why was this being done but not used?
@@ -358,13 +312,13 @@ void GenBinDataset::ParseCoordinateSystem(char **papszHdr)
     /* -------------------------------------------------------------------- */
     const char *pszDatumName = CSLFetchNameValue(papszHdr, "DATUM_NAME");
 
-    if (EQUAL(pszProjName, "UTM") && nZone != 0)
+    if (EQUAL(pszProjName, "UTM") && nZone != 0 && nZone > INT_MIN)
     {
         // Just getting that the negative zone for southern hemisphere is used.
         m_oSRS.SetUTM(std::abs(nZone), nZone > 0);
     }
 
-    else if (EQUAL(pszProjName, "State Plane") && nZone != 0)
+    else if (EQUAL(pszProjName, "State Plane") && nZone != 0 && nZone > INT_MIN)
     {
         const int nPairs = sizeof(anUsgsEsriZones) / (2 * sizeof(int));
 
@@ -441,24 +395,25 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
     /*      Now we need to tear apart the filename to form a .HDR           */
     /*      filename.                                                       */
     /* -------------------------------------------------------------------- */
-    const CPLString osPath = CPLGetPath(poOpenInfo->pszFilename);
-    const CPLString osName = CPLGetBasename(poOpenInfo->pszFilename);
+    const CPLString osPath = CPLGetPathSafe(poOpenInfo->pszFilename);
+    const CPLString osName = CPLGetBasenameSafe(poOpenInfo->pszFilename);
     CPLString osHDRFilename;
 
     char **papszSiblingFiles = poOpenInfo->GetSiblingFiles();
     if (papszSiblingFiles)
     {
-        const int iFile = CSLFindString(
-            papszSiblingFiles, CPLFormFilename(nullptr, osName, "hdr"));
+        const int iFile =
+            CSLFindString(papszSiblingFiles,
+                          CPLFormFilenameSafe(nullptr, osName, "hdr").c_str());
         if (iFile < 0)  // return if there is no corresponding .hdr file
             return nullptr;
 
         osHDRFilename =
-            CPLFormFilename(osPath, papszSiblingFiles[iFile], nullptr);
+            CPLFormFilenameSafe(osPath, papszSiblingFiles[iFile], nullptr);
     }
     else
     {
-        osHDRFilename = CPLFormCIFilename(osPath, osName, "hdr");
+        osHDRFilename = CPLFormCIFilenameSafe(osPath, osName, "hdr");
     }
 
     const bool bSelectedHDR = EQUAL(osHDRFilename, poOpenInfo->pszFilename);
@@ -556,7 +511,7 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    GenBinDataset *poDS = new GenBinDataset();
+    auto poDS = std::make_unique<GenBinDataset>();
 
     /* -------------------------------------------------------------------- */
     /*      Capture some information from the file that is of interest.     */
@@ -570,12 +525,10 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
     if (!GDALCheckDatasetDimensions(poDS->nRasterXSize, poDS->nRasterYSize) ||
         !GDALCheckBandCount(nBands, FALSE))
     {
-        delete poDS;
         return nullptr;
     }
 
-    poDS->fpImage = poOpenInfo->fpL;
-    poOpenInfo->fpL = nullptr;
+    std::swap(poDS->fpImage, poOpenInfo->fpL);
     poDS->eAccess = poOpenInfo->eAccess;
 
     /* -------------------------------------------------------------------- */
@@ -609,7 +562,6 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             CPLError(CE_Failure, CPLE_OpenFailed,
                      "Only one band is supported for U1/U2/U4 data type");
-            delete poDS;
             return nullptr;
         }
     }
@@ -622,16 +574,15 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Do we need byte swapping?                                       */
     /* -------------------------------------------------------------------- */
-    const char *pszBYTE_ORDER = CSLFetchNameValue(papszHdr, "BYTE_ORDER");
-    bool bNative = true;
 
-    if (pszBYTE_ORDER != nullptr)
+    RawRasterBand::ByteOrder eByteOrder = RawRasterBand::NATIVE_BYTE_ORDER;
+
+    const char *pszByteOrder = CSLFetchNameValue(papszHdr, "BYTE_ORDER");
+    if (pszByteOrder)
     {
-#ifdef CPL_LSB
-        bNative = STARTS_WITH_CI(pszBYTE_ORDER, "LSB");
-#else
-        bNative = !STARTS_WITH_CI(pszBYTE_ORDER, "LSB");
-#endif
+        eByteOrder = EQUAL(pszByteOrder, "LSB")
+                         ? RawRasterBand::ByteOrder::ORDER_LITTLE_ENDIAN
+                         : RawRasterBand::ByteOrder::ORDER_BIG_ENDIAN;
     }
 
     /* -------------------------------------------------------------------- */
@@ -691,7 +642,6 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (bIntOverflow)
     {
-        delete poDS;
         CPLError(CE_Failure, CPLE_AppDefined, "Int overflow occurred.");
         return nullptr;
     }
@@ -701,7 +651,6 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
                                     nBands, nItemSize, nPixelOffset,
                                     nLineOffset, 0, nBandOffset, poDS->fpImage))
     {
-        delete poDS;
         return nullptr;
     }
 
@@ -711,20 +660,20 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create band information objects.                                */
     /* -------------------------------------------------------------------- */
-    poDS->nBands = nBands;
-    for (int i = 0; i < poDS->nBands; i++)
+    for (int i = 0; i < nBands; i++)
     {
         if (nBits != -1)
         {
-            poDS->SetBand(i + 1, new GenBinBitRasterBand(poDS, nBits));
+            poDS->SetBand(i + 1, new GenBinBitRasterBand(poDS.get(), nBits));
         }
         else
         {
-            poDS->SetBand(i + 1,
-                          new RawRasterBand(poDS, i + 1, poDS->fpImage,
-                                            nBandOffset * i, nPixelOffset,
-                                            nLineOffset, eDataType, bNative,
-                                            RawRasterBand::OwnFP::NO));
+            auto poBand = RawRasterBand::Create(
+                poDS.get(), i + 1, poDS->fpImage, nBandOffset * i, nPixelOffset,
+                nLineOffset, eDataType, eByteOrder, RawRasterBand::OwnFP::NO);
+            if (!poBand)
+                return nullptr;
+            poDS->SetBand(i + 1, std::move(poBand));
         }
     }
 
@@ -746,13 +695,13 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
         const double dfLRY =
             CPLAtofM(CSLFetchNameValue(papszHdr, "LR_Y_COORDINATE"));
 
-        poDS->adfGeoTransform[1] = (dfLRX - dfULX) / (poDS->nRasterXSize - 1);
-        poDS->adfGeoTransform[2] = 0.0;
-        poDS->adfGeoTransform[4] = 0.0;
-        poDS->adfGeoTransform[5] = (dfLRY - dfULY) / (poDS->nRasterYSize - 1);
+        poDS->m_gt[1] = (dfLRX - dfULX) / (poDS->nRasterXSize - 1);
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] = (dfLRY - dfULY) / (poDS->nRasterYSize - 1);
 
-        poDS->adfGeoTransform[0] = dfULX - poDS->adfGeoTransform[1] * 0.5;
-        poDS->adfGeoTransform[3] = dfULY - poDS->adfGeoTransform[5] * 0.5;
+        poDS->m_gt[0] = dfULX - poDS->m_gt[1] * 0.5;
+        poDS->m_gt[3] = dfULY - poDS->m_gt[5] * 0.5;
 
         poDS->bGotTransform = true;
     }
@@ -770,9 +719,9 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/

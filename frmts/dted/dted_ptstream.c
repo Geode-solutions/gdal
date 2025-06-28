@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  DTED Translator
  * Purpose:  DTED Point Stream Writer.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2001, Frank Warmerdam
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "dted_api.h"
@@ -457,7 +440,7 @@ static void DTEDFillPixel(DTEDInfo *psInfo, GInt16 **papanProfiles,
 
                 fKernelCoef = pafKernel[iXK + iYK * nKernelWidth];
                 dfCoefSum += fKernelCoef;
-                dfValueSum += fKernelCoef * panThisProfile[iYS];
+                dfValueSum += (double)fKernelCoef * (double)panThisProfile[iYS];
             }
         }
     }
@@ -488,7 +471,7 @@ void DTEDFillPtStream(void *hStream, int nPixelSearchDist)
     /*      Setup inverse distance weighting kernel.                        */
     /* -------------------------------------------------------------------- */
     nKernelWidth = 2 * nPixelSearchDist + 1;
-    pafKernel = (float *)CPLMalloc(nKernelWidth * nKernelWidth * sizeof(float));
+    pafKernel = (float *)CPLMalloc(sizeof(float) * nKernelWidth * nKernelWidth);
 
     for (iX = 0; iX < nKernelWidth; iX++)
     {

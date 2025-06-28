@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "pcidsk_exception.h"
@@ -109,12 +93,12 @@ int CPixelInterleavedChannel::ReadBlock( int block_index, void *buffer,
 /*      cases for 16/32bit data that is word aligned.                   */
 /* -------------------------------------------------------------------- */
     if( pixel_size == pixel_group )
-        memcpy( buffer, pixel_buffer, pixel_size * win_xsize );
+        memcpy( buffer, pixel_buffer, static_cast<size_t>(pixel_size) * win_xsize );
     else
     {
         int i;
-        uint8  *src = ((uint8 *)pixel_buffer) + image_offset;
-        uint8  *dst = (uint8 *) buffer;
+        const uint8  *src = pixel_buffer + image_offset;
+        uint8  *dst = static_cast<uint8 *>(buffer);
 
         if( pixel_size == 1 )
         {
@@ -219,7 +203,7 @@ int CPixelInterleavedChannel::WriteBlock( int block_index, void *buffer )
 /* -------------------------------------------------------------------- */
     if( pixel_size == pixel_group )
     {
-        memcpy( pixel_buffer, buffer, pixel_size * width );
+        memcpy( pixel_buffer, buffer, static_cast<size_t>(pixel_size) * width );
 
         if( needs_swap )
         {
@@ -234,8 +218,8 @@ int CPixelInterleavedChannel::WriteBlock( int block_index, void *buffer )
     else
     {
         int i;
-        uint8  *dst = ((uint8 *)pixel_buffer) + image_offset;
-        uint8  *src = (uint8 *) buffer;
+        uint8  *dst = pixel_buffer + image_offset;
+        const uint8  *src = static_cast<uint8 *>(buffer);
 
         if( pixel_size == 1 )
         {

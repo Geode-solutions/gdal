@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  PCRaster Integration
  * Purpose:  PCRaster CSF 2.0 raster file driver declarations.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) PCRaster owners
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef INCLUDED_PCRASTERDATASET
@@ -114,19 +97,20 @@ class PCRasterDataset final : public GDALPamDataset
     // MANIPULATORS
     //----------------------------------------------------------------------------
 
-    CPLErr SetGeoTransform(double *transform) override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
     //----------------------------------------------------------------------------
     // ACCESSORS
     //----------------------------------------------------------------------------
 
     MAP *map() const;
-    CPLErr GetGeoTransform(double *transform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     CSF_CR cellRepresentation() const;
     CSF_VS valueScale() const;
     double defaultNoDataValue() const;
     bool location_changed() const;
 };
+
 // } // namespace
 
 #endif

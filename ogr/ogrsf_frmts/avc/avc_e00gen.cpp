@@ -1,5 +1,4 @@
 /**********************************************************************
- * $Id$
  *
  * Name:     avc_e00gen.c
  * Project:  Arc/Info vector coverage (AVC)  BIN->E00 conversion library
@@ -10,23 +9,7 @@
  **********************************************************************
  * Copyright (c) 1999-2005, Daniel Morissette
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************
  *
  * $Log: avc_e00gen.c,v $
@@ -92,6 +75,7 @@
 
 #include "avc.h"
 
+#include <cassert>
 #include <ctype.h> /* toupper() */
 
 /**********************************************************************
@@ -168,7 +152,8 @@ const char *AVCE00GenStartSection(AVCE00GenInfo *psInfo, AVCFileType eType,
         int i;
         for (i = 0; pszClassName[i] != '\0'; i++)
         {
-            psInfo->pszBuf[i] = (char)toupper(pszClassName[i]);
+            psInfo->pszBuf[i] =
+                (char)CPLToupper(static_cast<unsigned char>(pszClassName[i]));
         }
         psInfo->pszBuf[i] = '\0';
     }
@@ -994,23 +979,41 @@ const char *AVCE00GenTx6(AVCE00GenInfo *psInfo, AVCTxt *psTxt, GBool bCont)
          *------------------------------------------------------------*/
         GInt16 *pValue;
 
-        if (psInfo->iCurItem < 3)
-            pValue = psTxt->anJust2 + psInfo->iCurItem * 7;
-        else
-            pValue = psTxt->anJust1 + (psInfo->iCurItem - 3) * 7;
-
-        if (psInfo->iCurItem == 2 || psInfo->iCurItem == 5)
+        if (psInfo->iCurItem == 0 || psInfo->iCurItem == 1)
         {
+            pValue = psTxt->anJust2 + psInfo->iCurItem * 7;
+            snprintf(psInfo->pszBuf, psInfo->nBufSize,
+                     "%10d%10d%10d%10d%10d%10d%10d", pValue[0], pValue[1],
+                     pValue[2], pValue[3], pValue[4], pValue[5], pValue[6]);
+        }
+        else if (psInfo->iCurItem == 2)
+        {
+            pValue = psTxt->anJust2 + psInfo->iCurItem * 7;
             snprintf(psInfo->pszBuf, psInfo->nBufSize,
                      "%10d%10d%10d%10d%10d%10d", pValue[0], pValue[1],
                      pValue[2], pValue[3], pValue[4], pValue[5]);
         }
-        else
+        else if (psInfo->iCurItem == 3)
         {
-            /* coverity[overrun-local] */
+            pValue = psTxt->anJust1 + (psInfo->iCurItem - 3) * 7;
             snprintf(psInfo->pszBuf, psInfo->nBufSize,
                      "%10d%10d%10d%10d%10d%10d%10d", pValue[0], pValue[1],
                      pValue[2], pValue[3], pValue[4], pValue[5], pValue[6]);
+        }
+        else if (psInfo->iCurItem == 4)
+        {
+            pValue = psTxt->anJust1 + (psInfo->iCurItem - 3) * 7;
+            snprintf(psInfo->pszBuf, psInfo->nBufSize,
+                     "%10d%10d%10d%10d%10d%10d%10d", pValue[0], pValue[1],
+                     pValue[2], pValue[3], pValue[4], pValue[5], pValue[6]);
+        }
+        else
+        {
+            assert(psInfo->iCurItem == 5);
+            pValue = psTxt->anJust1 + (psInfo->iCurItem - 3) * 7;
+            snprintf(psInfo->pszBuf, psInfo->nBufSize,
+                     "%10d%10d%10d%10d%10d%10d", pValue[0], pValue[1],
+                     pValue[2], pValue[3], pValue[4], pValue[5]);
         }
 
         psInfo->iCurItem++;

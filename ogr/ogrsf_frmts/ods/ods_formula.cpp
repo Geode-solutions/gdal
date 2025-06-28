@@ -8,23 +8,7 @@
  * Copyright (C) 2010 Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <cctype>
@@ -32,6 +16,8 @@
 
 #include "cpl_conv.h"
 #include "ods_formula.h"
+
+IODSCellEvaluator::~IODSCellEvaluator() = default;
 
 namespace
 {
@@ -42,8 +28,6 @@ int ods_formulalex(ods_formula_node **ppNode,
 
 #include "ods_formula_parser.cpp"
 } /* end of anonymous namespace */
-
-#define YYSTYPE ods_formula_node *
 
 static const SingleOpStruct apsSingleOp[] = {
     {"ABS", ODS_ABS, fabs},   {"SQRT", ODS_SQRT, sqrt},
@@ -205,7 +189,7 @@ int ods_formulalex(YYSTYPE *ppNode, ods_formula_parse_context *context)
     /* -------------------------------------------------------------------- */
     /*      Handle alpha-numerics.                                          */
     /* -------------------------------------------------------------------- */
-    else if (*pszInput == '.' || isalnum(*pszInput))
+    else if (*pszInput == '.' || isalnum(static_cast<unsigned char>(*pszInput)))
     {
         int nReturn = ODST_IDENTIFIER;
         const char *pszNext = pszInput + 1;
@@ -214,8 +198,8 @@ int ods_formulalex(YYSTYPE *ppNode, ods_formula_parse_context *context)
         osToken += *pszInput;
 
         // collect text characters
-        while (isalnum(*pszNext) || *pszNext == '_' ||
-               ((unsigned char)*pszNext) > 127)
+        while (isalnum(static_cast<unsigned char>(*pszNext)) ||
+               *pszNext == '_' || ((unsigned char)*pszNext) > 127)
             osToken += *(pszNext++);
 
         context->pszNext = pszNext;

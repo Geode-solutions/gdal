@@ -7,29 +7,13 @@
  ******************************************************************************
  * Copyright (c) 2015, Victor Chernetsky, <victor at amigocloud dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_amigocloud.h"
 #include "ogr_p.h"
 #include "ogr_pgdump.h"
-#include "ogrgeojsonreader.h"
+#include "ogrlibjsonutils.h"
 #include <sstream>
 #include <iomanip>
 
@@ -295,23 +279,13 @@ OGRErr OGRAmigoCloudTableLayer::SetAttributeFilter(const char *pszQuery)
 }
 
 /************************************************************************/
-/*                          SetSpatialFilter()                          */
+/*                          ISetSpatialFilter()                          */
 /************************************************************************/
 
-void OGRAmigoCloudTableLayer::SetSpatialFilter(int iGeomField,
-                                               OGRGeometry *poGeomIn)
+OGRErr OGRAmigoCloudTableLayer::ISetSpatialFilter(int iGeomField,
+                                                  const OGRGeometry *poGeomIn)
 
 {
-    if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount() ||
-        GetLayerDefn()->GetGeomFieldDefn(iGeomField)->GetType() == wkbNone)
-    {
-        if (iGeomField != 0)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Invalid geometry field index : %d", iGeomField);
-        }
-        return;
-    }
     m_iGeomFieldFilter = iGeomField;
 
     if (InstallFilter(poGeomIn))
@@ -320,6 +294,7 @@ void OGRAmigoCloudTableLayer::SetSpatialFilter(int iGeomField,
 
         ResetReading();
     }
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
@@ -369,7 +344,7 @@ void OGRAmigoCloudTableLayer::FlushDeferredInsert()
 /*                            CreateField()                             */
 /************************************************************************/
 
-OGRErr OGRAmigoCloudTableLayer::CreateField(OGRFieldDefn *poFieldIn,
+OGRErr OGRAmigoCloudTableLayer::CreateField(const OGRFieldDefn *poFieldIn,
                                             CPL_UNUSED int bApproxOK)
 {
     GetLayerDefn();
@@ -456,7 +431,8 @@ OGRErr OGRAmigoCloudTableLayer::ICreateFeature(OGRFeature *poFeature)
             continue;
 
         OGRAmigoCloudGeomFieldDefn *poGeomFieldDefn =
-            (OGRAmigoCloudGeomFieldDefn *)poFeatureDefn->GetGeomFieldDefn(i);
+            cpl::down_cast<OGRAmigoCloudGeomFieldDefn *>(
+                poFeatureDefn->GetGeomFieldDefn(i));
         int nSRID = poGeomFieldDefn->nSRID;
         if (nSRID == 0)
             nSRID = 4326;
@@ -488,7 +464,7 @@ OGRErr OGRAmigoCloudTableLayer::ICreateFeature(OGRFeature *poFeature)
 
         if (name == "amigo_id")
         {
-            amigo_id_value = value;
+            amigo_id_value = std::move(value);
             continue;
         }
         if (!poFeature->IsFieldSet(i))
@@ -564,11 +540,10 @@ OGRErr OGRAmigoCloudTableLayer::ISetFeature(OGRFeature *poFeature)
         return OGRERR_FAILURE;
     }
 
-    std::map<GIntBig, OGRAmigoCloudFID>::iterator it =
-        mFIDs.find(poFeature->GetFID());
+    const auto it = mFIDs.find(poFeature->GetFID());
     if (it != mFIDs.end())
     {
-        OGRAmigoCloudFID &aFID = it->second;
+        const OGRAmigoCloudFID &aFID = it->second;
 
         CPLString osSQL;
         osSQL.Printf("UPDATE %s SET ",
@@ -633,8 +608,8 @@ OGRErr OGRAmigoCloudTableLayer::ISetFeature(OGRFeature *poFeature)
             else
             {
                 OGRAmigoCloudGeomFieldDefn *poGeomFieldDefn =
-                    (OGRAmigoCloudGeomFieldDefn *)
-                        poFeatureDefn->GetGeomFieldDefn(i);
+                    cpl::down_cast<OGRAmigoCloudGeomFieldDefn *>(
+                        poFeatureDefn->GetGeomFieldDefn(i));
                 int nSRID = poGeomFieldDefn->nSRID;
                 if (nSRID == 0)
                     nSRID = 4326;
@@ -709,10 +684,10 @@ OGRErr OGRAmigoCloudTableLayer::DeleteFeature(GIntBig nFID)
     if (osFIDColName.empty())
         return OGRERR_FAILURE;
 
-    std::map<GIntBig, OGRAmigoCloudFID>::iterator it = mFIDs.find(nFID);
+    const auto it = mFIDs.find(nFID);
     if (it != mFIDs.end())
     {
-        OGRAmigoCloudFID &aFID = it->second;
+        const OGRAmigoCloudFID &aFID = it->second;
 
         CPLString osSQL;
         osSQL.Printf("DELETE FROM %s WHERE %s = '%s'",
@@ -781,11 +756,11 @@ void OGRAmigoCloudTableLayer::BuildWhere()
         char szBox3D_2[128];
         char *pszComma = nullptr;
 
-        CPLsnprintf(szBox3D_1, sizeof(szBox3D_1), "%.18g %.18g", sEnvelope.MinX,
+        CPLsnprintf(szBox3D_1, sizeof(szBox3D_1), "%.17g %.17g", sEnvelope.MinX,
                     sEnvelope.MinY);
         while ((pszComma = strchr(szBox3D_1, ',')) != nullptr)
             *pszComma = '.';
-        CPLsnprintf(szBox3D_2, sizeof(szBox3D_2), "%.18g %.18g", sEnvelope.MaxX,
+        CPLsnprintf(szBox3D_2, sizeof(szBox3D_2), "%.17g %.17g", sEnvelope.MaxX,
                     sEnvelope.MaxY);
         while ((pszComma = strchr(szBox3D_2, ',')) != nullptr)
             *pszComma = '.';
@@ -828,10 +803,10 @@ OGRFeature *OGRAmigoCloudTableLayer::GetFeature(GIntBig nFeatureId)
     if (osFIDColName.empty())
         return OGRAmigoCloudLayer::GetFeature(nFeatureId);
 
-    std::map<GIntBig, OGRAmigoCloudFID>::iterator it = mFIDs.find(nFeatureId);
+    const auto it = mFIDs.find(nFeatureId);
     if (it != mFIDs.end())
     {
-        OGRAmigoCloudFID &aFID = it->second;
+        const OGRAmigoCloudFID &aFID = it->second;
 
         CPLString osSQL = osSELECTWithoutWHERE;
         osSQL += " WHERE ";
@@ -902,31 +877,20 @@ GIntBig OGRAmigoCloudTableLayer::GetFeatureCount(int bForce)
 }
 
 /************************************************************************/
-/*                             GetExtent()                              */
+/*                            IGetExtent()                              */
 /*                                                                      */
 /*      For PostGIS use internal Extend(geometry) function              */
 /*      in other cases we use standard OGRLayer::GetExtent()            */
 /************************************************************************/
 
-OGRErr OGRAmigoCloudTableLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
-                                          int bForce)
+OGRErr OGRAmigoCloudTableLayer::IGetExtent(int iGeomField,
+                                           OGREnvelope *psExtent, bool bForce)
 {
     CPLString osSQL;
 
     if (bDeferredCreation && RunDeferredCreationIfNecessary() != OGRERR_NONE)
         return OGRERR_FAILURE;
     FlushDeferredInsert();
-
-    if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount() ||
-        GetLayerDefn()->GetGeomFieldDefn(iGeomField)->GetType() == wkbNone)
-    {
-        if (iGeomField != 0)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Invalid geometry field index : %d", iGeomField);
-        }
-        return OGRERR_FAILURE;
-    }
 
     OGRGeomFieldDefn *poGeomFieldDefn =
         poFeatureDefn->GetGeomFieldDefn(iGeomField);
@@ -1003,10 +967,7 @@ OGRErr OGRAmigoCloudTableLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
     if (poObj != nullptr)
         json_object_put(poObj);
 
-    if (iGeomField == 0)
-        return OGRLayer::GetExtent(psExtent, bForce);
-    else
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
+    return OGRLayer::IGetExtent(iGeomField, psExtent, bForce);
 }
 
 /************************************************************************/
@@ -1056,7 +1017,7 @@ void OGRAmigoCloudTableLayer::SetDeferredCreation(OGRwkbGeometryType eGType,
         eGType = wkbMultiPolygon25D;
     if (eGType != wkbNone)
     {
-        auto poFieldDefn = cpl::make_unique<OGRAmigoCloudGeomFieldDefn>(
+        auto poFieldDefn = std::make_unique<OGRAmigoCloudGeomFieldDefn>(
             "wkb_geometry", eGType);
         poFieldDefn->SetNullable(bGeomNullable);
         if (poSRS != nullptr)
@@ -1071,7 +1032,7 @@ void OGRAmigoCloudTableLayer::SetDeferredCreation(OGRwkbGeometryType eGType,
                      OGRAMIGOCLOUDEscapeIdentifier(osTableName).c_str());
 }
 
-CPLString OGRAmigoCloudTableLayer::GetAmigoCloudType(OGRFieldDefn &oField)
+CPLString OGRAmigoCloudTableLayer::GetAmigoCloudType(const OGRFieldDefn &oField)
 {
     char szFieldType[256];
 
@@ -1169,7 +1130,8 @@ OGRErr OGRAmigoCloudTableLayer::RunDeferredCreationIfNecessary()
             osGeomType += "Z";
 
         OGRAmigoCloudGeomFieldDefn *poFieldDefn =
-            (OGRAmigoCloudGeomFieldDefn *)poFeatureDefn->GetGeomFieldDefn(0);
+            cpl::down_cast<OGRAmigoCloudGeomFieldDefn *>(
+                poFeatureDefn->GetGeomFieldDefn(0));
 
         json << "{\\\"name\\\":\\\"" << poFieldDefn->GetNameRef() << "\\\",";
         json << "\\\"type\\\":\\\"geometry\\\",";

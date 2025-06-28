@@ -8,23 +8,7 @@
  * Copyright (c) 2012, Jean-Claude Repetto
  * Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_frmts.h"
@@ -41,22 +25,24 @@
 
 class MAPDataset final : public GDALDataset
 {
-    GDALDataset *poImageDS;
+    GDALDataset *poImageDS{};
 
     OGRSpatialReference m_oSRS{};
-    int bGeoTransformValid;
-    double adfGeoTransform[6];
-    int nGCPCount;
-    GDAL_GCP *pasGCPList;
-    OGRPolygon *poNeatLine;
-    CPLString osImgFilename;
+    int bGeoTransformValid{};
+    GDALGeoTransform m_gt{};
+    int nGCPCount{};
+    GDAL_GCP *pasGCPList{};
+    OGRPolygon *poNeatLine{};
+    CPLString osImgFilename{};
+
+    CPL_DISALLOW_COPY_ASSIGN(MAPDataset)
 
   public:
     MAPDataset();
     virtual ~MAPDataset();
 
     const OGRSpatialReference *GetSpatialRef() const override;
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     virtual int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
     virtual const GDAL_GCP *GetGCPs() override;
@@ -75,14 +61,13 @@ class MAPDataset final : public GDALDataset
 /************************************************************************/
 class MAPWrapperRasterBand final : public GDALProxyRasterBand
 {
-    GDALRasterBand *poBaseBand;
+    GDALRasterBand *poBaseBand{};
+
+    CPL_DISALLOW_COPY_ASSIGN(MAPWrapperRasterBand)
 
   protected:
     virtual GDALRasterBand *
-    RefUnderlyingRasterBand(bool /*bForceOpen*/) const override
-    {
-        return poBaseBand;
-    }
+    RefUnderlyingRasterBand(bool /*bForceOpen*/) const override;
 
   public:
     explicit MAPWrapperRasterBand(GDALRasterBand *poBaseBandIn)
@@ -91,10 +76,17 @@ class MAPWrapperRasterBand final : public GDALProxyRasterBand
         eDataType = poBaseBand->GetRasterDataType();
         poBaseBand->GetBlockSize(&nBlockXSize, &nBlockYSize);
     }
+
     ~MAPWrapperRasterBand()
     {
     }
 };
+
+GDALRasterBand *
+MAPWrapperRasterBand::RefUnderlyingRasterBand(bool /*bForceOpen*/) const
+{
+    return poBaseBand;
+}
 
 /************************************************************************/
 /* ==================================================================== */
@@ -107,12 +99,6 @@ MAPDataset::MAPDataset()
       pasGCPList(nullptr), poNeatLine(nullptr)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -165,7 +151,7 @@ int MAPDataset::Identify(GDALOpenInfo *poOpenInfo)
 
 {
     if (poOpenInfo->nHeaderBytes < 200 ||
-        !EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "MAP"))
+        !poOpenInfo->IsExtensionEqualToCI("MAP"))
         return FALSE;
 
     if (strstr(reinterpret_cast<const char *>(poOpenInfo->pabyHeader),
@@ -189,9 +175,7 @@ GDALDataset *MAPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The MAP driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("MAP");
         return nullptr;
     }
 
@@ -207,8 +191,8 @@ GDALDataset *MAPDataset::Open(GDALOpenInfo *poOpenInfo)
 
     char *pszWKT = nullptr;
     bool bOziFileOK = CPL_TO_BOOL(
-        GDALLoadOziMapFile(poOpenInfo->pszFilename, poDS->adfGeoTransform,
-                           &pszWKT, &poDS->nGCPCount, &poDS->pasGCPList));
+        GDALLoadOziMapFile(poOpenInfo->pszFilename, poDS->m_gt.data(), &pszWKT,
+                           &poDS->nGCPCount, &poDS->pasGCPList));
     if (pszWKT)
     {
         poDS->m_oSRS.importFromWkt(pszWKT);
@@ -244,11 +228,11 @@ GDALDataset *MAPDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     poDS->osImgFilename = papszLines[2];
 
-    const CPLString osPath = CPLGetPath(poOpenInfo->pszFilename);
+    const CPLString osPath = CPLGetPathSafe(poOpenInfo->pszFilename);
     if (CPLIsFilenameRelative(poDS->osImgFilename))
     {
         poDS->osImgFilename =
-            CPLFormCIFilename(osPath, poDS->osImgFilename, nullptr);
+            CPLFormCIFilenameSafe(osPath, poDS->osImgFilename, nullptr);
     }
     else
     {
@@ -257,7 +241,7 @@ GDALDataset *MAPDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             poDS->osImgFilename = CPLGetFilename(poDS->osImgFilename);
             poDS->osImgFilename =
-                CPLFormCIFilename(osPath, poDS->osImgFilename, nullptr);
+                CPLFormCIFilenameSafe(osPath, poDS->osImgFilename, nullptr);
         }
     }
 
@@ -280,6 +264,7 @@ GDALDataset *MAPDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->nRasterYSize = poDS->poImageDS->GetRasterYSize();
     if (!GDALCheckDatasetDimensions(poDS->nRasterXSize, poDS->nRasterYSize))
     {
+        CSLDestroy(papszLines);
         GDALClose(poDS->poImageDS);
         delete poDS;
         return nullptr;
@@ -348,12 +333,10 @@ GDALDataset *MAPDataset::Open(GDALOpenInfo *poOpenInfo)
 
                     const double x = CPLAtofM(papszTok[2]);
                     const double y = CPLAtofM(papszTok[3]);
-                    const double X = poDS->adfGeoTransform[0] +
-                                     x * poDS->adfGeoTransform[1] +
-                                     y * poDS->adfGeoTransform[2];
-                    const double Y = poDS->adfGeoTransform[3] +
-                                     x * poDS->adfGeoTransform[4] +
-                                     y * poDS->adfGeoTransform[5];
+                    const double X =
+                        poDS->m_gt[0] + x * poDS->m_gt[1] + y * poDS->m_gt[2];
+                    const double Y =
+                        poDS->m_gt[3] + x * poDS->m_gt[4] + y * poDS->m_gt[5];
                     poRing->addPoint(X, Y);
                     CPLDebug("CORNER MMPXY", "%f, %f, %f, %f", x, y, X, Y);
                     CSLDestroy(papszTok);
@@ -434,10 +417,10 @@ const OGRSpatialReference *MAPDataset::GetSpatialRef() const
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr MAPDataset::GetGeoTransform(double *padfTransform)
+CPLErr MAPDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, 6 * sizeof(double));
+    gt = m_gt;
 
     return (nGCPCount == 0) ? CE_None : CE_Failure;
 }

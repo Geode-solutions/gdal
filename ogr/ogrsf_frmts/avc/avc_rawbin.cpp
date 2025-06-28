@@ -1,5 +1,4 @@
 /**********************************************************************
- * $Id$
  *
  * Name:     avc_rawbin.c
  * Project:  Arc/Info vector coverage (AVC)  BIN->E00 conversion library
@@ -10,23 +9,7 @@
  **********************************************************************
  * Copyright (c) 1999-2005, Daniel Morissette
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************
  *
  * $Log: avc_rawbin.c,v $
@@ -479,7 +462,7 @@ GInt16 AVCRawBinReadInt16(AVCRawBinFile *psFile)
 {
     GInt16 n16Value = 0;
 
-    AVCRawBinReadBytes(psFile, 2, (GByte *)(&n16Value));
+    AVCRawBinReadBytes(psFile, 2, reinterpret_cast<GByte *>(&n16Value));
 
     if (psFile->eByteOrder != geSystemByteOrder)
     {
@@ -493,7 +476,7 @@ GInt32 AVCRawBinReadInt32(AVCRawBinFile *psFile)
 {
     GInt32 n32Value = 0;
 
-    AVCRawBinReadBytes(psFile, 4, (GByte *)(&n32Value));
+    AVCRawBinReadBytes(psFile, 4, reinterpret_cast<GByte *>(&n32Value));
 
     if (psFile->eByteOrder != geSystemByteOrder)
     {
@@ -507,7 +490,7 @@ float AVCRawBinReadFloat(AVCRawBinFile *psFile)
 {
     float fValue = 0.0f;
 
-    AVCRawBinReadBytes(psFile, 4, (GByte *)(&fValue));
+    AVCRawBinReadBytes(psFile, 4, reinterpret_cast<GByte *>(&fValue));
 
     if (psFile->eByteOrder != geSystemByteOrder)
     {
@@ -521,7 +504,7 @@ double AVCRawBinReadDouble(AVCRawBinFile *psFile)
 {
     double dValue = 0.0;
 
-    AVCRawBinReadBytes(psFile, 8, (GByte *)(&dValue));
+    AVCRawBinReadBytes(psFile, 8, reinterpret_cast<GByte *>(&dValue));
 
     if (psFile->eByteOrder != geSystemByteOrder)
     {
@@ -584,7 +567,7 @@ void AVCRawBinWriteInt16(AVCRawBinFile *psFile, GInt16 n16Value)
         n16Value = (GInt16)CPL_SWAP16(n16Value);
     }
 
-    AVCRawBinWriteBytes(psFile, 2, (GByte *)&n16Value);
+    AVCRawBinWriteBytes(psFile, 2, reinterpret_cast<GByte *>(&n16Value));
 }
 
 void AVCRawBinWriteInt32(AVCRawBinFile *psFile, GInt32 n32Value)
@@ -594,7 +577,7 @@ void AVCRawBinWriteInt32(AVCRawBinFile *psFile, GInt32 n32Value)
         n32Value = (GInt32)CPL_SWAP32(n32Value);
     }
 
-    AVCRawBinWriteBytes(psFile, 4, (GByte *)&n32Value);
+    AVCRawBinWriteBytes(psFile, 4, reinterpret_cast<GByte *>(&n32Value));
 }
 
 void AVCRawBinWriteFloat(AVCRawBinFile *psFile, float fValue)
@@ -604,7 +587,7 @@ void AVCRawBinWriteFloat(AVCRawBinFile *psFile, float fValue)
         CPL_SWAP32PTR(&fValue);
     }
 
-    AVCRawBinWriteBytes(psFile, 4, (GByte *)&fValue);
+    AVCRawBinWriteBytes(psFile, 4, reinterpret_cast<GByte *>(&fValue));
 }
 
 void AVCRawBinWriteDouble(AVCRawBinFile *psFile, double dValue)
@@ -614,7 +597,7 @@ void AVCRawBinWriteDouble(AVCRawBinFile *psFile, double dValue)
         CPL_SWAPDOUBLE(&dValue);
     }
 
-    AVCRawBinWriteBytes(psFile, 8, (GByte *)&dValue);
+    AVCRawBinWriteBytes(psFile, 8, reinterpret_cast<GByte *>(&dValue));
 }
 
 /**********************************************************************

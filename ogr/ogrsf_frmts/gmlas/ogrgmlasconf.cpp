@@ -9,111 +9,18 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_gmlas.h"
-
-#define CONSTANT_DEFINITION
-#undef OGR_GMLAS_CONSTS_INCLUDED_REDEFINABLE
-#include "ogr_gmlas_consts.h"
 
 #include "cpl_minixml.h"
 
 #include <algorithm>
 
-/************************************************************************/
-/*                          GMLASConfiguration()                        */
-/************************************************************************/
-
-GMLASConfiguration::GMLASConfiguration()
-    : m_bAllowRemoteSchemaDownload(ALLOW_REMOTE_SCHEMA_DOWNLOAD_DEFAULT),
-      m_bAlwaysGenerateOGRId(ALWAYS_GENERATE_OGR_ID_DEFAULT),
-      m_bRemoveUnusedLayers(REMOVE_UNUSED_LAYERS_DEFAULT),
-      m_bRemoveUnusedFields(REMOVE_UNUSED_FIELDS_DEFAULT),
-      m_bUseArrays(USE_ARRAYS_DEFAULT), m_bUseNullState(USE_NULL_STATE_DEFAULT),
-      m_bIncludeGeometryXML(INCLUDE_GEOMETRY_XML_DEFAULT),
-      m_bInstantiateGMLFeaturesOnly(INSTANTIATE_GML_FEATURES_ONLY_DEFAULT),
-      m_nIdentifierMaxLength(0),
-      m_bCaseInsensitiveIdentifier(CASE_INSENSITIVE_IDENTIFIER_DEFAULT),
-      m_bPGIdentifierLaundering(PG_IDENTIFIER_LAUNDERING_DEFAULT),
-      m_nMaximumFieldsForFlattening(MAXIMUM_FIELDS_FLATTENING_DEFAULT),
-      m_bAllowXSDCache(ALLOW_XSD_CACHE_DEFAULT),
-      m_bSchemaFullChecking(SCHEMA_FULL_CHECKING_DEFAULT),
-      m_bHandleMultipleImports(HANDLE_MULTIPLE_IMPORTS_DEFAULT),
-      m_bValidate(VALIDATE_DEFAULT),
-      m_bFailIfValidationError(FAIL_IF_VALIDATION_ERROR_DEFAULT),
-      m_bExposeMetadataLayers(WARN_IF_EXCLUDED_XPATH_FOUND_DEFAULT),
-      m_eSWEActivationMode(SWE_ACTIVATE_IF_NAMESPACE_FOUND),
-      m_bSWEProcessDataRecord(SWE_PROCESS_DATA_RECORD_DEFAULT),
-      m_bSWEProcessDataArray(SWE_PROCESS_DATA_ARRAY_DEFAULT),
-      m_nIndentSize(INDENT_SIZE_DEFAULT), m_osSRSNameFormat(szSRSNAME_DEFAULT),
-      m_osWrapping(szWFS2_FEATURECOLLECTION),
-      m_osWFS20SchemaLocation(szWFS20_SCHEMALOCATION)
-{
-}
-
-/************************************************************************/
-/*                         ~GMLASConfiguration()                        */
-/************************************************************************/
-
-GMLASConfiguration::~GMLASConfiguration()
-{
-}
-
-/************************************************************************/
-/*                        GetBaseCacheDirectory()                       */
-/************************************************************************/
-
-CPLString GMLASConfiguration::GetBaseCacheDirectory()
-{
-#ifdef WIN32
-    const char *pszHome = CPLGetConfigOption("USERPROFILE", nullptr);
-#else
-    const char *pszHome = CPLGetConfigOption("HOME", nullptr);
+#ifdef EMBED_RESOURCE_FILES
+#include "embedded_resources.h"
 #endif
-    if (pszHome != nullptr)
-    {
-        return CPLFormFilename(pszHome, ".gdal", nullptr);
-    }
-    else
-    {
-        const char *pszDir = CPLGetConfigOption("CPL_TMPDIR", nullptr);
-
-        if (pszDir == nullptr)
-            pszDir = CPLGetConfigOption("TMPDIR", nullptr);
-
-        if (pszDir == nullptr)
-            pszDir = CPLGetConfigOption("TEMP", nullptr);
-
-        const char *pszUsername = CPLGetConfigOption("USERNAME", nullptr);
-        if (pszUsername == nullptr)
-            pszUsername = CPLGetConfigOption("USER", nullptr);
-
-        if (pszDir != nullptr && pszUsername != nullptr)
-        {
-            return CPLFormFilename(pszDir, CPLSPrintf(".gdal_%s", pszUsername),
-                                   nullptr);
-        }
-    }
-    return CPLString();
-}
 
 /************************************************************************/
 /*                              Finalize()                              */
@@ -123,7 +30,7 @@ void GMLASConfiguration::Finalize()
 {
     if (m_bAllowXSDCache && m_osXSDCacheDirectory.empty())
     {
-        m_osXSDCacheDirectory = GetBaseCacheDirectory();
+        m_osXSDCacheDirectory = GDALGetCacheDirectory();
         if (m_osXSDCacheDirectory.empty())
         {
             CPLError(CE_Warning, CPLE_AppDefined,
@@ -131,8 +38,8 @@ void GMLASConfiguration::Finalize()
         }
         else
         {
-            m_osXSDCacheDirectory = CPLFormFilename(m_osXSDCacheDirectory,
-                                                    "gmlas_xsd_cache", nullptr);
+            m_osXSDCacheDirectory = CPLFormFilenameSafe(
+                m_osXSDCacheDirectory, "gmlas_xsd_cache", nullptr);
             CPLDebug("GMLAS", "XSD cache directory: %s",
                      m_osXSDCacheDirectory.c_str());
         }
@@ -171,25 +78,25 @@ static bool IsValidXPath(const CPLString &osXPath)
         }
         else if (chCur == '@' && (i == 0 || osXPath[i - 1] == '/') &&
                  i < osXPath.size() - 1 &&
-                 isalpha(static_cast<int>(osXPath[i + 1])))
+                 isalpha(static_cast<unsigned char>(osXPath[i + 1])))
         {
             // OK
         }
-        else if (chCur == '_' || isalpha(static_cast<int>(chCur)))
+        else if (chCur == '_' || isalpha(static_cast<unsigned char>(chCur)))
         {
             // OK
         }
-        else if (isdigit(static_cast<int>(chCur)) && i > 0 &&
-                 (isalnum(static_cast<int>(osXPath[i - 1])) ||
+        else if (isdigit(static_cast<unsigned char>(chCur)) && i > 0 &&
+                 (isalnum(static_cast<unsigned char>(osXPath[i - 1])) ||
                   osXPath[i - 1] == '_'))
         {
             // OK
         }
         else if (chCur == ':' && i > 0 &&
-                 (isalnum(static_cast<int>(osXPath[i - 1])) ||
+                 (isalnum(static_cast<unsigned char>(osXPath[i - 1])) ||
                   osXPath[i - 1] == '_') &&
                  i < osXPath.size() - 1 &&
-                 isalpha(static_cast<int>(osXPath[i + 1])))
+                 isalpha(static_cast<unsigned char>(osXPath[i + 1])))
         {
             // OK
         }
@@ -211,7 +118,7 @@ static void CPL_STDCALL GMLASConfigurationErrorHandler(CPLErr /*eErr*/,
                                                        const char *pszMsg)
 {
     std::vector<CPLString> *paosErrors =
-        (std::vector<CPLString> *)CPLGetErrorHandlerUserData();
+        static_cast<std::vector<CPLString> *>(CPLGetErrorHandlerUserData());
     paosErrors->push_back(pszMsg);
 }
 
@@ -231,8 +138,9 @@ static void ParseNamespaces(CPLXMLNode *psContainerNode,
             if (psIter->eType == CXT_Element &&
                 EQUAL(psIter->pszValue, "Namespace"))
             {
-                CPLString osPrefix = CPLGetXMLValue(psIter, "prefix", "");
-                CPLString osURI = CPLGetXMLValue(psIter, "uri", "");
+                const std::string osPrefix =
+                    CPLGetXMLValue(psIter, "prefix", "");
+                const std::string osURI = CPLGetXMLValue(psIter, "uri", "");
                 if (!osPrefix.empty() && !osURI.empty())
                 {
                     if (oMap.find(osPrefix) == oMap.end())
@@ -251,6 +159,40 @@ static void ParseNamespaces(CPLXMLNode *psContainerNode,
             }
         }
     }
+}
+
+/************************************************************************/
+/*                           GetDefaultConfFile()                       */
+/************************************************************************/
+
+/* static */
+std::string GMLASConfiguration::GetDefaultConfFile(bool &bUnlinkAfterUse)
+{
+    bUnlinkAfterUse = false;
+#if !defined(USE_ONLY_EMBEDDED_RESOURCE_FILES)
+    const char *pszConfigFile = CPLFindFile("gdal", szDEFAULT_CONF_FILENAME);
+    if (pszConfigFile)
+        return pszConfigFile;
+#endif
+#ifdef EMBED_RESOURCE_FILES
+    static const bool bOnce [[maybe_unused]] = []()
+    {
+        CPLDebug("GMLAS", "Using embedded %s", szDEFAULT_CONF_FILENAME);
+        return true;
+    }();
+    bUnlinkAfterUse = true;
+    const std::string osTmpFilename =
+        VSIMemGenerateHiddenFilename(szDEFAULT_CONF_FILENAME);
+    VSIFCloseL(VSIFileFromMemBuffer(
+        osTmpFilename.c_str(),
+        const_cast<GByte *>(
+            reinterpret_cast<const GByte *>(GMLASConfXMLGetFileContent())),
+        static_cast<int>(strlen(GMLASConfXMLGetFileContent())),
+        /* bTakeOwnership = */ false));
+    return osTmpFilename;
+#else
+    return std::string();
+#endif
 }
 
 /************************************************************************/
@@ -274,8 +216,35 @@ bool GMLASConfiguration::Load(const char *pszFilename)
     // Validate the configuration file
     if (CPLTestBool(CPLGetConfigOption("GDAL_XML_VALIDATION", "YES")))
     {
+#ifdef EMBED_RESOURCE_FILES
+        std::string osTmpFilename;
+        CPLErrorStateBackuper oErrorStateBackuper(CPLQuietErrorHandler);
+#endif
+#ifdef USE_ONLY_EMBEDDED_RESOURCE_FILES
+        const char *pszXSD = nullptr;
+#else
         const char *pszXSD = CPLFindFile("gdal", "gmlasconf.xsd");
-        if (pszXSD != nullptr)
+#endif
+#ifdef EMBED_RESOURCE_FILES
+        if (!pszXSD)
+        {
+            static const bool bOnce [[maybe_unused]] = []()
+            {
+                CPLDebug("GMLAS", "Using embedded gmlasconf.xsd");
+                return true;
+            }();
+            osTmpFilename = VSIMemGenerateHiddenFilename("gmlasconf.xsd");
+            pszXSD = osTmpFilename.c_str();
+            VSIFCloseL(VSIFileFromMemBuffer(
+                osTmpFilename.c_str(),
+                const_cast<GByte *>(reinterpret_cast<const GByte *>(
+                    GMLASConfXSDGetFileContent())),
+                static_cast<int>(strlen(GMLASConfXSDGetFileContent())),
+                /* bTakeOwnership = */ false));
+        }
+#else
+        if (pszXSD)
+#endif
         {
             std::vector<CPLString> aosErrors;
             const CPLErr eErrClass = CPLGetLastErrorType();
@@ -299,6 +268,11 @@ bool GMLASConfiguration::Load(const char *pszFilename)
                 CPLErrorSetState(eErrClass, nErrNum, osErrMsg);
             }
         }
+
+#ifdef EMBED_RESOURCE_FILES
+        if (!osTmpFilename.empty())
+            VSIUnlink(osTmpFilename.c_str());
+#endif
     }
 
     m_bAllowRemoteSchemaDownload =
@@ -529,21 +503,6 @@ bool GMLASConfiguration::Load(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                         GMLASXLinkResolutionConf()                   */
-/************************************************************************/
-
-GMLASXLinkResolutionConf::GMLASXLinkResolutionConf()
-    : m_nTimeOut(0), m_nMaxFileSize(MAX_FILE_SIZE_DEFAULT),
-      m_nMaxGlobalResolutionTime(0),
-      m_bDefaultResolutionEnabled(DEFAULT_RESOLUTION_ENABLED_DEFAULT),
-      m_bDefaultAllowRemoteDownload(ALLOW_REMOTE_DOWNLOAD_DEFAULT),
-      m_eDefaultResolutionMode(RawContent), m_nDefaultResolutionDepth(1),
-      m_bDefaultCacheResults(CACHE_RESULTS_DEFAULT),
-      m_bResolveInternalXLinks(INTERNAL_XLINK_RESOLUTION_DEFAULT)
-{
-}
-
-/************************************************************************/
 /*                               LoadFromXML()                          */
 /************************************************************************/
 
@@ -564,10 +523,10 @@ bool GMLASXLinkResolutionConf::LoadFromXML(CPLXMLNode *psRoot)
     m_osCacheDirectory = CPLGetXMLValue(psRoot, "CacheDirectory", "");
     if (m_osCacheDirectory.empty())
     {
-        m_osCacheDirectory = GMLASConfiguration::GetBaseCacheDirectory();
+        m_osCacheDirectory = GDALGetCacheDirectory();
         if (!m_osCacheDirectory.empty())
         {
-            m_osCacheDirectory = CPLFormFilename(
+            m_osCacheDirectory = CPLFormFilenameSafe(
                 m_osCacheDirectory, "xlink_resolved_cache", nullptr);
         }
     }
@@ -633,11 +592,11 @@ bool GMLASXLinkResolutionConf::LoadFromXML(CPLXMLNode *psRoot)
                     oField.m_osName = CPLGetXMLValue(psIter, "Name", "");
                     oField.m_osType = CPLGetXMLValue(psIter, "Type", "");
                     oField.m_osXPath = CPLGetXMLValue(psIter, "XPath", "");
-                    oItem.m_aoFields.push_back(oField);
+                    oItem.m_aoFields.push_back(std::move(oField));
                 }
             }
 
-            m_aoURLSpecificRules.push_back(oItem);
+            m_aoURLSpecificRules.push_back(std::move(oItem));
         }
     }
 
@@ -645,14 +604,4 @@ bool GMLASXLinkResolutionConf::LoadFromXML(CPLXMLNode *psRoot)
         psRoot, "ResolveInternalXLinks", INTERNAL_XLINK_RESOLUTION_DEFAULT);
 
     return true;
-}
-
-/************************************************************************/
-/*                          URLSpecificResolution()                     */
-/************************************************************************/
-
-GMLASXLinkResolutionConf::URLSpecificResolution::URLSpecificResolution()
-    : m_bAllowRemoteDownload(false), m_eResolutionMode(RawContent),
-      m_nResolutionDepth(1), m_bCacheResults(false)
-{
 }

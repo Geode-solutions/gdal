@@ -2,12 +2,12 @@
 GDAL
 ================================================================================
 
-.. include:: ./about_no_title.rst
-
-This documentation is also available as a `PDF file <gdal.pdf>`_.
+.. include:: ./about.rst
+   :start-after: .. descriptionstartshere
 
 .. toctree::
     :maxdepth: 2
+    :includehidden:
 
     download
     programs/index
@@ -21,9 +21,14 @@ This documentation is also available as a `PDF file <gdal.pdf>`_.
     sponsors/index
     contributing/index
     faq
+    glossary
     license
+    thanks
 
 Index
 =====
 
 * :ref:`genindex`
+
+.. meta::
+   :google-site-verification: 9rQvEBJEGGlTYi0neT9qNthRNbnxE4LCy_hdZ6WDiK4

@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <stdio.h>
@@ -193,7 +177,7 @@ int main(int nArgc, char **papszArgv)
             printf(">\n");
             for (int iSubField = 0; iSubField < nSubfieldCount; iSubField++)
             {
-                DDFSubfieldDefn *poSubFieldDefn =
+                const DDFSubfieldDefn *poSubFieldDefn =
                     poFieldDefn->GetSubfield(iSubField);
                 printf("  <DDFSubfieldDefn name=\"%s\" format=\"%s\"/>\n",
                        poSubFieldDefn->GetName(), poSubFieldDefn->GetFormat());
@@ -220,8 +204,8 @@ int main(int nArgc, char **papszArgv)
             int nFieldCount = poRecord->GetFieldCount();
             for (int iField = 0; iField < nFieldCount; iField++)
             {
-                DDFField *poField = poRecord->GetField(iField);
-                DDFFieldDefn *poDefn = poField->GetFieldDefn();
+                const DDFField *poField = poRecord->GetField(iField);
+                const DDFFieldDefn *poDefn = poField->GetFieldDefn();
                 const char *pszFieldName = poDefn->GetName();
                 printf("  <DDFField name=\"%s\"", pszFieldName);
                 if (poField->GetRepeatCount() > 1)
@@ -245,7 +229,7 @@ int main(int nArgc, char **papszArgv)
                          iSubField < poDefn->GetSubfieldCount(); iSubField++)
                     {
                         int nBytesConsumed;
-                        DDFSubfieldDefn *poSubFieldDefn =
+                        const DDFSubfieldDefn *poSubFieldDefn =
                             poDefn->GetSubfield(iSubField);
                         const char *pszSubFieldName = poSubFieldDefn->GetName();
                         printf("    <DDFSubfield name=\"%s\" ",

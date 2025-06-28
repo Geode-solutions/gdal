@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2011-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -31,7 +15,9 @@
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
 
+#include <array>
 #include <cmath>
+#include <deque>
 
 /************************************************************************/
 /* ==================================================================== */
@@ -45,20 +31,23 @@ class ZMapDataset final : public GDALPamDataset
 {
     friend class ZMapRasterBand;
 
-    VSILFILE *fp;
-    int nValuesPerLine;
-    int nFieldSize;
-    int nDecimalCount;
-    int nColNum;
-    double dfNoDataValue;
-    vsi_l_offset nDataStartOff;
-    double adfGeoTransform[6];
+    VSIVirtualHandleUniquePtr m_fp{};
+    int m_nValuesPerLine = 0;
+    int m_nFieldSize = 0;
+    int m_nDecimalCount = 0;
+    int m_nColNum = -1;
+    double m_dfNoDataValue = 0;
+    vsi_l_offset m_nDataStartOff = 0;
+    GDALGeoTransform m_gt{};
+    int m_nFirstDataLine = 0;
+    int m_nCurLine = 0;
+    std::deque<double> m_odfQueue{};
 
   public:
     ZMapDataset();
     virtual ~ZMapDataset();
 
-    virtual CPLErr GetGeoTransform(double *) override;
+    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -98,6 +87,8 @@ ZMapRasterBand::ZMapRasterBand(ZMapDataset *poDSIn)
 
     eDataType = GDT_Float64;
 
+    // The format is column oriented! That is we have first the value of
+    // pixel (col=0, line=0), then the one of (col=0, line=1), etc.
     nBlockXSize = 1;
     nBlockYSize = poDSIn->GetRasterYSize();
 }
@@ -109,56 +100,97 @@ ZMapRasterBand::ZMapRasterBand(ZMapDataset *poDSIn)
 CPLErr ZMapRasterBand::IReadBlock(int nBlockXOff, CPL_UNUSED int nBlockYOff,
                                   void *pImage)
 {
-    ZMapDataset *poGDS = reinterpret_cast<ZMapDataset *>(poDS);
+    ZMapDataset *poGDS = cpl::down_cast<ZMapDataset *>(poDS);
 
-    if (poGDS->fp == nullptr)
-        return CE_Failure;
-
-    if (nBlockXOff < poGDS->nColNum + 1)
+    // If seeking backwards in term of columns, reset reading to the first
+    // column
+    if (nBlockXOff < poGDS->m_nColNum + 1)
     {
-        VSIFSeekL(poGDS->fp, poGDS->nDataStartOff, SEEK_SET);
-        poGDS->nColNum = -1;
+        poGDS->m_fp->Seek(poGDS->m_nDataStartOff, SEEK_SET);
+        poGDS->m_nColNum = -1;
+        poGDS->m_nCurLine = poGDS->m_nFirstDataLine;
+        poGDS->m_odfQueue.clear();
     }
 
-    if (nBlockXOff > poGDS->nColNum + 1)
+    if (nBlockXOff > poGDS->m_nColNum + 1)
     {
-        for (int i = poGDS->nColNum + 1; i < nBlockXOff; i++)
+        for (int i = poGDS->m_nColNum + 1; i < nBlockXOff; i++)
         {
-            if (IReadBlock(i, 0, pImage) != CE_None)
+            if (IReadBlock(i, 0, nullptr) != CE_None)
                 return CE_Failure;
         }
     }
 
-    int i = 0;
-    const double dfExp = std::pow(10.0, poGDS->nDecimalCount);
-    while (i < nRasterYSize)
+    int iRow = 0;
+    const double dfExp = std::pow(10.0, poGDS->m_nDecimalCount);
+    double *padfImage = reinterpret_cast<double *>(pImage);
+
+    // If we have previously read too many values, start by consuming the
+    // queue
+    while (iRow < nRasterYSize && !poGDS->m_odfQueue.empty())
     {
-        char *pszLine = const_cast<char *>(CPLReadLineL(poGDS->fp));
-        if (pszLine == nullptr)
-            return CE_Failure;
-        int nExpected = nRasterYSize - i;
-        if (nExpected > poGDS->nValuesPerLine)
-            nExpected = poGDS->nValuesPerLine;
-        if (static_cast<int>(strlen(pszLine)) != nExpected * poGDS->nFieldSize)
-            return CE_Failure;
-
-        for (int j = 0; j < nExpected; j++)
-        {
-            char *pszValue = pszLine + j * poGDS->nFieldSize;
-            const char chSaved = pszValue[poGDS->nFieldSize];
-            pszValue[poGDS->nFieldSize] = 0;
-            if (strchr(pszValue, '.') != nullptr)
-                reinterpret_cast<double *>(pImage)[i + j] = CPLAtofM(pszValue);
-            else
-                reinterpret_cast<double *>(pImage)[i + j] =
-                    atoi(pszValue) * dfExp;
-            pszValue[poGDS->nFieldSize] = chSaved;
-        }
-
-        i += nExpected;
+        if (padfImage)
+            padfImage[iRow] = poGDS->m_odfQueue.front();
+        ++iRow;
+        poGDS->m_odfQueue.pop_front();
     }
 
-    poGDS->nColNum++;
+    // Now read as many lines as needed to finish filling the column buffer
+    while (iRow < nRasterYSize)
+    {
+        constexpr int MARGIN = 16;  // Should be at least 2 for \r\n
+        char *pszLine = const_cast<char *>(CPLReadLine2L(
+            poGDS->m_fp.get(),
+            poGDS->m_nValuesPerLine * poGDS->m_nFieldSize + MARGIN, nullptr));
+        ++poGDS->m_nCurLine;
+        if (pszLine == nullptr)
+            return CE_Failure;
+
+        // Each line should have at most m_nValuesPerLine values of size
+        // m_nFieldSize
+        const int nLineLen = static_cast<int>(strlen(pszLine));
+        if ((nLineLen % poGDS->m_nFieldSize) != 0)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Line %d has length %d, which is not a multiple of %d",
+                     poGDS->m_nCurLine, nLineLen, poGDS->m_nFieldSize);
+            return CE_Failure;
+        }
+
+        const int nValuesThisLine = nLineLen / poGDS->m_nFieldSize;
+        if (nValuesThisLine > poGDS->m_nValuesPerLine)
+        {
+            CPLError(
+                CE_Failure, CPLE_AppDefined,
+                "Line %d has %d values, whereas the maximum expected is %d",
+                poGDS->m_nCurLine, nValuesThisLine, poGDS->m_nValuesPerLine);
+            return CE_Failure;
+        }
+
+        for (int iValueThisLine = 0; iValueThisLine < nValuesThisLine;
+             iValueThisLine++)
+        {
+            char *pszValue = pszLine + iValueThisLine * poGDS->m_nFieldSize;
+            const char chSaved = pszValue[poGDS->m_nFieldSize];
+            pszValue[poGDS->m_nFieldSize] = 0;
+            const double dfVal = strchr(pszValue, '.') != nullptr
+                                     ? CPLAtofM(pszValue)
+                                     : atoi(pszValue) * dfExp;
+            pszValue[poGDS->m_nFieldSize] = chSaved;
+            if (iRow < nRasterYSize)
+            {
+                if (padfImage)
+                    padfImage[iRow] = dfVal;
+                ++iRow;
+            }
+            else
+            {
+                poGDS->m_odfQueue.push_back(dfVal);
+            }
+        }
+    }
+
+    poGDS->m_nColNum++;
 
     return CE_None;
 }
@@ -169,29 +201,19 @@ CPLErr ZMapRasterBand::IReadBlock(int nBlockXOff, CPL_UNUSED int nBlockYOff,
 
 double ZMapRasterBand::GetNoDataValue(int *pbSuccess)
 {
-    ZMapDataset *poGDS = reinterpret_cast<ZMapDataset *>(poDS);
+    ZMapDataset *poGDS = cpl::down_cast<ZMapDataset *>(poDS);
 
     if (pbSuccess)
         *pbSuccess = TRUE;
 
-    return poGDS->dfNoDataValue;
+    return poGDS->m_dfNoDataValue;
 }
 
 /************************************************************************/
 /*                            ~ZMapDataset()                            */
 /************************************************************************/
 
-ZMapDataset::ZMapDataset()
-    : fp(nullptr), nValuesPerLine(0), nFieldSize(0), nDecimalCount(0),
-      nColNum(-1), dfNoDataValue(0.0), nDataStartOff(0)
-{
-    adfGeoTransform[0] = 0;
-    adfGeoTransform[1] = 1;
-    adfGeoTransform[2] = 0;
-    adfGeoTransform[3] = 0;
-    adfGeoTransform[4] = 0;
-    adfGeoTransform[5] = 1;
-}
+ZMapDataset::ZMapDataset() = default;
 
 /************************************************************************/
 /*                            ~ZMapDataset()                            */
@@ -201,8 +223,6 @@ ZMapDataset::~ZMapDataset()
 
 {
     FlushCache(true);
-    if (fp)
-        VSIFCloseL(fp);
 }
 
 /************************************************************************/
@@ -243,25 +263,17 @@ int ZMapDataset::Identify(GDALOpenInfo *poOpenInfo)
         return FALSE;
     i++;
 
-    char **papszTokens = CSLTokenizeString2(pszData + i, ",", 0);
-    if (CSLCount(papszTokens) < 3)
+    const CPLStringList aosTokens(CSLTokenizeString2(pszData + i, ",", 0));
+    if (aosTokens.size() < 3)
     {
-        CSLDestroy(papszTokens);
         return FALSE;
     }
 
-    const char *pszToken = papszTokens[1];
+    const char *pszToken = aosTokens[1];
     while (*pszToken == ' ')
         pszToken++;
 
-    if (!STARTS_WITH(pszToken, "GRID"))
-    {
-        CSLDestroy(papszTokens);
-        return FALSE;
-    }
-
-    CSLDestroy(papszTokens);
-    return TRUE;
+    return STARTS_WITH(pszToken, "GRID");
 }
 
 /************************************************************************/
@@ -279,19 +291,25 @@ GDALDataset *ZMapDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The ZMAP driver does not support update access to existing"
-                 " datasets.");
+        ReportUpdateNotSupportedByDriver("ZMAP");
         return nullptr;
     }
+
+    auto poDS = std::make_unique<ZMapDataset>();
+    poDS->m_fp.reset(poOpenInfo->fpL);
+    poOpenInfo->fpL = nullptr;
+
     /* -------------------------------------------------------------------- */
     /*      Find dataset characteristics                                    */
     /* -------------------------------------------------------------------- */
 
     const char *pszLine;
-
-    while ((pszLine = CPLReadLine2L(poOpenInfo->fpL, 100, nullptr)) != nullptr)
+    int nLine = 0;
+    constexpr int MAX_HEADER_LINE = 1024;
+    while ((pszLine = CPLReadLine2L(poDS->m_fp.get(), MAX_HEADER_LINE,
+                                    nullptr)) != nullptr)
     {
+        ++nLine;
         if (*pszLine == '!')
         {
             continue;
@@ -302,160 +320,155 @@ GDALDataset *ZMapDataset::Open(GDALOpenInfo *poOpenInfo)
     // cppcheck-suppress knownConditionTrueFalse
     if (pszLine == nullptr)
     {
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
 
     /* Parse first header line */
-    char **papszTokens = CSLTokenizeString2(pszLine, ",", 0);
-    if (CSLCount(papszTokens) != 3)
+    CPLStringList aosTokensFirstLine(CSLTokenizeString2(pszLine, ",", 0));
+    if (aosTokensFirstLine.size() != 3)
     {
-        CSLDestroy(papszTokens);
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
 
-    const int nValuesPerLine = atoi(papszTokens[2]);
+    const int nValuesPerLine = atoi(aosTokensFirstLine[2]);
     if (nValuesPerLine <= 0)
     {
-        CSLDestroy(papszTokens);
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Invalid/unsupported value for nValuesPerLine = %d",
+                 nValuesPerLine);
         return nullptr;
     }
-
-    CSLDestroy(papszTokens);
-    papszTokens = nullptr;
 
     /* Parse second header line */
-    pszLine = CPLReadLine2L(poOpenInfo->fpL, 100, nullptr);
+    pszLine = CPLReadLine2L(poDS->m_fp.get(), MAX_HEADER_LINE, nullptr);
+    ++nLine;
     if (pszLine == nullptr)
     {
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
-    papszTokens = CSLTokenizeString2(pszLine, ",", 0);
-    if (CSLCount(papszTokens) != 5)
+    const CPLStringList aosTokensSecondLine(
+        CSLTokenizeString2(pszLine, ",", 0));
+    if (aosTokensSecondLine.size() != 5)
     {
-        CSLDestroy(papszTokens);
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
 
-    const int nFieldSize = atoi(papszTokens[0]);
-    const double dfNoDataValue = CPLAtofM(papszTokens[1]);
-    const int nDecimalCount = atoi(papszTokens[3]);
-    const int nColumnNumber = atoi(papszTokens[4]);
+    const int nFieldSize = atoi(aosTokensSecondLine[0]);
+    const double dfNoDataValue = CPLAtofM(aosTokensSecondLine[1]);
+    const int nDecimalCount = atoi(aosTokensSecondLine[3]);
+    const int nColumnNumber = atoi(aosTokensSecondLine[4]);
 
-    CSLDestroy(papszTokens);
-    papszTokens = nullptr;
-
-    if (nFieldSize <= 0 || nFieldSize >= 40 || nDecimalCount <= 0 ||
-        nDecimalCount >= nFieldSize || nColumnNumber != 1)
+    if (nFieldSize <= 0 || nFieldSize >= 40)
     {
-        CPLDebug("ZMap", "nFieldSize=%d, nDecimalCount=%d, nColumnNumber=%d",
-                 nFieldSize, nDecimalCount, nColumnNumber);
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Invalid/unsupported value for nFieldSize = %d", nFieldSize);
+        return nullptr;
+    }
+
+    if (nDecimalCount <= 0 || nDecimalCount >= nFieldSize)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Invalid/unsupported value for nDecimalCount = %d",
+                 nDecimalCount);
+        return nullptr;
+    }
+
+    if (nColumnNumber != 1)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Invalid/unsupported value for nColumnNumber = %d",
+                 nColumnNumber);
+        return nullptr;
+    }
+
+    if (nValuesPerLine <= 0 || nFieldSize > 1024 * 1024 / nValuesPerLine)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Invalid/unsupported value for nFieldSize = %d x "
+                 "nValuesPerLine = %d",
+                 nFieldSize, nValuesPerLine);
         return nullptr;
     }
 
     /* Parse third header line */
-    pszLine = CPLReadLine2L(poOpenInfo->fpL, 100, nullptr);
+    pszLine = CPLReadLine2L(poDS->m_fp.get(), MAX_HEADER_LINE, nullptr);
+    ++nLine;
     if (pszLine == nullptr)
     {
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
-    papszTokens = CSLTokenizeString2(pszLine, ",", 0);
-    if (CSLCount(papszTokens) != 6)
+    const CPLStringList aosTokensThirdLine(CSLTokenizeString2(pszLine, ",", 0));
+    if (aosTokensThirdLine.size() != 6)
     {
-        CSLDestroy(papszTokens);
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
 
-    const int nRows = atoi(papszTokens[0]);
-    const int nCols = atoi(papszTokens[1]);
-    const double dfMinX = CPLAtofM(papszTokens[2]);
-    const double dfMaxX = CPLAtofM(papszTokens[3]);
-    const double dfMinY = CPLAtofM(papszTokens[4]);
-    const double dfMaxY = CPLAtofM(papszTokens[5]);
-
-    CSLDestroy(papszTokens);
-    papszTokens = nullptr;
+    const int nRows = atoi(aosTokensThirdLine[0]);
+    const int nCols = atoi(aosTokensThirdLine[1]);
+    const double dfMinX = CPLAtofM(aosTokensThirdLine[2]);
+    const double dfMaxX = CPLAtofM(aosTokensThirdLine[3]);
+    const double dfMinY = CPLAtofM(aosTokensThirdLine[4]);
+    const double dfMaxY = CPLAtofM(aosTokensThirdLine[5]);
 
     if (!GDALCheckDatasetDimensions(nCols, nRows) || nCols == 1 || nRows == 1)
     {
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
 
     /* Ignore fourth header line */
-    pszLine = CPLReadLine2L(poOpenInfo->fpL, 100, nullptr);
+    pszLine = CPLReadLine2L(poDS->m_fp.get(), MAX_HEADER_LINE, nullptr);
+    ++nLine;
     if (pszLine == nullptr)
     {
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
 
     /* Check fifth header line */
-    pszLine = CPLReadLine2L(poOpenInfo->fpL, 100, nullptr);
+    pszLine = CPLReadLine2L(poDS->m_fp.get(), MAX_HEADER_LINE, nullptr);
+    ++nLine;
     if (pszLine == nullptr || pszLine[0] != '@')
     {
-        VSIFCloseL(poOpenInfo->fpL);
-        poOpenInfo->fpL = nullptr;
         return nullptr;
     }
 
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    ZMapDataset *poDS = new ZMapDataset();
-    poDS->fp = poOpenInfo->fpL;
-    poOpenInfo->fpL = nullptr;
-    poDS->nDataStartOff = VSIFTellL(poDS->fp);
-    poDS->nValuesPerLine = nValuesPerLine;
-    poDS->nFieldSize = nFieldSize;
-    poDS->nDecimalCount = nDecimalCount;
+    poDS->m_nDataStartOff = VSIFTellL(poDS->m_fp.get());
+    poDS->m_nValuesPerLine = nValuesPerLine;
+    poDS->m_nFieldSize = nFieldSize;
+    poDS->m_nDecimalCount = nDecimalCount;
     poDS->nRasterXSize = nCols;
     poDS->nRasterYSize = nRows;
-    poDS->dfNoDataValue = dfNoDataValue;
+    poDS->m_dfNoDataValue = dfNoDataValue;
+    poDS->m_nFirstDataLine = nLine;
 
     if (CPLTestBool(CPLGetConfigOption("ZMAP_PIXEL_IS_POINT", "FALSE")))
     {
         const double dfStepX = (dfMaxX - dfMinX) / (nCols - 1);
         const double dfStepY = (dfMaxY - dfMinY) / (nRows - 1);
 
-        poDS->adfGeoTransform[0] = dfMinX - dfStepX / 2;
-        poDS->adfGeoTransform[1] = dfStepX;
-        poDS->adfGeoTransform[3] = dfMaxY + dfStepY / 2;
-        poDS->adfGeoTransform[5] = -dfStepY;
+        poDS->m_gt[0] = dfMinX - dfStepX / 2;
+        poDS->m_gt[1] = dfStepX;
+        poDS->m_gt[3] = dfMaxY + dfStepY / 2;
+        poDS->m_gt[5] = -dfStepY;
     }
     else
     {
         const double dfStepX = (dfMaxX - dfMinX) / nCols;
         const double dfStepY = (dfMaxY - dfMinY) / nRows;
 
-        poDS->adfGeoTransform[0] = dfMinX;
-        poDS->adfGeoTransform[1] = dfStepX;
-        poDS->adfGeoTransform[3] = dfMaxY;
-        poDS->adfGeoTransform[5] = -dfStepY;
+        poDS->m_gt[0] = dfMinX;
+        poDS->m_gt[1] = dfStepX;
+        poDS->m_gt[3] = dfMaxY;
+        poDS->m_gt[5] = -dfStepY;
     }
 
     /* -------------------------------------------------------------------- */
     /*      Create band information objects.                                */
     /* -------------------------------------------------------------------- */
     poDS->nBands = 1;
-    poDS->SetBand(1, new ZMapRasterBand(poDS));
+    poDS->SetBand(1, std::make_unique<ZMapRasterBand>(poDS.get()));
 
     /* -------------------------------------------------------------------- */
     /*      Initialize any PAM information.                                 */
@@ -466,31 +479,33 @@ GDALDataset *ZMapDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Support overviews.                                              */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
-    return poDS;
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
+    return poDS.release();
 }
 
 /************************************************************************/
 /*                       WriteRightJustified()                          */
 /************************************************************************/
 
-static void WriteRightJustified(VSILFILE *fp, const char *pszValue, int nWidth)
+static void WriteRightJustified(VSIVirtualHandleUniquePtr &fp,
+                                const char *pszValue, int nWidth)
 {
-    int nLen = (int)strlen(pszValue);
+    int nLen = static_cast<int>(strlen(pszValue));
     CPLAssert(nLen <= nWidth);
     for (int i = 0; i < nWidth - nLen; i++)
-        VSIFWriteL(" ", 1, 1, fp);
-    VSIFWriteL(pszValue, 1, nLen, fp);
+        fp->Write(" ", 1, 1);
+    fp->Write(pszValue, 1, nLen);
 }
 
-static void WriteRightJustified(VSILFILE *fp, int nValue, int nWidth)
+static void WriteRightJustified(VSIVirtualHandleUniquePtr &fp, int nValue,
+                                int nWidth)
 {
     CPLString osValue(CPLSPrintf("%d", nValue));
     WriteRightJustified(fp, osValue.c_str(), nWidth);
 }
 
-static void WriteRightJustified(VSILFILE *fp, double dfValue, int nWidth,
-                                int nDecimals = -1)
+static void WriteRightJustified(VSIVirtualHandleUniquePtr &fp, double dfValue,
+                                int nWidth, int nDecimals = -1)
 {
     char szFormat[32];
     if (nDecimals >= 0)
@@ -560,9 +575,9 @@ GDALDataset *ZMapDataset::CreateCopy(const char *pszFilename,
         return nullptr;
     }
 
-    double adfGeoTransform[6];
-    poSrcDS->GetGeoTransform(adfGeoTransform);
-    if (adfGeoTransform[2] != 0 || adfGeoTransform[4] != 0)
+    GDALGeoTransform gt;
+    poSrcDS->GetGeoTransform(gt);
+    if (gt[2] != 0 || gt[4] != 0)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "ZMap driver does not support CreateCopy() from skewed or "
@@ -574,7 +589,7 @@ GDALDataset *ZMapDataset::CreateCopy(const char *pszFilename,
     /*      Create target file                                              */
     /* -------------------------------------------------------------------- */
 
-    VSILFILE *fp = VSIFOpenL(pszFilename, "wb");
+    auto fp = VSIVirtualHandleUniquePtr(VSIFOpenL(pszFilename, "wb"));
     if (fp == nullptr)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Cannot create %s", pszFilename);
@@ -591,118 +606,117 @@ GDALDataset *ZMapDataset::CreateCopy(const char *pszFilename,
     if (!bHasNoDataValue)
         dfNoDataValue = 1.e30;
 
-    VSIFPrintfL(fp, "!\n");
-    VSIFPrintfL(fp, "! Created by GDAL.\n");
-    VSIFPrintfL(fp, "!\n");
-    VSIFPrintfL(fp, "@GRID FILE, GRID, %d\n", nValuesPerLine);
+    fp->Printf("!\n");
+    fp->Printf("! Created by GDAL.\n");
+    fp->Printf("!\n");
+    fp->Printf("@GRID FILE, GRID, %d\n", nValuesPerLine);
 
     WriteRightJustified(fp, nFieldSize, 10);
-    VSIFPrintfL(fp, ",");
+    fp->Printf(",");
     WriteRightJustified(fp, dfNoDataValue, nFieldSize, nDecimalCount);
-    VSIFPrintfL(fp, ",");
+    fp->Printf(",");
     WriteRightJustified(fp, "", 10);
-    VSIFPrintfL(fp, ",");
+    fp->Printf(",");
     WriteRightJustified(fp, nDecimalCount, 10);
-    VSIFPrintfL(fp, ",");
+    fp->Printf(",");
     WriteRightJustified(fp, 1, 10);
-    VSIFPrintfL(fp, "\n");
+    fp->Printf("\n");
 
     WriteRightJustified(fp, nYSize, 10);
-    VSIFPrintfL(fp, ",");
+    fp->Printf(",");
     WriteRightJustified(fp, nXSize, 10);
-    VSIFPrintfL(fp, ",");
+    fp->Printf(",");
 
     if (CPLTestBool(CPLGetConfigOption("ZMAP_PIXEL_IS_POINT", "FALSE")))
     {
-        WriteRightJustified(fp, adfGeoTransform[0] + adfGeoTransform[1] / 2, 14,
-                            7);
-        VSIFPrintfL(fp, ",");
-        WriteRightJustified(fp,
-                            adfGeoTransform[0] + adfGeoTransform[1] * nXSize -
-                                adfGeoTransform[1] / 2,
-                            14, 7);
-        VSIFPrintfL(fp, ",");
-        WriteRightJustified(fp,
-                            adfGeoTransform[3] + adfGeoTransform[5] * nYSize -
-                                adfGeoTransform[5] / 2,
-                            14, 7);
-        VSIFPrintfL(fp, ",");
-        WriteRightJustified(fp, adfGeoTransform[3] + adfGeoTransform[5] / 2, 14,
-                            7);
+        WriteRightJustified(fp, gt[0] + gt[1] / 2, 14, 7);
+        fp->Printf(",");
+        WriteRightJustified(fp, gt[0] + gt[1] * nXSize - gt[1] / 2, 14, 7);
+        fp->Printf(",");
+        WriteRightJustified(fp, gt[3] + gt[5] * nYSize - gt[5] / 2, 14, 7);
+        fp->Printf(",");
+        WriteRightJustified(fp, gt[3] + gt[5] / 2, 14, 7);
     }
     else
     {
-        WriteRightJustified(fp, adfGeoTransform[0], 14, 7);
-        VSIFPrintfL(fp, ",");
-        WriteRightJustified(
-            fp, adfGeoTransform[0] + adfGeoTransform[1] * nXSize, 14, 7);
-        VSIFPrintfL(fp, ",");
-        WriteRightJustified(
-            fp, adfGeoTransform[3] + adfGeoTransform[5] * nYSize, 14, 7);
-        VSIFPrintfL(fp, ",");
-        WriteRightJustified(fp, adfGeoTransform[3], 14, 7);
+        WriteRightJustified(fp, gt[0], 14, 7);
+        fp->Printf(",");
+        WriteRightJustified(fp, gt[0] + gt[1] * nXSize, 14, 7);
+        fp->Printf(",");
+        WriteRightJustified(fp, gt[3] + gt[5] * nYSize, 14, 7);
+        fp->Printf(",");
+        WriteRightJustified(fp, gt[3], 14, 7);
     }
 
-    VSIFPrintfL(fp, "\n");
+    fp->Printf("\n");
 
-    VSIFPrintfL(fp, "0.0, 0.0, 0.0\n");
-    VSIFPrintfL(fp, "@\n");
+    fp->Printf("0.0, 0.0, 0.0\n");
+    fp->Printf("@\n");
 
     /* -------------------------------------------------------------------- */
     /*      Copy imagery                                                    */
     /* -------------------------------------------------------------------- */
-    double *padfLineBuffer =
-        reinterpret_cast<double *>(CPLMalloc(nYSize * sizeof(double)));
+    std::vector<double> adfLineBuffer(nYSize);
 
     CPLErr eErr = CE_None;
+    const bool bEmitEOLAtEndOfColumn = CPLTestBool(
+        CPLGetConfigOption("ZMAP_EMIT_EOL_AT_END_OF_COLUMN", "YES"));
+    bool bEOLPrinted = false;
+    int nValuesThisLine = 0;
     for (int i = 0; i < nXSize && eErr == CE_None; i++)
     {
-        eErr = poSrcDS->GetRasterBand(1)->RasterIO(GF_Read, i, 0, 1, nYSize,
-                                                   padfLineBuffer, 1, nYSize,
-                                                   GDT_Float64, 0, 0, nullptr);
+        eErr = poSrcDS->GetRasterBand(1)->RasterIO(
+            GF_Read, i, 0, 1, nYSize, adfLineBuffer.data(), 1, nYSize,
+            GDT_Float64, 0, 0, nullptr);
         if (eErr != CE_None)
             break;
-        bool bEOLPrinted = false;
-        int j = 0;
-        for (; j < nYSize; j++)
+        for (int j = 0; j < nYSize; j++)
         {
-            WriteRightJustified(fp, padfLineBuffer[j], nFieldSize,
+            WriteRightJustified(fp, adfLineBuffer[j], nFieldSize,
                                 nDecimalCount);
-            if (((j + 1) % nValuesPerLine) == 0)
+            ++nValuesThisLine;
+            if (nValuesThisLine == nValuesPerLine)
             {
                 bEOLPrinted = true;
-                VSIFPrintfL(fp, "\n");
+                nValuesThisLine = 0;
+                fp->Printf("\n");
             }
             else
                 bEOLPrinted = false;
         }
-        if (!bEOLPrinted)
-            VSIFPrintfL(fp, "\n");
+        if (bEmitEOLAtEndOfColumn && !bEOLPrinted)
+        {
+            bEOLPrinted = true;
+            nValuesThisLine = 0;
+            fp->Printf("\n");
+        }
 
         if (pfnProgress != nullptr &&
-            !pfnProgress((j + 1) * 1.0 / nYSize, nullptr, pProgressData))
+            !pfnProgress((i + 1) * 1.0 / nXSize, nullptr, pProgressData))
         {
             eErr = CE_Failure;
             break;
         }
     }
-    CPLFree(padfLineBuffer);
-    VSIFCloseL(fp);
+    if (!bEOLPrinted)
+        fp->Printf("\n");
 
-    if (eErr != CE_None)
+    if (eErr != CE_None || fp->Close() != 0)
         return nullptr;
 
-    return GDALDataset::FromHandle(GDALOpen(pszFilename, GA_ReadOnly));
+    fp.reset();
+    GDALOpenInfo oOpenInfo(pszFilename, GA_ReadOnly);
+    return ZMapDataset::Open(&oOpenInfo);
 }
 
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr ZMapDataset::GetGeoTransform(double *padfTransform)
+CPLErr ZMapDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, 6 * sizeof(double));
+    gt = m_gt;
 
     return CE_None;
 }
@@ -717,7 +731,7 @@ void GDALRegister_ZMap()
     if (GDALGetDriverByName("ZMap") != nullptr)
         return;
 
-    GDALDriver *poDriver = new GDALDriver();
+    auto poDriver = std::make_unique<GDALDriver>();
 
     poDriver->SetDescription("ZMap");
     poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
@@ -730,5 +744,5 @@ void GDALRegister_ZMap()
     poDriver->pfnIdentify = ZMapDataset::Identify;
     poDriver->pfnCreateCopy = ZMapDataset::CreateCopy;
 
-    GetGDALDriverManager()->RegisterDriver(poDriver);
+    GetGDALDriverManager()->RegisterDriver(poDriver.release());
 }

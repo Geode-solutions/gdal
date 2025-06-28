@@ -10,7 +10,16 @@ add_gdal_driver(
             wcsrasterband.cpp
             wcsrasterband.h
             wcsutils.cpp
-            PLUGIN_CAPABLE
-            NO_DEPS)
+    CORE_SOURCES
+            wcsdrivercore.cpp
+    PLUGIN_CAPABLE NO_DEPS
+    NO_SHARED_SYMBOL_WITH_CORE
+    NO_CXX_WFLAGS_EFFCXX
+    NO_WFLAG_OLD_STYLE_CAST
+)
+if(NOT TARGET gdal_WCS)
+    return()
+endif()
+
 gdal_standard_includes(gdal_WCS)
-target_include_directories(gdal_WCS PRIVATE ${GDAL_VECTOR_FORMAT_SOURCE_DIR}/gml)
+target_include_directories(gdal_WCS PRIVATE ${GDAL_VECTOR_FORMAT_SOURCE_DIR}/gmlutils)

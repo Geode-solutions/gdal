@@ -7,25 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2009-2010, Martin Landa <landa.martin gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_vfk.h"
@@ -108,13 +90,13 @@ void OGRVFKLayer::ResetReading()
 }
 
 /*!
-  \brief Create geometry from VFKFeature
+  \brief Get geometry from VFKFeature
 
   \param poVfkFeature pointer to VFKFeature
 
   \return pointer to OGRGeometry or NULL on error
 */
-OGRGeometry *OGRVFKLayer::CreateGeometry(IVFKFeature *poVfkFeature)
+const OGRGeometry *OGRVFKLayer::GetGeometry(IVFKFeature *poVfkFeature)
 {
     return poVfkFeature->GetGeometry();
 }
@@ -222,12 +204,10 @@ OGRFeature *OGRVFKLayer::GetFeature(IVFKFeature *poVFKFeature)
         return nullptr;
 
     /* get features geometry */
-    OGRGeometry *poGeom = CreateGeometry(poVFKFeature);
-    if (poGeom != nullptr)
-        poGeom->assignSpatialReference(poSRS);
+    const OGRGeometry *poGeomRef = GetGeometry(poVFKFeature);
 
     /* does it satisfy the spatial query, if there is one? */
-    if (m_poFilterGeom != nullptr && poGeom && !FilterGeometry(poGeom))
+    if (m_poFilterGeom != nullptr && poGeomRef && !FilterGeometry(poGeomRef))
     {
         return nullptr;
     }
@@ -244,8 +224,12 @@ OGRFeature *OGRVFKLayer::GetFeature(IVFKFeature *poVFKFeature)
         return nullptr;
     }
 
-    if (poGeom)
-        poOGRFeature->SetGeometryDirectly(poGeom->clone());
+    if (poGeomRef)
+    {
+        auto poGeom = poGeomRef->clone();
+        poGeom->assignSpatialReference(poSRS);
+        poOGRFeature->SetGeometryDirectly(poGeom);
+    }
 
     m_iNextFeature++;
 

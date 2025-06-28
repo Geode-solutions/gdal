@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -43,7 +27,7 @@ class SNODASDataset final : public RawDataset
 {
     CPLString osDataFilename{};
     bool bGotTransform;
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     bool bHasNoData;
     double dfNoData;
     bool bHasMin;
@@ -62,7 +46,8 @@ class SNODASDataset final : public RawDataset
     SNODASDataset();
     ~SNODASDataset() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+
     const OGRSpatialReference *GetSpatialRef() const override
     {
         return &m_oSRS;
@@ -86,6 +71,7 @@ class SNODASRasterBand final : public RawRasterBand
 
   public:
     SNODASRasterBand(VSILFILE *fpRaw, int nXSize, int nYSize);
+
     ~SNODASRasterBand() override
     {
     }
@@ -169,13 +155,6 @@ SNODASDataset::SNODASDataset()
 {
     m_oSRS.SetFromUserInput(SRS_WKT_WGS84_LAT_LONG);
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -210,16 +189,16 @@ CPLErr SNODASDataset::Close()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr SNODASDataset::GetGeoTransform(double *padfTransform)
+CPLErr SNODASDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (bGotTransform)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
-    return GDALPamDataset::GetGeoTransform(padfTransform);
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -264,9 +243,7 @@ GDALDataset *SNODASDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The SNODAS driver does not support update access to existing"
-                 " datasets.");
+        ReportUpdateNotSupportedByDriver("SNODAS");
         return nullptr;
     }
 
@@ -445,8 +422,9 @@ GDALDataset *SNODASDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Open target binary file.                                        */
     /* -------------------------------------------------------------------- */
-    const char *pszPath = CPLGetPath(poOpenInfo->pszFilename);
-    osDataFilename = CPLFormFilename(pszPath, osDataFilename, nullptr);
+    const std::string osPath = CPLGetPathSafe(poOpenInfo->pszFilename);
+    osDataFilename =
+        CPLFormFilenameSafe(osPath.c_str(), osDataFilename, nullptr);
 
     VSILFILE *fpRaw = VSIFOpenL(osDataFilename, "rb");
 
@@ -456,11 +434,11 @@ GDALDataset *SNODASDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create a corresponding GDALDataset.                             */
     /* -------------------------------------------------------------------- */
-    SNODASDataset *poDS = new SNODASDataset();
+    auto poDS = std::make_unique<SNODASDataset>();
 
     poDS->nRasterXSize = nCols;
     poDS->nRasterYSize = nRows;
-    poDS->osDataFilename = osDataFilename;
+    poDS->osDataFilename = std::move(osDataFilename);
     poDS->bHasNoData = bHasNoData;
     poDS->dfNoData = dfNoData;
     poDS->bHasMin = bHasMin;
@@ -470,12 +448,12 @@ GDALDataset *SNODASDataset::Open(GDALOpenInfo *poOpenInfo)
     if (bHasMinX && bHasMinY && bHasMaxX && bHasMaxY)
     {
         poDS->bGotTransform = true;
-        poDS->adfGeoTransform[0] = dfMinX;
-        poDS->adfGeoTransform[1] = (dfMaxX - dfMinX) / nCols;
-        poDS->adfGeoTransform[2] = 0.0;
-        poDS->adfGeoTransform[3] = dfMaxY;
-        poDS->adfGeoTransform[4] = 0.0;
-        poDS->adfGeoTransform[5] = -(dfMaxY - dfMinY) / nRows;
+        poDS->m_gt[0] = dfMinX;
+        poDS->m_gt[1] = (dfMaxX - dfMinX) / nCols;
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[3] = dfMaxY;
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] = -(dfMaxY - dfMinY) / nRows;
     }
 
     if (!osDescription.empty())
@@ -498,7 +476,10 @@ GDALDataset *SNODASDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create band information objects.                                */
     /* -------------------------------------------------------------------- */
-    poDS->SetBand(1, new SNODASRasterBand(fpRaw, nCols, nRows));
+    auto poBand = std::make_unique<SNODASRasterBand>(fpRaw, nCols, nRows);
+    if (!poBand->IsValid())
+        return nullptr;
+    poDS->SetBand(1, std::move(poBand));
 
     /* -------------------------------------------------------------------- */
     /*      Initialize any PAM information.                                 */
@@ -509,9 +490,9 @@ GDALDataset *SNODASDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for overviews.                                            */
     /* -------------------------------------------------------------------- */
-    poDS->oOvManager.Initialize(poDS, poOpenInfo->pszFilename);
+    poDS->oOvManager.Initialize(poDS.get(), poOpenInfo->pszFilename);
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/

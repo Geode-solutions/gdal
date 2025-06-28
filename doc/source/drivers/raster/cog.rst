@@ -32,278 +32,523 @@ Driver capabilities
 Creation Options
 ----------------
 
+|about-creation-options|
+
 General creation options
 ************************
 
--  **BLOCKSIZE=n**: Sets the tile width and height in pixels. Defaults to 512. Must be divisible by 16.
+-  .. co:: BLOCKSIZE
+      :choices: <integer>
+      :default: 512
 
--  **COMPRESS=[NONE/LZW/JPEG/DEFLATE/ZSTD/WEBP/LERC/LERC_DEFLATE/LERC_ZSTD/LZMA]**: Set the compression to use.
-   Defaults to ``LZW`` starting with GDAL 3.4 (default in previous version is ``NONE``).
+      Sets the tile width and height in pixels. Must be divisible by 16.
 
-   * ``JPEG`` should generally only be used with
-     Byte data (8 bit per channel). But if GDAL is built with internal libtiff and
-     libjpeg, it is    possible to read and write TIFF files with 12bit JPEG compressed TIFF
-     files (seen as UInt16 bands with NBITS=12). See the `"8 and 12 bit
-     JPEG in TIFF" <http://trac.osgeo.org/gdal/wiki/TIFF12BitJPEG>`__ wiki
-     page for more details.
-     For the COG driver, JPEG compression for 3 or 4-band images automatically
-     selects the PHOTOMETRIC=YCBCR colorspace with a 4:2:2 subsampling of the Y,Cb,Cr
-     components.
+-  .. co:: INTERLEAVE
+      :choices: BAND, PIXEL, TILE
+      :since: 3.11
 
-   * ``LZW``, ``DEFLATE`` and ``ZSTD`` compressions can be used with the PREDICTOR creation option.
+      Set the interleaving to use
 
-   * ``ZSTD`` is available when using internal libtiff and if GDAL built against
-     libzstd >=1.0, or if built against external libtiff with zstd support.
+      * ``PIXEL``: for each spatial block, one TIFF tile/strip gathering values for
+        all bands is used . This matches the ``contiguous`` planar configuration in
+        TIFF terminology.
+        This is also known as a ``BIP (Band Interleaved Per Pixel)`` organization.
+        Such method is the default, and may be slightly less
+        efficient than BAND interleaving for some purposes, but some applications
+        only support pixel interleaved TIFF files. On the other hand, image-based
+        compression methods may perform better using PIXEL interleaving. For JPEG
+        PHOTOMETRIC=YCbCr, pixel interleaving is required. It is also required for
+        WebP compression.
 
-   * ``LERC`` is available when using internal libtiff.
+        Prior to GDAL 3.11, INTERLEAVE=PIXEL was the only possible interleaving
+        output by the COG driver.
 
-   * ``LERC_ZSTD`` is available when ``LERC`` and ``ZSTD`` are available.
+        Assuming a pixel[band][y][x] indexed array, when using CreateCopy(),
+        the pseudo code for the file disposition is:
 
-   * ``JXL`` is for JPEG-XL, and is only available when using internal libtiff and building GDAL against
-     https://github.com/libjxl/libjxl . JXL compression may only be used on datasets with 4 bands or less.
-     Option added in GDAL 3.4
+        ::
 
--  **LEVEL=integer_value**: DEFLATE/ZSTD/LERC_DEFLATE/LERC_ZSTD/LZMA compression level.
-   A lower number will
-   result in faster compression but less efficient compression rate.
-   1 is the fastest.
+          for y in 0 ... numberOfBlocksInHeight - 1:
+              for x in 0 ... numberOfTilesInWidth - 1:
+                  for j in 0 ... blockHeight - 1:
+                      for i in 0 ... blockWidth -1:
+                          start_new_strip_or_tile()
+                          for band in 0 ... numberBands -1:
+                              write(pixel[band][y*blockHeight+j][x*blockWidth+i])
+                          end_new_strip_or_tile()
+                      end_for
+                  end_for
+              end_for
+          end_for
 
-   * For DEFLATE/LZMA, 9 is the slowest/higher compression rate
-     (or 12 when using a libtiff with libdeflate support). The default is 6.
-   * For ZSTD, 22 is the slowest/higher compression rate. The default is 9.
 
--  **MAX_Z_ERROR=threshold**: Set the maximum error threshold on values
-   for LERC/LERC_DEFLATE/LERC_ZSTD compression. The default is 0
-   (lossless).
+      * ``BAND``: for each spatial block, one TIFF tile/strip is used for each band.
+        This matches the contiguous ``separate`` configuration in TIFF terminology.
+        This is also known as a ``BSQ (Band SeQuential)`` organization.
 
--  **QUALITY=integer_value**: JPEG/WEBP quality setting. A value of 100 is best
-   quality (least compression), and 1 is worst quality (best compression).
-   The default is 75. For WEBP, QUALITY=100 automatically turns on lossless mode.
+        In addition to that, when using CreateCopy(), data for the first band is
+        written first, followed by data for the second band, etc.
+        The pseudo code for the file disposition is:
 
--  **JXL_LOSSLESS=YES/NO**: Set whether JPEG-XL compression should be lossless
-   (YES, default) or lossy (NO). For lossy compression, the underlying data
-   should be either gray, gray+alpha, rgb or rgb+alpha.
+        ::
 
--  **JXL_EFFORT=[1-9]**: Level of effort for JPEG-XL compression.
-   The higher, the smaller file and slower compression time. Default is 5.
+          for y in 0 ... numberOfBlocksInHeight - 1:
+              for x in 0 ... numberOfTilesInWidth - 1:
+                  start_new_strip_or_tile()
+                  for band in 0 ... numberBands -1:
+                      for j in 0 ... blockHeight - 1:
+                          for i in 0 ... blockWidth -1:
+                              write(pixel[band][y*blockHeight+j][x*blockWidth+i])
+                          end_for
+                      end_for
+                  end_new_strip_or_tile()
+              end_for
+          end_for
 
--  **JXL_DISTANCE=[0.1-15]**: Distance level for lossy JPEG-XL compression.
-   It is specified in multiples of a just-noticeable difference
-   (cf `butteraugli <https://github.com/google/butteraugli>`__ for the definition
-   of the distance)
-   That is, 0 is mathematically lossless, 1 should be visually lossless, and
-   higher distances yield denser and denser files with lower and lower fidelity.
-   The recommended range is [0.5,3]. Default is 1.0.
 
--  **JXL_ALPHA_DISTANCE=[-1,0,0.1-15]**: (GDAL >= 3.7, libjxl > 0.8.1)
-   Distance level for alpha channel for lossy JPEG-XL compression.
-   It is specified in multiples of a just-noticeable difference.
-   (cf `butteraugli <https://github.com/google/butteraugli>`__ for the definition
-   of the distance)
-   That is, 0 is mathematically lossless, 1 should be visually lossless, and
-   higher distances yield denser and denser files with lower and lower fidelity.
-   For lossy compression, the recommended range is [0.5,3].
-   The default value is the special value -1.0, which means to use the same
-   distance value as non-alpha channel (ie JXL_DISTANCE).
+      * ``TILE`` (added in 3.11): this is a sort of
+        compromise between PIXEL and BAND, using the ``separate`` configuration,
+        but where data for a same spatial block is written for all bands, before
+        the data of the next spatial block.
+        When the block height is 1, this is also known as a
+        ``BIL (Band Interleaved per Line)`` organization.
 
--  **NUM_THREADS=number_of_threads/ALL_CPUS**: Enable
-   multi-threaded compression by specifying the number of worker
-   threads. Default is compression in the main thread. This also determines
-   the number of threads used when reprojection is done with the TILING_SCHEME
-   or TARGET_SRS creation options. (Overview generation is also multithreaded since
-   GDAL 3.2)
+        Such a layout may be useful for writing hyperspectral datasets (several
+        hundred of bands), to get a compromise between efficient spatial query,
+        and partial band selection.
 
--  **PREDICTOR=[YES/NO/STANDARD/FLOATING_POINT]**: Set the predictor for LZW,
-   DEFLATE and ZSTD compression. The default is NO. If YES is specified, then
-   standard predictor (Predictor=2) is used for integer data type,
-   and floating-point predictor (Predictor=3) for floating point data type (in
-   some circumstances, the standard predictor might perform better than the
-   floating-point one on floating-point data). STANDARD or FLOATING_POINT can
-   also be used to select the precise algorithm wished.
+        Assuming a pixel[band][y][x] indexed array, when using CreateCopy(),
+        the pseudo code for the file disposition is:
 
--  **BIGTIFF=YES/NO/IF_NEEDED/IF_SAFER**: Control whether the created
-   file is a BigTIFF or a classic TIFF.
+        ::
 
-   -  ``YES`` forces BigTIFF.
-   -  ``NO`` forces classic TIFF.
-   -  ``IF_NEEDED`` will only create a BigTIFF if it is clearly needed (in
-      the uncompressed case, and image larger than 4GB. So no effect
-      when using a compression).
-   -  ``IF_SAFER`` will create BigTIFF if the resulting file \*might\*
-      exceed 4GB. Note: this is only a heuristics that might not always
-      work depending on compression ratios.
+          for y in 0 ... numberOfBlocksInHeight - 1:
+              for x in 0 ... numberOfTilesInWidth - 1:
+                  for band in 0 ... numberBands -1:
+                      start_new_strip_or_tile()
+                      for j in 0 ... blockHeight - 1:
+                          for i in 0 ... blockWidth -1:
+                              write(pixel[band][y*blockHeight+j][x*blockWidth+i])
+                          end_for
+                      end_for
+                      end_new_strip_or_tile()
+                  end_for
+              end_for
+          end_for
 
-   BigTIFF is a TIFF variant which can contain more than 4GiB of data
-   (size of classic TIFF is limited by that value). This option is
-   available if GDAL is built with libtiff library version 4.0 or
-   higher. The default is IF_NEEDED.
 
-   When creating a new GeoTIFF with no compression, GDAL computes in
-   advance the size of the resulting file. If that computed file size is
-   over 4GiB, GDAL will automatically decide to create a BigTIFF file.
-   However, when compression is used, it is not possible in advance to
-   known the final size of the file, so classical TIFF will be chosen.
-   In that case, the user must explicitly require the creation of a
-   BigTIFF with BIGTIFF=YES if the final file is anticipated to be too
-   big for classical TIFF format. If BigTIFF creation is not explicitly
-   asked or guessed and the resulting file is too big for classical
-   TIFF, libtiff will fail with an error message like
-   "TIFFAppendToStrip:Maximum TIFF file size exceeded".
+      Starting with GDAL 3.5, when copying from a source dataset with multiple bands
+      which advertises a INTERLEAVE metadata item, if the INTERLEAVE creation option
+      is not specified, the source dataset INTERLEAVE will be automatically taken
+      into account, unless the COMPRESS creation option is specified.
 
--  **RESAMPLING=[NEAREST/AVERAGE/BILINEAR/CUBIC/CUBICSPLINE/LANCZOS/MODE/RMS]**:
-   Resampling method used for overview generation or reprojection.
-   For paletted images,
-   NEAREST is used by default, otherwise it is CUBIC.
+-  .. co:: COMPRESS
+      :choices: NONE, LZW, JPEG, DEFLATE, ZSTD, WEBP, LERC, LERC_DEFLATE, LERC_ZSTD, LZMA
+      :default: LZW
 
--  **OVERVIEW_RESAMPLING=[NEAREST/AVERAGE/BILINEAR/CUBIC/CUBICSPLINE/LANCZOS/MODE/RMS]**:
-   (since GDAL 3.2)
-   Resampling method used for overview generation.
-   For paletted images, NEAREST is used by default, otherwise it is CUBIC.
-   This overrides, for overview generation, the value of ``RESAMPLING`` if it specified.
+      Set the compression to use.
+      Defaults to ``LZW`` starting with GDAL 3.4 (default in previous version is ``NONE``).
 
--  **WARP_RESAMPLING=[NEAREST/AVERAGE/BILINEAR/CUBIC/CUBICSPLINE/LANCZOS/MODE/RMS/MIN/MAX/MED/Q1/Q3]**:
-   (since GDAL 3.2)
-   Resampling method used for reprojection.
-   For paletted images, NEAREST is used by default, otherwise it is CUBIC.
-   This overrides, for reprojection, the value of ``RESAMPLING`` if it specified.
+      * ``JPEG`` should generally only be used with
+        Byte data (8 bit per channel). But if GDAL is built with internal libtiff and
+        libjpeg, it is    possible to read and write TIFF files with 12bit JPEG compressed TIFF
+        files (seen as UInt16 bands with NBITS=12).
+        For the COG driver, JPEG compression for 3 or 4-band images automatically
+        selects the PHOTOMETRIC=YCBCR colorspace with a 4:2:2 subsampling of the Y,Cb,Cr
+        components with the default INTERLEAVE=PIXEL.
+        For a input dataset (single-band or 3-band), plus an alpha band,
+        the alpha band will be converted as a 1-bit DEFLATE compressed mask.
 
-- **OVERVIEWS=[AUTO/IGNORE_EXISTING/FORCE_USE_EXISTING/NONE]**: Describe the behavior
-  regarding overview generation and use of source overviews.
+      * ``LZW``, ``DEFLATE`` and ``ZSTD`` compressions can be used with the PREDICTOR creation option.
 
-  - ``AUTO`` (default): source overviews will be used if present.
-    If not present, overviews will be automatically generated in the
-    output file.
+      * ``ZSTD`` is available when using internal libtiff and if GDAL built against
+        libzstd >=1.0, or if built against external libtiff with zstd support.
 
-  - ``IGNORE_EXISTING``: potential existing overviews on the source dataset will
-    be ignored and new overviews will be automatically generated.
+      * ``WEBP`` is available when using internal libtiff and if GDAL built against
+        libwebp, or if built against external libtiff with WebP support.
+        It can only be used with the default INTERLEAVE=PIXEL.
 
-  - ``FORCE_USE_EXISTING``: potential existing overviews on the source will
-    be used.
-    If there is no source overview, this is equivalent to specifying ``NONE``.
+      * ``LERC`` is available when using internal libtiff.
 
-  - ``NONE``: potential source overviews will be ignored, and no overview will be
-    generated.
+      * ``LERC_ZSTD`` is available when ``LERC`` and ``ZSTD`` are available.
 
-    .. note::
+      * ``JXL`` is for JPEG-XL, and is only available when using internal libtiff and building GDAL against
+        https://github.com/libjxl/libjxl . JXL compression may only be used on datasets with 4 bands or less.
+        Option added in GDAL 3.4
 
-        When using the gdal_translate utility, source overviews will not be
-        available if general options (i.e. options which are not creation options,
-        like subsetting, etc.) are used.
+-  .. co:: LEVEL
+      :choices: <integer>
 
-- **OVERVIEW_COUNT=integer_value**: (since GDAL 3.6)
-  Number of overview levels to generate. This can be used to increase or decrease
-  the number of levels in the COG file (when GDAL computes overviews from the
-  full resolution dataset, that is when there are no source overviews or the user
-  specifies OVERVIEWS=IGNORE_EXISTING), or decrease the number of levels copied
-  from the source dataset (in OVERVIEWS=AUTO or FORCE_USE_EXISTING modes when
-  there are such overviews in the source dataset).
+      DEFLATE/ZSTD/LERC_DEFLATE/LERC_ZSTD/LZMA compression level.
+      A lower number will
+      result in faster compression but less efficient compression rate.
+      1 is the fastest.
 
-  If not specified, the driver will use all the overviews available in the source raster,
-  in OVERVIEW=AUTO or FORCE_USE_EXISTING modes. In situations where GDAL generates
-  overviews, the default number of overview levels is such that the dimensions of
-  the smallest overview are smaller or equal to the BLOCKSIZE value.
+      * For DEFLATE/LZMA, 9 is the slowest/higher compression rate
+        (or 12 when using a libtiff with libdeflate support). The default is 6.
+      * For ZSTD, 22 is the slowest/higher compression rate. The default is 9.
 
-- **OVERVIEW_COMPRESS=[AUTO/NONE/LZW/JPEG/DEFLATE/ZSTD/WEBP/LERC/LERC_DEFLATE/LERC_ZSTD/LZMA]**:
-  Set the compression method (see ``COMPRESS``) to use when storing the overviews in the COG.
+-  .. co:: MAX_Z_ERROR
+      :choices: <threshold>
+      :default: 0
 
-  By default (``AUTO``) the overviews will be created with the same compression method as the COG.
+      Set the maximum error threshold on values
+      for LERC/LERC_DEFLATE/LERC_ZSTD compression. The default is 0
+      (lossless).
 
-- **OVERVIEW_QUALITY=integer_value**: JPEG/WEBP quality setting. A value of 100 is best
-  quality (least compression), and 1 is worst quality (best compression).
-  By default the overviews will be created with the same quality as the COG, unless
-  the compression type is different then the default is 75.
+-  .. co:: MAX_Z_ERROR_OVERVIEW
+      :choices: <threshold>
+      :since: 3.8
 
-- **OVERVIEW_PREDICTOR=[YES/NO/STANDARD/FLOATING_POINT]**: Set the predictor for LZW,
-  DEFLATE and ZSTD overview compression. By default the overviews will be created with the
-  same predictor as the COG, unless the compression type of the overview is different,
-  then the default is NO.
+      Set the maximum error threshold on values
+      for LERC/LERC_DEFLATE/LERC_ZSTD compression, on overviews.
+      The default is the value of :co:`MAX_Z_ERROR`
 
-- **GEOTIFF_VERSION=[AUTO/1.0/1.1]**: Select the version of
-  the GeoTIFF standard used to encode georeferencing information. ``1.0``
-  corresponds to the original
-  `1995, GeoTIFF Revision 1.0, by Ritter & Ruth <http://geotiff.maptools.org/spec/geotiffhome.html>`_.
-  ``1.1`` corresponds to the OGC standard 19-008, which is an evolution of 1.0,
-  which clear ambiguities and fix inconsistencies mostly in the processing of
-  the vertical part of a CRS.
-  ``AUTO`` mode (default value) will generally select 1.0, unless the CRS to
-  encode has a vertical component or is a 3D CRS, in which case 1.1 is used.
+-  .. co:: QUALITY
+      :choices: <integer>
+      :default: 75
 
-  .. note:: Write support for GeoTIFF 1.1 requires libgeotiff 1.6.0 or later.
+      JPEG/WEBP quality setting. A value of 100 is best
+      quality (least compression), and 1 is worst quality (best compression).
+      For WEBP, QUALITY=100 automatically turns on lossless mode.
 
-- **SPARSE_OK=TRUE/FALSE** (GDAL >= 3.2): Should empty blocks be
-  omitted on disk? When this option is set, any attempt of writing a
-  block whose all pixels are 0 or the nodata value will cause it not to
-  be written at all (unless there is a corresponding block already
-  allocated in the file). Sparse files have 0 tile/strip offsets for
-  blocks never written and save space; however, most non-GDAL packages
-  cannot read such files.
-  On the reading side, the presence of a omitted tile after a non-empty one
-  may cause optimized readers to have to issue an extra GET request to the
-  TileByteCounts array.
-  The default is FALSE.
+-  .. co:: JXL_LOSSLESS
+      :choices: YES, NO
+      :default: YES
+
+      Set whether JPEG-XL compression should be lossless
+      (YES) or lossy (NO). For lossy compression, the underlying data
+      should be either gray, gray+alpha, rgb or rgb+alpha.
+
+-  .. co:: JXL_EFFORT
+      :choices: 1-9
+      :default: 5
+
+      Level of effort for JPEG-XL compression.
+      The higher, the smaller file and slower compression time.
+
+-  .. co:: JXL_DISTANCE
+      :choices: 0.01-25
+      :default: 1.0
+
+      Distance level for lossy JPEG-XL compression.
+      It is specified in multiples of a just-noticeable difference
+      (cf `butteraugli <https://github.com/google/butteraugli>`__ for the definition
+      of the distance)
+      That is, 0 is mathematically lossless, 1 should be visually lossless, and
+      higher distances yield denser and denser files with lower and lower fidelity.
+      The recommended range is [0.5,3].
+
+-  .. co:: JXL_ALPHA_DISTANCE
+      :choices: -1, 0, 0.01-25
+      :default: -1
+      :since: 3.7
+
+      (libjxl > 0.8.1)
+      Distance level for alpha channel for lossy JPEG-XL compression.
+      It is specified in multiples of a just-noticeable difference.
+      (cf `butteraugli <https://github.com/google/butteraugli>`__ for the definition
+      of the distance)
+      That is, 0 is mathematically lossless, 1 should be visually lossless, and
+      higher distances yield denser and denser files with lower and lower fidelity.
+      For lossy compression, the recommended range is [0.5,3].
+      The default value is the special value -1.0, which means to use the same
+      distance value as non-alpha channel (ie :co:`JXL_DISTANCE`).
+
+-  .. co:: NUM_THREADS
+      :choices: <number_of_threads>, ALL_CPUS
+
+      Enable multi-threaded compression by specifying the number of worker
+      threads. Default is compression in the main thread. This also determines
+      the number of threads used when reprojection is done with the :co:`TILING_SCHEME`
+      or :co:`TARGET_SRS` creation options. (Overview generation is also multithreaded since
+      GDAL 3.2)
+
+-  .. co:: NBITS
+      :choices: <integer>
+      :since: 3.7
+
+      Create a file with less than 8 bits per sample by
+      passing a value from 1 to 7. The apparent pixel type should be Byte.
+      Values of n=9...15 (UInt16 type) and n=17...31
+      (UInt32 type) are also accepted. From GDAL 2.2, n=16 is accepted for
+      Float32 type to generate half-precision floating point values.
+
+-  .. co:: PREDICTOR
+      :choices: YES, NO, STANDARD, FLOATING_POINT
+      :default: NO
+
+      Set the predictor for LZW,
+      DEFLATE and ZSTD compression. If YES is specified, then
+      standard predictor (Predictor=2) is used for integer data type,
+      and floating-point predictor (Predictor=3) for floating point data type (in
+      some circumstances, the standard predictor might perform better than the
+      floating-point one on floating-point data). STANDARD or FLOATING_POINT can
+      also be used to select the precise algorithm wished.
+
+-  .. co:: BIGTIFF
+      :choices: YES, NO, IF_NEEDED, IF_SAFER
+
+      Control whether the created
+      file is a BigTIFF or a classic TIFF.
+
+      -  ``YES`` forces BigTIFF.
+      -  ``NO`` forces classic TIFF.
+      -  ``IF_NEEDED`` will only create a BigTIFF if it is clearly needed (in
+         the uncompressed case, and image larger than 4GB. So no effect
+         when using a compression).
+      -  ``IF_SAFER`` will create BigTIFF if the resulting file \*might\*
+         exceed 4GB. Note: this is only a heuristics that might not always
+         work depending on compression ratios.
+
+      BigTIFF is a TIFF variant which can contain more than 4GiB of data
+      (size of classic TIFF is limited by that value). This option is
+      available if GDAL is built with libtiff library version 4.0 or
+      higher. The default is IF_NEEDED.
+
+      When creating a new GeoTIFF with no compression, GDAL computes in
+      advance the size of the resulting file. If that computed file size is
+      over 4GiB, GDAL will automatically decide to create a BigTIFF file.
+      However, when compression is used, it is not possible in advance to
+      known the final size of the file, so classical TIFF will be chosen.
+      In that case, the user must explicitly require the creation of a
+      BigTIFF with BIGTIFF=YES if the final file is anticipated to be too
+      big for classical TIFF format. If BigTIFF creation is not explicitly
+      asked or guessed and the resulting file is too big for classical
+      TIFF, libtiff will fail with an error message like
+      "TIFFAppendToStrip:Maximum TIFF file size exceeded".
+
+-  .. co:: RESAMPLING
+      :choices: NEAREST, AVERAGE, BILINEAR, CUBIC, CUBICSPLINE, LANCZOS, MODE, RMS
+
+      Resampling method used for overview generation or reprojection.
+      For paletted images,
+      NEAREST is used by default, otherwise it is CUBIC.
+
+-  .. co:: OVERVIEW_RESAMPLING
+      :choices: NEAREST, AVERAGE, BILINEAR, CUBIC, CUBICSPLINE, LANCZOS, MODE, RMS
+      :since: 3.2
+
+      Resampling method used for overview generation.
+      For paletted images, NEAREST is used by default, otherwise it is CUBIC.
+      This overrides, for overview generation, the value of :co:`RESAMPLING` if it specified.
+
+-  .. co:: WARP_RESAMPLING
+      :choices: NEAREST, AVERAGE, BILINEAR, CUBIC, CUBICSPLINE, LANCZOS, MODE, RMS, MIN, MAX, MED, Q1, Q3
+      :since: 3.2
+
+      Resampling method used for reprojection.
+      For paletted images, NEAREST is used by default, otherwise it is CUBIC.
+      This overrides, for reprojection, the value of :co:`RESAMPLING` if it specified.
+
+- .. co:: OVERVIEWS
+     :choices: AUTO, IGNORE_EXISTING, FORCE_USE_EXISTING, NONE
+     :default: AUTO
+
+     Describe the behavior
+     regarding overview generation and use of source overviews.
+
+     - ``AUTO`` (default): source overviews will be used if present.
+       If not present, overviews will be automatically generated in the
+       output file.
+
+     - ``IGNORE_EXISTING``: potential existing overviews on the source dataset will
+       be ignored and new overviews will be automatically generated.
+
+     - ``FORCE_USE_EXISTING``: potential existing overviews on the source will
+       be used.
+       If there is no source overview, this is equivalent to specifying ``NONE``.
+
+     - ``NONE``: potential source overviews will be ignored, and no overview will be
+       generated.
+
+       .. note::
+
+           When using the gdal_translate utility, source overviews will not be
+           available if general options (i.e. options which are not creation options,
+           like subsetting, etc.) are used.
+
+- .. co:: OVERVIEW_COUNT
+     :choices: <integer>
+     :since: 3.6
+
+     Number of overview levels to generate. This can be used to increase or decrease
+     the number of levels in the COG file (when GDAL computes overviews from the
+     full resolution dataset, that is when there are no source overviews or the user
+     specifies :co:`OVERVIEWS=IGNORE_EXISTING`), or decrease the number of levels copied
+     from the source dataset (in :co:`OVERVIEWS=AUTO` or ``FORCE_USE_EXISTING`` modes when
+     there are such overviews in the source dataset).
+
+     If not specified, the driver will use all the overviews available in the source raster,
+     in :co:`OVERVIEWS=AUTO` or ``FORCE_USE_EXISTING`` modes. In situations where GDAL generates
+     overviews, the default number of overview levels is such that the dimensions of
+     the smallest overview are smaller or equal to the :co:`BLOCKSIZE` value.
+
+- .. co:: OVERVIEW_COMPRESS
+     :choices: AUTO, NONE, LZW, JPEG, DEFLATE, ZSTD, WEBP, LERC, LERC_DEFLATE, LERC_ZSTD, LZMA
+     :default: AUTO
+
+     Set the compression method (see ``COMPRESS``) to use when storing the overviews in the COG.
+
+     By default (``AUTO``) the overviews will be created with the same compression method as the COG.
+
+- .. co:: OVERVIEW_QUALITY
+     :choices: <integer>
+
+     JPEG/WEBP quality setting. A value of 100 is best
+     quality (least compression), and 1 is worst quality (best compression).
+     By default the overviews will be created with the same quality as the COG, unless
+     the compression type is different then the default is 75.
+
+- .. co:: OVERVIEW_PREDICTOR
+     :choices: YES, NO, STANDARD, FLOATING_POINT
+
+     Set the predictor for LZW,
+     DEFLATE and ZSTD overview compression. By default the overviews will be created with the
+     same predictor as the COG, unless the compression type of the overview is different,
+     then the default is NO.
+
+- .. co:: GEOTIFF_VERSION
+     :choices: AUTO, 1.0,1.1
+     :default: AUTO
+
+     Select the version of
+     the GeoTIFF standard used to encode georeferencing information. ``1.0``
+     corresponds to the original
+     `1995, GeoTIFF Revision 1.0, by Ritter & Ruth <http://geotiff.maptools.org/spec/geotiffhome.html>`_.
+     ``1.1`` corresponds to the OGC standard 19-008, which is an evolution of 1.0,
+     which clear ambiguities and fix inconsistencies mostly in the processing of
+     the vertical part of a CRS.
+     ``AUTO`` mode (default value) will generally select 1.0, unless the CRS to
+     encode has a vertical component or is a 3D CRS, in which case 1.1 is used.
+
+     .. note:: Write support for GeoTIFF 1.1 requires libgeotiff 1.6.0 or later.
+
+- .. co:: SPARSE_OK
+     :choices: TRUE, FALSE
+     :default: FALSE
+     :since: 3.2
+
+     Should empty blocks be
+     omitted on disk? When this option is set, any attempt of writing a
+     block whose all pixels are 0 or the nodata value will cause it not to
+     be written at all (unless there is a corresponding block already
+     allocated in the file). Sparse files have 0 tile/strip offsets for
+     blocks never written and save space; however, most non-GDAL packages
+     cannot read such files.
+     On the reading side, the presence of a omitted tile after a non-empty one
+     may cause optimized readers to have to issue an extra GET request to the
+     TileByteCounts array.
+
+- .. co:: STATISTICS
+     :choices: AUTO, YES, NO
+     :default: AUTO
+     :since: 3.8
+
+     Whether band statistics should be included in the output file.
+     In ``AUTO`` mode, they will be included only if available in the source
+     dataset.
+     If setting to ``YES``, they will always be included.
+     If setting to ``NO``, they will be never included.
 
 Reprojection related creation options
 *************************************
 
-- **TILING_SCHEME=CUSTOM/GoogleMapsCompatible/...**: Default value: CUSTOM.
-  If set to a value different than CUSTOM, the definition of the specified tiling
-  scheme will be used to reproject the dataset to its CRS, select the resolution
-  corresponding to the closest zoom level and align on tile boundaries at this
-  resolution (the actual resolution can be controlled with the ZOOM_LEVEL or
-  ZOOM_LEVEL_STRATEGY options).
+- .. co:: TILING_SCHEME
+     :choices: CUSTOM, GoogleMapsCompatible, ...
+     :default: CUSTOM
 
-  The tile size indicated in the tiling scheme definition (generally
-  256 pixels) will be used, unless the user has specified a value with the
-  BLOCKSIZE creation option, in which case the user specified one will be taken
-  into account (that is if setting a higher value than 256, the original
-  tiling scheme is modified to take into account the size of the HiDPi tiles).
+     If set to a value different than CUSTOM, the definition of the specified tiling
+     scheme will be used to reproject the dataset to its CRS, select the resolution
+     corresponding to the closest zoom level and align on tile boundaries at this
+     resolution (the actual resolution can be controlled with the :co:`ZOOM_LEVEL` or
+     :co:`ZOOM_LEVEL_STRATEGY` options).
 
-  In non-CUSTOM mode, TARGET_SRS, RES and EXTENT options are ignored.
-  Starting with GDAL 3.2, the value of TILING_SCHEME can also be the filename
-  of a JSON file according to the `OGC Two Dimensional Tile Matrix Set standard`_,
-  a URL to such file, the radical of a definition file in the GDAL data directory
-  (e.g. ``FOO`` for a file named ``tms_FOO.json``) or the inline JSON definition.
-  The list of available tiling schemes can be obtained by looking at values of
-  the TILING_SCHEME option reported by ``gdalinfo --format COG``.
+     The tile size indicated in the tiling scheme definition (generally
+     256 pixels) will be used, unless the user has specified a value with the
+     :co:`BLOCKSIZE` creation option, in which case the user specified one will be taken
+     into account (that is if setting a higher value than 256, the original
+     tiling scheme is modified to take into account the size of the HiDPi tiles).
 
-.. _`OGC Two Dimensional Tile Matrix Set standard`: http://docs.opengeospatial.org/is/17-083r2/17-083r2.html
+     In non-CUSTOM mode, TARGET_SRS, RES and EXTENT options are ignored.
+     Starting with GDAL 3.2, the value of :co:`TILING_SCHEME` can also be the filename
+     of a JSON file according to the `OGC Two Dimensional Tile Matrix Set standard`_,
+     a URL to such file, the radical of a definition file in the GDAL data directory
+     (e.g. ``FOO`` for a file named ``tms_FOO.json``) or the inline JSON definition.
+     The list of available tiling schemes can be obtained by looking at values of
+     the TILING_SCHEME option reported by ``gdalinfo --format COG``.
 
-- **ZOOM_LEVEL**\ =integer. (GDAL >= 3.5) Zoom level number (starting at 0 for
-  coarsest zoom level). Only used for TILING_SCHEME different from CUSTOM.
-  If this option is specified, ZOOM_LEVEL_STRATEGY is ignored.
+     .. _`OGC Two Dimensional Tile Matrix Set standard`: http://docs.opengeospatial.org/is/17-083r2/17-083r2.html
 
-- **ZOOM_LEVEL_STRATEGY**\ =AUTO/LOWER/UPPER. (GDAL >= 3.2) Strategy to determine
-  zoom level. Only used for TILING_SCHEME different from CUSTOM.
-  LOWER will select the zoom level immediately below the
-  theoretical computed non-integral zoom level, leading to subsampling.
-  On the contrary, UPPER will select the immediately above zoom level,
-  leading to oversampling. Defaults to AUTO which selects the closest
-  zoom level.
+- .. co:: ZOOM_LEVEL
+     :choices: <integer>
+     :since: 3.5
 
-- **TARGET_SRS=string**: to force reprojection of the input dataset to another
-  SRS. The string can be a WKT string, a EPSG:XXXX code or a PROJ string.
+     Zoom level number (starting at 0 for
+     coarsest zoom level). Only used for :co:`TILING_SCHEME` different from CUSTOM.
+     If this option is specified, :co:`ZOOM_LEVEL_STRATEGY` is ignored.
 
-- **RES=value**: Set the resolution of the target raster, in the units of
-  TARGET_SRS. Only taken into account if TARGET_SRS is specified.
+- .. co:: ZOOM_LEVEL_STRATEGY
+     :choices: AUTO, LOWER, UPPER
+     :default: AUTO
+     :since: 3.2
 
-- **EXTENT=minx,miny,maxx,maxy**: Set the extent of the target raster, in the
-  units of TARGET_SRS. Only taken into account if TARGET_SRS is specified.
+     Strategy to determine
+     zoom level. Only used for :co:`TILING_SCHEME` different from CUSTOM.
+     LOWER will select the zoom level immediately below the
+     theoretical computed non-integral zoom level, leading to subsampling.
+     On the contrary, UPPER will select the immediately above zoom level,
+     leading to oversampling. Defaults to AUTO which selects the closest
+     zoom level.
 
-- **ALIGNED_LEVELS=INT**: Number of resolution levels for which GeoTIFF tile and
-  tiles defined in the tiling scheme match. When specifying this option, padding tiles will be
-  added to the left and top sides of the target raster, when needed, so that
-  a GeoTIFF tile matches with a tile of the tiling scheme.
-  Only taken into account if TILING_SCHEME is different from CUSTOM.
-  Effect of this option is only visible when setting it at 2 or more, since the
-  full resolution level is by default aligned with the tiling scheme.
-  For a tiling scheme whose consecutive zoom level resolutions differ by a
-  factor of 2, care must be taken in setting this value to a high number of
-  levels, as up to 2^(ALIGNED_LEVELS-1) tiles can be added in each dimension.
-  The driver enforces a hard limit of 10.
+- .. co:: TARGET_SRS
 
-- **ADD_ALPHA=YES/NO**: Whether an alpha band is added in case of reprojection.
-  Defaults to YES.
+     to force reprojection of the input dataset to another
+     SRS. The string can be a WKT string, a EPSG:XXXX code or a PROJ string.
 
+- .. co:: RES
+
+     Set the resolution of the target raster, in the units of
+     :co:`TARGET_SRS`. Only taken into account if :co:`TARGET_SRS` is specified.
+
+- .. co:: EXTENT
+     :choices: <minx\,miny\,maxx\,maxy>
+
+     Set the extent of the target raster, in the
+     units of :co:`TARGET_SRS`. Only taken into account if :co:`TARGET_SRS` is specified.
+
+- .. co:: ALIGNED_LEVELS
+     :choices: <integer>
+
+     Number of resolution levels for which GeoTIFF tile and
+     tiles defined in the tiling scheme match. When specifying this option, padding tiles will be
+     added to the left and top sides of the target raster, when needed, so that
+     a GeoTIFF tile matches with a tile of the tiling scheme.
+     Only taken into account if :co:`TILING_SCHEME` is different from CUSTOM.
+     Effect of this option is only visible when setting it at 2 or more, since the
+     full resolution level is by default aligned with the tiling scheme.
+     For a tiling scheme whose consecutive zoom level resolutions differ by a
+     factor of 2, care must be taken in setting this value to a high number of
+     levels, as up to 2^(ALIGNED_LEVELS-1) tiles can be added in each dimension.
+     The driver enforces a hard limit of 10.
+
+- .. co:: ADD_ALPHA
+     :choices: YES, NO
+     :default: YES
+
+     Whether an alpha band is added in case of reprojection.
+
+Update
+------
+
+Updating a COG file generally breaks part of the optimizations, but still
+produces a valid GeoTIFF file. Starting with GDAL 3.8, to avoid undesired loss
+of the COG characteristics, opening such a file in update mode will be rejected,
+unless the IGNORE_COG_LAYOUT_BREAK open option is also explicitly set to YES.
+
+Note that a subset of operations are possible when opening a COG file in
+read-only mode, like metadata edition (including statistics storage), that will
+be stored in a auxiliary .aux.xml side-car file.
 
 File format details
 -------------------
@@ -417,11 +662,18 @@ line).
      mask.TileByteCounts[i], but none of them actually need to be read)
    * trailer of mask data (4 bytes)
 
+   This is only written if INTERLEAVE=PIXEL.
+
+- ``INTERLEAVE=BAND`` or ``INTERLEAVE=TILE``: (GDAL >= 3.11)
+  Reflects the value of the INTERLEAVE creation option.
+  Omission implies INTERLEAVE=PIXEL.
+
+
 .. note::
 
     The content of the header ghost area can be retrieved by getting the
     ``GDAL_STRUCTURAL_METADATA`` metadata item of the ``TIFF`` metadata domain
-    on the datasett object (with GetMetadataItem())
+    on the dataset object (with GetMetadataItem())
 
 .. _cog.tile_data_leader_trailer:
 
@@ -434,7 +686,8 @@ that follows it. This leader is *ghost* in the sense that the
 TileOffsets[] array does not point to it, but points to the real payload. Hence
 the offset of the leader is TileOffsets[i]-4.
 
-An optimized reader seeing the ``BLOCK_LEADER=SIZE_AS_UINT4`` metadata item will thus look for TileOffset[i]
+For INTERLEAVE=PIXEL or INTERLEAVE=TILE, an optimized reader seeing the
+``BLOCK_LEADER=SIZE_AS_UINT4`` metadata item will thus look for TileOffset[i]
 and TileOffset[i+1] to deduce it must fetch the data starting at
 offset=TileOffset[i] - 4 and of size=TileOffset[i+1]-TileOffset[i]+4. It then
 checks the 4 first bytes to see if the size in this leader marker is
@@ -444,6 +697,9 @@ BLOCK_TRAILER). In the case where there is a mask and
 MASK_INTERLEAVED_WITH_IMAGERY=YES, then the tile size indicated in the leader
 will be < TileOffset[i+1]-TileOffset[i] since the data for the mask will
 follow the imagery data (see MASK_INTERLEAVED_WITH_IMAGERY=YES)
+
+For INTERLEAVE=BAND, the above paragraph applies but the successor of tile i
+is not tile i+1, but tile i+nTilesPerBand.
 
 Each tile data is immediately followed by a trailer, consisting of the repetition
 of the last 4 bytes of the payload of the tile data. The size of this trailer is
@@ -468,8 +724,12 @@ See Also
 --------
 
 - :ref:`raster.gtiff` driver
--  `How to generate and read cloud optimized GeoTIFF
-   files <https://trac.osgeo.org/gdal/wiki/CloudOptimizedGeoTIFF>`__ (before GDAL 3.1)
 - If your source dataset is an internally tiled geotiff with the desired georeferencing and compression,
   using `cogger <https://github.com/airbusgeo/cogger>`__ (possibly along with gdaladdo to create overviews) will
   be much faster than the COG driver.
+
+
+.. below is an allow-list for spelling checker.
+
+.. spelling:word-list::
+      nTilesPerBand

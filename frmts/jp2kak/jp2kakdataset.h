@@ -8,32 +8,13 @@
  * Copyright (c) 2002, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
-
-// $Id$
 
 #include <cstring>
 #include <algorithm>
 #include <cmath>
 
-#include "../mem/memdataset.h"
 #include "cpl_multiproc.h"
 #include "cpl_port.h"
 #include "cpl_string.h"
@@ -66,6 +47,7 @@ class JP2KAKDataset final : public GDALJP2AbstractDataset
 {
     friend class JP2KAKRasterBand;
 
+    std::string m_osFilename{};
     kdu_codestream oCodeStream;
     kdu_compressed_source *poInput = nullptr;
     kdu_compressed_source *poRawInput = nullptr;
@@ -75,6 +57,9 @@ class JP2KAKDataset final : public GDALJP2AbstractDataset
     int nResCount = 0;
     bool bPreferNPReads = false;
     kdu_thread_env *poThreadEnv = nullptr;
+    int m_nDiscardLevels = 0;
+
+    std::vector<std::unique_ptr<JP2KAKDataset>> m_apoOverviews{};
 
     bool bCached = false;
     bool bResilient = false;
@@ -83,19 +68,24 @@ class JP2KAKDataset final : public GDALJP2AbstractDataset
 
     bool bPromoteTo8Bit = false;
 
-    bool TestUseBlockIO(int, int, int, int, int, int, GDALDataType, int, int *);
+    bool TestUseBlockIO(int, int, int, int, GDALDataType, int, const int *);
     CPLErr DirectRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                          GDALDataType, int, int *, GSpacing nPixelSpace,
+                          GDALDataType, int, const int *, GSpacing nPixelSpace,
                           GSpacing nLineSpace, GSpacing nBandSpace,
                           GDALRasterIOExtraArg *psExtraArg);
 
     virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, int, int *, GSpacing nPixelSpace,
-                             GSpacing nLineSpace, GSpacing nBandSpace,
+                             GDALDataType, int, BANDMAP_TYPE,
+                             GSpacing nPixelSpace, GSpacing nLineSpace,
+                             GSpacing nBandSpace,
                              GDALRasterIOExtraArg *psExtraArg) override;
 
   public:
     JP2KAKDataset();
+
+    JP2KAKDataset(JP2KAKDataset *poMainDS, int nDiscardLevels,
+                  const kdu_dims &dimsIn);
+
     virtual ~JP2KAKDataset() override;
 
     virtual CPLErr IBuildOverviews(const char *, int, const int *, int,
@@ -117,18 +107,15 @@ class JP2KAKRasterBand final : public GDALPamRasterBand
 {
     friend class JP2KAKDataset;
 
-    JP2KAKDataset *poBaseDS;
+    JP2KAKDataset *poBaseDS = nullptr;
 
-    int nDiscardLevels;
     kdu_dims band_dims;
-    int nOverviewCount;
-    JP2KAKRasterBand **papoOverviewBand;
 
     kdu_client *jpip_client;
     kdu_codestream oCodeStream;
 
     GDALColorTable oCT;
-    GDALColorInterp eInterp;
+    GDALColorInterp eInterp = GCI_Undefined;
 
     virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
                              GDALDataType, GSpacing nPixelSpace,
@@ -141,7 +128,7 @@ class JP2KAKRasterBand final : public GDALPamRasterBand
     }
 
   public:
-    JP2KAKRasterBand(int, int, kdu_codestream, int, kdu_client *, jp2_channels,
+    JP2KAKRasterBand(int, kdu_codestream, kdu_client *, jp2_channels,
                      JP2KAKDataset *);
     virtual ~JP2KAKRasterBand() override;
 

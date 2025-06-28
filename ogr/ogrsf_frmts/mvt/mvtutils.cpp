@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "mvtutils.h"
@@ -34,7 +18,8 @@
 /************************************************************************/
 
 void OGRMVTInitFields(OGRFeatureDefn *poFeatureDefn,
-                      const CPLJSONObject &oFields)
+                      const CPLJSONObject &oFields,
+                      const CPLJSONArray &oAttributesFromTileStats)
 {
     {
         OGRFieldDefn oFieldDefnId("mvt_id", OFTInteger64);
@@ -50,6 +35,36 @@ void OGRMVTInitFields(OGRFeatureDefn *poFeatureDefn,
                 if (oField.ToString() == "Number")
                 {
                     OGRFieldDefn oFieldDefn(oField.GetName().c_str(), OFTReal);
+
+                    for (int i = 0; i < oAttributesFromTileStats.Size(); ++i)
+                    {
+                        if (oAttributesFromTileStats[i].GetString(
+                                "attribute") == oField.GetName() &&
+                            oAttributesFromTileStats[i].GetString("type") ==
+                                "number")
+                        {
+                            const auto eMinType = oAttributesFromTileStats[i]
+                                                      .GetObj("min")
+                                                      .GetType();
+                            const auto eMaxType = oAttributesFromTileStats[i]
+                                                      .GetObj("max")
+                                                      .GetType();
+                            if (eMinType == CPLJSONObject::Type::Integer &&
+                                eMaxType == CPLJSONObject::Type::Integer)
+                            {
+                                oFieldDefn.SetType(OFTInteger);
+                            }
+                            else if ((eMinType ==
+                                          CPLJSONObject::Type::Integer ||
+                                      eMinType == CPLJSONObject::Type::Long) &&
+                                     eMaxType == CPLJSONObject::Type::Long)
+                            {
+                                oFieldDefn.SetType(OFTInteger64);
+                            }
+                            break;
+                        }
+                    }
+
                     poFeatureDefn->AddFieldDefn(&oFieldDefn);
                 }
                 else if (oField.ToString() == "Integer")  // GDAL extension
@@ -118,6 +133,37 @@ OGRMVTFindGeomTypeFromTileStat(const CPLJSONArray &oTileStatLayers,
         }
     }
     return eGeomType;
+}
+
+/************************************************************************/
+/*                     OGRMVTFindAttributesFromTileStat()               */
+/************************************************************************/
+
+CPLJSONArray
+OGRMVTFindAttributesFromTileStat(const CPLJSONArray &oTileStatLayers,
+                                 const char *pszLayerName)
+{
+    for (int i = 0; i < oTileStatLayers.Size(); i++)
+    {
+        CPLJSONObject oId = oTileStatLayers[i].GetObj("layer");
+        if (oId.IsValid() && oId.GetType() == CPLJSONObject::Type::String)
+        {
+            if (oId.ToString() == pszLayerName)
+            {
+                CPLJSONObject oAttributes =
+                    oTileStatLayers[i].GetObj("attributes");
+                if (oAttributes.IsValid() &&
+                    oAttributes.GetType() == CPLJSONObject::Type::Array)
+                {
+                    return oAttributes.ToArray();
+                }
+                break;
+            }
+        }
+    }
+    CPLJSONArray oAttributes;
+    oAttributes.Deinit();
+    return oAttributes;
 }
 
 /************************************************************************/

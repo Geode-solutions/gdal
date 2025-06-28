@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2016, Tamas Szekeres
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -108,11 +92,13 @@ SegmentType (1 byte)
 /*                         Geometry writer macros                       */
 /************************************************************************/
 
-#define WriteInt32(nPos, value) (*((unsigned int *)(pszData + (nPos))) = value)
+#define WriteInt32(nPos, value)                                                \
+    (*(reinterpret_cast<unsigned int *>(pszData + (nPos))) = value)
 
 #define WriteByte(nPos, value) (pszData[nPos] = value)
 
-#define WriteDouble(nPos, value) (*((double *)(pszData + (nPos))) = value)
+#define WriteDouble(nPos, value)                                               \
+    (*(reinterpret_cast<double *>(pszData + (nPos))) = value)
 
 #define ParentOffset(iShape) (nShapePos + (iShape)*9)
 #define FigureOffset(iShape) (nShapePos + (iShape)*9 + 4)
@@ -251,8 +237,14 @@ void OGRMSSQLGeometryWriter::WritePoint(double x, double y, double z, double m)
 /************************************************************************/
 
 void OGRMSSQLGeometryWriter::WriteSimpleCurve(OGRSimpleCurve *poGeom,
-                                              int iStartIndex, int nCount)
+                                              int iStartIndex, int nCount,
+                                              bool bReversePoints)
 {
+    if (bReversePoints && iStartIndex == 0)
+    {
+        poGeom->reversePoints();
+    }
+
     if ((chProps & SP_HASZVALUES) && (chProps & SP_HASMVALUES))
     {
         for (int i = iStartIndex; i < iStartIndex + nCount; i++)
@@ -277,14 +269,17 @@ void OGRMSSQLGeometryWriter::WriteSimpleCurve(OGRSimpleCurve *poGeom,
 }
 
 void OGRMSSQLGeometryWriter::WriteSimpleCurve(OGRSimpleCurve *poGeom,
-                                              int iStartIndex)
+                                              int iStartIndex,
+                                              bool bReversePoints)
 {
-    WriteSimpleCurve(poGeom, iStartIndex, poGeom->getNumPoints() - iStartIndex);
+    WriteSimpleCurve(poGeom, iStartIndex, poGeom->getNumPoints() - iStartIndex,
+                     bReversePoints);
 }
 
-void OGRMSSQLGeometryWriter::WriteSimpleCurve(OGRSimpleCurve *poGeom)
+void OGRMSSQLGeometryWriter::WriteSimpleCurve(OGRSimpleCurve *poGeom,
+                                              bool bReversePoints)
 {
-    WriteSimpleCurve(poGeom, 0, poGeom->getNumPoints());
+    WriteSimpleCurve(poGeom, 0, poGeom->getNumPoints(), bReversePoints);
 }
 
 /************************************************************************/
@@ -303,9 +298,9 @@ void OGRMSSQLGeometryWriter::WriteCompoundCurve(OGRCompoundCurve *poGeom)
         {
             case wkbLineString:
                 if (i == 0)
-                    WriteSimpleCurve(poSubGeom);
+                    WriteSimpleCurve(poSubGeom, false);
                 else
-                    WriteSimpleCurve(poSubGeom, 1);
+                    WriteSimpleCurve(poSubGeom, 1, false);
                 for (int j = 1; j < poSubGeom->getNumPoints(); j++)
                 {
                     if (j == 1)
@@ -317,9 +312,9 @@ void OGRMSSQLGeometryWriter::WriteCompoundCurve(OGRCompoundCurve *poGeom)
 
             case wkbCircularString:
                 if (i == 0)
-                    WriteSimpleCurve(poSubGeom);
+                    WriteSimpleCurve(poSubGeom, false);
                 else
-                    WriteSimpleCurve(poSubGeom, 1);
+                    WriteSimpleCurve(poSubGeom, 1, false);
                 for (int j = 2; j < poSubGeom->getNumPoints(); j += 2)
                 {
                     if (j == 2)
@@ -339,7 +334,7 @@ void OGRMSSQLGeometryWriter::WriteCompoundCurve(OGRCompoundCurve *poGeom)
 /*                         WriteCurve()                                 */
 /************************************************************************/
 
-void OGRMSSQLGeometryWriter::WriteCurve(OGRCurve *poGeom)
+void OGRMSSQLGeometryWriter::WriteCurve(OGRCurve *poGeom, bool bReversePoints)
 {
     switch (wkbFlatten(poGeom->getGeometryType()))
     {
@@ -347,14 +342,14 @@ void OGRMSSQLGeometryWriter::WriteCurve(OGRCurve *poGeom)
         case wkbLinearRing:
             WriteByte(FigureAttribute(iFigure), FA_LINE);
             WriteInt32(PointOffset(iFigure), iPoint);
-            WriteSimpleCurve(poGeom->toSimpleCurve());
+            WriteSimpleCurve(poGeom->toSimpleCurve(), bReversePoints);
             ++iFigure;
             break;
 
         case wkbCircularString:
             WriteByte(FigureAttribute(iFigure), FA_ARC);
             WriteInt32(PointOffset(iFigure), iPoint);
-            WriteSimpleCurve(poGeom->toSimpleCurve());
+            WriteSimpleCurve(poGeom->toSimpleCurve(), bReversePoints);
             ++iFigure;
             break;
 
@@ -386,7 +381,8 @@ void OGRMSSQLGeometryWriter::WritePolygon(OGRPolygon *poGeom)
         WriteByte(FigureAttribute(iFigure), FA_LINE);
 
     WriteInt32(PointOffset(iFigure), iPoint);
-    WriteSimpleCurve(poRing);
+    WriteSimpleCurve(poRing, poRing->isClockwise() &&
+                                 nColType == MSSQLCOLTYPE_GEOGRAPHY);
     ++iFigure;
     for (r = 0; r < poGeom->getNumInteriorRings(); r++)
     {
@@ -398,7 +394,8 @@ void OGRMSSQLGeometryWriter::WritePolygon(OGRPolygon *poGeom)
             WriteByte(FigureAttribute(iFigure), FA_LINE);
 
         WriteInt32(PointOffset(iFigure), iPoint);
-        WriteSimpleCurve(poRing);
+        WriteSimpleCurve(poRing, !poRing->isClockwise() &&
+                                     nColType == MSSQLCOLTYPE_GEOGRAPHY);
         ++iFigure;
     }
 }
@@ -412,11 +409,15 @@ void OGRMSSQLGeometryWriter::WriteCurvePolygon(OGRCurvePolygon *poGeom)
     if (poGeom->getExteriorRingCurve() == nullptr)
         return;
 
-    WriteCurve(poGeom->getExteriorRingCurve());
+    WriteCurve(poGeom->getExteriorRingCurve(),
+               poGeom->getExteriorRingCurve()->isClockwise() &&
+                   nColType == MSSQLCOLTYPE_GEOGRAPHY);
     for (int r = 0; r < poGeom->getNumInteriorRings(); r++)
     {
         /* write interior rings */
-        WriteCurve(poGeom->getInteriorRingCurve(r));
+        WriteCurve(poGeom->getInteriorRingCurve(r),
+                   !poGeom->getInteriorRingCurve(r)->isClockwise() &&
+                       nColType == MSSQLCOLTYPE_GEOGRAPHY);
     }
 }
 
@@ -469,7 +470,7 @@ void OGRMSSQLGeometryWriter::WriteGeometry(OGRGeometry *poGeom, int iParent)
                 else
                     WriteByte(FigureAttribute(iFigure), FA_LINE);
                 WriteInt32(PointOffset(iFigure), iPoint);
-                WriteSimpleCurve(poGeom->toSimpleCurve());
+                WriteSimpleCurve(poGeom->toSimpleCurve(), false);
                 ++iFigure;
             }
             break;
@@ -483,7 +484,7 @@ void OGRMSSQLGeometryWriter::WriteGeometry(OGRGeometry *poGeom, int iParent)
                 else
                     WriteByte(FigureAttribute(iFigure), FA_ARC);
                 WriteInt32(PointOffset(iFigure), iPoint);
-                WriteSimpleCurve(poGeom->toSimpleCurve());
+                WriteSimpleCurve(poGeom->toSimpleCurve(), false);
                 ++iFigure;
             }
             break;
@@ -602,7 +603,7 @@ void OGRMSSQLGeometryWriter::TrackGeometry(OGRGeometry *poGeom)
                                     nNumPoints += c;
                                 else
                                     nNumPoints += c - 1;
-                                nNumSegments += (int)((c - 1) / 2);
+                                nNumSegments += static_cast<int>((c - 1) / 2);
                             }
                             break;
 
@@ -721,3 +722,12 @@ OGRErr OGRMSSQLGeometryWriter::WriteSqlGeometry(unsigned char *pszBuffer,
     }
     return OGRERR_NONE;
 }
+
+#undef ParentOffset
+#undef FigureOffset
+#undef ShapeType
+#undef SegmentType
+
+#undef FigureAttribute
+#undef PointOffset
+#undef NextPointOffset

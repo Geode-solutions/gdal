@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  gdalinfo testing
@@ -10,28 +9,13 @@
 ###############################################################################
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import json
 import os
 import shutil
+import stat
 
 import gdaltest
 import pytest
@@ -59,7 +43,7 @@ def test_gdalinfo_1(gdalinfo_path):
         gdalinfo_path + " ../gcore/data/byte.tif",
         encoding="UTF-8",
     )
-    assert err is None or err == "", "got error/warning"
+    assert err is None or err == "", f"got error/warning {err}"
     assert ret.find("Driver: GTiff/GeoTIFF") != -1
 
 
@@ -104,11 +88,9 @@ def test_gdalinfo_4(gdalinfo_path):
 # Test -stats option
 
 
-def test_gdalinfo_5(gdalinfo_path):
+def test_gdalinfo_5(gdalinfo_path, tmp_path):
 
-    tmpfilename = "tmp/test_gdalinfo_5.tif"
-    if os.path.exists(tmpfilename + ".aux.xml"):
-        os.remove(tmpfilename + ".aux.xml")
+    tmpfilename = str(tmp_path / "test_gdalinfo_5.tif")
     shutil.copy("../gcore/data/byte.tif", tmpfilename)
 
     ret = gdaltest.runexternal(gdalinfo_path + " " + tmpfilename)
@@ -118,14 +100,14 @@ def test_gdalinfo_5(gdalinfo_path):
     assert ret.find("STATISTICS_MINIMUM=74") != -1, "got wrong minimum (2)."
 
     # We will blow an exception if the file does not exist now!
-    os.remove(tmpfilename + ".aux.xml")
-    os.remove(tmpfilename)
+    assert os.path.exists(tmpfilename + ".aux.xml")
 
 
 ###############################################################################
 # Test a dataset with overviews and RAT
 
 
+@pytest.mark.require_driver("HFA")
 def test_gdalinfo_6(gdalinfo_path):
 
     ret = gdaltest.runexternal(gdalinfo_path + " ../gdrivers/data/hfa/int.img")
@@ -137,6 +119,10 @@ def test_gdalinfo_6(gdalinfo_path):
 # Test a dataset with GCPs
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_gdalinfo_7(gdalinfo_path):
 
     ret = gdaltest.runexternal(
@@ -159,11 +145,9 @@ def test_gdalinfo_7(gdalinfo_path):
 # Test -hist option
 
 
-def test_gdalinfo_8(gdalinfo_path):
+def test_gdalinfo_8(gdalinfo_path, tmp_path):
 
-    tmpfilename = "tmp/test_gdalinfo_8.tif"
-    if os.path.exists(tmpfilename + ".aux.xml"):
-        os.remove(tmpfilename + ".aux.xml")
+    tmpfilename = str(tmp_path / "test_gdalinfo_8.tif")
     shutil.copy("../gcore/data/byte.tif", tmpfilename)
 
     ret = gdaltest.runexternal(gdalinfo_path + " " + tmpfilename)
@@ -183,8 +167,7 @@ def test_gdalinfo_8(gdalinfo_path):
     ), "did not get expected histogram."
 
     # We will blow an exception if the file does not exist now!
-    os.remove(tmpfilename + ".aux.xml")
-    os.remove(tmpfilename)
+    assert os.path.exists(tmpfilename + ".aux.xml")
 
 
 ###############################################################################
@@ -260,7 +243,7 @@ def test_gdalinfo_14(gdalinfo_path):
     (_, err) = gdaltest.runexternal_out_and_err(
         gdalinfo_path + " --config", check_memleak=False
     )
-    assert "--config option given without a key and value argument" in err
+    assert "--config option given without" in err
 
 
 ###############################################################################
@@ -323,17 +306,18 @@ def test_gdalinfo_18(gdalinfo_path):
 # Test --optfile
 
 
-def test_gdalinfo_19(gdalinfo_path):
+def test_gdalinfo_19(gdalinfo_path, tmp_path):
 
-    f = open("tmp/optfile.txt", "wt")
+    optfile_txt = str(tmp_path / "optfile.txt")
+
+    f = open(optfile_txt, "wt")
     f.write("# comment\n")
     f.write("../gcore/data/byte.tif\n")
     f.close()
     ret = gdaltest.runexternal(
-        gdalinfo_path + " --optfile tmp/optfile.txt",
+        gdalinfo_path + f" --optfile {optfile_txt}",
         check_memleak=False,
     )
-    os.unlink("tmp/optfile.txt")
     assert ret.startswith("Driver: GTiff/GeoTIFF")
 
 
@@ -344,7 +328,26 @@ def test_gdalinfo_19(gdalinfo_path):
 def test_gdalinfo_20(gdalinfo_path):
 
     ret = gdaltest.runexternal(gdalinfo_path + " --formats", check_memleak=False)
-    assert "GTiff -raster- (rw+vs): GeoTIFF" in ret
+    assert "GTiff -raster- (rw+uvs): GeoTIFF" in ret
+
+
+###############################################################################
+# Test --formats -json
+
+
+@pytest.mark.require_driver("VRT")
+def test_gdalinfo_formats_json(gdalinfo_path):
+
+    ret = json.loads(
+        gdaltest.runexternal(gdalinfo_path + " --formats -json", check_memleak=False)
+    )
+    assert {
+        "short_name": "VRT",
+        "long_name": "Virtual Raster",
+        "scopes": ["raster", "multidimensional_raster"],
+        "capabilities": ["open", "create", "create_copy", "update", "virtual_io"],
+        "file_extensions": ["vrt"],
+    } in ret
 
 
 ###############################################################################
@@ -464,7 +467,7 @@ def test_gdalinfo_28(gdalinfo_path):
         encoding="UTF-8",
     )
     ret = json.loads(ret)
-    assert err is None or err == "", "got error/warning"
+    assert err is None or err == "", f"got error/warning {err}"
     assert ret["driverShortName"] == "GTiff"
 
 
@@ -518,43 +521,46 @@ def test_gdalinfo_31(gdalinfo_path):
 # Test -stats option
 
 
-def test_gdalinfo_32(gdalinfo_path):
+def test_gdalinfo_stats(gdalinfo_path, tmp_path):
 
-    try:
-        os.remove("../gcore/data/byte.tif.aux.xml")
-    except OSError:
-        pass
+    filename = str(tmp_path / "test.tif")
+    shutil.copy("../gcore/data/byte.tif", filename)
 
-    ret = gdaltest.runexternal(gdalinfo_path + " -json ../gcore/data/byte.tif")
+    ret = gdaltest.runexternal(gdalinfo_path + f" -json {filename}")
     ret = json.loads(ret)
     assert "" not in ret["bands"][0]["metadata"], "got wrong minimum."
 
-    ret = gdaltest.runexternal(gdalinfo_path + " -json -stats ../gcore/data/byte.tif")
+    ret = gdaltest.runexternal(gdalinfo_path + f" -json -stats {filename}")
     ret = json.loads(ret)
     assert (
         ret["bands"][0]["metadata"][""]["STATISTICS_MINIMUM"] == "74"
     ), "got wrong minimum (2)."
 
     # We will blow an exception if the file does not exist now!
-    os.remove("../gcore/data/byte.tif.aux.xml")
+    os.remove(f"{filename}.aux.xml")
 
 
 ###############################################################################
 # Test a dataset with overviews and RAT
 
 
+@pytest.mark.require_driver("HFA")
 def test_gdalinfo_33(gdalinfo_path):
 
     ret = gdaltest.runexternal(gdalinfo_path + " -json ../gdrivers/data/hfa/int.img")
     ret = json.loads(ret)
     assert "overviews" in ret["bands"][0]
-    assert "rat" in ret
+    assert "rat" in ret["bands"][0]
 
 
 ###############################################################################
 # Test a dataset with GCPs
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_gdalinfo_34(gdalinfo_path):
 
     ret = gdaltest.runexternal(gdalinfo_path + " -json ../gcore/data/gcps.vrt")
@@ -575,18 +581,16 @@ def test_gdalinfo_34(gdalinfo_path):
 # Test -hist option
 
 
-def test_gdalinfo_35(gdalinfo_path):
+def test_gdalinfo_35(gdalinfo_path, tmp_path):
 
-    try:
-        os.remove("../gcore/data/byte.tif.aux.xml")
-    except OSError:
-        pass
+    tmp_tif = str(tmp_path / "byte.tif")
+    shutil.copy("../gcore/data/byte.tif", tmp_tif)
 
-    ret = gdaltest.runexternal(gdalinfo_path + " -json ../gcore/data/byte.tif")
+    ret = gdaltest.runexternal(gdalinfo_path + f" -json {tmp_tif}")
     ret = json.loads(ret)
     assert "histogram" not in ret["bands"][0], "did not expect histogram."
 
-    ret = gdaltest.runexternal(gdalinfo_path + " -json -hist ../gcore/data/byte.tif")
+    ret = gdaltest.runexternal(gdalinfo_path + f" -json -hist {tmp_tif}")
     ret = json.loads(ret)
     assert ret["bands"][0]["histogram"]["buckets"] == [
         0,
@@ -847,8 +851,7 @@ def test_gdalinfo_35(gdalinfo_path):
         1,
     ], "did not get expected histogram."
 
-    # We will blow an exception if the file does not exist now!
-    os.remove("../gcore/data/byte.tif.aux.xml")
+    assert os.path.exists(tmp_tif + ".aux.xml")
 
 
 ###############################################################################
@@ -967,15 +970,14 @@ def test_gdalinfo_if_option(gdalinfo_path):
 # Test STAC JSON output
 
 
-def test_gdalinfo_stac_json(gdalinfo_path):
+def test_gdalinfo_stac_json(gdalinfo_path, tmp_path):
 
-    tmpfilename = "tmp/test_gdalinfo_stac_json.tif"
+    tmpfilename = str(tmp_path / "test_gdalinfo_stac_json.tif")
     shutil.copy("../gcore/data/byte.tif", tmpfilename)
     ret, _ = gdaltest.runexternal_out_and_err(
         gdalinfo_path + " -json -proj4 -stats -hist " + tmpfilename,
         encoding="UTF-8",
     )
-    gdal.GetDriverByName("GTiff").Delete(tmpfilename)
     data = json.loads(ret)
 
     assert "stac" in data
@@ -1007,21 +1009,68 @@ def test_gdalinfo_stac_json(gdalinfo_path):
     assert band["name"] == "b1"
     assert band["description"] == "Gray"
 
+
+def test_gdalinfo_stac_eo_bands(gdalinfo_path, tmp_path):
     # Test eo:bands cloud_cover
     # https://github.com/OSGeo/gdal/pull/6265#issuecomment-1232229669
-    tmpfilename = "tmp/test_gdalinfo_stac_json_cloud_cover.tif"
+    tmpfilename = str(tmp_path / "test_gdalinfo_stac_json_cloud_cover.tif")
     shutil.copy("../gcore/data/md_dg.tif", tmpfilename)
     shutil.copy(
-        "../gcore/data/md_dg.IMD", "tmp/test_gdalinfo_stac_json_cloud_cover.IMD"
+        "../gcore/data/md_dg.IMD", f"{tmp_path}/test_gdalinfo_stac_json_cloud_cover.IMD"
     )
     shutil.copy(
-        "../gcore/data/md_dg.RPB", "tmp/test_gdalinfo_stac_json_cloud_cover.RPB"
+        "../gcore/data/md_dg.RPB", f"{tmp_path}/test_gdalinfo_stac_json_cloud_cover.RPB"
     )
     ret, _ = gdaltest.runexternal_out_and_err(
         gdalinfo_path + " -json " + tmpfilename,
         encoding="UTF-8",
     )
-    gdal.GetDriverByName("GTiff").Delete(tmpfilename)
     data = json.loads(ret)
 
     assert data["stac"]["eo:cloud_cover"] == 2
+
+
+def test_gdalinfo_access_to_file_without_permission(gdalinfo_path, tmp_path):
+
+    tmpfilename = str(tmp_path / "test.bin")
+    with open(tmpfilename, "wb") as f:
+        f.write(b"\x00" * 1024)
+    os.chmod(tmpfilename, 0)
+
+    # Test that file is not accessible
+    try:
+        f = open(tmpfilename, "rb")
+        f.close()
+        pytest.skip("could not set non accessible permission")
+    except IOError:
+        pass
+
+    _, err = gdaltest.runexternal_out_and_err(
+        gdalinfo_path + " " + tmpfilename,
+        encoding="UTF-8",
+    )
+    lines = list(filter(lambda x: len(x) > 0, err.split("\n")))
+    assert (len(lines)) == 3
+
+    os.chmod(tmpfilename, stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+
+
+###############################################################################
+# Test error messages when file cannot be opened
+
+
+def test_gdalinfo_file_does_not_exist(gdalinfo_path):
+
+    (ret, err) = gdaltest.runexternal_out_and_err(gdalinfo_path + " does_not_exist.tif")
+
+    assert "No such file or directory" in err
+    assert "ogrinfo" not in err
+
+
+def test_gdalinfo_open_vector(gdalinfo_path):
+
+    (ret, err) = gdaltest.runexternal_out_and_err(
+        gdalinfo_path + " ../ogr/data/poly.shp"
+    )
+
+    assert "Did you intend to call ogrinfo" in err

@@ -73,43 +73,6 @@ int TIFFReInitJPEG_12(TIFF *tif, const JPEGOtherSettings *otherSettings,
                       int scheme, int is_encode);
 int TIFFJPEGIsFullStripRequired_12(TIFF *tif);
 
-/* We undefine FAR to avoid conflict with JPEG definition */
-
-#ifdef FAR
-#undef FAR
-#endif
-
-/*
-  Libjpeg's jmorecfg.h defines INT16 and INT32, but only if XMD_H is
-  not defined.  Unfortunately, the MinGW and Borland compilers include
-  a typedef for INT32, which causes a conflict.  MSVC does not include
-  a conflicting typedef given the headers which are included.
-*/
-#if defined(__BORLANDC__) || defined(__MINGW32__)
-#define XMD_H 1
-#endif
-
-/*
-   The windows RPCNDR.H file defines boolean, but defines it with the
-   unsigned char size.  You should compile JPEG library using appropriate
-   definitions in jconfig.h header, but many users compile library in wrong
-   way. That causes errors of the following type:
-
-   "JPEGLib: JPEG parameter struct mismatch: library thinks size is 432,
-   caller expects 464"
-
-   For such users we will fix the problem here. See install.doc file from
-   the JPEG library distribution for details.
-*/
-
-/* Define "boolean" as unsigned char, not int, per Windows custom. */
-#if defined(__WIN32__) && !defined(__MINGW32__)
-#ifndef __RPCNDR_H__ /* don't conflict if rpcndr.h already read */
-typedef unsigned char boolean;
-#endif
-#define HAVE_BOOLEAN /* prevent jmorecfg.h from redefining it */
-#endif
-
 #include "jerror.h"
 #include "jpeglib.h"
 
@@ -125,18 +88,18 @@ typedef unsigned char boolean;
  * 16bit value?
  */
 
-/* HAVE_JPEGTURBO_DUAL_MODE_8_12 is defined for libjpeg-turbo >= 2.2 which
+/* HAVE_JPEGTURBO_DUAL_MODE_8_12 is defined for libjpeg-turbo >= 3.0 which
  * adds a dual-mode 8/12 bit API in the same library.
  */
 
 #if defined(HAVE_JPEGTURBO_DUAL_MODE_8_12)
 #define JPEG_DUAL_MODE_8_12
 /* Start by undefining BITS_IN_JSAMPLE which is always set to 8 in libjpeg-turbo
- * >= 2.2 Cf
+ * >= 3.0 Cf
  * https://github.com/libjpeg-turbo/libjpeg-turbo/commit/8b9bc4b9635a2a047fb23ebe70c9acd728d3f99b
  */
 #undef BITS_IN_JSAMPLE
-/* libjpeg-turbo >= 2.2 adds J12xxxx datatypes for the 12-bit mode. */
+/* libjpeg-turbo >= 3.0 adds J12xxxx datatypes for the 12-bit mode. */
 #if defined(FROM_TIF_JPEG_12)
 #define BITS_IN_JSAMPLE 12
 #define TIFF_JSAMPLE J12SAMPLE
@@ -182,9 +145,20 @@ typedef unsigned char boolean;
 #define LONGJMP(jbuf, code) longjmp(jbuf, code)
 #define JMP_BUF jmp_buf
 
+#ifndef TIFF_jpeg_destination_mgr_defined
+#define TIFF_jpeg_destination_mgr_defined
 typedef struct jpeg_destination_mgr jpeg_destination_mgr;
+#endif
+
+#ifndef TIFF_jpeg_source_mgr_defined
+#define TIFF_jpeg_source_mgr_defined
 typedef struct jpeg_source_mgr jpeg_source_mgr;
+#endif
+
+#ifndef TIFF_jpeg_error_mgr_defined
+#define TIFF_jpeg_error_mgr_defined
 typedef struct jpeg_error_mgr jpeg_error_mgr;
+#endif
 
 /*
  * State block for each open TIFF file using
@@ -246,13 +220,13 @@ static int DecodeRowError(TIFF *tif, uint8_t *buf, tmsize_t cc, uint16_t s);
 
 static const TIFFField jpegFields[] = {
     {TIFFTAG_JPEGTABLES, -3, -3, TIFF_UNDEFINED, 0, TIFF_SETGET_C32_UINT8,
-     TIFF_SETGET_C32_UINT8, FIELD_JPEGTABLES, FALSE, TRUE, "JPEGTables", NULL},
-    {TIFFTAG_JPEGQUALITY, 0, 0, TIFF_ANY, 0, TIFF_SETGET_INT,
-     TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, TRUE, FALSE, "", NULL},
-    {TIFFTAG_JPEGCOLORMODE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_INT,
-     TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "", NULL},
-    {TIFFTAG_JPEGTABLESMODE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_INT,
-     TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "", NULL}};
+     FIELD_JPEGTABLES, FALSE, TRUE, "JPEGTables", NULL},
+    {TIFFTAG_JPEGQUALITY, 0, 0, TIFF_ANY, 0, TIFF_SETGET_INT, FIELD_PSEUDO,
+     TRUE, FALSE, "", NULL},
+    {TIFFTAG_JPEGCOLORMODE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_INT, FIELD_PSEUDO,
+     FALSE, FALSE, "", NULL},
+    {TIFFTAG_JPEGTABLESMODE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_INT, FIELD_PSEUDO,
+     FALSE, FALSE, "", NULL}};
 
 /*
  * libjpeg interface layer.
@@ -1241,6 +1215,12 @@ int TIFFJPEGIsFullStripRequired(TIFF *tif)
          * For PC 2, scale down the expected strip/tile size
          * to match a downsampled component
          */
+        if (sp->h_sampling == 0 || sp->v_sampling == 0)
+        {
+            TIFFErrorExtR(tif, module,
+                          "JPEG horizontal or vertical sampling is zero");
+            return (0);
+        }
         segment_width = TIFFhowmany_32(segment_width, sp->h_sampling);
         segment_height = TIFFhowmany_32(segment_height, sp->v_sampling);
     }
@@ -1471,7 +1451,10 @@ static int JPEGDecode(TIFF *tif, uint8_t *buf, tmsize_t cc, uint16_t s)
     sp->src.bytes_in_buffer = (size_t)tif->tif_rawcc;
 
     if (sp->bytesperline == 0)
+    {
+        memset(buf, 0, (size_t)cc);
         return 0;
+    }
 
     nrows = cc / sp->bytesperline;
     if (cc % sp->bytesperline)
@@ -1492,7 +1475,10 @@ static int JPEGDecode(TIFF *tif, uint8_t *buf, tmsize_t cc, uint16_t s)
             JSAMPROW bufptr = (JSAMPROW)buf;
 
             if (TIFFjpeg_read_scanlines(sp, &bufptr, 1) != 1)
+            {
+                memset(buf, 0, (size_t)cc);
                 return (0);
+            }
 
             ++tif->tif_row;
             buf += sp->bytesperline;
@@ -1526,7 +1512,10 @@ static int JPEGDecode(TIFF *tif, uint8_t *buf, tmsize_t cc, uint16_t s)
     sp->src.bytes_in_buffer = (size_t)tif->tif_rawcc;
 
     if (sp->bytesperline == 0)
+    {
+        memset(buf, 0, (size_t)cc);
         return 0;
+    }
 
     nrows = cc / sp->bytesperline;
     if (cc % sp->bytesperline)
@@ -1562,7 +1551,10 @@ static int JPEGDecode(TIFF *tif, uint8_t *buf, tmsize_t cc, uint16_t s)
                  * for 12bit data, which we need to repack.
                  */
                 if (TIFFjpeg_read_scanlines(sp, &line_work_buf, 1) != 1)
+                {
+                    memset(buf, 0, (size_t)cc);
                     return (0);
+                }
 
                 if (sp->cinfo.d.data_precision == 12)
                 {
@@ -2190,12 +2182,21 @@ static int JPEGPreEncode(TIFF *tif, uint16_t s)
         /* for PC 2, scale down the strip/tile size
          * to match a downsampled component
          */
+        if (sp->h_sampling == 0 || sp->v_sampling == 0)
+        {
+            TIFFErrorExtR(tif, module,
+                          "JPEG horizontal or vertical sampling is zero");
+            return (0);
+        }
         segment_width = TIFFhowmany_32(segment_width, sp->h_sampling);
         segment_height = TIFFhowmany_32(segment_height, sp->v_sampling);
     }
-    if (segment_width > 65535 || segment_height > 65535)
+    if (segment_width > (uint32_t)JPEG_MAX_DIMENSION ||
+        segment_height > (uint32_t)JPEG_MAX_DIMENSION)
     {
-        TIFFErrorExtR(tif, module, "Strip/tile too large for JPEG");
+        TIFFErrorExtR(tif, module,
+                      "Strip/tile too large for JPEG. Maximum dimension is %d",
+                      (int)JPEG_MAX_DIMENSION);
         return (0);
     }
     sp->cinfo.c.image_width = segment_width;

@@ -1,5 +1,4 @@
 /**********************************************************************
- * $Id$
  *
  * Name:     avc_e00write.c
  * Project:  Arc/Info vector coverage (AVC)  E00->BIN conversion library
@@ -11,23 +10,7 @@
  **********************************************************************
  * Copyright (c) 1999-2001, Daniel Morissette
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************
  *
  * $Log: avc_e00write.c,v $
@@ -256,7 +239,7 @@ AVCE00WritePtr AVCE00WriteOpen(const char *pszCoverPath,
         psInfo->pszCoverPath = CPLStrdup(pszCoverPath);
     else
     {
-#ifdef WIN32
+#ifdef _WIN32
         psInfo->pszCoverPath = CPLStrdup(CPLSPrintf("%s\\", pszCoverPath));
 #else
         psInfo->pszCoverPath = CPLStrdup(CPLSPrintf("%s/", pszCoverPath));
@@ -327,7 +310,7 @@ AVCE00WritePtr AVCE00WriteOpen(const char *pszCoverPath,
          *------------------------------------------------------------*/
         size_t nInfoPathLen = strlen(psInfo->pszCoverPath) + 9;
         psInfo->pszInfoPath = (char *)CPLMalloc(nInfoPathLen);
-#ifdef WIN32
+#ifdef _WIN32
 #define AVC_INFOPATH "..\\info\\"
 #else
 #define AVC_INFOPATH "../info/"
@@ -480,7 +463,8 @@ static void _AVCE00WriteRenameTable(AVCTableDef *psTableDef,
 
     snprintf(szNewName, sizeof(szNewName), "%s", pszNewCoverName);
     for (i = 0; szNewName[i] != '\0'; i++)
-        szNewName[i] = (char)toupper(szNewName[i]);
+        szNewName[i] =
+            (char)CPLToupper(static_cast<unsigned char>(szNewName[i]));
 
     /*-----------------------------------------------------------------
      * Extract components from the current table name.
@@ -662,7 +646,7 @@ static int _AVCE00WriteCreateCoverFile(AVCE00WritePtr psInfo, AVCFileType eType,
      * Make sure filename is all lowercase and attempt to create the file
      *----------------------------------------------------------------*/
     for (i = 0; szFname[i] != '\0'; i++)
-        szFname[i] = (char)tolower(szFname[i]);
+        szFname[i] = (char)CPLTolower(static_cast<unsigned char>(szFname[i]));
 
     if (nStatus == 0)
     {
@@ -961,7 +945,8 @@ int AVCE00DeleteCoverage(const char *pszCoverToDelete)
         {
             /* Convert table filename to lowercases */
             for (j = 0; papszFiles[i] && papszFiles[i][j] != '\0'; j++)
-                papszFiles[i][j] = (char)tolower(papszFiles[i][j]);
+                papszFiles[i][j] = (char)CPLTolower(
+                    static_cast<unsigned char>(papszFiles[i][j]));
 
             /* Delete the .DAT file */
             pszFname = CPLSPrintf("%s%s.dat", pszInfoPath, papszFiles[i]);

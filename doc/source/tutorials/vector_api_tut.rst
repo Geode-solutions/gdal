@@ -22,28 +22,32 @@ Initially it is necessary to register all the format drivers that are desired.
 This is normally accomplished by calling :cpp:func:`GDALAllRegister` which registers
 all format drivers built into GDAL/OGR.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    #include "ogrsf_frmts.h"
+      #include "ogrsf_frmts.h"
 
-    int main()
+      int main()
 
-    {
-        GDALAllRegister();
+      {
+          GDALAllRegister();
 
 
-In C :
+   .. code-tab:: c
 
-.. code-block:: c
+      #include "gdal.h"
 
-    #include "gdal.h"
+      int main()
 
-    int main()
+      {
+          GDALAllRegister();
 
-    {
-        GDALAllRegister();
+   .. code-tab:: python
+
+      from osgeo import gdal
+      # when importing gdal in Python
+      # GDALAllRegister() is automatically called
 
 Next we need to open the input OGR datasource.  Datasources can be files,
 RDBMSes, directories full of files, or even remote web services depending on
@@ -54,224 +58,190 @@ that we want a vector driver to be use and that don't require update access.
 On failure NULL is returned, and
 we report an error.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    GDALDataset       *poDS;
+      GDALDataset       *poDS;
 
-    poDS = (GDALDataset*) GDALOpenEx( "point.shp", GDAL_OF_VECTOR, NULL, NULL, NULL );
-    if( poDS == NULL )
-    {
-        printf( "Open failed.\n" );
-        exit( 1 );
-    }
+      poDS = (GDALDataset*) GDALOpenEx( "point.shp", GDAL_OF_VECTOR, NULL, NULL, NULL );
+      if( poDS == NULL )
+      {
+          printf( "Open failed.\n" );
+          exit( 1 );
+      }
 
-In C :
+   .. code-tab:: c
 
-.. code-block:: c
+      GDALDatasetH hDS;
 
-    GDALDatasetH hDS;
+      hDS = GDALOpenEx( "point.shp", GDAL_OF_VECTOR, NULL, NULL, NULL );
+      if( hDS == NULL )
+      {
+          printf( "Open failed.\n" );
+          exit( 1 );
+      }
 
-    hDS = GDALOpenEx( "point.shp", GDAL_OF_VECTOR, NULL, NULL, NULL );
-    if( hDS == NULL )
-    {
-        printf( "Open failed.\n" );
-        exit( 1 );
-    }
+   .. code-tab:: python
+
+      ds = gdal.OpenEx("point", gdal.OF_VECTOR)
 
 A GDALDataset can potentially have many layers associated with it.  The
 number of layers available can be queried with :cpp:func:`GDALDataset::GetLayerCount`
 and individual layers fetched by index using :cpp:func:`GDALDataset::GetLayer`.
 However, we will just fetch the layer by name.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    OGRLayer  *poLayer;
+      OGRLayer  *poLayer;
 
-    poLayer = poDS->GetLayerByName( "point" );
+      poLayer = poDS->GetLayerByName( "point" );
 
-In C :
+   .. code-tab:: c
 
-.. code-block:: c
+      OGRLayerH hLayer;
 
-    OGRLayerH hLayer;
+      hLayer = GDALDatasetGetLayerByName( hDS, "point" );
 
-    hLayer = GDALDatasetGetLayerByName( hDS, "point" );
+   .. code-tab:: python
 
+      lyr = ds.GetLayerByName("point")
 
 Now we want to start reading features from the layer.  Before we start we
 could assign an attribute or spatial filter to the layer to restrict the set
 of feature we get back, but for now we are interested in getting all features.
 
-With GDAL 2.3 and C++11:
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    for( auto& poFeature: poLayer )
-    {
+      for( auto& poFeature: poLayer )
+      {
+            // do something with each feature
+      }
 
-With GDAL 2.3 and C:
+   .. code-tab:: c
 
-.. code-block:: c
+      OGR_FOR_EACH_FEATURE_BEGIN(hFeature, hLayer)
+      {
+           // do something, including continue, break;
+           // do not explicitly destroy the feature (unless you use return or goto
+           // outside of the loop, in which case use OGR_F_Destroy(hFeat))
+      }
+      OGR_FOR_EACH_FEATURE_END(hFeat)
 
-    OGR_FOR_EACH_FEATURE_BEGIN(hFeature, hLayer)
-    {
+   .. code-tab:: python
 
-If using older GDAL versions, while it isn't strictly necessary in this
-circumstance since we are starting fresh with the layer, it is often wise
-to call :cpp:func:`OGRLayer::ResetReading` to ensure we are starting at the beginning of
-the layer.  We iterate through all the features in the layer using
-OGRLayer::GetNextFeature().  It will return NULL when we run out of features.
-
-With GDAL < 2.3 and C++ :
-
-.. code-block:: c++
-
-    OGRFeature *poFeature;
-
-    poLayer->ResetReading();
-    while( (poFeature = poLayer->GetNextFeature()) != NULL )
-    {
-
-
-With GDAL < 2.3 and C :
-
-.. code-block:: c
-
-    OGRFeatureH hFeature;
-
-    OGR_L_ResetReading(hLayer);
-    while( (hFeature = OGR_L_GetNextFeature(hLayer)) != NULL )
-    {
+      for feat in lyr:
+        # do something with each feature
 
 In order to dump all the attribute fields of the feature, it is helpful
 to get the :cpp:class:`OGRFeatureDefn`.  This is an object, associated with the layer,
 containing the definitions of all the fields.  We loop over all the fields,
 and fetch and report the attributes based on their type.
 
-With GDAL 2.3 and C++11:
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    for( auto&& oField: *poFeature )
-    {
-        if( oField.IsUnset() )
-        {
-            printf("(unset),");
-            continue;
-        }
-        if( oField.IsNull() )
-        {
-            printf("(null),");
-            continue;
-        }
-        switch( oField.GetType() )
-        {
-            case OFTInteger:
-                printf( "%d,", oField.GetInteger() );
-                break;
-            case OFTInteger64:
-                printf( CPL_FRMT_GIB ",", oField.GetInteger64() );
-                break;
-            case OFTReal:
-                printf( "%.3f,", oField.GetDouble() );
-                break;
-            case OFTString:
-                // GetString() returns a C string
-                printf( "%s,", oField.GetString() );
-                break;
-            default:
-                // Note: we use GetAsString() and not GetString(), since
-                // the later assumes the field type to be OFTString while the
-                // former will do a conversion from the original type to string.
-                printf( "%s,", oField.GetAsString() );
-                break;
-        }
-    }
+      for( auto&& oField: *poFeature )
+      {
+          if( oField.IsUnset() )
+          {
+              printf("(unset),");
+              continue;
+          }
+          if( oField.IsNull() )
+          {
+              printf("(null),");
+              continue;
+          }
+          switch( oField.GetType() )
+          {
+              case OFTInteger:
+                  printf( "%d,", oField.GetInteger() );
+                  break;
+              case OFTInteger64:
+                  printf( CPL_FRMT_GIB ",", oField.GetInteger64() );
+                  break;
+              case OFTReal:
+                  printf( "%.3f,", oField.GetDouble() );
+                  break;
+              case OFTString:
+                  // GetString() returns a C string
+                  printf( "%s,", oField.GetString() );
+                  break;
+              default:
+                  // Note: we use GetAsString() and not GetString(), since
+                  // the later assumes the field type to be OFTString while the
+                  // former will do a conversion from the original type to string.
+                  printf( "%s,", oField.GetAsString() );
+                  break;
+          }
+      }
 
-With GDAL < 2.3 and C++ :
+   .. code-tab:: c
 
-.. code-block:: c
+      OGRFeatureDefnH hFDefn = OGR_L_GetLayerDefn(hLayer);
+      int iField;
+   
+      for( iField = 0; iField < OGR_FD_GetFieldCount(hFDefn); iField++ )
+      {
+          OGRFieldDefnH hFieldDefn = OGR_FD_GetFieldDefn( hFDefn, iField );
+   
+          if( !OGR_F_IsFieldSet(hFeature, iField) )
+          {
+              printf("(unset),");
+              continue;
+          }
+          if( OGR_F_IsFieldNull(hFeature, iField) )
+          {
+              printf("(null),");
+              continue;
+          }
 
-    OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
-    for( int iField = 0; iField < poFDefn->GetFieldCount(); iField++ )
-    {
-        if( !poFeature->IsFieldSet(iField) )
-        {
-            printf("(unset),");
-            continue;
-        }
-        if( poFeature->IsFieldNull(iField) )
-        {
-            printf("(null),");
-            continue;
-        }
-        OGRFieldDefn *poFieldDefn = poFDefn->GetFieldDefn( iField );
+          switch( OGR_Fld_GetType(hFieldDefn) )
+          {
+              case OFTInteger:
+                  printf( "%d,", OGR_F_GetFieldAsInteger( hFeature, iField ) );
+                  break;
+              case OFTInteger64:
+                  printf( CPL_FRMT_GIB ",", OGR_F_GetFieldAsInteger64( hFeature, iField ) );
+                  break;
+              case OFTReal:
+                  printf( "%.3f,", OGR_F_GetFieldAsDouble( hFeature, iField) );
+                  break;
+              case OFTString:
+                  printf( "%s,", OGR_F_GetFieldAsString( hFeature, iField) );
+                  break;
+              default:
+                  printf( "%s,", OGR_F_GetFieldAsString( hFeature, iField) );
+                  break;
+          }
+      }
 
-        switch( poFieldDefn->GetType() )
-        {
-            case OFTInteger:
-                printf( "%d,", poFeature->GetFieldAsInteger( iField ) );
-                break;
-            case OFTInteger64:
-                printf( CPL_FRMT_GIB ",", poFeature->GetFieldAsInteger64( iField ) );
-                break;
-            case OFTReal:
-                printf( "%.3f,", poFeature->GetFieldAsDouble(iField) );
-                break;
-            case OFTString:
-                printf( "%s,", poFeature->GetFieldAsString(iField) );
-                break;
-            default:
-                printf( "%s,", poFeature->GetFieldAsString(iField) );
-                break;
-        }
-    }
+   .. code-tab:: python
 
-In C :
+      feat_defn = lyr.GetLayerDefn()
+      for i in range(feat_defn.GetFieldCount()):
+          field_defn = feat_defn.GetFieldDefn(i)
 
-.. code-block:: c
+          # Tests below can be simplified with just :
+          # print feat.GetField(i)
+          if (
+              field_defn.GetType() == ogr.OFTInteger
+              or field_defn.GetType() == ogr.OFTInteger64
+          ):
+              print("%d" % feat.GetFieldAsInteger64(i))
+          elif field_defn.GetType() == ogr.OFTReal:
+              print("%.3f" % feat.GetFieldAsDouble(i))
+          elif field_defn.GetType() == ogr.OFTString:
+              print("%s" % feat.GetFieldAsString(i))
+          else:
+              print("%s" % feat.GetFieldAsString(i))
 
-    OGRFeatureDefnH hFDefn = OGR_L_GetLayerDefn(hLayer);
-    int iField;
-
-    for( iField = 0; iField < OGR_FD_GetFieldCount(hFDefn); iField++ )
-    {
-        OGRFieldDefnH hFieldDefn = OGR_FD_GetFieldDefn( hFDefn, iField );
-
-        if( !OGR_F_IsFieldSet(hFeature, iField) )
-        {
-            printf("(unset),");
-            continue;
-        }
-        if( OGR_F_IsFieldNull(hFeature, iField) )
-        {
-            printf("(null),");
-            continue;
-        }
-
-        switch( OGR_Fld_GetType(hFieldDefn) )
-        {
-            case OFTInteger:
-                printf( "%d,", OGR_F_GetFieldAsInteger( hFeature, iField ) );
-                break;
-            case OFTInteger64:
-                printf( CPL_FRMT_GIB ",", OGR_F_GetFieldAsInteger64( hFeature, iField ) );
-                break;
-            case OFTReal:
-                printf( "%.3f,", OGR_F_GetFieldAsDouble( hFeature, iField) );
-                break;
-            case OFTString:
-                printf( "%s,", OGR_F_GetFieldAsString( hFeature, iField) );
-                break;
-            default:
-                printf( "%s,", OGR_F_GetFieldAsString( hFeature, iField) );
-                break;
-        }
-    }
 
 There are a few more field types than those explicitly handled above, but
 a reasonable representation of them can be fetched with the
@@ -284,45 +254,51 @@ We then determine the specific geometry type, and if it is a point, we
 cast it to point and operate on it.  If it is something else we write
 placeholders.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    OGRGeometry *poGeometry;
+      OGRGeometry *poGeometry;
 
-    poGeometry = poFeature->GetGeometryRef();
-    if( poGeometry != NULL
-            && wkbFlatten(poGeometry->getGeometryType()) == wkbPoint )
-    {
-    #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION(2,3,0)
-        OGRPoint *poPoint = poGeometry->toPoint();
-    #else
-        OGRPoint *poPoint = (OGRPoint *) poGeometry;
-    #endif
+      poGeometry = poFeature->GetGeometryRef();
+      if( poGeometry != NULL
+              && wkbFlatten(poGeometry->getGeometryType()) == wkbPoint )
+      {
+      #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION(2,3,0)
+          OGRPoint *poPoint = poGeometry->toPoint();
+      #else
+          OGRPoint *poPoint = (OGRPoint *) poGeometry;
+      #endif
 
-        printf( "%.3f,%3.f\n", poPoint->getX(), poPoint->getY() );
-    }
-    else
-    {
-        printf( "no point geometry\n" );
-    }
+          printf( "%.3f,%3.f\n", poPoint->getX(), poPoint->getY() );
+      }
+      else
+      {
+          printf( "no point geometry\n" );
+      }
 
-In C :
+   .. code-tab:: c
 
-.. code-block:: c
+      OGRGeometryH hGeometry;
 
-    OGRGeometryH hGeometry;
+      hGeometry = OGR_F_GetGeometryRef(hFeature);
+      if( hGeometry != NULL
+              && wkbFlatten(OGR_G_GetGeometryType(hGeometry)) == wkbPoint )
+      {
+          printf( "%.3f,%3.f\n", OGR_G_GetX(hGeometry, 0), OGR_G_GetY(hGeometry, 0) );
+      }
+      else
+      {
+          printf( "no point geometry\n" );
+      }
 
-    hGeometry = OGR_F_GetGeometryRef(hFeature);
-    if( hGeometry != NULL
-            && wkbFlatten(OGR_G_GetGeometryType(hGeometry)) == wkbPoint )
-    {
-        printf( "%.3f,%3.f\n", OGR_G_GetX(hGeometry, 0), OGR_G_GetY(hGeometry, 0) );
-    }
-    else
-    {
-        printf( "no point geometry\n" );
-    }
+   .. code-tab:: python
+
+      geom = feat.GetGeometryRef()
+      if geom is not None and geom.GetGeometryType() == ogr.wkbPoint:
+          print("%.3f, %.3f" % (geom.GetX(), geom.GetY()))
+      else:
+          print("no point geometry")
 
 The :cpp:func:`wkbFlatten` macro is used above to convert the type for a wkbPoint25D
 (a point with a z coordinate) into the base 2D geometry type code (wkbPoint).
@@ -332,116 +308,71 @@ handle 2D or 3D cases properly.
 
 Several geometry fields can be associated to a feature.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    OGRGeometry *poGeometry;
-    int iGeomField;
-    int nGeomFieldCount;
+      OGRGeometry *poGeometry;
+      int iGeomField;
+      int nGeomFieldCount;
 
-    nGeomFieldCount = poFeature->GetGeomFieldCount();
-    for(iGeomField = 0; iGeomField < nGeomFieldCount; iGeomField ++ )
-    {
-        poGeometry = poFeature->GetGeomFieldRef(iGeomField);
-        if( poGeometry != NULL
-                && wkbFlatten(poGeometry->getGeometryType()) == wkbPoint )
-        {
-    #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION(2,3,0)
-            OGRPoint *poPoint = poGeometry->toPoint();
-    #else
-            OGRPoint *poPoint = (OGRPoint *) poGeometry;
-    #endif
+      nGeomFieldCount = poFeature->GetGeomFieldCount();
+      for(iGeomField = 0; iGeomField < nGeomFieldCount; iGeomField ++ )
+      {
+          poGeometry = poFeature->GetGeomFieldRef(iGeomField);
+          if( poGeometry != NULL
+                  && wkbFlatten(poGeometry->getGeometryType()) == wkbPoint )
+          {
+      #if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION(2,3,0)
+              OGRPoint *poPoint = poGeometry->toPoint();
+      #else
+              OGRPoint *poPoint = (OGRPoint *) poGeometry;
+      #endif
+     
+              printf( "%.3f,%3.f\n", poPoint->getX(), poPoint->getY() );
+          }
+          else
+          {
+              printf( "no point geometry\n" );
+          }
+      }
 
-            printf( "%.3f,%3.f\n", poPoint->getX(), poPoint->getY() );
-        }
-        else
-        {
-            printf( "no point geometry\n" );
-        }
-    }
+   .. code-tab:: c
 
+      OGRGeometryH hGeometry;
+      int iGeomField;
+      int nGeomFieldCount;
 
-In C :
+      nGeomFieldCount = OGR_F_GetGeomFieldCount(hFeature);
+      for(iGeomField = 0; iGeomField < nGeomFieldCount; iGeomField ++ )
+      {
+          hGeometry = OGR_F_GetGeomFieldRef(hFeature, iGeomField);
+          if( hGeometry != NULL
+                  && wkbFlatten(OGR_G_GetGeometryType(hGeometry)) == wkbPoint )
+          {
+              printf( "%.3f,%3.f\n", OGR_G_GetX(hGeometry, 0),
+                      OGR_G_GetY(hGeometry, 0) );
+          }
+          else
+          {
+              printf( "no point geometry\n" );
+          }
+      }
 
-.. code-block:: c
+   .. code-tab:: python
 
-    OGRGeometryH hGeometry;
-    int iGeomField;
-    int nGeomFieldCount;
-
-    nGeomFieldCount = OGR_F_GetGeomFieldCount(hFeature);
-    for(iGeomField = 0; iGeomField < nGeomFieldCount; iGeomField ++ )
-    {
-        hGeometry = OGR_F_GetGeomFieldRef(hFeature, iGeomField);
-        if( hGeometry != NULL
-                && wkbFlatten(OGR_G_GetGeometryType(hGeometry)) == wkbPoint )
-        {
-            printf( "%.3f,%3.f\n", OGR_G_GetX(hGeometry, 0),
-                    OGR_G_GetY(hGeometry, 0) );
-        }
-        else
-        {
-            printf( "no point geometry\n" );
-        }
-    }
-
-
-In Python:
-
-.. code-block:: python
-
-    nGeomFieldCount = feat.GetGeomFieldCount()
-    for iGeomField in range(nGeomFieldCount):
-        geom = feat.GetGeomFieldRef(iGeomField)
-        if geom is not None and geom.GetGeometryType() == ogr.wkbPoint:
-            print "%.3f, %.3f" % ( geom.GetX(), geom.GetY() )
-        else:
-            print "no point geometry\n"
+      nGeomFieldCount = feat.GetGeomFieldCount()
+      for iGeomField in range(nGeomFieldCount):
+          geom = feat.GetGeomFieldRef(iGeomField)
+          if geom is not None and geom.GetGeometryType() == ogr.wkbPoint:
+              print("%.3f, %.3f" % ( geom.GetX(), geom.GetY() ))
+          else:
+              print("no point geometry\n")
 
 Note that :cpp:func:`OGRFeature::GetGeometryRef` and :cpp:func:`OGRFeature::GetGeomFieldRef`
 return a pointer to
 the internal geometry owned by the OGRFeature.  There we don't actually
 delete the return geometry.
-
-
-With GDAL 2.3 and C++11, the looping over features is simply terminated by
-a closing curly bracket.
-
-.. code-block:: c++
-
-    }
-
-With GDAL 2.3 and C, the looping over features is simply terminated by
-the following.
-
-.. code-block:: c
-
-    }
-    OGR_FOR_EACH_FEATURE_END(hFeature)
-
-
-For GDAL < 2.3, as the :cpp:func:`OGRLayer::GetNextFeature` method
-returns a copy of the feature that is now owned by us.  So at the end of
-use we must free the feature.  We could just "delete" it, but this can cause
-problems in windows builds where the GDAL DLL has a different "heap" from the
-main program.  To be on the safe side we use a GDAL function to delete the
-feature.
-
-In C++ :
-
-.. code-block:: c++
-
-        OGRFeature::DestroyFeature( poFeature );
-    }
-
-In C :
-
-.. code-block:: c
-
-        OGR_F_Destroy( hFeature );
-    }
-
 
 The OGRLayer returned by :cpp:func:`GDALDataset::GetLayerByName` is also a reference
 to an internal layer owned by the GDALDataset so we don't need to delete
@@ -449,294 +380,186 @@ it.  But we do need to delete the datasource in order to close the input file.
 Once again we do this with a custom delete method to avoid special win32
 heap issues.
 
-In C/C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-        GDALClose( poDS );
-    }
+      GDALClose( poDS );
+      }
 
+   .. code-tab:: c
+
+      GDALClose( poDS );
+      }
+
+   .. code-tab:: python
+
+      ds.Close()
 
 All together our program looks like this.
 
-With GDAL 2.3 and C++11 :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    #include "ogrsf_frmts.h"
+      #include "ogrsf_frmts.h"
 
-    int main()
+      int main()
 
-    {
-        GDALAllRegister();
+      {
+          GDALAllRegister();
 
-        GDALDatasetUniquePtr poDS(GDALDataset::Open( "point.shp", GDAL_OF_VECTOR));
-        if( poDS == nullptr )
-        {
-            printf( "Open failed.\n" );
-            exit( 1 );
-        }
+          GDALDatasetUniquePtr poDS(GDALDataset::Open( "point.shp", GDAL_OF_VECTOR));
+          if( poDS == nullptr )
+          {
+              printf( "Open failed.\n" );
+              exit( 1 );
+          }
 
-        for( const OGRLayer* poLayer: poDS->GetLayers() )
-        {
-            for( const auto& poFeature: *poLayer )
-            {
-                for( const auto& oField: *poFeature )
-                {
-                    if( oField.IsUnset() )
-                    {
-                        printf("(unset),");
-                        continue;
-                    }
-                    if( oField.IsNull() )
-                    {
-                        printf("(null),");
-                        continue;
-                    }
-                    switch( oField.GetType() )
-                    {
-                        case OFTInteger:
-                            printf( "%d,", oField.GetInteger() );
-                            break;
-                        case OFTInteger64:
-                            printf( CPL_FRMT_GIB ",", oField.GetInteger64() );
-                            break;
-                        case OFTReal:
-                            printf( "%.3f,", oField.GetDouble() );
-                            break;
-                        case OFTString:
-                            // GetString() returns a C string
-                            printf( "%s,", oField.GetString() );
-                            break;
-                        default:
-                            // Note: we use GetAsString() and not GetString(), since
-                            // the later assumes the field type to be OFTString while the
-                            // former will do a conversion from the original type to string.
-                            printf( "%s,", oField.GetAsString() );
-                            break;
-                    }
-                }
+          for( const OGRLayer* poLayer: poDS->GetLayers() )
+          {
+              for( const auto& poFeature: *poLayer )
+              {
+                  for( const auto& oField: *poFeature )
+                  {
+                      if( oField.IsUnset() )
+                      {
+                          printf("(unset),");
+                          continue;
+                      }
+                      if( oField.IsNull() )
+                      {
+                          printf("(null),");
+                          continue;
+                      }
+                      switch( oField.GetType() )
+                      {
+                          case OFTInteger:
+                              printf( "%d,", oField.GetInteger() );
+                              break;
+                          case OFTInteger64:
+                              printf( CPL_FRMT_GIB ",", oField.GetInteger64() );
+                              break;
+                          case OFTReal:
+                              printf( "%.3f,", oField.GetDouble() );
+                              break;
+                          case OFTString:
+                              // GetString() returns a C string
+                              printf( "%s,", oField.GetString() );
+                              break;
+                          default:
+                              // Note: we use GetAsString() and not GetString(), since
+                              // the later assumes the field type to be OFTString while the
+                              // former will do a conversion from the original type to string.
+                              printf( "%s,", oField.GetAsString() );
+                              break;
+                      }
+                  }
 
-                const OGRGeometry *poGeometry = poFeature->GetGeometryRef();
-                if( poGeometry != nullptr
-                        && wkbFlatten(poGeometry->getGeometryType()) == wkbPoint )
-                {
-                    const OGRPoint *poPoint = poGeometry->toPoint();
+                  const OGRGeometry *poGeometry = poFeature->GetGeometryRef();
+                  if( poGeometry != nullptr
+                          && wkbFlatten(poGeometry->getGeometryType()) == wkbPoint )
+                  {
+                      const OGRPoint *poPoint = poGeometry->toPoint();
 
-                    printf( "%.3f,%3.f\n", poPoint->getX(), poPoint->getY() );
-                }
-                else
-                {
-                    printf( "no point geometry\n" );
-                }
-            }
-        }
-        return 0;
-    }
+                      printf( "%.3f,%3.f\n", poPoint->getX(), poPoint->getY() );
+                  }
+                  else
+                  {
+                      printf( "no point geometry\n" );
+                  }
+              }
+          }
+          return 0;
+      }
 
-In C++ :
+   .. code-tab:: c
 
-.. code-block:: c++
+      #include "gdal.h"
 
-    #include "ogrsf_frmts.h"
+      int main()
 
-    int main()
+      {
+          GDALAllRegister();
 
-    {
-        GDALAllRegister();
+          GDALDatasetH hDS;
+          OGRLayerH hLayer;
+          OGRFeatureH hFeature;
+          OGRFeatureDefnH hFDefn;
 
-        GDALDataset *poDS = static_cast<GDALDataset*>(
-            GDALOpenEx( "point.shp", GDAL_OF_VECTOR, NULL, NULL, NULL ));
-        if( poDS == NULL )
-        {
-            printf( "Open failed.\n" );
-            exit( 1 );
-        }
+          hDS = GDALOpenEx( "point.shp", GDAL_OF_VECTOR, NULL, NULL, NULL );
+          if( hDS == NULL )
+          {
+              printf( "Open failed.\n" );
+              exit( 1 );
+          }
 
-        OGRLayer  *poLayer = poDS->GetLayerByName( "point" );
-        OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
+          hLayer = GDALDatasetGetLayerByName( hDS, "point" );
+          hFDefn = OGR_L_GetLayerDefn(hLayer);
 
-        poLayer->ResetReading();
-        OGRFeature *poFeature;
-        while( (poFeature = poLayer->GetNextFeature()) != NULL )
-        {
-            for( int iField = 0; iField < poFDefn->GetFieldCount(); iField++ )
-            {
-                if( !poFeature->IsFieldSet(iField) )
-                {
-                    printf("(unset),");
-                    continue;
-                }
-                if( poFeature->IsFieldNull(iField) )
-                {
-                    printf("(null),");
-                    continue;
-                }
-                OGRFieldDefn *poFieldDefn = poFDefn->GetFieldDefn( iField );
+          OGR_L_ResetReading(hLayer);
+          while( (hFeature = OGR_L_GetNextFeature(hLayer)) != NULL )
+          {
+              int iField;
+              OGRGeometryH hGeometry;
 
-                switch( poFieldDefn->GetType() )
-                {
-                    case OFTInteger:
-                        printf( "%d,", poFeature->GetFieldAsInteger( iField ) );
-                        break;
-                    case OFTInteger64:
-                        printf( CPL_FRMT_GIB ",", poFeature->GetFieldAsInteger64( iField ) );
-                        break;
-                    case OFTReal:
-                        printf( "%.3f,", poFeature->GetFieldAsDouble(iField) );
-                        break;
-                    case OFTString:
-                        printf( "%s,", poFeature->GetFieldAsString(iField) );
-                        break;
-                    default:
-                        printf( "%s,", poFeature->GetFieldAsString(iField) );
-                        break;
-                }
-            }
+              for( iField = 0; iField < OGR_FD_GetFieldCount(hFDefn); iField++ )
+              {
+                  OGRFieldDefnH hFieldDefn = OGR_FD_GetFieldDefn( hFDefn, iField );
 
-            OGRGeometry *poGeometry = poFeature->GetGeometryRef();
-            if( poGeometry != NULL
-                    && wkbFlatten(poGeometry->getGeometryType()) == wkbPoint )
-            {
-                OGRPoint *poPoint = (OGRPoint *) poGeometry;
+                  if( !OGR_F_IsFieldSet(hFeature, iField) )
+                  {
+                      printf("(unset),");
+                      continue;
+                  }
+                  if( OGR_F_IsFieldNull(hFeature, iField) )
+                  {
+                      printf("(null),");
+                      continue;
+                  }
 
-                printf( "%.3f,%3.f\n", poPoint->getX(), poPoint->getY() );
-            }
-            else
-            {
-                printf( "no point geometry\n" );
-            }
-            OGRFeature::DestroyFeature( poFeature );
-        }
+                  switch( OGR_Fld_GetType(hFieldDefn) )
+                  {
+                      case OFTInteger:
+                          printf( "%d,", OGR_F_GetFieldAsInteger( hFeature, iField ) );
+                          break;
+                      case OFTInteger64:
+                          printf( CPL_FRMT_GIB ",", OGR_F_GetFieldAsInteger64( hFeature, iField ) );
+                          break;
+                      case OFTReal:
+                          printf( "%.3f,", OGR_F_GetFieldAsDouble( hFeature, iField) );
+                          break;
+                      case OFTString:
+                          printf( "%s,", OGR_F_GetFieldAsString( hFeature, iField) );
+                          break;
+                      default:
+                          printf( "%s,", OGR_F_GetFieldAsString( hFeature, iField) );
+                          break;
+                  }
+              }
 
-        GDALClose( poDS );
-    }
+              hGeometry = OGR_F_GetGeometryRef(hFeature);
+              if( hGeometry != NULL
+                  && wkbFlatten(OGR_G_GetGeometryType(hGeometry)) == wkbPoint )
+              {
+                  printf( "%.3f,%3.f\n", OGR_G_GetX(hGeometry, 0), OGR_G_GetY(hGeometry, 0) );
+              }
+              else
+              {
+                  printf( "no point geometry\n" );
+              }
 
-In C :
+              OGR_F_Destroy( hFeature );
+          }
 
-.. code-block:: c
+          GDALClose( hDS );
+      }
 
-    #include "gdal.h"
+   .. group-tab:: Python
 
-    int main()
+      .. literalinclude :: code/vector_api_tut.py
+         :language: python
 
-    {
-        GDALAllRegister();
-
-        GDALDatasetH hDS;
-        OGRLayerH hLayer;
-        OGRFeatureH hFeature;
-        OGRFeatureDefnH hFDefn;
-
-        hDS = GDALOpenEx( "point.shp", GDAL_OF_VECTOR, NULL, NULL, NULL );
-        if( hDS == NULL )
-        {
-            printf( "Open failed.\n" );
-            exit( 1 );
-        }
-
-        hLayer = GDALDatasetGetLayerByName( hDS, "point" );
-        hFDefn = OGR_L_GetLayerDefn(hLayer);
-
-        OGR_L_ResetReading(hLayer);
-        while( (hFeature = OGR_L_GetNextFeature(hLayer)) != NULL )
-        {
-            int iField;
-            OGRGeometryH hGeometry;
-
-            for( iField = 0; iField < OGR_FD_GetFieldCount(hFDefn); iField++ )
-            {
-                OGRFieldDefnH hFieldDefn = OGR_FD_GetFieldDefn( hFDefn, iField );
-
-                if( !OGR_F_IsFieldSet(hFeature, iField) )
-                {
-                    printf("(unset),");
-                    continue;
-                }
-                if( OGR_F_IsFieldNull(hFeature, iField) )
-                {
-                    printf("(null),");
-                    continue;
-                }
-
-                switch( OGR_Fld_GetType(hFieldDefn) )
-                {
-                    case OFTInteger:
-                        printf( "%d,", OGR_F_GetFieldAsInteger( hFeature, iField ) );
-                        break;
-                    case OFTInteger64:
-                        printf( CPL_FRMT_GIB ",", OGR_F_GetFieldAsInteger64( hFeature, iField ) );
-                        break;
-                    case OFTReal:
-                        printf( "%.3f,", OGR_F_GetFieldAsDouble( hFeature, iField) );
-                        break;
-                    case OFTString:
-                        printf( "%s,", OGR_F_GetFieldAsString( hFeature, iField) );
-                        break;
-                    default:
-                        printf( "%s,", OGR_F_GetFieldAsString( hFeature, iField) );
-                        break;
-                }
-            }
-
-            hGeometry = OGR_F_GetGeometryRef(hFeature);
-            if( hGeometry != NULL
-                && wkbFlatten(OGR_G_GetGeometryType(hGeometry)) == wkbPoint )
-            {
-                printf( "%.3f,%3.f\n", OGR_G_GetX(hGeometry, 0), OGR_G_GetY(hGeometry, 0) );
-            }
-            else
-            {
-                printf( "no point geometry\n" );
-            }
-
-            OGR_F_Destroy( hFeature );
-        }
-
-        GDALClose( hDS );
-    }
-
-
-In Python:
-
-.. code-block:: python
-
-    import sys
-    from osgeo import gdal
-
-    ds = gdal.OpenEx( "point.shp", gdal.OF_VECTOR )
-    if ds is None:
-        print "Open failed.\n"
-        sys.exit( 1 )
-
-    lyr = ds.GetLayerByName( "point" )
-
-    lyr.ResetReading()
-
-    for feat in lyr:
-
-        feat_defn = lyr.GetLayerDefn()
-        for i in range(feat_defn.GetFieldCount()):
-            field_defn = feat_defn.GetFieldDefn(i)
-
-            # Tests below can be simplified with just :
-            # print feat.GetField(i)
-            if field_defn.GetType() == ogr.OFTInteger or field_defn.GetType() == ogr.OFTInteger64:
-                print "%d" % feat.GetFieldAsInteger64(i)
-            elif field_defn.GetType() == ogr.OFTReal:
-                print "%.3f" % feat.GetFieldAsDouble(i)
-            elif field_defn.GetType() == ogr.OFTString:
-                print "%s" % feat.GetFieldAsString(i)
-            else:
-                print "%s" % feat.GetFieldAsString(i)
-
-        geom = feat.GetGeometryRef()
-        if geom is not None and geom.GetGeometryType() == ogr.wkbPoint:
-            print "%.3f, %.3f" % ( geom.GetX(), geom.GetY() )
-        else:
-            print "no point geometry\n"
-
-    ds = None
 
 .. _vector_api_tut_arrow_stream:
 
@@ -771,7 +594,7 @@ two main callbacks to get:
   a set of values for a specific column/field in a subset of features.
   This is the equivalent of a
   `Series <https://arrow.apache.org/docs/python/pandas.html#series>`_ in a Pandas DataFrame.
-  This is a potentially hiearchical structure that can aggregate
+  This is a potentially hierarchical structure that can aggregate
   sub arrays, and in OGR usage, the main array will be a StructArray which is
   the collection of OGR attribute and geometry fields.
   The layout of buffers and children arrays per data type is detailed in the
@@ -793,7 +616,7 @@ once.
 
 The ArrowArrayStream, ArrowSchema, ArrowArray structures are defined in a
 ogr_recordbatch.h public header file, directly derived from
-https://github.com/apache/arrow/blob/master/cpp/src/arrow/c/abi.h
+https://github.com/apache/arrow/blob/main/cpp/src/arrow/c/abi.h
 to get API/ABI compatibility with Apache Arrow C++. This header file must be
 explicitly included when the related array batch API is used.
 
@@ -892,7 +715,7 @@ array specifications, to know, in which buffer of an array, data is to be read,
 which data type void* buffers should be cast to, how to use buffers that contain
 null/not_null information, how to use offset buffers for data types of type List, etc.
 The study of the gdal_array._RecordBatchAsNumpy() method of the SWIG Python
-bindings (https://github.com/OSGeo/gdal/blob/master/swig/include/gdal_array.i)
+bindings (:source_file:`swig/include/gdal_array.i`)
 can give a good hint of how to use an ArrowArray object, in conjunction
 with the associated ArrowSchema.
 
@@ -1025,6 +848,8 @@ of a integer field and a geometry field:
     }
 
 
+To write features by batches using an ArrowArray, consult :ref:`vector_api_tut_arrow_write`.
+
 Writing To OGR
 --------------
 
@@ -1035,45 +860,54 @@ will be written to a point shapefile via OGR.
 As usual, we start by registering all the drivers, and then fetch the
 Shapefile driver as we will need it to create our output file.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    #include "ogrsf_frmts.h"
+      #include "ogrsf_frmts.h"
 
-    int main()
-    {
-        const char *pszDriverName = "ESRI Shapefile";
-        GDALDriver *poDriver;
+      int main()
+      {
+          const char *pszDriverName = "ESRI Shapefile";
+          GDALDriver *poDriver;
 
-        GDALAllRegister();
+          GDALAllRegister();
 
-        poDriver = GetGDALDriverManager()->GetDriverByName(pszDriverName );
-        if( poDriver == NULL )
-        {
-            printf( "%s driver not available.\n", pszDriverName );
-            exit( 1 );
-        }
+          poDriver = GetGDALDriverManager()->GetDriverByName(pszDriverName );
+          if( poDriver == NULL )
+          {
+              printf( "%s driver not available.\n", pszDriverName );
+              exit( 1 );
+          }
 
-In C :
+   .. code-tab:: c
 
-.. code-block:: c
+      #include "ogr_api.h"
 
-    #include "ogr_api.h"
+      int main()
+      {
+          const char *pszDriverName = "ESRI Shapefile";
+          GDALDriver *poDriver;
 
-    int main()
-    {
-        const char *pszDriverName = "ESRI Shapefile";
-        GDALDriver *poDriver;
+          GDALAllRegister();
 
-        GDALAllRegister();
+          poDriver = (GDALDriver*) GDALGetDriverByName(pszDriverName );
+          if( poDriver == NULL )
+          {
+              printf( "%s driver not available.\n", pszDriverName );
+              exit( 1 );
+          }
 
-        poDriver = (GDALDriver*) GDALGetDriverByName(pszDriverName );
-        if( poDriver == NULL )
-        {
-            printf( "%s driver not available.\n", pszDriverName );
-            exit( 1 );
-        }
+   .. code-tab:: python
+
+      from osgeo import gdal
+
+      gdal.UseExceptions()
+      driverName = "ESRI Shapefile"
+      drv = gdal.GetDriverByName(driverName)
+      if drv is None:
+          print("%s driver not available." % driverName)
+          sys.exit(1)
 
 Next we create the datasource.  The ESRI Shapefile driver allows us to create
 a directory full of shapefiles, or a single shapefile as a datasource.  In
@@ -1084,65 +918,66 @@ The second, third, fourth and fifth argument are related to raster dimensions
 the call is a list of option values, but we will just be using defaults in
 this case.  Details of the options supported are also format specific.
 
-In C ++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    GDALDataset *poDS;
+      GDALDataset *poDS;
 
-    poDS = poDriver->Create( "point_out.shp", 0, 0, 0, GDT_Unknown, NULL );
-    if( poDS == NULL )
-    {
-        printf( "Creation of output file failed.\n" );
-        exit( 1 );
-    }
+      poDS = poDriver->Create( "point_out.shp", 0, 0, 0, GDT_Unknown, NULL );
+      if( poDS == NULL )
+      {
+          printf( "Creation of output file failed.\n" );
+          exit( 1 );
+      }
 
+   .. code-tab:: c
 
-In C :
+      GDALDatasetH hDS;
 
-.. code-block:: c
+      hDS = GDALCreate( hDriver, "point_out.shp", 0, 0, 0, GDT_Unknown, NULL );
+      if( hDS == NULL )
+      {
+          printf( "Creation of output file failed.\n" );
+          exit( 1 );
+      }
 
-    GDALDatasetH hDS;
+   .. code-tab:: python
 
-    hDS = GDALCreate( hDriver, "point_out.shp", 0, 0, 0, GDT_Unknown, NULL );
-    if( hDS == NULL )
-    {
-        printf( "Creation of output file failed.\n" );
-        exit( 1 );
-    }
+      ds = drv.Create("point_out.shp", 0, 0, 0, gdal.GDT_Unknown)
 
 Now we create the output layer.  In this case since the datasource is a
 single file, we can only have one layer.  We pass wkbPoint to specify the
 type of geometry supported by this layer.  In this case we aren't passing
 any coordinate system information or other special layer creation options.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    OGRLayer *poLayer;
+      OGRLayer *poLayer;
 
-    poLayer = poDS->CreateLayer( "point_out", NULL, wkbPoint, NULL );
-    if( poLayer == NULL )
-    {
-        printf( "Layer creation failed.\n" );
-        exit( 1 );
-    }
+      poLayer = poDS->CreateLayer( "point_out", NULL, wkbPoint, NULL );
+      if( poLayer == NULL )
+      {
+          printf( "Layer creation failed.\n" );
+          exit( 1 );
+      }
 
+   .. code-tab:: c
 
-In C :
+      OGRLayerH hLayer;
 
-.. code-block:: c
+      hLayer = GDALDatasetCreateLayer( hDS, "point_out", NULL, wkbPoint, NULL );
+      if( hLayer == NULL )
+      {
+          printf( "Layer creation failed.\n" );
+          exit( 1 );
+      }
 
-    OGRLayerH hLayer;
+   .. code-tab:: python
 
-    hLayer = GDALDatasetCreateLayer( hDS, "point_out", NULL, wkbPoint, NULL );
-    if( hLayer == NULL )
-    {
-        printf( "Layer creation failed.\n" );
-        exit( 1 );
-    }
-
+      lyr = ds.CreateLayer("point_out", None, ogr.wkbPoint)
 
 Now that the layer exists, we need to create any attribute fields that should
 appear on the layer.  Fields must be added to the layer before any features
@@ -1155,76 +990,100 @@ we will just have one attribute, a name string associated with the x,y point.
 Note that the template OGRField we pass to :cpp:func:`OGRLayer::CreateField` is copied internally.
 We retain ownership of the object.
 
-In C++:
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    OGRFieldDefn oField( "Name", OFTString );
+      OGRFieldDefn oField( "Name", OFTString );
 
-    oField.SetWidth(32);
+      oField.SetWidth(32);
 
-    if( poLayer->CreateField( &oField ) != OGRERR_NONE )
-    {
-        printf( "Creating Name field failed.\n" );
-        exit( 1 );
-    }
+      if( poLayer->CreateField( &oField ) != OGRERR_NONE )
+      {
+          printf( "Creating Name field failed.\n" );
+          exit( 1 );
+      }
 
+   .. code-tab:: c
 
-In C:
+      OGRFieldDefnH hFieldDefn;
 
-.. code-block:: c
+      hFieldDefn = OGR_Fld_Create( "Name", OFTString );
 
-    OGRFieldDefnH hFieldDefn;
+      OGR_Fld_SetWidth( hFieldDefn, 32);
 
-    hFieldDefn = OGR_Fld_Create( "Name", OFTString );
+      if( OGR_L_CreateField( hLayer, hFieldDefn, TRUE ) != OGRERR_NONE )
+      {
+          printf( "Creating Name field failed.\n" );
+          exit( 1 );
+      }
 
-    OGR_Fld_SetWidth( hFieldDefn, 32);
+      OGR_Fld_Destroy(hFieldDefn);
 
-    if( OGR_L_CreateField( hLayer, hFieldDefn, TRUE ) != OGRERR_NONE )
-    {
-        printf( "Creating Name field failed.\n" );
-        exit( 1 );
-    }
+   .. code-tab:: python
 
-    OGR_Fld_Destroy(hFieldDefn);
+      field_defn = ogr.FieldDefn("Name", ogr.OFTString)
+      field_defn.SetWidth(32)
 
+      lyr.CreateField(field_defn)
 
 The following snipping loops reading lines of the form "x,y,name" from stdin,
 and parsing them.
 
-In C++ and in C :
+.. tabs::
 
-.. code-block:: c
+   .. code-tab:: c++
 
-    double x, y;
-    char szName[33];
+      double x, y;
+      char szName[33];
 
-    while( !feof(stdin)
-           && fscanf( stdin, "%lf,%lf,%32s", &x, &y, szName ) == 3 )
-    {
+      while( !feof(stdin)
+             && fscanf( stdin, "%lf,%lf,%32s", &x, &y, szName ) == 3 )
+      {
+
+   .. code-tab:: c++
+
+      double x, y;
+      char szName[33];
+
+      while( !feof(stdin)
+             && fscanf( stdin, "%lf,%lf,%32s", &x, &y, szName ) == 3 )
+      {
+
+   .. code-tab:: python
+
+      # Expected format of user input: x y name
+      linestring = input()
+      linelist = linestring.split()
+
+      while len(linelist) == 3:
+        ...
 
 To write a feature to disk, we must create a local OGRFeature, set attributes
 and attach geometry before trying to write it to the layer.  It is
 imperative that this feature be instantiated from the OGRFeatureDefn
 associated with the layer it will be written to.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-        OGRFeature *poFeature;
+          OGRFeature *poFeature;
 
-        poFeature = OGRFeature::CreateFeature( poLayer->GetLayerDefn() );
-        poFeature->SetField( "Name", szName );
+          poFeature = OGRFeature::CreateFeature( poLayer->GetLayerDefn() );
+          poFeature->SetField( "Name", szName );
 
-In C :
+   .. code-tab:: c
 
-.. code-block:: c
+          OGRFeatureH hFeature;
 
-        OGRFeatureH hFeature;
+          hFeature = OGR_F_Create( OGR_L_GetLayerDefn( hLayer ) );
+          OGR_F_SetFieldString( hFeature, OGR_F_GetFieldIndex(hFeature, "Name"), szName );
 
-        hFeature = OGR_F_Create( OGR_L_GetLayerDefn( hLayer ) );
-        OGR_F_SetFieldString( hFeature, OGR_F_GetFieldIndex(hFeature, "Name"), szName );
+   .. code-tab:: python
+
+      feat = ogr.Feature(lyr.GetLayerDefn())
+      feat.SetField("Name", name)
 
 We create a local geometry object, and assign its copy (indirectly) to the feature.
 The :cpp:func:`OGRFeature::SetGeometryDirectly` differs from :cpp:func:`OGRFeature::SetGeometry`
@@ -1232,289 +1091,243 @@ in that the direct method gives ownership of the geometry to the feature.
 This is generally more efficient as it avoids an extra deep object copy
 of the geometry.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-        OGRPoint pt;
-        pt.setX( x );
-        pt.setY( y );
+      OGRPoint pt;
+      pt.setX( x );
+      pt.setY( y );
 
-        poFeature->SetGeometry( &pt );
+      poFeature->SetGeometry( &pt );
 
+   .. code-tab:: c
 
-In C :
+      OGRGeometryH hPt;
+      hPt = OGR_G_CreateGeometry(wkbPoint);
+      OGR_G_SetPoint_2D(hPt, 0, x, y);
 
-.. code-block:: c
+      OGR_F_SetGeometry( hFeature, hPt );
+      OGR_G_DestroyGeometry(hPt);
 
-        OGRGeometryH hPt;
-        hPt = OGR_G_CreateGeometry(wkbPoint);
-        OGR_G_SetPoint_2D(hPt, 0, x, y);
+   .. code-tab:: python
 
-        OGR_F_SetGeometry( hFeature, hPt );
-        OGR_G_DestroyGeometry(hPt);
+      pt = ogr.Geometry(ogr.wkbPoint)
+      pt.SetPoint_2D(0, x, y)
 
+      feat.SetGeometry(pt)
 
 Now we create a feature in the file.  The :cpp:func:`OGRLayer::CreateFeature` does not
 take ownership of our feature so we clean it up when done with it.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-        if( poLayer->CreateFeature( poFeature ) != OGRERR_NONE )
-        {
-            printf( "Failed to create feature in shapefile.\n" );
-           exit( 1 );
-        }
+          if( poLayer->CreateFeature( poFeature ) != OGRERR_NONE )
+          {
+              printf( "Failed to create feature in shapefile.\n" );
+             exit( 1 );
+          }
 
-        OGRFeature::DestroyFeature( poFeature );
-   }
+          OGRFeature::DestroyFeature( poFeature );
+     }
 
-In C :
+   .. code-tab:: c
 
-.. code-block:: c
+          if( OGR_L_CreateFeature( hLayer, hFeature ) != OGRERR_NONE )
+          {
+              printf( "Failed to create feature in shapefile.\n" );
+             exit( 1 );
+          }
 
-        if( OGR_L_CreateFeature( hLayer, hFeature ) != OGRERR_NONE )
-        {
-            printf( "Failed to create feature in shapefile.\n" );
-           exit( 1 );
-        }
+          OGR_F_Destroy( hFeature );
+     }
 
-        OGR_F_Destroy( hFeature );
-   }
+   .. code-tab:: python
+
+      lyr.CreateFeature(feat)
 
 
 Finally we need to close down the datasource in order to ensure headers
 are written out in an orderly way and all resources are recovered.
 
-In C/C++ :
+.. tabs::
 
-.. code-block:: c
+   .. code-tab:: c++
 
         GDALClose( poDS );
-    }
+      }
 
+   .. code-tab:: c
+
+        GDALClose( poDS );
+      }
+
+   .. code-tab:: python
+
+      ds.Close()
 
 The same program all in one block looks like this:
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    #include "ogrsf_frmts.h"
+      #include "ogrsf_frmts.h"
 
-    int main()
-    {
-        const char *pszDriverName = "ESRI Shapefile";
-        GDALDriver *poDriver;
+      int main()
+      {
+          const char *pszDriverName = "ESRI Shapefile";
+          GDALDriver *poDriver;
 
-        GDALAllRegister();
+          GDALAllRegister();
 
-        poDriver = GetGDALDriverManager()->GetDriverByName(pszDriverName );
-        if( poDriver == NULL )
-        {
-            printf( "%s driver not available.\n", pszDriverName );
-            exit( 1 );
-        }
+          poDriver = GetGDALDriverManager()->GetDriverByName(pszDriverName );
+          if( poDriver == NULL )
+          {
+              printf( "%s driver not available.\n", pszDriverName );
+              exit( 1 );
+          }
 
-        GDALDataset *poDS;
+          GDALDataset *poDS;
 
-        poDS = poDriver->Create( "point_out.shp", 0, 0, 0, GDT_Unknown, NULL );
-        if( poDS == NULL )
-        {
-            printf( "Creation of output file failed.\n" );
-            exit( 1 );
-        }
+          poDS = poDriver->Create( "point_out.shp", 0, 0, 0, GDT_Unknown, NULL );
+          if( poDS == NULL )
+          {
+              printf( "Creation of output file failed.\n" );
+              exit( 1 );
+          }
 
-        OGRLayer *poLayer;
+          OGRLayer *poLayer;
 
-        poLayer = poDS->CreateLayer( "point_out", NULL, wkbPoint, NULL );
-        if( poLayer == NULL )
-        {
-            printf( "Layer creation failed.\n" );
-            exit( 1 );
-        }
+          poLayer = poDS->CreateLayer( "point_out", NULL, wkbPoint, NULL );
+          if( poLayer == NULL )
+          {
+              printf( "Layer creation failed.\n" );
+              exit( 1 );
+          }
 
-        OGRFieldDefn oField( "Name", OFTString );
+          OGRFieldDefn oField( "Name", OFTString );
 
-        oField.SetWidth(32);
+          oField.SetWidth(32);
 
-        if( poLayer->CreateField( &oField ) != OGRERR_NONE )
-        {
-            printf( "Creating Name field failed.\n" );
-            exit( 1 );
-        }
+          if( poLayer->CreateField( &oField ) != OGRERR_NONE )
+          {
+              printf( "Creating Name field failed.\n" );
+              exit( 1 );
+          }
 
-        double x, y;
-        char szName[33];
+          double x, y;
+          char szName[33];
 
-        while( !feof(stdin)
-            && fscanf( stdin, "%lf,%lf,%32s", &x, &y, szName ) == 3 )
-        {
-            OGRFeature *poFeature;
+          while( !feof(stdin)
+              && fscanf( stdin, "%lf,%lf,%32s", &x, &y, szName ) == 3 )
+          {
+              OGRFeature *poFeature;
 
-            poFeature = OGRFeature::CreateFeature( poLayer->GetLayerDefn() );
-            poFeature->SetField( "Name", szName );
+             poFeature = OGRFeature::CreateFeature( poLayer->GetLayerDefn() );
+             poFeature->SetField( "Name", szName );
 
-            OGRPoint pt;
+              OGRPoint pt;
 
-            pt.setX( x );
-            pt.setY( y );
+              pt.setX( x );
+              pt.setY( y );
 
-            poFeature->SetGeometry( &pt );
+              poFeature->SetGeometry( &pt );
 
-            if( poLayer->CreateFeature( poFeature ) != OGRERR_NONE )
-            {
-                printf( "Failed to create feature in shapefile.\n" );
-                exit( 1 );
-            }
+              if( poLayer->CreateFeature( poFeature ) != OGRERR_NONE )
+              {
+                  printf( "Failed to create feature in shapefile.\n" );
+                  exit( 1 );
+              }
 
-            OGRFeature::DestroyFeature( poFeature );
-        }
+              OGRFeature::DestroyFeature( poFeature );
+          }
 
-        GDALClose( poDS );
-    }
+          GDALClose( poDS );
+      }
 
+   .. code-tab:: c
 
-In C :
+      #include "gdal.h"
 
-.. code-block:: c
+      int main()
+      {
+          const char *pszDriverName = "ESRI Shapefile";
+          GDALDriverH hDriver;
+          GDALDatasetH hDS;
+          OGRLayerH hLayer;
+          OGRFieldDefnH hFieldDefn;
+          double x, y;
+          char szName[33];
 
-    #include "gdal.h"
+          GDALAllRegister();
 
-    int main()
-    {
-        const char *pszDriverName = "ESRI Shapefile";
-        GDALDriverH hDriver;
-        GDALDatasetH hDS;
-        OGRLayerH hLayer;
-        OGRFieldDefnH hFieldDefn;
-        double x, y;
-        char szName[33];
+          hDriver = GDALGetDriverByName( pszDriverName );
+          if( hDriver == NULL )
+          {
+              printf( "%s driver not available.\n", pszDriverName );
+              exit( 1 );
+          }
 
-        GDALAllRegister();
+          hDS = GDALCreate( hDriver, "point_out.shp", 0, 0, 0, GDT_Unknown, NULL );
+          if( hDS == NULL )
+          {
+              printf( "Creation of output file failed.\n" );
+              exit( 1 );
+          }
 
-        hDriver = GDALGetDriverByName( pszDriverName );
-        if( hDriver == NULL )
-        {
-            printf( "%s driver not available.\n", pszDriverName );
-            exit( 1 );
-        }
+          hLayer = GDALDatasetCreateLayer( hDS, "point_out", NULL, wkbPoint, NULL );
+          if( hLayer == NULL )
+          {
+              printf( "Layer creation failed.\n" );
+              exit( 1 );
+          }
 
-        hDS = GDALCreate( hDriver, "point_out.shp", 0, 0, 0, GDT_Unknown, NULL );
-        if( hDS == NULL )
-        {
-            printf( "Creation of output file failed.\n" );
-            exit( 1 );
-        }
+          hFieldDefn = OGR_Fld_Create( "Name", OFTString );
 
-        hLayer = GDALDatasetCreateLayer( hDS, "point_out", NULL, wkbPoint, NULL );
-        if( hLayer == NULL )
-        {
-            printf( "Layer creation failed.\n" );
-            exit( 1 );
-        }
+          OGR_Fld_SetWidth( hFieldDefn, 32);
 
-        hFieldDefn = OGR_Fld_Create( "Name", OFTString );
+          if( OGR_L_CreateField( hLayer, hFieldDefn, TRUE ) != OGRERR_NONE )
+          {
+              printf( "Creating Name field failed.\n" );
+              exit( 1 );
+          }
 
-        OGR_Fld_SetWidth( hFieldDefn, 32);
+          OGR_Fld_Destroy(hFieldDefn);
 
-        if( OGR_L_CreateField( hLayer, hFieldDefn, TRUE ) != OGRERR_NONE )
-        {
-            printf( "Creating Name field failed.\n" );
-            exit( 1 );
-        }
+          while( !feof(stdin)
+              && fscanf( stdin, "%lf,%lf,%32s", &x, &y, szName ) == 3 )
+          {
+              OGRFeatureH hFeature;
+              OGRGeometryH hPt;
 
-        OGR_Fld_Destroy(hFieldDefn);
+              hFeature = OGR_F_Create( OGR_L_GetLayerDefn( hLayer ) );
+              OGR_F_SetFieldString( hFeature, OGR_F_GetFieldIndex(hFeature, "Name"), szName );
 
-        while( !feof(stdin)
-            && fscanf( stdin, "%lf,%lf,%32s", &x, &y, szName ) == 3 )
-        {
-            OGRFeatureH hFeature;
-            OGRGeometryH hPt;
+              hPt = OGR_G_CreateGeometry(wkbPoint);
+              OGR_G_SetPoint_2D(hPt, 0, x, y);
 
-            hFeature = OGR_F_Create( OGR_L_GetLayerDefn( hLayer ) );
-            OGR_F_SetFieldString( hFeature, OGR_F_GetFieldIndex(hFeature, "Name"), szName );
+              OGR_F_SetGeometry( hFeature, hPt );
+              OGR_G_DestroyGeometry(hPt);
 
-            hPt = OGR_G_CreateGeometry(wkbPoint);
-            OGR_G_SetPoint_2D(hPt, 0, x, y);
+              if( OGR_L_CreateFeature( hLayer, hFeature ) != OGRERR_NONE )
+              {
+              printf( "Failed to create feature in shapefile.\n" );
+              exit( 1 );
+              }
 
-            OGR_F_SetGeometry( hFeature, hPt );
-            OGR_G_DestroyGeometry(hPt);
+              OGR_F_Destroy( hFeature );
+          }
 
-            if( OGR_L_CreateFeature( hLayer, hFeature ) != OGRERR_NONE )
-            {
-            printf( "Failed to create feature in shapefile.\n" );
-            exit( 1 );
-            }
+          GDALClose( hDS );
+      }
 
-            OGR_F_Destroy( hFeature );
-        }
+   .. group-tab:: Python
 
-        GDALClose( hDS );
-    }
-
-
-In Python :
-
-.. code-block:: python
-
-    import sys
-    from osgeo import gdal
-    from osgeo import ogr
-    import string
-
-    driverName = "ESRI Shapefile"
-    drv = gdal.GetDriverByName( driverName )
-    if drv is None:
-        print "%s driver not available.\n" % driverName
-        sys.exit( 1 )
-
-    ds = drv.Create( "point_out.shp", 0, 0, 0, gdal.GDT_Unknown )
-    if ds is None:
-        print "Creation of output file failed.\n"
-        sys.exit( 1 )
-
-    lyr = ds.CreateLayer( "point_out", None, ogr.wkbPoint )
-    if lyr is None:
-        print "Layer creation failed.\n"
-        sys.exit( 1 )
-
-    field_defn = ogr.FieldDefn( "Name", ogr.OFTString )
-    field_defn.SetWidth( 32 )
-
-    if lyr.CreateField ( field_defn ) != 0:
-        print "Creating Name field failed.\n"
-        sys.exit( 1 )
-
-    # Expected format of user input: x y name
-    linestring = raw_input()
-    linelist = string.split(linestring)
-
-    while len(linelist) == 3:
-        x = float(linelist[0])
-        y = float(linelist[1])
-        name = linelist[2]
-
-        feat = ogr.Feature( lyr.GetLayerDefn())
-        feat.SetField( "Name", name )
-
-        pt = ogr.Geometry(ogr.wkbPoint)
-        pt.SetPoint_2D(0, x, y)
-
-        feat.SetGeometry(pt)
-
-        if lyr.CreateFeature(feat) != 0:
-            print "Failed to create feature in shapefile.\n"
-            sys.exit( 1 )
-
-        feat.Destroy()
-
-        linestring = raw_input()
-        linelist = string.split(linestring)
-
-    ds = None
+      .. literalinclude :: code/vector_api_tut2.py
+         :language: python
 
 
 Several geometry fields can be associated to a feature. This capability
@@ -1523,69 +1336,66 @@ is just available for a few file formats, such as PostGIS.
 To create such datasources, geometry fields must be first created.
 Spatial reference system objects can be associated to each geometry field.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-    OGRGeomFieldDefn oPointField( "PointField", wkbPoint );
-    OGRSpatialReference* poSRS = new OGRSpatialReference();
-    poSRS->importFromEPSG(4326);
-    oPointField.SetSpatialRef(poSRS);
-    poSRS->Release();
+      OGRGeomFieldDefn oPointField( "PointField", wkbPoint );
+      OGRSpatialReference* poSRS = new OGRSpatialReference();
+      poSRS->importFromEPSG(4326);
+      oPointField.SetSpatialRef(poSRS);
+      poSRS->Release();
 
-    if( poLayer->CreateGeomField( &oPointField ) != OGRERR_NONE )
-    {
-        printf( "Creating field PointField failed.\n" );
-        exit( 1 );
-    }
+      if( poLayer->CreateGeomField( &oPointField ) != OGRERR_NONE )
+      {
+          printf( "Creating field PointField failed.\n" );
+          exit( 1 );
+      }
 
-    OGRGeomFieldDefn oFieldPoint2( "PointField2", wkbPoint );
-    poSRS = new OGRSpatialReference();
-    poSRS->importFromEPSG(32631);
-    oPointField2.SetSpatialRef(poSRS);
-    poSRS->Release();
+      OGRGeomFieldDefn oFieldPoint2( "PointField2", wkbPoint );
+      poSRS = new OGRSpatialReference();
+      poSRS->importFromEPSG(32631);
+      oPointField2.SetSpatialRef(poSRS);
+      poSRS->Release();
 
-    if( poLayer->CreateGeomField( &oPointField2 ) != OGRERR_NONE )
-    {
-        printf( "Creating field PointField2 failed.\n" );
-        exit( 1 );
-    }
+      if( poLayer->CreateGeomField( &oPointField2 ) != OGRERR_NONE )
+      {
+          printf( "Creating field PointField2 failed.\n" );
+          exit( 1 );
+      }
 
+   .. code-tab:: c
 
-In C :
+      OGRGeomFieldDefnH hPointField;
+      OGRGeomFieldDefnH hPointField2;
+      OGRSpatialReferenceH hSRS;
 
-.. code-block:: c
+      hPointField = OGR_GFld_Create( "PointField", wkbPoint );
+      hSRS = OSRNewSpatialReference( NULL );
+      OSRImportFromEPSG(hSRS, 4326);
+      OGR_GFld_SetSpatialRef(hPointField, hSRS);
+      OSRRelease(hSRS);
 
-    OGRGeomFieldDefnH hPointField;
-    OGRGeomFieldDefnH hPointField2;
-    OGRSpatialReferenceH hSRS;
+      if( OGR_L_CreateGeomField( hLayer, hPointField ) != OGRERR_NONE )
+      {
+          printf( "Creating field PointField failed.\n" );
+          exit( 1 );
+      }
 
-    hPointField = OGR_GFld_Create( "PointField", wkbPoint );
-    hSRS = OSRNewSpatialReference( NULL );
-    OSRImportFromEPSG(hSRS, 4326);
-    OGR_GFld_SetSpatialRef(hPointField, hSRS);
-    OSRRelease(hSRS);
+      OGR_GFld_Destroy( hPointField );
 
-    if( OGR_L_CreateGeomField( hLayer, hPointField ) != OGRERR_NONE )
-    {
-        printf( "Creating field PointField failed.\n" );
-        exit( 1 );
-    }
+      hPointField2 = OGR_GFld_Create( "PointField2", wkbPoint );
+      OSRImportFromEPSG(hSRS, 32631);
+      OGR_GFld_SetSpatialRef(hPointField2, hSRS);
+      OSRRelease(hSRS);
 
-    OGR_GFld_Destroy( hPointField );
+      if( OGR_L_CreateGeomField( hLayer, hPointField2 ) != OGRERR_NONE )
+      {
+          printf( "Creating field PointField2 failed.\n" );
+          exit( 1 );
+      }
 
-    hPointField2 = OGR_GFld_Create( "PointField2", wkbPoint );
-    OSRImportFromEPSG(hSRS, 32631);
-    OGR_GFld_SetSpatialRef(hPointField2, hSRS);
-    OSRRelease(hSRS);
-
-    if( OGR_L_CreateGeomField( hLayer, hPointField2 ) != OGRERR_NONE )
-    {
-        printf( "Creating field PointField2 failed.\n" );
-        exit( 1 );
-    }
-
-    OGR_GFld_Destroy( hPointField2 );
+      OGR_GFld_Destroy( hPointField2 );
 
 
 To write a feature to disk, we must create a local OGRFeature, set attributes
@@ -1593,72 +1403,238 @@ and attach geometries before trying to write it to the layer.  It is
 imperative that this feature be instantiated from the OGRFeatureDefn
 associated with the layer it will be written to.
 
-In C++ :
+.. tabs::
 
-.. code-block:: c++
+   .. code-tab:: c++
 
-        OGRFeature *poFeature;
-        OGRGeometry *poGeometry;
-        char* pszWKT;
+          OGRFeature *poFeature;
+          OGRGeometry *poGeometry;
+          char* pszWKT;
 
-        poFeature = OGRFeature::CreateFeature( poLayer->GetLayerDefn() );
+          poFeature = OGRFeature::CreateFeature( poLayer->GetLayerDefn() );
 
-        pszWKT = (char*) "POINT (2 49)";
-        OGRGeometryFactory::createFromWkt( &pszWKT, NULL, &poGeometry );
-        poFeature->SetGeomFieldDirectly( "PointField", poGeometry );
+          pszWKT = (char*) "POINT (2 49)";
+          OGRGeometryFactory::createFromWkt( &pszWKT, NULL, &poGeometry );
+          poFeature->SetGeomFieldDirectly( "PointField", poGeometry );
 
-        pszWKT = (char*) "POINT (500000 4500000)";
-        OGRGeometryFactory::createFromWkt( &pszWKT, NULL, &poGeometry );
-        poFeature->SetGeomFieldDirectly( "PointField2", poGeometry );
+          pszWKT = (char*) "POINT (500000 4500000)";
+          OGRGeometryFactory::createFromWkt( &pszWKT, NULL, &poGeometry );
+          poFeature->SetGeomFieldDirectly( "PointField2", poGeometry );
 
-        if( poLayer->CreateFeature( poFeature ) != OGRERR_NONE )
-        {
-            printf( "Failed to create feature.\n" );
-            exit( 1 );
-        }
+          if( poLayer->CreateFeature( poFeature ) != OGRERR_NONE )
+          {
+              printf( "Failed to create feature.\n" );
+              exit( 1 );
+          }
 
-        OGRFeature::DestroyFeature( poFeature );
+          OGRFeature::DestroyFeature( poFeature );
 
-In C :
+   .. code-tab:: c
 
-.. code-block:: c
+          OGRFeatureH hFeature;
+          OGRGeometryH hGeometry;
+          char* pszWKT;
 
-        OGRFeatureH hFeature;
-        OGRGeometryH hGeometry;
-        char* pszWKT;
+          poFeature = OGR_F_Create( OGR_L_GetLayerDefn(hLayer) );
 
-        poFeature = OGR_F_Create( OGR_L_GetLayerDefn(hLayer) );
+          pszWKT = (char*) "POINT (2 49)";
+          OGR_G_CreateFromWkt( &pszWKT, NULL, &hGeometry );
+          OGR_F_SetGeomFieldDirectly( hFeature,
+              OGR_F_GetGeomFieldIndex(hFeature, "PointField"), hGeometry );
 
-        pszWKT = (char*) "POINT (2 49)";
-        OGR_G_CreateFromWkt( &pszWKT, NULL, &hGeometry );
-        OGR_F_SetGeomFieldDirectly( hFeature,
-            OGR_F_GetGeomFieldIndex(hFeature, "PointField"), hGeometry );
+          pszWKT = (char*) "POINT (500000 4500000)";
+          OGR_G_CreateFromWkt( &pszWKT, NULL, &hGeometry );
+          OGR_F_SetGeomFieldDirectly( hFeature,
+              OGR_F_GetGeomFieldIndex(hFeature, "PointField2"), hGeometry );
 
-        pszWKT = (char*) "POINT (500000 4500000)";
-        OGR_G_CreateFromWkt( &pszWKT, NULL, &hGeometry );
-        OGR_F_SetGeomFieldDirectly( hFeature,
-            OGR_F_GetGeomFieldIndex(hFeature, "PointField2"), hGeometry );
+          if( OGR_L_CreateFeature( hFeature ) != OGRERR_NONE )
+          {
+              printf( "Failed to create feature.\n" );
+              exit( 1 );
+          }
 
-        if( OGR_L_CreateFeature( hFeature ) != OGRERR_NONE )
-        {
-            printf( "Failed to create feature.\n" );
-            exit( 1 );
-        }
+          OGR_F_Destroy( hFeature );
 
-        OGR_F_Destroy( hFeature );
+   .. code-tab:: python
 
+          feat = ogr.Feature( lyr.GetLayerDefn() )
 
-In Python :
+          feat.SetGeomFieldDirectly( "PointField",
+              ogr.CreateGeometryFromWkt( "POINT (2 49)" ) )
+          feat.SetGeomFieldDirectly( "PointField2",
+              ogr.CreateGeometryFromWkt( "POINT (500000 4500000)" ) )
+
+          if lyr.CreateFeature( feat ) != 0:
+              print( "Failed to create feature.\n" );
+              sys.exit( 1 );
+
+.. _vector_api_tut_arrow_write:
+
+Writing to OGR using the Arrow C Data interface
+-----------------------------------------------
+
+.. versionadded:: 3.8
+
+Instead of writing features one at a time, it is also possible to write
+them by batches, with a column-oriented memory layout, using the
+:cpp:func:`OGRLayer::WriteArrowBatch` method. Note that this method is more
+difficult to use than the traditional :cpp:func:`OGRLayer::CreateFeature` approach,
+and is only advised when compatibility with the
+`Apache Arrow C Data interface <https://arrow.apache.org/docs/format/CDataInterface.html>`_
+is needed, or when column-oriented writing of layers is required.
+
+Pending using an helper library, generation of the Arrow C Data interface
+requires reading of the following documents:
+
+- `Arrow C data interface <https://arrow.apache.org/docs/format/CDataInterface.html>`_
+- `Arrow Columnar Format <https://arrow.apache.org/docs/format/Columnar.html>`_.
+
+Consult :ref:`vector_api_tut_arrow_stream` for introduction to the ArrowSchema and ArrowArray
+basic types involved for batch writing.
+
+The WriteArrowBatch() method has the following signature:
+
+  .. code-block:: cpp
+
+        /** Writes a batch of rows from an ArrowArray.
+         *
+         * @param schema Schema of array
+         * @param array Array of type struct. It may be released (array->release==NULL)
+         *              after calling this method.
+         * @param papszOptions Options. Null terminated list, or nullptr.
+         * @return true in case of success
+         */
+        virtual bool OGRLayer::WriteArrowBatch(const struct ArrowSchema *schema,
+                                               struct ArrowArray *array,
+                                               CSLConstList papszOptions = nullptr);
+
+It is also available in the C API as :cpp:func:`OGR_L_WriteArrowBatch`.
+
+This is semantically close to calling :cpp:func:`OGRLayer::CreateFeature()`
+with multiple features at once.
+
+The ArrowArray must be of type struct (format=+s), and its children generally
+map to a OGR attribute or geometry field (unless they are struct themselves).
+
+Method :cpp:func:`OGRLayer::IsArrowSchemaSupported` can be called to determine
+if the schema will be supported by WriteArrowBatch().
+
+OGR fields for the corresponding children arrays must exist and be of a
+compatible type. For attribute fields, they should be created with
+:cpp:func:`OGRLayer::CreateFieldFromArrowSchema`.
+
+Arrays for geometry columns should be of binary or large binary type and
+contain WKB geometry.
+
+Note that the passed array may be set to a released state
+(array->release==NULL) after this call (not by the base implementation,
+but in specialized ones such as Parquet or Arrow for example)
+
+Supported options of the base implementation are:
+
+- FID=name. Name of the FID column in the array. If not provided,
+  GetFIDColumn() is used to determine it. The special name
+  OGRLayer::DEFAULT_ARROW_FID_NAME is also recognized if neither FID nor
+  GetFIDColumn() are set.
+  The corresponding ArrowArray must be of type int32 (i) or int64 (l).
+  On input, values of the FID column are used to create the feature.
+  On output, the values of the FID column may be set with the FID of the
+  created feature (if the array is not released).
+
+- GEOMETRY_NAME=name. Name of the geometry column. If not provided,
+  GetGeometryColumn() is used. The special name
+  OGRLayer::DEFAULT_ARROW_GEOMETRY_NAME is also recognized if neither
+  GEOMETRY_NAME nor GetGeometryColumn() are set.
+  Geometry columns are also identified if they have
+  ARROW:extension:name=ogc.wkb as a field metadata.
+  The corresponding ArrowArray must be of type binary (w) or large
+  binary (W).
+
+Drivers that have a specialized implementation (such as :ref:`vector.parquet`
+and :ref:`vector.arrow`) advertise the OLCFastWriteArrowBatch layer capability.
+
+The following example in Python demonstrates how to copy a layer from one format to
+another one (assuming it has at most a single geometry column):
 
 .. code-block:: python
 
-        feat = ogr.Feature( lyr.GetLayerDefn() )
+    def copy_layer(src_lyr, out_filename, out_format, lcos = {}):
+        stream = src_lyr.GetArrowStream()
+        schema = stream.GetSchema()
 
-        feat.SetGeomFieldDirectly( "PointField",
-            ogr.CreateGeometryFromWkt( "POINT (2 49)" ) )
-        feat.SetGeomFieldDirectly( "PointField2",
-            ogr.CreateGeometryFromWkt( "POINT (500000 4500000)" ) )
+        # If the source layer has a FID column and the output driver supports
+        # a FID layer creation option, set it to the source FID column name.
+        if src_lyr.GetFIDColumn():
+            creationOptions = gdal.GetDriverByName(out_format).GetMetadataItem(
+                "DS_LAYER_CREATIONOPTIONLIST"
+            )
+            if creationOptions and '"FID"' in creationOptions:
+                lcos["FID"] = src_lyr.GetFIDColumn()
 
-        if lyr.CreateFeature( feat ) != 0:
-            print( "Failed to create feature.\n" );
-            sys.exit( 1 );
+        with ogr.GetDriverByName(out_format).CreateDataSource(out_filename) as out_ds:
+            if src_lyr.GetLayerDefn().GetGeomFieldCount() > 1:
+                out_lyr = out_ds.CreateLayer(
+                    src_lyr.GetName(), geom_type=ogr.wkbNone, options=lcos
+                )
+                for i in range(src_lyr.GetLayerDefn().GetGeomFieldCount()):
+                    out_lyr.CreateGeomField(src_lyr.GetLayerDefn().GetGeomFieldDefn(i))
+            else:
+                out_lyr = out_ds.CreateLayer(
+                    src_lyr.GetName(),
+                    geom_type=src_lyr.GetGeomType(),
+                    srs=src_lyr.GetSpatialRef(),
+                    options=lcos,
+                )
+
+            success, error_msg = out_lyr.IsArrowSchemaSupported(schema)
+            assert success, error_msg
+
+            src_geom_field_names = [
+                src_lyr.GetLayerDefn().GetGeomFieldDefn(i).GetName()
+                for i in range(src_lyr.GetLayerDefn().GetGeomFieldCount())
+            ]
+            for i in range(schema.GetChildrenCount()):
+                # GetArrowStream() may return "OGC_FID" for a unnamed source FID
+                # column and "wkb_geometry" for a unnamed source geometry column.
+                # Also test GetFIDColumn() and src_geom_field_names if they are
+                # named.
+                if (
+                    schema.GetChild(i).GetName()
+                    not in ("OGC_FID", "wkb_geometry", src_lyr.GetFIDColumn())
+                    and schema.GetChild(i).GetName() not in src_geom_field_names
+                ):
+                    out_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
+
+            write_options = []
+            if src_lyr.GetFIDColumn():
+                write_options.append("FID=" + src_lyr.GetFIDColumn())
+            if (
+                src_lyr.GetLayerDefn().GetGeomFieldCount() == 1
+                and src_lyr.GetGeometryColumn()
+            ):
+                write_options.append("GEOMETRY_NAME=" + src_lyr.GetGeometryColumn())
+
+            while True:
+                array = stream.GetNextRecordBatch()
+                if array is None:
+                    break
+                out_lyr.WriteArrowBatch(schema, array, write_options)
+
+
+For the Python bindings, in addition to the above ogr.Layer.IsArrowSchemaSupported(),
+ogr.Layer.CreateFieldFromArrowSchema() and ogr.Layer.WriteArrowBatch() methods,
+3 similar methods exist using the `PyArrow <https://arrow.apache.org/docs/python/index.html>`__
+data types:
+
+.. code-block:: python
+
+    class Layer:
+
+        def IsPyArrowSchemaSupported(self, pa_schema, options=[]):
+            """Returns whether the passed pyarrow Schema is supported by the layer, as a tuple (success: bool, errorMsg: str).
+
+        def CreateFieldFromPyArrowSchema(self, pa_schema, options=[]):
+            """Create a field from the passed pyarrow Schema."""
+
+        def WritePyArrow(self, pa_batch, options=[]):
+            """Write the content of the passed PyArrow batch (either a pyarrow.Table, a pyarrow.RecordBatch or a pyarrow.StructArray) into the layer."""

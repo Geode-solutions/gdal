@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test basic GDAL open
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -37,6 +20,14 @@ import gdaltest
 import pytest
 
 from osgeo import gdal
+
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
+
 
 # Nothing exciting here. Just trying to open non existing files,
 # or empty names, or files that are not valid datasets...
@@ -53,12 +44,20 @@ def matches_non_existing_error_msg(msg):
 
 
 def test_basic_test_1():
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("non_existing_ds", gdal.GA_ReadOnly)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("non_existing_ds", gdal.GA_ReadOnly)
     if ds is None and matches_non_existing_error_msg(gdal.GetLastErrorMsg()):
         return
     pytest.fail("did not get expected error message, got %s" % gdal.GetLastErrorMsg())
+
+
+def test_basic_test_invalid_open_flag():
+    with pytest.raises(Exception, match="invalid value for GDALAccess"):
+        gdal.Open("data/byte.tif", "invalid")
+
+    assert gdal.OF_RASTER not in (gdal.GA_ReadOnly, gdal.GA_Update)
+    with pytest.raises(Exception, match="invalid value for GDALAccess"):
+        gdal.Open("data/byte.tif", gdal.OF_RASTER)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Incorrect platform")
@@ -66,13 +65,13 @@ def test_basic_test_strace_non_existing_file():
 
     python_exe = sys.executable
     cmd = 'strace -f %s -c "from osgeo import gdal; ' % python_exe + (
-        "gdal.OpenEx('non_existing_ds', gdal.OF_RASTER)" ' " '
+        "gdal.DontUseExceptions(); gdal.OpenEx('non_existing_ds', gdal.OF_RASTER)" ' " '
     )
     try:
-        (_, err) = gdaltest.runexternal_out_and_err(cmd)
-    except Exception:
+        (_, err) = gdaltest.runexternal_out_and_err(cmd, encoding="UTF-8")
+    except Exception as e:
         # strace not available
-        pytest.skip()
+        pytest.skip(str(e))
 
     interesting_lines = []
     for line in err.split("\n"):
@@ -83,41 +82,40 @@ def test_basic_test_strace_non_existing_file():
 
 
 def test_basic_test_2():
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("non_existing_ds", gdal.GA_Update)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("non_existing_ds", gdal.GA_Update)
     if ds is None and matches_non_existing_error_msg(gdal.GetLastErrorMsg()):
         return
     pytest.fail("did not get expected error message, got %s" % gdal.GetLastErrorMsg())
 
 
 def test_basic_test_3():
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("", gdal.GA_ReadOnly)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("", gdal.GA_ReadOnly)
     if ds is None and matches_non_existing_error_msg(gdal.GetLastErrorMsg()):
         return
     pytest.fail("did not get expected error message, got %s" % gdal.GetLastErrorMsg())
 
 
 def test_basic_test_4():
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("", gdal.GA_Update)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("", gdal.GA_Update)
     if ds is None and matches_non_existing_error_msg(gdal.GetLastErrorMsg()):
         return
     pytest.fail("did not get expected error message, got %s" % gdal.GetLastErrorMsg())
 
 
 def test_basic_test_5():
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.Open("data/doctype.xml", gdal.GA_ReadOnly)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.Open("data/doctype.xml", gdal.GA_ReadOnly)
     last_error = gdal.GetLastErrorMsg()
-    expected = "`data/doctype.xml' not recognized as a supported file format"
-    if ds is None and expected in last_error:
-        return
-    pytest.fail()
+    expected = "`data/doctype.xml' not recognized as being in a supported file format"
+    assert ds is not None or expected in last_error
+
+
+def test_basic_test_5bis():
+    with pytest.raises(RuntimeError, match="not a string"):
+        gdal.Open(12345)
 
 
 ###############################################################################
@@ -159,22 +157,6 @@ def basic_test_7_internal():
     assert gdal.GetLastErrorType() == 0, "got unexpected error type"
 
 
-def test_basic_test_7():
-    old_val = gdal.GetUseExceptions()
-    try:
-        with gdal.enable_exceptions():
-            basic_test_7_internal()
-    finally:
-        assert old_val == gdal.GetUseExceptions()
-
-    try:
-        with gdal.enable_exceptions():
-            with gdal.enable_exceptions():
-                basic_test_7_internal()
-    finally:
-        assert old_val == gdal.GetUseExceptions()
-
-
 ###############################################################################
 # Test gdal.VersionInfo('RELEASE_DATE') and gdal.VersionInfo('LICENSE')
 
@@ -193,17 +175,20 @@ def test_basic_test_8():
         license_text.startswith("GDAL/OGR is released under the MIT license")
         or "GDAL/OGR Licensing" in license_text
     )
+    if "EMBED_RESOURCE_FILES=YES" in gdal.VersionInfo("BUILD_INFO"):
+        assert len(license_text) > 1000
 
-    # Use a subprocess to avoid the cached license text
-    env = os.environ.copy()
-    env["GDAL_DATA"] = "tmp"
-    with open("tmp/LICENSE.TXT", "wt") as f:
-        f.write("fake_license")
-    license_text = subprocess.check_output(
-        [sys.executable, "basic_test_subprocess.py"], env=env
-    ).decode("utf-8")
-    os.unlink("tmp/LICENSE.TXT")
-    assert license_text.startswith("fake_license")
+    if "USE_ONLY_EMBEDDED_RESOURCE_FILES=YES" not in gdal.VersionInfo("BUILD_INFO"):
+        # Use a subprocess to avoid the cached license text
+        env = os.environ.copy()
+        env["GDAL_DATA"] = "tmp"
+        with open("tmp/LICENSE.TXT", "wt") as f:
+            f.write("fake_license")
+        license_text = subprocess.check_output(
+            [sys.executable, "basic_test_subprocess.py"], env=env
+        ).decode("utf-8")
+        os.unlink("tmp/LICENSE.TXT")
+        assert license_text.startswith("fake_license")
 
 
 ###############################################################################
@@ -236,7 +221,7 @@ def test_basic_test_9():
 # Test gdal.PushErrorHandler() with a Python error handler as a method (#5186)
 
 
-class my_python_error_handler_class(object):
+class my_python_error_handler_class:
     def __init__(self):
         self.eErrClass = None
         self.err_no = None
@@ -306,7 +291,7 @@ def test_basic_test_11():
     ds = gdal.OpenEx("data/byte.tif", allowed_drivers=["PNG"])
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = gdal.OpenEx("data/byte.tif", open_options=["FOO"])
     assert ds is not None
 
@@ -332,21 +317,30 @@ def test_basic_test_11():
     ds = gdal.OpenEx("non existing")
     assert ds is None and gdal.GetLastErrorMsg() == ""
 
-    gdal.PushErrorHandler("CPLQuietErrorHandler")
-    ds = gdal.OpenEx("non existing", gdal.OF_VERBOSE_ERROR)
-    gdal.PopErrorHandler()
+    with gdal.quiet_errors():
+        ds = gdal.OpenEx("non existing", gdal.OF_VERBOSE_ERROR)
     assert ds is None and gdal.GetLastErrorMsg() != ""
 
-    old_use_exceptions_status = gdal.GetUseExceptions()
-    gdal.UseExceptions()
-    got_exception = False
+    with gdal.ExceptionMgr(useExceptions=True):
+        assert gdal.GetUseExceptions()
+        with pytest.raises(Exception):
+            gdal.OpenEx("non existing")
+
     try:
-        ds = gdal.OpenEx("non existing")
-    except RuntimeError:
-        got_exception = True
-    if old_use_exceptions_status == 0:
-        gdal.DontUseExceptions()
-    assert got_exception
+        with gdal.ExceptionMgr(useExceptions=True):
+            try:
+                gdal.OpenEx("non existing")
+            except Exception:
+                pass
+    except Exception:
+        pytest.fails("Exception thrown whereas it should not have")
+
+    with gdal.ExceptionMgr(useExceptions=True):
+        try:
+            gdal.OpenEx("non existing")
+        except Exception:
+            pass
+        gdal.Open("data/byte.tif")
 
 
 ###############################################################################
@@ -434,7 +428,7 @@ def test_basic_test_14():
     ds.SetMetadata(["foo=bar"])
     assert ds.GetMetadata_List() == ["foo=bar"]
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         with pytest.raises(Exception):
             ds.SetMetadata([5])
 
@@ -444,7 +438,7 @@ def test_basic_test_14():
     ds.SetMetadata({"foo": b"baz"})
     assert ds.GetMetadata_List() == ["foo=baz"]
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         with pytest.raises(Exception):
             ds.SetMetadata({"foo": b"zero_byte_in_string\0"})
 
@@ -510,24 +504,24 @@ def test_basic_test_15():
     mem_driver = gdal.GetDriverByName("MEM")
 
     with pytest.raises(Exception):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             gdal.GetDriverByName("MEM").CreateCopy(
                 "", gdal.GetDriverByName("MEM").Create("", 1, 1), callback="foo"
             )
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = mem_driver.CreateCopy(
             "", mem_driver.Create("", 1, 1), callback=basic_test_15_cbk_no_argument
         )
     assert ds is None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = mem_driver.CreateCopy(
             "", mem_driver.Create("", 1, 1), callback=basic_test_15_cbk_no_ret
         )
     assert ds is not None
 
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         ds = mem_driver.CreateCopy(
             "", mem_driver.Create("", 1, 1), callback=basic_test_15_cbk_bad_ret
         )
@@ -546,7 +540,7 @@ def test_basic_test_16():
 
     gdal.ErrorReset()
     gdal.Translate("/vsimem/temp.tif", "data/byte.tif", options="-co BLOCKYSIZE=10")
-    with gdaltest.error_handler():
+    with gdal.quiet_errors():
         gdal.OpenEx(
             "/vsimem/temp.tif", gdal.OF_UPDATE, open_options=["@NUM_THREADS=INVALID"]
         )
@@ -554,53 +548,60 @@ def test_basic_test_16():
     assert "Invalid value for NUM_THREADS: INVALID" in gdal.GetLastErrorMsg()
 
 
-###############################################################################
-# Test mix of gdal/ogr.UseExceptions()/DontUseExceptions()
+def test_basic_dict_open_options():
+
+    ds1 = gdal.Open("data/byte.tif")
+
+    ds2 = gdal.OpenEx("data/byte.tif", open_options={"GEOREF_SOURCES": "TABFILE"})
+
+    assert ds1.GetGeoTransform() != ds2.GetGeoTransform()
 
 
-def test_basic_test_17():
+@pytest.mark.parametrize(
+    "create_tfw", (True, False, "TRUE", "FALSE", "YES", "NO", "ON", "OFF")
+)
+def test_basic_dict_create_options(tmp_vsimem, create_tfw):
 
-    from osgeo import ogr
+    with gdal.GetDriverByName("GTiff").Create(
+        tmp_vsimem / "test_basic_dict_create_options.tif",
+        1,
+        1,
+        options={"TFW": create_tfw},
+    ) as ds:
+        gt = (0.0, 5.0, 0.0, 5.0, 0.0, -5.0)
+        ds.SetGeoTransform(gt)
 
-    for _ in range(2):
-        ogr.UseExceptions()
-        gdal.UseExceptions()
-        flag = False
-        try:
-            gdal.Open("do_not_exist")
-            flag = True
-        except RuntimeError:
-            pass
-        assert not flag, "expected failure"
-        gdal.DontUseExceptions()
-        ogr.DontUseExceptions()
-        assert not gdal.GetUseExceptions()
-        assert not ogr.GetUseExceptions()
+    if create_tfw in (True, "TRUE", "YES", "ON"):
+        assert (
+            gdal.VSIStatL(tmp_vsimem / "test_basic_dict_create_options.tfw") is not None
+        )
+    else:
+        assert gdal.VSIStatL(tmp_vsimem / "test_basic_dict_create_options.tfw") is None
 
 
-def test_basic_test_17_part_2():
+@pytest.mark.parametrize("create_tfw", (True, False))
+def test_basic_dict_create_copy_options(tmp_vsimem, create_tfw):
 
-    # For some odd reason, this fails on the Travis CI targets after unrelated
-    # changes (https://travis-ci.com/github/OSGeo/gdal/jobs/501940381)
-    if gdaltest.skip_on_travis():
-        pytest.skip()
+    src_ds = gdal.Open("data/byte.tif")
 
-    from osgeo import ogr
+    with gdal.GetDriverByName("GTiff").CreateCopy(
+        tmp_vsimem / "test_basic_dict_create_copy_options.tif",
+        src_ds,
+        options={"TFW": create_tfw},
+    ) as ds:
+        gt = (0.0, 5.0, 0.0, 5.0, 0.0, -5.0)
+        ds.SetGeoTransform(gt)
 
-    for _ in range(2):
-        ogr.UseExceptions()
-        gdal.UseExceptions()
-        flag = False
-        try:
-            ogr.DontUseExceptions()
-            gdal.DontUseExceptions()
-            flag = True
-        except Exception:
-            gdal.DontUseExceptions()
-            ogr.DontUseExceptions()
-        assert not flag, "expected failure"
-        assert not gdal.GetUseExceptions()
-        assert not ogr.GetUseExceptions()
+    if create_tfw:
+        assert (
+            gdal.VSIStatL(tmp_vsimem / "test_basic_dict_create_copy_options.tfw")
+            is not None
+        )
+    else:
+        assert (
+            gdal.VSIStatL(tmp_vsimem / "test_basic_dict_create_copy_options.tfw")
+            is None
+        )
 
 
 def test_gdal_getspatialref():
@@ -775,3 +776,269 @@ def test_exceptionmanager():
 
     # Check we are back to original state
     assert gdal.GetUseExceptions() == currentExceptionsFlag
+
+
+def test_quiet_errors():
+    with gdal.ExceptionMgr(useExceptions=False), gdal.quiet_errors():
+        gdal.Error(gdal.CE_Failure, gdal.CPLE_AppDefined, "you will never see me")
+
+
+def test_basic_test_UseExceptions():
+
+    python_exe = sys.executable
+    cmd = '%s -c "from osgeo import gdal;' % python_exe + (
+        "gdal.UseExceptions();" "gdal.Open('non_existing.tif');" ' " '
+    )
+    try:
+        (_, err) = gdaltest.runexternal_out_and_err(cmd, encoding="UTF-8")
+    except Exception as e:
+        pytest.skip("got exception %s" % str(e))
+    assert "RuntimeError: " in err
+    assert "FutureWarning: Neither gdal.UseExceptions()" not in err
+    assert "FutureWarning: Neither ogr.UseExceptions()" not in err
+
+
+def test_basic_test_UseExceptions_ogr_open():
+
+    python_exe = sys.executable
+    cmd = '%s -c "from osgeo import gdal, ogr;' % python_exe + (
+        "gdal.UseExceptions();" "ogr.Open('non_existing.tif');" ' " '
+    )
+    try:
+        (_, err) = gdaltest.runexternal_out_and_err(cmd, encoding="UTF-8")
+    except Exception as e:
+        pytest.skip("got exception %s" % str(e))
+    assert "RuntimeError: " in err
+    assert "FutureWarning: Neither gdal.UseExceptions()" not in err
+    assert "FutureWarning: Neither ogr.UseExceptions()" not in err
+
+
+def test_basic_test_DontUseExceptions():
+
+    python_exe = sys.executable
+    cmd = '%s -c "from osgeo import gdal;' % python_exe + (
+        "gdal.DontUseExceptions();" "gdal.Open('non_existing.tif');" ' " '
+    )
+    try:
+        (_, err) = gdaltest.runexternal_out_and_err(cmd, encoding="UTF-8")
+    except Exception as e:
+        pytest.skip("got exception %s" % str(e))
+    assert "ERROR " in err
+    assert "FutureWarning: Neither gdal.UseExceptions()" not in err
+    assert "FutureWarning: Neither ogr.UseExceptions()" not in err
+
+
+def test_create_context_manager(tmp_path):
+    fname = tmp_path / "out.tif"
+
+    drv = gdal.GetDriverByName("GTiff")
+    with drv.Create(fname, xsize=10, ysize=10, bands=1, eType=gdal.GDT_Float32) as ds:
+        ds.GetRasterBand(1).Fill(100)
+
+    # Make sure we don't crash when accessing ds after it has been closed
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1).ReadRaster()
+
+    ds_in = gdal.Open(fname)
+    assert ds_in.GetRasterBand(1).Checksum() != 0
+
+
+def test_dataset_use_after_close_1():
+    ds = gdal.Open("data/byte.tif")
+    assert ds is not None
+
+    ds.Close()
+
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1)
+
+
+def test_dataset_use_after_close_2():
+    ds = gdal.Open("data/byte.tif")
+    assert ds is not None
+
+    ds2 = ds
+
+    ds2.Close()
+
+    with pytest.raises(Exception):
+        ds.GetRasterBand(1)
+
+    with pytest.raises(Exception):
+        ds2.GetRasterBand(1)
+
+
+def test_band_use_after_dataset_close_1():
+    ds = gdal.Open("data/byte.tif")
+    band = ds.GetRasterBand(1)
+    del ds
+
+    # Make sure "del ds" has invalidated "band" so we don't crash here
+    with pytest.raises(Exception):
+        band.Checksum()
+
+
+def test_band_use_after_dataset_close_2():
+    with gdal.Open("data/byte.tif") as ds:
+        band = ds.GetRasterBand(1)
+
+    # Make sure ds.__exit__() has invalidated "band" so we don't crash here
+    with pytest.raises(Exception):
+        band.Checksum()
+
+
+def test_layer_use_after_dataset_close_1():
+    with gdal.OpenEx("../ogr/data/poly.shp") as ds:
+        lyr = ds.GetLayer(0)
+
+    # Make sure ds.__exit__() has invalidated "lyr" so we don't crash here
+    with pytest.raises(Exception):
+        lyr.GetFeatureCount()
+
+
+def test_layer_use_after_dataset_close_2():
+    ds = gdal.OpenEx("../ogr/data/poly.shp")
+    lyr = ds.GetLayerByName("poly")
+
+    del ds
+    # Make sure ds.__del__() has invalidated "lyr" so we don't crash here
+    with pytest.raises(Exception):
+        lyr.GetFeatureCount()
+
+
+def test_mask_band_use_after_dataset_close():
+    with gdal.Open("data/byte.tif") as ds:
+        m1 = ds.GetRasterBand(1).GetMaskBand()
+        m2 = m1.GetMaskBand()
+
+    # Make sure ds.__exit__() invalidation has propagated to mask bands
+    with pytest.raises(Exception):
+        m1.Checksum()
+
+    with pytest.raises(Exception):
+        m2.Checksum()
+
+
+def test_ovr_band_use_after_dataset_close():
+    with gdal.Open("data/byte_with_ovr.tif") as ds:
+        ovr = ds.GetRasterBand(1).GetOverview(1)
+
+    # Make sure ds.__exit__() invalidation has propagated to overviews
+
+    with pytest.raises(Exception):
+        ovr.Checksum()
+
+
+@pytest.mark.slow()
+def test_checksum_more_than_2billion_pixels():
+
+    filename = "/vsimem/test_checksum_more_than_2billion_pixels.tif"
+    ds = gdal.GetDriverByName("GTiff").Create(
+        filename,
+        50000,
+        50000,
+        options=["SPARSE_OK=YES"],
+    )
+    ds.GetRasterBand(1).SetNoDataValue(1)
+    assert ds.GetRasterBand(1).Checksum() == 63744
+    ds = None
+    gdal.Unlink(filename)
+
+
+def test_tmp_vsimem(tmp_vsimem):
+    assert isinstance(tmp_vsimem, os.PathLike)
+
+    assert gdal.VSIStatL(tmp_vsimem) is not None
+
+
+def test_band_iter():
+
+    ds = gdal.Open("data/rgba.tif")
+
+    assert len(ds) == 4
+
+    bands = []
+
+    for band in ds:
+        bands.append(band)
+
+    assert len(bands) == 4
+
+
+def test_band_getitem():
+
+    ds = gdal.Open("data/rgba.tif")
+
+    assert ds[2].this == ds.GetRasterBand(2).this
+
+    with pytest.raises(IndexError):
+        ds[0]
+
+    with pytest.raises(IndexError):
+        ds[5]
+
+
+def test_colorinterp():
+
+    d = {}
+    for c in range(gdal.GCI_Max + 1):
+        name = gdal.GetColorInterpretationName(c)
+        assert name not in d
+        d[name] = c
+        assert gdal.GetColorInterpretationByName(name) == c
+
+
+def test_ComputeMinMaxLocation():
+
+    ds = gdal.Open("data/byte.tif")
+    ret = ds.GetRasterBand(1).ComputeMinMaxLocation()
+    assert (
+        ret.min == 74
+        and ret.max == 255
+        and ret.minX == 9
+        and ret.minY == 17
+        and ret.maxX == 2
+        and ret.maxY == 18
+    )
+
+    ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 1, gdal.GDT_Float64)
+    ds.GetRasterBand(1).Fill(float("nan"))
+    ret = ds.GetRasterBand(1).ComputeMinMaxLocation()
+    assert ret is None
+
+
+def test_create_numpy_types():
+    np = pytest.importorskip("numpy")
+    gdaltest.importorskip_gdal_array()
+
+    drv = gdal.GetDriverByName("MEM")
+
+    with drv.Create("", 1, 1, eType=np.int16) as ds:
+        assert ds.GetRasterBand(1).DataType == gdal.GDT_Int16
+
+    with drv.Create("", 1, 1, eType=np.dtype("float32")) as ds:
+        assert ds.GetRasterBand(1).DataType == gdal.GDT_Float32
+
+    with pytest.raises(Exception, match="must be a GDAL data type code or NumPy type"):
+        drv.Create("", 1, 1, eType=str)
+
+    with pytest.raises(Exception, match="must be a GDAL data type code or NumPy type"):
+        drv.Create("", 1, 1, eType=[1, 2, 3])
+
+
+@pytest.mark.require_curl()
+@gdaltest.enable_exceptions()
+def test_gdal_open_non_accessible_object_on_cloud_storage():
+
+    with gdal.config_option("OSS_SECRET_ACCESS_KEY", ""):
+        with pytest.raises(Exception, match="InvalidCredentials"):
+            gdal.Open("/vsioss/i_do_not/exist.bin")
+
+
+def test_basic_test_create_copy_band():
+    mem_driver = gdal.GetDriverByName("MEM")
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src_ds.GetRasterBand(1).Fill(1)
+
+    out_ds = mem_driver.CreateCopy("", src_ds.GetRasterBand(1))
+    assert out_ds.GetRasterBand(1).Checksum() == 1

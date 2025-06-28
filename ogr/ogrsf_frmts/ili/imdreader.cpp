@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Pirmin Kalberer, Sourcepole AG
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 // IlisMeta model: http://www.interlis.ch/models/core/IlisMeta07-20111222.ili
@@ -80,10 +64,12 @@ class IliClass
     {
         return poTableDefn->GetName();
     }
+
     const char *GetIliName()
     {
         return CPLGetXMLValue(node, "TID", nullptr);
     }
+
     char *LayerName()
     {
         const char *psClassTID = GetIliName();
@@ -107,6 +93,7 @@ class IliClass
 
         return CPLStrdup(psClassTID);
     }
+
     void AddFieldNode(CPLXMLNode *nodeIn, int iOrderPos)
     {
         if (iOrderPos < 0 || iOrderPos > 100000)
@@ -123,11 +110,13 @@ class IliClass
 #endif
         oFields[iOrderPos] = nodeIn;
     }
+
     void AddRoleNode(CPLXMLNode *nodeIn, int iOrderPos)
     {
         isAssocClass = true;
         AddFieldNode(nodeIn, iOrderPos);
     }
+
     bool isEmbedded()
     {
         if (isAssocClass)
@@ -142,8 +131,9 @@ class IliClass
             }
         return false;
     }
+
     // Add additional Geometry table for Interlis 1
-    void AddGeomTable(CPLString layerName, const char *psFieldName,
+    void AddGeomTable(const CPLString &layerName, const char *psFieldName,
                       OGRwkbGeometryType eType, bool bRefTIDField = false)
     {
         OGRFeatureDefn *poGeomTableDefn = new OGRFeatureDefn(layerName);
@@ -161,12 +151,14 @@ class IliClass
                  poGeomTableDefn->GetName(), psFieldName);
         poGeomFieldInfos[psFieldName].SetGeomTableDefn(poGeomTableDefn);
     }
+
     void AddField(const char *psName, OGRFieldType fieldType) const
     {
         OGRFieldDefn fieldDef(psName, fieldType);
         poTableDefn->AddFieldDefn(&fieldDef);
         CPLDebug("OGR_ILI", "Adding field '%s' to Class %s", psName, GetName());
     }
+
     void AddGeomField(const char *psName, OGRwkbGeometryType geomType) const
     {
         OGRGeomFieldDefn fieldDef(psName, geomType);
@@ -175,6 +167,7 @@ class IliClass
         CPLDebug("OGR_ILI", "Adding geometry field '%s' to Class %s", psName,
                  GetName());
     }
+
     void AddCoord(const char *psName, const CPLXMLNode *psTypeNode) const
     {
         auto oIter = oAxisCount.find(psTypeNode);
@@ -191,6 +184,7 @@ class IliClass
         OGRwkbGeometryType geomType = (dim > 2) ? wkbPoint25D : wkbPoint;
         AddGeomField(psName, geomType);
     }
+
     OGRFieldType GetFormattedType(CPLXMLNode *nodeIn)
     {
         const char *psRefSuper = CPLGetXMLValue(nodeIn, "Super.REF", nullptr);
@@ -199,6 +193,7 @@ class IliClass
 
         return OFTString;  // TODO: Time, Date, etc. if possible
     }
+
     void InitFieldDefinitions()
     {
         // Delete default geometry field
@@ -385,6 +380,7 @@ class IliClass
             }
         }
     }
+
     FeatureDefnInfo tableDefs()
     {
         FeatureDefnInfo poLayerInfo;

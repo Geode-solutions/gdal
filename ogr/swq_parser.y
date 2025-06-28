@@ -9,23 +9,7 @@
  ******************************************************************************
  * Copyright (C) 2010 Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -89,6 +73,9 @@
 %token SWQT_ALL                 "ALL"
 %token SWQT_LIMIT               "LIMIT"
 %token SWQT_OFFSET              "OFFSET"
+%token SWQT_EXCEPT              "EXCEPT"
+%token SWQT_EXCLUDE             "EXCLUDE"
+%token SWQT_HIDDEN              "HIDDEN"
 
 %token SWQT_VALUE_START
 %token SWQT_SELECT_START
@@ -113,9 +100,9 @@
 %token SWQT_RESERVED_KEYWORD    "reserved keyword"
 
 /* Any grammar rule that does $$ = must be listed afterwards */
-/* as well as SWQT_INTEGER_NUMBER SWQT_FLOAT_NUMBER SWQT_STRING SWQT_IDENTIFIER that are allocated by swqlex() */
-%destructor { delete $$; } SWQT_INTEGER_NUMBER SWQT_FLOAT_NUMBER SWQT_STRING SWQT_IDENTIFIER
-%destructor { delete $$; } value_expr_list field_value value_expr value_expr_non_logical type_def table_def
+/* as well as SWQT_INTEGER_NUMBER SWQT_FLOAT_NUMBER SWQT_STRING SWQT_IDENTIFIER SWQT_HIDDEN that are allocated by swqlex(), and identifier */
+%destructor { delete $$; } SWQT_INTEGER_NUMBER SWQT_FLOAT_NUMBER SWQT_STRING SWQT_IDENTIFIER SWQT_HIDDEN identifier
+%destructor { delete $$; } value_expr_list field_value value_expr value_expr_non_logical type_def table_def as_clause as_clause_with_hidden
 
 %%
 
@@ -141,11 +128,23 @@ value_expr:
     | value_expr SWQT_AND value_expr
         {
             $$ = swq_create_and_or_or( SWQ_AND, $1, $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_OR value_expr
         {
             $$ = swq_create_and_or_or( SWQ_OR, $1, $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | SWQT_NOT value_expr
@@ -153,6 +152,12 @@ value_expr:
             $$ = new swq_expr_node( SWQ_NOT );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $2 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '=' value_expr
@@ -161,6 +166,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '<' '>' value_expr
@@ -169,6 +180,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $4 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '!' '=' value_expr
@@ -177,6 +194,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $4 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '<' value_expr
@@ -185,6 +208,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '>' value_expr
@@ -193,6 +222,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '<' '=' value_expr
@@ -201,6 +236,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $4 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '=' '<' value_expr
@@ -209,6 +250,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $4 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '=' '>' value_expr
@@ -217,6 +264,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $4 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr '>' '=' value_expr
@@ -225,6 +278,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $4 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_LIKE value_expr
@@ -233,6 +292,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_NOT SWQT_LIKE value_expr
@@ -245,6 +310,12 @@ value_expr:
             $$ = new swq_expr_node( SWQ_NOT );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( like );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_LIKE value_expr SWQT_ESCAPE value_expr
@@ -254,6 +325,12 @@ value_expr:
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
             $$->PushSubExpression( $5 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_NOT SWQT_LIKE value_expr SWQT_ESCAPE value_expr
@@ -267,6 +344,12 @@ value_expr:
             $$ = new swq_expr_node( SWQ_NOT );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( like );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_ILIKE value_expr
@@ -275,6 +358,12 @@ value_expr:
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_NOT SWQT_ILIKE value_expr
@@ -287,6 +376,12 @@ value_expr:
             $$ = new swq_expr_node( SWQ_NOT );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( like );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_ILIKE value_expr SWQT_ESCAPE value_expr
@@ -296,6 +391,12 @@ value_expr:
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
             $$->PushSubExpression( $5 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_NOT SWQT_ILIKE value_expr SWQT_ESCAPE value_expr
@@ -309,6 +410,12 @@ value_expr:
             $$ = new swq_expr_node( SWQ_NOT );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( like );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_IN '(' value_expr_list ')'
@@ -318,6 +425,12 @@ value_expr:
             $$->nOperation = SWQ_IN;
             $$->PushSubExpression( $1 );
             $$->ReverseSubExpressions();
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_NOT SWQT_IN '(' value_expr_list ')'
@@ -331,6 +444,12 @@ value_expr:
             $$ = new swq_expr_node( SWQ_NOT );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( in );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_BETWEEN value_expr_non_logical SWQT_AND value_expr_non_logical
@@ -340,6 +459,12 @@ value_expr:
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
             $$->PushSubExpression( $5 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_NOT SWQT_BETWEEN value_expr_non_logical SWQT_AND value_expr_non_logical
@@ -353,6 +478,12 @@ value_expr:
             $$ = new swq_expr_node( SWQ_NOT );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( between );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_IS SWQT_NULL
@@ -360,6 +491,12 @@ value_expr:
             $$ = new swq_expr_node( SWQ_ISNULL );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( $1 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr SWQT_IS SWQT_NOT SWQT_NULL
@@ -371,23 +508,46 @@ value_expr:
             $$ = new swq_expr_node( SWQ_NOT );
             $$->field_type = SWQ_BOOLEAN;
             $$->PushSubExpression( isnull );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
 value_expr_list:
     value_expr ',' value_expr_list
         {
             $$ = $3;
-            $3->PushSubExpression( $1 );
+            $$->PushSubExpression( $1 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr
             {
             $$ = new swq_expr_node( SWQ_ARGUMENT_LIST ); /* temporary value */
             $$->PushSubExpression( $1 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
-field_value:
+identifier:
     SWQT_IDENTIFIER
+
+    | SWQT_HIDDEN
+
+field_value:
+    identifier
         {
             $$ = $1;  // validation deferred.
             $$->eNodeType = SNT_COLUMN;
@@ -395,7 +555,7 @@ field_value:
             $$->table_index = -1;
         }
 
-    | SWQT_IDENTIFIER '.' SWQT_IDENTIFIER
+    | identifier '.' identifier
         {
             $$ = $1;  // validation deferred.
             $$->eNodeType = SNT_COLUMN;
@@ -469,6 +629,12 @@ value_expr_non_logical:
                 $$ = new swq_expr_node( SWQ_MULTIPLY );
                 $$->PushSubExpression( new swq_expr_node(-1) );
                 $$->PushSubExpression( $2 );
+                if( $$->HasReachedMaxDepth() )
+                {
+                    yyerror (context, "Maximum expression depth reached");
+                    delete $$;
+                    YYERROR;
+                }
             }
         }
 
@@ -477,6 +643,12 @@ value_expr_non_logical:
             $$ = new swq_expr_node( SWQ_ADD );
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr_non_logical '-' value_expr_non_logical
@@ -484,6 +656,12 @@ value_expr_non_logical:
             $$ = new swq_expr_node( SWQ_SUBTRACT );
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr_non_logical '*' value_expr_non_logical
@@ -491,6 +669,12 @@ value_expr_non_logical:
             $$ = new swq_expr_node( SWQ_MULTIPLY );
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr_non_logical '/' value_expr_non_logical
@@ -498,6 +682,12 @@ value_expr_non_logical:
             $$ = new swq_expr_node( SWQ_DIVIDE );
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
     | value_expr_non_logical '%' value_expr_non_logical
@@ -505,9 +695,15 @@ value_expr_non_logical:
             $$ = new swq_expr_node( SWQ_MODULUS );
             $$->PushSubExpression( $1 );
             $$->PushSubExpression( $3 );
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
-    | SWQT_IDENTIFIER '(' value_expr_list ')'
+    | identifier '(' value_expr_list ')'
         {
             const swq_operation *poOp =
                     swq_op_registrar::GetOperator( $1->string_value );
@@ -548,23 +744,35 @@ value_expr_non_logical:
             $$ = $5;
             $$->PushSubExpression( $3 );
             $$->ReverseSubExpressions();
+            if( $$->HasReachedMaxDepth() )
+            {
+                yyerror (context, "Maximum expression depth reached");
+                delete $$;
+                YYERROR;
+            }
         }
 
 type_def:
-    SWQT_IDENTIFIER
+    identifier
     {
         $$ = new swq_expr_node( SWQ_CAST );
         $$->PushSubExpression( $1 );
+        if( $$->HasReachedMaxDepth() )
+        {
+            yyerror (context, "Maximum expression depth reached");
+            delete $$;
+            YYERROR;
+        }
     }
 
-    | SWQT_IDENTIFIER '(' SWQT_INTEGER_NUMBER ')'
+    | identifier '(' SWQT_INTEGER_NUMBER ')'
     {
         $$ = new swq_expr_node( SWQ_CAST );
         $$->PushSubExpression( $3 );
         $$->PushSubExpression( $1 );
     }
 
-    | SWQT_IDENTIFIER '(' SWQT_INTEGER_NUMBER ',' SWQT_INTEGER_NUMBER ')'
+    | identifier '(' SWQT_INTEGER_NUMBER ',' SWQT_INTEGER_NUMBER ')'
     {
         $$ = new swq_expr_node( SWQ_CAST );
         $$->PushSubExpression( $5 );
@@ -573,7 +781,7 @@ type_def:
     }
 
     /* e.g. GEOMETRY(POINT) */
-    | SWQT_IDENTIFIER '(' SWQT_IDENTIFIER ')'
+    | identifier '(' identifier ')'
     {
         OGRwkbGeometryType eType = OGRFromOGCGeomType($3->string_value);
         if( !EQUAL($1->string_value, "GEOMETRY") ||
@@ -591,7 +799,7 @@ type_def:
     }
 
     /* e.g. GEOMETRY(POINT,4326) */
-    | SWQT_IDENTIFIER '(' SWQT_IDENTIFIER ',' SWQT_INTEGER_NUMBER ')'
+    | identifier '(' identifier ',' SWQT_INTEGER_NUMBER ')'
     {
         OGRwkbGeometryType eType = OGRFromOGCGeomType($3->string_value);
         if( !EQUAL($1->string_value, "GEOMETRY") ||
@@ -640,25 +848,58 @@ select_field_list:
     column_spec
     | column_spec ',' select_field_list
 
-column_spec:
-    value_expr
+exclude_field:
+    field_value
         {
-            if( !context->poCurSelect->PushField( $1 ) )
+            if ( !context->poCurSelect->PushExcludeField( $1 ) )
             {
                 delete $1;
                 YYERROR;
             }
         }
 
-    | value_expr as_clause
+exclude_field_list:
+    exclude_field
+    | exclude_field ',' exclude_field_list
+
+except_or_exclude:
+    SWQT_EXCEPT
+    | SWQT_EXCLUDE
+
+column_spec:
+    value_expr
         {
-            if( !context->poCurSelect->PushField( $1, $2->string_value ) )
+            if( !context->poCurSelect->PushField( $1, nullptr, false, false ) )
+            {
+                delete $1;
+                YYERROR;
+            }
+        }
+
+    | value_expr as_clause_with_hidden
+        {
+            if( !context->poCurSelect->PushField( $1, $2->string_value, false, $2->bHidden ) )
             {
                 delete $1;
                 delete $2;
                 YYERROR;
             }
             delete $2;
+        }
+
+    | '*' except_or_exclude '(' exclude_field_list ')'
+        {
+            swq_expr_node *poNode = new swq_expr_node();
+            poNode->eNodeType = SNT_COLUMN;
+            poNode->string_value = CPLStrdup( "*" );
+            poNode->table_index = -1;
+            poNode->field_index = -1;
+
+            if( !context->poCurSelect->PushField( poNode, nullptr, false, false ) )
+            {
+                delete poNode;
+                YYERROR;
+            }
         }
 
     | '*'
@@ -669,14 +910,14 @@ column_spec:
             poNode->table_index = -1;
             poNode->field_index = -1;
 
-            if( !context->poCurSelect->PushField( poNode ) )
+            if( !context->poCurSelect->PushField( poNode, nullptr, false, false ) )
             {
                 delete poNode;
                 YYERROR;
             }
         }
 
-    | SWQT_IDENTIFIER '.' '*'
+    | identifier '.' '*'
         {
             CPLString osTableName = $1->string_value;
 
@@ -690,14 +931,14 @@ column_spec:
             poNode->table_index = -1;
             poNode->field_index = -1;
 
-            if( !context->poCurSelect->PushField( poNode ) )
+            if( !context->poCurSelect->PushField( poNode, nullptr, false, false ) )
             {
                 delete poNode;
                 YYERROR;
             }
         }
 
-    | SWQT_IDENTIFIER '(' '*' ')'
+    | identifier '(' '*' ')'
         {
                 // special case for COUNT(*), confirm it.
             if( !EQUAL($1->string_value, "COUNT") )
@@ -721,14 +962,14 @@ column_spec:
             swq_expr_node *count = new swq_expr_node( SWQ_COUNT );
             count->PushSubExpression( poNode );
 
-            if( !context->poCurSelect->PushField( count ) )
+            if( !context->poCurSelect->PushField( count, nullptr, false, false ) )
             {
                 delete count;
                 YYERROR;
             }
         }
 
-    | SWQT_IDENTIFIER '(' '*' ')' as_clause
+    | identifier '(' '*' ')' as_clause
         {
                 // special case for COUNT(*), confirm it.
             if( !EQUAL($1->string_value, "COUNT") )
@@ -753,7 +994,7 @@ column_spec:
             swq_expr_node *count = new swq_expr_node( SWQ_COUNT );
             count->PushSubExpression( poNode );
 
-            if( !context->poCurSelect->PushField( count, $5->string_value ) )
+            if( !context->poCurSelect->PushField( count, $5->string_value, false, $5->bHidden ) )
             {
                 delete count;
                 delete $5;
@@ -763,7 +1004,7 @@ column_spec:
             delete $5;
         }
 
-    | SWQT_IDENTIFIER '(' SWQT_DISTINCT field_value ')'
+    | identifier '(' SWQT_DISTINCT field_value ')'
         {
                 // special case for COUNT(DISTINCT x), confirm it.
             if( !EQUAL($1->string_value, "COUNT") )
@@ -781,14 +1022,14 @@ column_spec:
             swq_expr_node *count = new swq_expr_node( SWQ_COUNT );
             count->PushSubExpression( $4 );
 
-            if( !context->poCurSelect->PushField( count, nullptr, TRUE ) )
+            if( !context->poCurSelect->PushField( count, nullptr, true, false ) )
             {
                 delete count;
                 YYERROR;
             }
         }
 
-    | SWQT_IDENTIFIER '(' SWQT_DISTINCT field_value ')' as_clause
+    | identifier '(' SWQT_DISTINCT field_value ')' as_clause
         {
             // special case for COUNT(DISTINCT x), confirm it.
             if( !EQUAL($1->string_value, "COUNT") )
@@ -804,7 +1045,7 @@ column_spec:
             swq_expr_node *count = new swq_expr_node( SWQ_COUNT );
             count->PushSubExpression( $4 );
 
-            if( !context->poCurSelect->PushField( count, $6->string_value, TRUE ) )
+            if( !context->poCurSelect->PushField( count, $6->string_value, true, $6->bHidden ) )
             {
                 delete $1;
                 delete count;
@@ -817,13 +1058,25 @@ column_spec:
         }
 
 as_clause:
-    SWQT_AS SWQT_IDENTIFIER
+    SWQT_AS identifier
         {
-            delete $1;
             $$ = $2;
+            $2 = nullptr;
         }
 
-    | SWQT_IDENTIFIER
+    | identifier
+
+as_clause_with_hidden:
+    as_clause
+
+    | as_clause SWQT_HIDDEN
+        {
+            $$ = $1;
+            $1 = nullptr;
+            delete $2;
+            $2 = nullptr;
+            $$->bHidden = true;
+        }
 
 opt_where:
     | SWQT_WHERE value_expr
@@ -889,7 +1142,7 @@ opt_offset:
     }
 
 table_def:
-    SWQT_IDENTIFIER
+    identifier
     {
         const int iTable =
             context->poCurSelect->PushTableDef( nullptr, $1->string_value,
@@ -899,7 +1152,7 @@ table_def:
         $$ = new swq_expr_node( iTable );
     }
 
-    | SWQT_IDENTIFIER as_clause
+    | identifier as_clause
     {
         const int iTable =
             context->poCurSelect->PushTableDef( nullptr, $1->string_value,
@@ -910,7 +1163,7 @@ table_def:
         $$ = new swq_expr_node( iTable );
     }
 
-    | SWQT_STRING '.' SWQT_IDENTIFIER
+    | SWQT_STRING '.' identifier
     {
         const int iTable =
             context->poCurSelect->PushTableDef( $1->string_value,
@@ -921,7 +1174,7 @@ table_def:
         $$ = new swq_expr_node( iTable );
     }
 
-    | SWQT_STRING '.' SWQT_IDENTIFIER as_clause
+    | SWQT_STRING '.' identifier as_clause
     {
         const int iTable =
             context->poCurSelect->PushTableDef( $1->string_value,
@@ -934,7 +1187,7 @@ table_def:
         $$ = new swq_expr_node( iTable );
     }
 
-    | SWQT_IDENTIFIER '.' SWQT_IDENTIFIER
+    | identifier '.' identifier
     {
         const int iTable =
             context->poCurSelect->PushTableDef( $1->string_value,
@@ -945,7 +1198,7 @@ table_def:
         $$ = new swq_expr_node( iTable );
     }
 
-    | SWQT_IDENTIFIER '.' SWQT_IDENTIFIER as_clause
+    | identifier '.' identifier as_clause
     {
         const int iTable =
             context->poCurSelect->PushTableDef( $1->string_value,

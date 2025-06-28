@@ -13,14 +13,7 @@ ogrtindex
 Synopsis
 --------
 
-.. code-block::
-
-    ogrtindex [-lnum n]... [-lname name]... [-f output_format]
-              [-write_absolute_path] [-skip_different_projection]
-              [-t_srs target_srs]
-              [-src_srs_name field_name] [-src_srs_format [AUTO|WKT|EPSG|PROJ]
-              [-accept_different_schemas]
-              <output_dataset> <src_dataset>...
+.. program-output:: ogrtindex --help-doc
 
 Description
 -----------
@@ -32,6 +25,8 @@ their spatial extents. This is primarily intended to be used with
 the OGR connection type.
 
 .. program:: ogrtindex
+
+.. include:: options/help_and_help_general.rst
 
 .. option:: -lnum <n>
 
@@ -75,7 +70,7 @@ the OGR connection type.
 
     .. versionadded:: 2.2.0
 
-.. option:: -src_srs_format <format>
+.. option:: -src_srs_format {AUTO|WKT|EPSG|PROJ}
 
     The format in which the SRS of each tile must be written.
     Available formats are: ``AUTO``, ``WKT``, ``EPSG``, ``PROJ``.
@@ -96,19 +91,15 @@ independent records.
 If the tile index already exists it will be appended to, otherwise it
 will be created.
 
-Example
--------
+Examples
+--------
 
-This example would create a shapefile (:file:`tindex.shp`) containing
-a tile index of the ``BL2000_LINK`` layers in all the NTF files
-in the :file:`wrk` directory:
+.. example::
 
-.. code-block::
+   This example would create a shapefile (:file:`tindex.shp`) containing
+   a tile index of the ``BL2000_LINK`` layers in all the NTF files
+   in the :file:`wrk` directory:
 
-    ogrtindex tindex.shp wrk/*.NTF 1069148.900,419873.100 1069147.500,419870.200
-      1069146.400,419862.100 1069143.000,419860 1069142,419854.900
-      1069138.600,419850 1069135,419848.800 1069134.100,419843
-      1069130,419836.200 1069127.600,419824.600 1069123.800,419820.200
-      1069126.900,419815.500 1069126.900,419808.200 1069116.500,419798.700
-      1069117.600,419794.100 1069115.100,419796.300 1069109.100,419801.800
-      1069106.800,419805.000  1069107.300)
+   .. code-block:: bash
+
+       ogrtindex tindex.shp wrk/*.NTF

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test coordinate transformations.
@@ -12,23 +11,7 @@
 # Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
 # Copyright (c) 2014, Google
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import math
@@ -52,9 +35,8 @@ def test_osr_ct_1():
     ll_srs.SetWellKnownGeogCS("WGS84")
 
     try:
-        gdal.PushErrorHandler("CPLQuietErrorHandler")
-        ct = osr.CoordinateTransformation(ll_srs, utm_srs)
-        gdal.PopErrorHandler()
+        with gdal.quiet_errors():
+            ct = osr.CoordinateTransformation(ll_srs, utm_srs)
         if gdal.GetLastErrorMsg().find("Unable to load PROJ.4") != -1:
             pytest.skip("PROJ.4 missing, transforms not available.")
     except ValueError:
@@ -89,6 +71,21 @@ def test_osr_ct_2():
         result[0] == pytest.approx(452772.06, abs=0.01)
         and result[1] == pytest.approx(3540544.89, abs=0.01)
         and result[2] == pytest.approx(0.0, abs=0.01)
+    ), "Wrong LL to UTM result"
+
+    result = ct.TransformPoint([32.0, -117.5, 10.0])
+    assert (
+        result[0] == pytest.approx(452772.06, abs=0.01)
+        and result[1] == pytest.approx(3540544.89, abs=0.01)
+        and result[2] == 10
+    ), "Wrong LL to UTM result"
+
+    result = ct.TransformPoint([32.0, -117.5, 10.0, 2000.0])
+    assert (
+        result[0] == pytest.approx(452772.06, abs=0.01)
+        and result[1] == pytest.approx(3540544.89, abs=0.01)
+        and result[2] == 10
+        and result[3] == 2000
     ), "Wrong LL to UTM result"
 
 
@@ -186,9 +183,8 @@ def test_osr_ct_5():
 
 def test_osr_ct_6():
 
-    with gdaltest.error_handler():
-        ct = osr.CreateCoordinateTransformation(None, None)
-        assert ct is None
+    with pytest.raises(Exception):
+        osr.CreateCoordinateTransformation(None, None)
 
     utm_srs = osr.SpatialReference()
     utm_srs.SetUTM(11)
@@ -401,10 +397,14 @@ def test_osr_ct_options_area_of_interest():
     srs_wgs84.SetFromUserInput("WGS84")
     srs_wgs84.SetAxisMappingStrategy(osr.OAMS_AUTHORITY_COMPLIANT)
     options = osr.CoordinateTransformationOptions()
-    assert not options.SetAreaOfInterest(-200, 40, -99, 41)
-    assert not options.SetAreaOfInterest(-100, -100, -99, 41)
-    assert not options.SetAreaOfInterest(-100, 40, 200, 41)
-    assert not options.SetAreaOfInterest(-100, 40, -99, 100)
+    with pytest.raises(Exception):
+        options.SetAreaOfInterest(-200, 40, -99, 41)
+    with pytest.raises(Exception):
+        options.SetAreaOfInterest(-100, -100, -99, 41)
+    with pytest.raises(Exception):
+        options.SetAreaOfInterest(-100, 40, 200, 41)
+    with pytest.raises(Exception):
+        options.SetAreaOfInterest(-100, 40, -99, 100)
     assert options.SetAreaOfInterest(-100, 40, -99, 41)
     ct = osr.CoordinateTransformation(srs_nad27, srs_wgs84, options)
     assert ct
@@ -484,7 +484,7 @@ def test_osr_ct_geocentric():
 # Test with +lon_wrap=180
 
 
-@gdaltest.require_proj_version(7, 0, 1)
+@pytest.mark.require_proj(7, 0, 1)
 def test_osr_ct_lon_wrap():
 
     s = osr.SpatialReference()
@@ -503,7 +503,7 @@ def test_osr_ct_lon_wrap():
 # Test ct.TransformPointWithErrorCode
 
 
-@gdaltest.require_proj_version(8)
+@pytest.mark.require_proj(8)
 def test_osr_ct_transformpointwitherrorcode():
 
     s = osr.SpatialReference()
@@ -520,7 +520,12 @@ def test_osr_ct_transformpointwitherrorcode():
     assert t == 4
     assert error_code == 0
 
-    x, y, z, t, error_code = ct.TransformPointWithErrorCode(90, 0, 0, 0)
+    with pytest.raises(Exception):
+        ct.TransformPointWithErrorCode(90, 0, 0, 0)
+
+    with osr.ExceptionMgr(useExceptions=False):
+        x, y, z, t, error_code = ct.TransformPointWithErrorCode(90, 0, 0, 0)
+
     assert math.isinf(x)
     assert error_code == osr.PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN
 
@@ -537,13 +542,11 @@ def test_osr_ct_options_accuracy():
     t.SetFromUserInput("EPSG:4258")  # ETRS89
     options = osr.CoordinateTransformationOptions()
     options.SetDesiredAccuracy(0.05)
-    with gdaltest.error_handler():
-        ct = osr.CoordinateTransformation(s, t, options)
-    try:
+    with gdal.quiet_errors():
+        with osr.ExceptionMgr(useExceptions=False):
+            ct = osr.CoordinateTransformation(s, t, options)
+    with pytest.raises(Exception):
         ct.TransformPoint(49, 2, 0)
-        assert False
-    except Exception:
-        pass
 
 
 ###############################################################################
@@ -558,13 +561,39 @@ def test_osr_ct_options_ballpark_disallowed():
     t.SetFromUserInput("EPSG:4258")  # ETRS89
     options = osr.CoordinateTransformationOptions()
     options.SetBallparkAllowed(False)
-    with gdaltest.error_handler():
-        ct = osr.CoordinateTransformation(s, t, options)
-    try:
+    with gdal.quiet_errors():
+        with osr.ExceptionMgr(useExceptions=False):
+            ct = osr.CoordinateTransformation(s, t, options)
+    with pytest.raises(Exception):
         ct.TransformPoint(49, 2, 0)
-        assert False
-    except Exception:
-        pass
+
+
+###############################################################################
+# Test CoordinateTransformationOptions.SetOnlyBest
+
+
+@pytest.mark.require_proj(9, 2)
+def test_osr_ct_options_only_best_enabled():
+
+    s = osr.SpatialReference()
+    s.SetFromUserInput("EPSG:4746")  # PD/83
+    t = osr.SpatialReference()
+    t.SetFromUserInput("EPSG:4326")  # WGS 84
+
+    # Best operation normally uses the BETA2007 grid
+    options = osr.CoordinateTransformationOptions()
+    options.SetOnlyBest(True)
+    ct = osr.CoordinateTransformation(s, t, options)
+    with pytest.raises(Exception, match=r"Grid de_adv_BETA2007.tif is not available"):
+        ct.TransformPoint(50.5, 10, 0)
+
+    options = osr.CoordinateTransformationOptions()
+    options.SetOnlyBest(False)
+    ct = osr.CoordinateTransformation(s, t, options)
+    # Ballpark operation
+    assert ct.TransformPoint(50.5, 10, 0) == pytest.approx(
+        (50.498804120408145, 9.99880336687919, 0.0)
+    )
 
 
 ###############################################################################
@@ -588,7 +617,7 @@ def test_osr_ct_non_specified_time_with_time_dependent_transformation():
 # Test using OGRSpatialReference::CoordinateEpoch()
 
 
-@gdaltest.require_proj_version(7, 2)
+@pytest.mark.require_proj(7, 2)
 def test_osr_ct_take_into_account_srs_coordinate_epoch():
 
     s = osr.SpatialReference()
@@ -623,10 +652,8 @@ def test_osr_ct_take_into_account_srs_coordinate_epoch():
     assert y == pytest.approx(150, abs=1e-10)
 
     # Not properly supported currently
-    gdal.ErrorReset()
-    with gdaltest.error_handler():
-        ct = osr.CoordinateTransformation(t_2020, t_2030)
-    assert gdal.GetLastErrorMsg() != ""
+    with gdal.quiet_errors():
+        osr.CoordinateTransformation(t_2020, t_2030)
 
 
 ###############################################################################
@@ -699,7 +726,7 @@ def test_osr_ct_wkt_non_consistent_with_epsg_definition():
 # https://github.com/OSGeo/PROJ/issues/2955
 
 
-@gdaltest.require_proj_version(7, 2)
+@pytest.mark.require_proj(7, 2)
 def test_osr_ct_OGR_CT_PREFER_OFFICIAL_SRS_DEF():
 
     # Not sure about the minimal version, but works as expected with 7.2.1
@@ -724,3 +751,188 @@ def test_osr_ct_OGR_CT_PREFER_OFFICIAL_SRS_DEF():
         x, y, _ = ct.TransformPoint(826158.063, 2405844.125, 0)
         assert abs(x - 9.867) < 0.001, x
         assert abs(y - 71.125) < 0.001, y
+
+
+###############################################################################
+# Test NAD83(CSRS)v7 change of epoch
+
+
+@pytest.mark.require_proj(9, 4)
+def test_osr_ct_point_motion_operation():
+
+    s = osr.SpatialReference()
+    s.ImportFromEPSG(8254)  # NAD83(CSRS)v7 3D
+    s.SetCoordinateEpoch(2002)
+
+    t = osr.SpatialReference()
+    t.ImportFromEPSG(8254)  # NAD83(CSRS)v7 3D
+    t.SetCoordinateEpoch(2010)
+
+    ct = osr.CoordinateTransformation(s, t)
+    x, y, z = ct.TransformPoint(60.5, -79.5)
+    assert abs(x - 60.49999994) < 1e-8, x
+    assert abs(y - -79.49999963) < 1e-8, y
+    assert abs(z - 0.060) < 1e-3, z
+
+    t = osr.SpatialReference()
+    t.ImportFromEPSG(22717)  # "NAD83(CSRS)v7 / UTM zone 17N"
+    t.SetCoordinateEpoch(2010)
+
+    ct = osr.CoordinateTransformation(s, t)
+    x, y, z = ct.TransformPoint(60.5, -79.5)
+    assert abs(x - 582395.993) < 1e-3, x
+    assert abs(y - 6708035.973) < 1e-3, y
+    assert abs(z - 0.060) < 1e-3, z
+
+
+###############################################################################
+# Test effect of SetDataAxisToSRSAxisMapping([1,2,-3])
+
+
+def test_osr_ct_source_z_axis_reversal():
+
+    s = osr.SpatialReference()
+    s.ImportFromEPSG(4979)
+    s.SetDataAxisToSRSAxisMapping([1, 2, -3])
+
+    t = osr.SpatialReference()
+    t.ImportFromEPSG(4979)
+
+    ct = osr.CoordinateTransformation(s, t)
+    x, y, z = ct.TransformPoint(1, 2, -3)
+    assert x == pytest.approx(1)
+    assert y == pytest.approx(2)
+    assert z == pytest.approx(3)
+
+
+###############################################################################
+# Test effect of SetDataAxisToSRSAxisMapping([1,2,-3])
+
+
+def test_osr_ct_target_z_axis_reversal():
+
+    s = osr.SpatialReference()
+    s.ImportFromEPSG(4979)
+
+    t = osr.SpatialReference()
+    t.ImportFromEPSG(4979)
+    t.SetDataAxisToSRSAxisMapping([1, 2, -3])
+
+    ct = osr.CoordinateTransformation(s, t)
+    x, y, z = ct.TransformPoint(1, 2, -3)
+    assert x == pytest.approx(1)
+    assert y == pytest.approx(2)
+    assert z == pytest.approx(3)
+
+
+###############################################################################
+# Test effect of SetDataAxisToSRSAxisMapping([-2,1])
+
+
+def test_osr_ct_source_mapping_minus_two_one():
+
+    s = osr.SpatialReference()
+    s.ImportFromEPSG(4326)
+    s.SetDataAxisToSRSAxisMapping([-2, 1])
+
+    t = osr.SpatialReference()
+    t.ImportFromEPSG(4326)
+
+    ct = osr.CoordinateTransformation(s, t)
+    x, y, _ = ct.TransformPoint(10, 20, 0)
+    assert x == pytest.approx(-20)
+    assert y == pytest.approx(10)
+
+
+###############################################################################
+# Test effect of SetDataAxisToSRSAxisMapping([-2,1])
+
+
+def test_osr_ct_target_mapping_minus_two_one():
+
+    s = osr.SpatialReference()
+    s.ImportFromEPSG(4326)
+
+    t = osr.SpatialReference()
+    t.ImportFromEPSG(4326)
+    t.SetDataAxisToSRSAxisMapping([-2, 1])
+
+    ct = osr.CoordinateTransformation(s, t)
+    x, y, _ = ct.TransformPoint(-20, 10, 0)
+    assert x == pytest.approx(10)
+    assert y == pytest.approx(20)
+
+
+###############################################################################
+# Test effect of SetDataAxisToSRSAxisMapping([-2,1])
+
+
+def test_osr_ct_source_and_target_mapping_minus_two_one():
+
+    s = osr.SpatialReference()
+    s.ImportFromEPSG(4326)
+    s.SetDataAxisToSRSAxisMapping([-2, 1])
+
+    t = osr.SpatialReference()
+    t.ImportFromEPSG(4326)
+    t.SetDataAxisToSRSAxisMapping([-2, 1])
+
+    ct = osr.CoordinateTransformation(s, t)
+    x, y, _ = ct.TransformPoint(10, 20, 0)
+    assert x == pytest.approx(10)
+    assert y == pytest.approx(20)
+
+
+###############################################################################
+# Test bug fix for https://github.com/OSGeo/gdal/issues/9732
+
+
+@pytest.mark.require_proj(9, 2)
+def test_osr_ct_fix_9732():
+
+    s = osr.SpatialReference()
+    s.ImportFromEPSG(6453)
+
+    assert not s.IsDerivedProjected()
+
+    t = osr.SpatialReference()
+    t.SetFromUserInput(
+        """DERIVEDPROJCRS["Ground for NAD83(2011) / Idaho West (ftUS)",
+    BASEPROJCRS["NAD83(2011) / Idaho West (ftUS)",
+        BASEGEOGCRS["NAD83(2011)",
+            DATUM["NAD83 (National Spatial Reference System 2011)",ELLIPSOID["GRS 1980",6378137,298.257222101,LENGTHUNIT["metre",1]]],
+            PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],
+            ID["EPSG",6318]],
+        CONVERSION["SPCS83 Idaho West zone (US Survey feet)",
+            METHOD["Transverse Mercator",ID["EPSG",9807]],
+            PARAMETER["Latitude of natural origin",41.6666666666667,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8801]],
+            PARAMETER["Longitude of natural origin",-115.75,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8802]],
+            PARAMETER["Scale factor at natural origin",0.999933333,SCALEUNIT["unity",1],ID["EPSG",8805]],
+            PARAMETER["False easting",2624666.667,LENGTHUNIT["US survey foot",0.304800609601219],ID["EPSG",8806]],
+            PARAMETER["False northing",0,LENGTHUNIT["US survey foot",0.304800609601219],ID["EPSG",8807]]],
+        CS[Cartesian,2],
+        AXIS["easting (X)",east,ORDER[1],LENGTHUNIT["US survey foot",0.304800609601219]],
+        AXIS["northing (Y)",north,ORDER[2],LENGTHUNIT["US survey foot",0.304800609601219]],
+        USAGE[SCOPE["Engineering survey, topographic mapping."],AREA["United States (USA) - Idaho - counties of Ada; Adams; Benewah; Boise; Bonner; Boundary; Canyon; Clearwater; Elmore; Gem; Idaho; Kootenai; Latah; Lewis; Nez Perce; Owyhee; Payette; Shoshone; Valley; Washington."],BBOX[41.99,-117.24,49.01,-114.32]],
+        ID["EPSG",6453]],
+    DERIVINGCONVERSION["Grid to ground",
+        METHOD["Similarity transformation",ID["EPSG",9621]],
+        PARAMETER["Ordinate 1 of evaluation point in target CRS",1000,LENGTHUNIT["US survey foot",0.304800609601219],ID["EPSG",8621]],
+        PARAMETER["Ordinate 2 of evaluation point in target CRS",0,LENGTHUNIT["US survey foot",0.304800609601219],ID["EPSG",8622]],
+        PARAMETER["Scale factor for source CRS axes",1,SCALEUNIT["unity",1],ID["EPSG",1061]],
+        PARAMETER["Rotation angle of source CRS axes", 0,ANGLEUNIT["degree",0.0],ID["EPSG",8614]]],
+    CS[Cartesian,2],
+    AXIS["easting (X)",east,
+        ORDER[1],
+        LENGTHUNIT["US survey foot",0.304800609601219]],
+    AXIS["northing (Y)",north,
+        ORDER[2],
+        LENGTHUNIT["US survey foot",0.304800609601219]]]"""
+    )
+
+    assert t.IsDerivedProjected()
+
+    ct = osr.CoordinateTransformation(s, t)
+    x, y, _ = ct.TransformPoint(2300000, 2000000, 0)
+    assert x == pytest.approx(2301000)
+    assert y == pytest.approx(2000000)

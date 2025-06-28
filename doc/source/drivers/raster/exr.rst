@@ -21,48 +21,85 @@ EXR header metadata.
 Creation Options
 ----------------
 
--  **COMPRESS=[NONE/RLE/ZIPS/ZIP/PIZ/PXR24/B44/B44A/DWAA/DWAB]**: Compression method.
-   Defaults to ZIP.
-   Details on the format `Wikipedia page <https://en.wikipedia.org/wiki/OpenEXR#Compression_methods>`_
+|about-creation-options|
+The following creation options are supported:
 
--  **PIXEL_TYPE=HALF/FLOAT/UINT**: Pixel type used for encoding.
+-  .. co:: COMPRESS
+      :choices: NONE, RLE, ZIPS, ZIP, PIZ, PXR24, B44, B44A, DWAA, DWAB
+      :default: ZIP
 
-   - ``HALF`` corresponds to a IEEE-754 16-bit floating point value.
-   - ``FLOAT`` corresponds to a IEEE-754 32-bit floating point value.
-   - ``UINT`` corresponds to a 32-bit unsigned integer value.
+      Compression method.
+      Details on the format `Wikipedia page <https://en.wikipedia.org/wiki/OpenEXR#Compression_methods>`_
 
-   If not specified, the following GDAL data types will be mapped as following:
+-  .. co:: PIXEL_TYPE
+      :choices: HALF, FLOAT, UINT
 
-   - ``Byte`` ==> HALF
-   - ``Int16`` ==> HALF (potentially lossy)
-   - ``UInt16`` ==> HALF (potentially lossy)
-   - ``Int32`` ==> FLOAT (potentially lossy)
-   - ``UInt32`` ==> UINT
-   - ``Float32`` ==> FLOAT
-   - ``Float64`` ==> FLOAT (generally lossy)
+      Pixel type used for encoding.
 
--  **TILED=YES/NO**: By default tiled files will be created, unless this option
-   is set to NO. In Create() mode, setting TILED=NO is not possible.
+      - ``HALF`` corresponds to a IEEE-754 16-bit floating point value.
+      - ``FLOAT`` corresponds to a IEEE-754 32-bit floating point value.
+      - ``UINT`` corresponds to a 32-bit unsigned integer value.
 
--  **BLOCKXSIZE=n**: Sets tile width, defaults to 256.
+      If not specified, the following GDAL data types will be mapped as following:
 
--  **BLOCKYSIZE=n**: Sets tile height, defaults to 256.
+      - ``Byte`` ==> HALF
+      - ``Int16`` ==> HALF (potentially lossy)
+      - ``UInt16`` ==> HALF (potentially lossy)
+      - ``Int32`` ==> FLOAT (potentially lossy)
+      - ``UInt32`` ==> UINT
+      - ``Float32`` ==> FLOAT
+      - ``Float64`` ==> FLOAT (generally lossy)
 
--  **OVERVIEWS=YES/NO**: Whether to create overviews. Default to NO. Only
-   compatible of CreateCopy() mode.
+-  .. co:: TILED
+      :choices: YES, NO
+      :default: NO
 
--  **OVERVIEW_RESAMPLING=NEAR/AVERAGE/CUBIC/...**: Resampling method to use for
-   overview creation. Defaults to CUBIC.
+      By default tiled files will be created, unless this option
+      is set to NO. In Create() mode, setting TILED=NO is not possible.
 
--  **PREVIEW=YES/NO**: Whether to create a preview. Default to NO. Only
-   compatible of CreateCopy() mode, and with RGB(A) data of type Byte.
+-  .. co:: BLOCKXSIZE
+      :choices: <integer>
+      :default: 256
 
--  **AUTO_RESCALE=YES/NO**: Whether to rescale Byte RGB(A) values from 0-255 to
-   the 0-1 range usually used in EXR ecosystem.
+      Sets tile width.
 
--  **DWA_COMPRESSION_LEVEL=n**: DWA compression level. The higher, the more
-   compressed the image will be (and the more artifacts). Defaults to 45
-   for OpenEXR 2.4
+-  .. co:: BLOCKYSIZE
+      :choices: <integer>
+      :default: 256
+
+      Sets tile height.
+
+-  .. co:: OVERVIEWS
+      :choices: YES, NO
+      :default: NO
+
+      Whether to create overviews. Only compatible with CreateCopy() mode.
+
+-  .. co:: OVERVIEW_RESAMPLING
+      :choices: NEAR, AVERAGE, CUBIC, ...
+      :default: CUBIC
+
+      Resampling method to use for overview creation.
+
+-  .. co:: PREVIEW
+      :choices: YES, NO
+      :default: NO
+
+      Whether to create a preview. Only
+      compatible with CreateCopy() mode, and with RGB(A) data of type Byte.
+
+-  .. co:: AUTO_RESCALE
+      :choices: YES, NO
+
+      Whether to rescale Byte RGB(A) values from 0-255 to
+      the 0-1 range usually used in EXR ecosystem.
+
+-  .. co:: DWA_COMPRESSION_LEVEL
+      :choices: <integer>
+
+      DWA compression level. The higher, the more
+      compressed the image will be (and the more artifacts). Defaults to 45
+      for OpenEXR 2.4
 
 Driver capabilities
 -------------------

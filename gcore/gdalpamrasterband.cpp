@@ -10,23 +10,7 @@
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -51,6 +35,61 @@
 #include "gdal_rat.h"
 
 /************************************************************************/
+/*                           CopyFrom()                                 */
+/************************************************************************/
+
+//! @cond Doxygen_Suppress
+
+void GDALRasterBandPamInfo::CopyFrom(const GDALRasterBandPamInfo &sOther)
+{
+    bNoDataValueSet = sOther.bNoDataValueSet;
+    bNoDataValueSetAsInt64 = sOther.bNoDataValueSetAsInt64;
+    bNoDataValueSetAsUInt64 = sOther.bNoDataValueSetAsUInt64;
+
+    dfNoDataValue = sOther.dfNoDataValue;
+    nNoDataValueInt64 = sOther.nNoDataValueInt64;
+    nNoDataValueUInt64 = sOther.nNoDataValueUInt64;
+
+    delete poColorTable;
+    poColorTable = sOther.poColorTable
+                       ? new GDALColorTable(*(sOther.poColorTable))
+                       : nullptr;
+
+    eColorInterp = sOther.eColorInterp;
+
+    CPLFree(pszUnitType);
+    pszUnitType = sOther.pszUnitType ? CPLStrdup(sOther.pszUnitType) : nullptr;
+
+    CSLDestroy(papszCategoryNames);
+    papszCategoryNames = CSLDuplicate(sOther.papszCategoryNames);
+
+    dfOffset = sOther.dfOffset;
+    dfScale = sOther.dfScale;
+
+    bHaveMinMax = sOther.bHaveMinMax;
+    dfMin = sOther.dfMin;
+    dfMax = sOther.dfMax;
+
+    bHaveStats = sOther.bHaveStats;
+    dfMean = sOther.dfMean;
+    dfStdDev = sOther.dfStdDev;
+
+    if (psSavedHistograms)
+        CPLDestroyXMLNode(psSavedHistograms);
+    psSavedHistograms = sOther.psSavedHistograms
+                            ? CPLCloneXMLTree(sOther.psSavedHistograms)
+                            : nullptr;
+
+    delete poDefaultRAT;
+    poDefaultRAT = sOther.poDefaultRAT ? sOther.poDefaultRAT->Clone() : nullptr;
+
+    bOffsetSet = sOther.bOffsetSet;
+    bScaleSet = sOther.bScaleSet;
+}
+
+//! @endcond
+
+/************************************************************************/
 /*                         GDALPamRasterBand()                          */
 /************************************************************************/
 
@@ -70,6 +109,7 @@ GDALPamRasterBand::GDALPamRasterBand(int bForceCachedIOIn)
 {
     SetMOFlags(GetMOFlags() | GMO_PAM_CLASS);
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -110,7 +150,7 @@ CPLXMLNode *GDALPamRasterBand::SerializeToXML(const char * /* pszUnused */)
 
     if (psPam->bNoDataValueSet)
     {
-        if (CPLIsNan(psPam->dfNoDataValue))
+        if (std::isnan(psPam->dfNoDataValue))
             CPLSetXMLValue(psTree, "NoDataValue", "nan");
         else
             CPLSetXMLValue(psTree, "NoDataValue",
@@ -372,7 +412,7 @@ void GDALPamRasterBand::PamClear()
 /*                              XMLInit()                               */
 /************************************************************************/
 
-CPLErr GDALPamRasterBand::XMLInit(CPLXMLNode *psTree,
+CPLErr GDALPamRasterBand::XMLInit(const CPLXMLNode *psTree,
                                   const char * /* pszUnused */)
 {
     PamInitialize();
@@ -387,8 +427,8 @@ CPLErr GDALPamRasterBand::XMLInit(CPLXMLNode *psTree,
     /* -------------------------------------------------------------------- */
     GDALMajorObject::SetDescription(CPLGetXMLValue(psTree, "Description", ""));
 
-    const char *pszNoDataValue = CPLGetXMLValue(psTree, "NoDataValue", nullptr);
-    if (pszNoDataValue != nullptr)
+    if (const char *pszNoDataValue =
+            CPLGetXMLValue(psTree, "NoDataValue", nullptr))
     {
         const char *pszLEHex =
             CPLGetXMLValue(psTree, "NoDataValue.le_hex_equiv", nullptr);
@@ -428,16 +468,19 @@ CPLErr GDALPamRasterBand::XMLInit(CPLXMLNode *psTree,
         }
     }
 
-    GDALPamRasterBand::SetOffset(
-        CPLAtof(CPLGetXMLValue(psTree, "Offset", "0.0")));
-    GDALPamRasterBand::SetScale(
-        CPLAtof(CPLGetXMLValue(psTree, "Scale", "1.0")));
-
-    GDALPamRasterBand::SetUnitType(CPLGetXMLValue(psTree, "UnitType", nullptr));
-
-    if (CPLGetXMLValue(psTree, "ColorInterp", nullptr) != nullptr)
+    const char *pszOffset = CPLGetXMLValue(psTree, "Offset", nullptr);
+    const char *pszScale = CPLGetXMLValue(psTree, "Scale", nullptr);
+    if (pszOffset || pszScale)
     {
-        const char *pszInterp = CPLGetXMLValue(psTree, "ColorInterp", nullptr);
+        GDALPamRasterBand::SetOffset(pszOffset ? CPLAtof(pszOffset) : 0.0);
+        GDALPamRasterBand::SetScale(pszScale ? CPLAtof(pszScale) : 1.0);
+    }
+
+    if (const char *pszUnitType = CPLGetXMLValue(psTree, "UnitType", nullptr))
+        GDALPamRasterBand::SetUnitType(pszUnitType);
+
+    if (const char *pszInterp = CPLGetXMLValue(psTree, "ColorInterp", nullptr))
+    {
         GDALPamRasterBand::SetColorInterpretation(
             GDALGetColorInterpretationByName(pszInterp));
     }
@@ -445,13 +488,12 @@ CPLErr GDALPamRasterBand::XMLInit(CPLXMLNode *psTree,
     /* -------------------------------------------------------------------- */
     /*      Category names.                                                 */
     /* -------------------------------------------------------------------- */
-    if (CPLGetXMLNode(psTree, "CategoryNames") != nullptr)
+    if (const auto psCategoryNames = CPLGetXMLNode(psTree, "CategoryNames"))
     {
         CPLStringList oCategoryNames;
 
-        for (CPLXMLNode *psEntry =
-                 CPLGetXMLNode(psTree, "CategoryNames")->psChild;
-             psEntry != nullptr; psEntry = psEntry->psNext)
+        for (const CPLXMLNode *psEntry = psCategoryNames->psChild; psEntry;
+             psEntry = psEntry->psNext)
         {
             /* Don't skip <Category> tag with empty content */
             if (psEntry->eType != CXT_Element ||
@@ -470,13 +512,13 @@ CPLErr GDALPamRasterBand::XMLInit(CPLXMLNode *psTree,
     /* -------------------------------------------------------------------- */
     /*      Collect a color table.                                          */
     /* -------------------------------------------------------------------- */
-    if (CPLGetXMLNode(psTree, "ColorTable") != nullptr)
+    if (const auto psColorTable = CPLGetXMLNode(psTree, "ColorTable"))
     {
         GDALColorTable oTable;
         int iEntry = 0;
 
-        for (CPLXMLNode *psEntry = CPLGetXMLNode(psTree, "ColorTable")->psChild;
-             psEntry != nullptr; psEntry = psEntry->psNext)
+        for (const CPLXMLNode *psEntry = psColorTable->psChild; psEntry;
+             psEntry = psEntry->psNext)
         {
             if (!(psEntry->eType == CXT_Element &&
                   EQUAL(psEntry->pszValue, "Entry")))
@@ -499,54 +541,54 @@ CPLErr GDALPamRasterBand::XMLInit(CPLXMLNode *psTree,
     /* -------------------------------------------------------------------- */
     /*      Do we have a complete set of stats?                             */
     /* -------------------------------------------------------------------- */
-    if (CPLGetXMLNode(psTree, "Minimum") != nullptr &&
-        CPLGetXMLNode(psTree, "Maximum") != nullptr)
+    if (const char *pszMinimum = CPLGetXMLValue(psTree, "Minimum", nullptr))
     {
-        psPam->bHaveMinMax = TRUE;
-        psPam->dfMin = CPLAtofM(CPLGetXMLValue(psTree, "Minimum", "0"));
-        psPam->dfMax = CPLAtofM(CPLGetXMLValue(psTree, "Maximum", "0"));
+        const char *pszMaximum = CPLGetXMLValue(psTree, "Maximum", nullptr);
+        if (pszMaximum)
+        {
+            psPam->bHaveMinMax = TRUE;
+            psPam->dfMin = CPLAtofM(pszMinimum);
+            psPam->dfMax = CPLAtofM(pszMaximum);
+        }
     }
 
-    if (CPLGetXMLNode(psTree, "Mean") != nullptr &&
-        CPLGetXMLNode(psTree, "StandardDeviation") != nullptr)
+    if (const char *pszMean = CPLGetXMLValue(psTree, "Mean", nullptr))
     {
-        psPam->bHaveStats = TRUE;
-        psPam->dfMean = CPLAtofM(CPLGetXMLValue(psTree, "Mean", "0"));
-        psPam->dfStdDev =
-            CPLAtofM(CPLGetXMLValue(psTree, "StandardDeviation", "0"));
+        const char *pszStandardDeviation =
+            CPLGetXMLValue(psTree, "StandardDeviation", nullptr);
+        if (pszStandardDeviation)
+        {
+            psPam->bHaveStats = TRUE;
+            psPam->dfMean = CPLAtofM(pszMean);
+            psPam->dfStdDev = CPLAtofM(pszStandardDeviation);
+        }
     }
 
     /* -------------------------------------------------------------------- */
     /*      Histograms                                                      */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psHist = CPLGetXMLNode(psTree, "Histograms");
-    if (psHist != nullptr)
+    if (const CPLXMLNode *psHist = CPLGetXMLNode(psTree, "Histograms"))
     {
-        CPLXMLNode *psNext = psHist->psNext;
-        psHist->psNext = nullptr;
-
+        CPLXMLNode sHistTemp = *psHist;
+        sHistTemp.psNext = nullptr;
         if (psPam->psSavedHistograms != nullptr)
         {
             CPLDestroyXMLNode(psPam->psSavedHistograms);
             psPam->psSavedHistograms = nullptr;
         }
-        psPam->psSavedHistograms = CPLCloneXMLTree(psHist);
-        psHist->psNext = psNext;
+        psPam->psSavedHistograms = CPLCloneXMLTree(&sHistTemp);
     }
 
     /* -------------------------------------------------------------------- */
     /*      Raster Attribute Table                                          */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psRAT = CPLGetXMLNode(psTree, "GDALRasterAttributeTable");
-    if (psRAT != nullptr)
+    if (const CPLXMLNode *psRAT =
+            CPLGetXMLNode(psTree, "GDALRasterAttributeTable"))
     {
-        if (psPam->poDefaultRAT != nullptr)
-        {
-            delete psPam->poDefaultRAT;
-            psPam->poDefaultRAT = nullptr;
-        }
-        psPam->poDefaultRAT = new GDALDefaultRasterAttributeTable();
-        psPam->poDefaultRAT->XMLInit(psRAT, "");
+        delete psPam->poDefaultRAT;
+        auto poNewRAT = new GDALDefaultRasterAttributeTable();
+        poNewRAT->XMLInit(psRAT, "");
+        psPam->poDefaultRAT = poNewRAT;
     }
 
     return CE_None;
@@ -764,6 +806,7 @@ CPLErr GDALPamRasterBand::CloneInfo(GDALRasterBand *poSrcBand, int nCloneFlags)
 
     return CE_None;
 }
+
 //! @endcond
 
 /************************************************************************/
@@ -1375,6 +1418,7 @@ CPLXMLNode *PamHistogramToXMLTree(double dfMin, double dfMax, int nBuckets,
 
     return psXMLHist;
 }
+
 //! @endcond
 
 /************************************************************************/

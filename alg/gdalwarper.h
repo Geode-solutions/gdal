@@ -9,23 +9,7 @@
  * Copyright (c) 2003, Frank Warmerdam
  * Copyright (c) 2009-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDALWARPER_H_INCLUDED
@@ -143,7 +127,16 @@ CPLErr CPL_DLL GDALWarpCutlineMaskerEx(void *pMaskFuncArg, int nBandCount,
                                        GByte ** /* ppImageData */,
                                        int bMaskIsFloat, void *pValidityMask,
                                        int *pnValidityFlag);
+
 /*! @endcond */
+
+/*! GWKMode tie-breaking strategy */
+typedef enum
+{
+    /* Choose the first value encountered */ GWKTS_First = 1,
+    /* Choose the minimal value */ GWKTS_Min = 2,
+    /* Choose the maximum value */ GWKTS_Max = 3,
+} GWKTieStrategy;
 
 /************************************************************************/
 /*                           GDALWarpOptions                            */
@@ -258,7 +251,11 @@ typedef struct
      * zero. */
     double dfCutlineBlendDist;
 
+    /** Tie-breaking method */
+    GWKTieStrategy eTieStrategy;
 } GDALWarpOptions;
+
+const char CPL_DLL *GDALWarpGetOptionList(void);
 
 GDALWarpOptions CPL_DLL *CPL_STDCALL GDALCreateWarpOptions(void);
 void CPL_DLL CPL_STDCALL GDALDestroyWarpOptions(GDALWarpOptions *);
@@ -324,7 +321,7 @@ GDALDatasetH CPL_DLL CPL_STDCALL GDALAutoCreateWarpedVRTEx(
 
 GDALDatasetH CPL_DLL CPL_STDCALL
 GDALCreateWarpedVRT(GDALDatasetH hSrcDS, int nPixels, int nLines,
-                    double *padfGeoTransform, GDALWarpOptions *psOptions);
+                    const double *padfGeoTransform, GDALWarpOptions *psOptions);
 
 CPLErr CPL_DLL CPL_STDCALL GDALInitializeWarpedVRT(GDALDatasetH hDS,
                                                    GDALWarpOptions *psWO);
@@ -335,6 +332,9 @@ CPL_C_END
 
 #include <vector>
 #include <utility>
+
+bool GDALGetWarpResampleAlg(const char *pszResampling,
+                            GDALResampleAlg &eResampleAlg, bool bThrow = false);
 
 /************************************************************************/
 /*                            GDALWarpKernel                            */
@@ -460,6 +460,16 @@ class CPL_DLL GDALWarpKernel
     bool bApplyVerticalShift = false;
 
     double dfMultFactorVerticalShift = 1.0;
+
+    // Tuples of values (e.g. "<R>,<G>,<B>" or "(<R1>,<G1>,<B1>),(<R2>,<G2>,<B2>)") that must
+    // be ignored as contributing source pixels during resampling. Only taken into account by
+    // Average currently
+    std::vector<std::vector<double>> m_aadfExcludedValues{};
+
+    GWKTieStrategy eTieStrategy;
+
+    bool bWarnedAboutDstNoDataReplacement = false;
+
     /*! @endcond */
 
     GDALWarpKernel();
@@ -488,25 +498,38 @@ void GWKThreadsEnd(void *psThreadDataIn);
 
 /*! @cond Doxygen_Suppress */
 typedef struct _GDALWarpChunk GDALWarpChunk;
+
+struct GDALTransformerUniquePtrReleaser
+{
+    void operator()(void *p)
+    {
+        GDALDestroyTransformer(p);
+    }
+};
+
 /*! @endcond */
 
-class CPL_DLL GDALWarpOperation
+/** Unique pointer for the argument of a GDALTransformerFunc */
+using GDALTransformerArgUniquePtr =
+    std::unique_ptr<void, GDALTransformerUniquePtrReleaser>;
+
+class CPL_DLL GDALWarpOperation final
 {
 
     CPL_DISALLOW_COPY_ASSIGN(GDALWarpOperation)
 
   private:
-    GDALWarpOptions *psOptions;
+    GDALWarpOptions *psOptions = nullptr;
+    GDALTransformerArgUniquePtr m_psOwnedTransformerArg{nullptr};
 
     void WipeOptions();
     int ValidateOptions();
 
-    CPLErr ComputeSourceWindow(int nDstXOff, int nDstYOff, int nDstXSize,
-                               int nDstYSize, int *pnSrcXOff, int *pnSrcYOff,
-                               int *pnSrcXSize, int *pnSrcYSize,
-                               double *pdfSrcXExtraSize,
-                               double *pdfSrcYExtraSize,
-                               double *pdfSrcFillRatio);
+    bool ComputeSourceWindowTransformPoints(
+        int nDstXOff, int nDstYOff, int nDstXSize, int nDstYSize, bool bUseGrid,
+        bool bAll, int nStepCount, bool bTryWithCheckWithInvertProj,
+        double &dfMinXOut, double &dfMinYOut, double &dfMaxXOut,
+        double &dfMaxYOut, int &nSamplePoints, int &nFailedCount);
 
     void ComputeSourceWindowStartingFromSource(int nDstXOff, int nDstYOff,
                                                int nDstXSize, int nDstYSize,
@@ -518,17 +541,17 @@ class CPL_DLL GDALWarpOperation
     static CPLErr CreateKernelMask(GDALWarpKernel *, int iBand,
                                    const char *pszType);
 
-    CPLMutex *hIOMutex;
-    CPLMutex *hWarpMutex;
+    CPLMutex *hIOMutex = nullptr;
+    CPLMutex *hWarpMutex = nullptr;
 
-    int nChunkListCount;
-    int nChunkListMax;
-    GDALWarpChunk *pasChunkList;
+    int nChunkListCount = 0;
+    int nChunkListMax = 0;
+    GDALWarpChunk *pasChunkList = nullptr;
 
-    int bReportTimings;
-    unsigned long nLastTimeReported;
+    bool bReportTimings = false;
+    unsigned long nLastTimeReported = 0;
 
-    void *psThreadData;
+    void *psThreadData = nullptr;
 
     // Coordinates a few special points in target image space, to determine
     // if ComputeSourceWindow() must use a grid based sampling.
@@ -545,11 +568,17 @@ class CPL_DLL GDALWarpOperation
 
   public:
     GDALWarpOperation();
-    virtual ~GDALWarpOperation();
+    ~GDALWarpOperation();
 
-    CPLErr Initialize(const GDALWarpOptions *psNewOptions);
+    CPLErr Initialize(const GDALWarpOptions *psNewOptions,
+                      GDALTransformerFunc pfnTransformer = nullptr,
+                      GDALTransformerArgUniquePtr psOwnedTransformerArg =
+                          GDALTransformerArgUniquePtr{nullptr});
     void *CreateDestinationBuffer(int nDstXSize, int nDstYSize,
                                   int *pbWasInitialized = nullptr);
+    CPLErr InitializeDestinationBuffer(void *pDstBuffer, int nDstXSize,
+                                       int nDstYSize,
+                                       int *pbWasInitialized = nullptr) const;
     static void DestroyDestinationBuffer(void *pDstBuffer);
 
     const GDALWarpOptions *GetOptions();
@@ -578,6 +607,18 @@ class CPL_DLL GDALWarpOperation
                               int nSrcYOff, int nSrcXSize, int nSrcYSize,
                               double dfSrcXExtraSize, double dfSrcYExtraSize,
                               double dfProgressBase, double dfProgressScale);
+
+  protected:
+    friend class VRTWarpedDataset;
+    CPLErr ComputeSourceWindow(int nDstXOff, int nDstYOff, int nDstXSize,
+                               int nDstYSize, int *pnSrcXOff, int *pnSrcYOff,
+                               int *pnSrcXSize, int *pnSrcYSize,
+                               double *pdfSrcXExtraSize,
+                               double *pdfSrcYExtraSize,
+                               double *pdfSrcFillRatio);
+
+    double GetWorkingMemoryForWindow(int nSrcXSize, int nSrcYSize,
+                                     int nDstXSize, int nDstYSize) const;
 };
 
 #endif /* def __cplusplus */

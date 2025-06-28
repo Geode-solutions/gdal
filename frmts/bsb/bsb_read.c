@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  BSB Reader
  * Purpose:  Low level BSB Access API Implementation (non-GDAL).
@@ -14,33 +13,20 @@
  * Copyright (c) 2001, Frank Warmerdam
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "bsb_read.h"
 #include "cpl_conv.h"
 #include "cpl_string.h"
 
+#include <stdbool.h>
+
 static int BSBReadHeaderLine(BSBInfo *psInfo, char *pszLine, int nLineMaxLen,
                              int bNO1);
 static int BSBSeekAndCheckScanlineNumber(BSBInfo *psInfo, unsigned nScanline,
                                          int bVerboseIfError);
+
 /************************************************************************
 
 Background:
@@ -97,7 +83,7 @@ note.  I would be happy to send you a copy of this conversion program.
 ... later email ...
 
          Well, here is my little proof of concept program. I hereby give
-you permission to distribute it freely, modify for you own use, etc.
+you permission to distribute it freely, modify for your own use, etc.
 I built it as a "WIN32 Console application" which means it runs in an MS
 DOS box under Microsoft Windows. But the only Windows specific stuff in it
 are the include files for the BMP file headers.  If you ripped out the BMP
@@ -115,7 +101,8 @@ file format and I want to break it open! Chart data for the People!
 static void BSBUngetc(BSBInfo *psInfo, int nCharacter)
 
 {
-    CPLAssert(psInfo->nSavedCharacter == -1000);
+    CPLAssert(psInfo->nSavedCharacter2 == -1000);
+    psInfo->nSavedCharacter2 = psInfo->nSavedCharacter;
     psInfo->nSavedCharacter = nCharacter;
 }
 
@@ -131,7 +118,8 @@ static int BSBGetc(BSBInfo *psInfo, int bNO1, int *pbErrorFlag)
     if (psInfo->nSavedCharacter != -1000)
     {
         nByte = psInfo->nSavedCharacter;
-        psInfo->nSavedCharacter = -1000;
+        psInfo->nSavedCharacter = psInfo->nSavedCharacter2;
+        psInfo->nSavedCharacter2 = -1000;
         return nByte;
     }
 
@@ -250,6 +238,7 @@ BSBInfo *BSBOpen(const char *pszFilename)
     psInfo->nBufferSize = 0;
     psInfo->nBufferOffset = 0;
     psInfo->nSavedCharacter = -1000;
+    psInfo->nSavedCharacter2 = -1000;
 
     /* -------------------------------------------------------------------- */
     /*      Rewind, and read line by line.                                  */
@@ -592,8 +581,8 @@ BSBInfo *BSBOpen(const char *pszFilename)
 /*                         BSBReadHeaderLine()                          */
 /*                                                                      */
 /*      Read one virtual line of text from the BSB header.  This        */
-/*      will end if a 0x1A (EOF) is encountered, indicating the data    */
-/*      is about to start.  It will also merge multiple physical        */
+/*      will end if a 0x1A 0x00 (EOF) is encountered, indicating the    */
+/*      data is about to start.  It will also merge multiple physical   */
 /*      lines where appropriate.                                        */
 /************************************************************************/
 
@@ -603,16 +592,25 @@ static int BSBReadHeaderLine(BSBInfo *psInfo, char *pszLine, int nLineMaxLen,
 {
     char chNext;
     int nLineLen = 0;
-
+    bool bGot1A = false;
     while (!VSIFEofL(psInfo->fp) && nLineLen < nLineMaxLen - 1)
     {
         chNext = (char)BSBGetc(psInfo, bNO1, NULL);
         /* '\0' is not really expected at this point in correct products */
         /* but we must escape if found. */
-        if (chNext == '\0' || chNext == 0x1A)
+        if (chNext == '\0')
         {
             BSBUngetc(psInfo, chNext);
+            if (bGot1A)
+                BSBUngetc(psInfo, 0x1A);
             return FALSE;
+        }
+        bGot1A = false;
+
+        if (chNext == 0x1A)
+        {
+            bGot1A = true;
+            continue;
         }
 
         /* each CR/LF (or LF/CR) as if just "CR" */
@@ -851,12 +849,7 @@ int BSBReadScanline(BSBInfo *psInfo, int nScanline,
             }
             if (nRunCount > psInfo->nXSize)
             {
-                static int bHasWarned = FALSE;
-                if (!bHasWarned)
-                {
-                    CPLDebug("BSB", "Too big run count : %d", nRunCount);
-                    bHasWarned = TRUE;
-                }
+                CPLDebugOnce("BSB", "Too big run count : %d", nRunCount);
             }
 
             if (iPixel + nRunCount + 1 > psInfo->nXSize)

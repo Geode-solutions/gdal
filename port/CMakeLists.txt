@@ -14,6 +14,7 @@ target_public_header(
   cpl_conv.h
   cpl_csv.h
   cpl_error.h
+  cpl_float.h
   cpl_hash_set.h
   cpl_http.h
   cpl_json.h
@@ -47,6 +48,7 @@ set(CPL_SOURCES
     cpl_findfile.cpp
     cpl_minixml.cpp
     cpl_multiproc.cpp
+    cpl_levenshtein.cpp
     cpl_list.cpp
     cpl_getexecpath.cpp
     cplstring.cpp
@@ -95,6 +97,7 @@ set(CPL_SOURCES
     cpl_swift.cpp
     cpl_vsil_adls.cpp
     cpl_vsil_az.cpp
+    cpl_vsil_chunked_write_handle.cpp
     cpl_vsil_uploadonclose.cpp
     cpl_vsil_gs.cpp
     cpl_vsil_webhdfs.cpp
@@ -110,10 +113,9 @@ add_library(cpl OBJECT ${CPL_SOURCES})
 target_sources(${GDAL_LIB_TARGET_NAME} PRIVATE $<TARGET_OBJECTS:cpl>)
 target_compile_options(cpl PRIVATE ${GDAL_CXX_WARNING_FLAGS} ${WFLAG_OLD_STYLE_CAST} ${WFLAG_EFFCXX})
 set_property(TARGET cpl PROPERTY POSITION_INDEPENDENT_CODE ${GDAL_OBJECT_LIBRARIES_POSITION_INDEPENDENT_CODE})
-if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
-  # Part of those files have CPL_CVSID() which break UNITY_BUILD
-  set_property(TARGET cpl PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
-endif ()
+
+set_property(SOURCE cpl_path.cpp PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
+
 # include path to generated cpl_config.h
 target_include_directories(cpl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 
@@ -177,7 +179,6 @@ if (GDAL_USE_JSONC_INTERNAL)
 endif ()
 
 target_compile_definitions(cpl PRIVATE -DHAVE_LIBZ -DZIP_SUPPORT)
-target_public_header(TARGET gdal HEADERS cpl_minizip_ioapi.h cpl_minizip_unzip.h cpl_minizip_zip.h)
 target_sources(cpl PRIVATE cpl_vsil_gzip.cpp cpl_minizip_ioapi.cpp cpl_minizip_unzip.cpp cpl_minizip_zip.cpp)
 
 if (GDAL_USE_ZLIB_INTERNAL)
@@ -247,11 +248,7 @@ if (GDAL_USE_ODBC)
   endif ()
 endif ()
 
-if (MSVC)
-  if (CMAKE_CL_64)
-    target_compile_definitions(cpl PRIVATE -D_WIN64)
-  endif ()
-else ()
+if (NOT MSVC)
   if (Threads_FOUND)
     gdal_target_link_libraries(cpl PRIVATE Threads::Threads)
   endif ()
@@ -259,11 +256,6 @@ endif ()
 
 if (HAVE_USERFAULTFD_H)
   target_compile_definitions(cpl PRIVATE -DENABLE_UFFD)
-endif ()
-
-option(HDFS_ENABLED "Include HDFS support" OFF)
-if (HDFS_ENABLED)
-  target_compile_definitions(cpl PRIVATE -DHDFS_ENABLED)
 endif ()
 
 # for plugin DLFCN: for win32 https://github.com/dlfcn-win32/dlfcn-win32/archive/v1.1.1.tar.gz if(WIN32)
@@ -349,9 +341,7 @@ if (NOT CMAKE_CROSSCOMPILING AND BUILD_VSIPRELOAD AND "${CMAKE_SYSTEM}" MATCHES 
     add_library(vsipreload MODULE vsipreload.cpp)
     set_target_properties(vsipreload PROPERTIES PREFIX "")
     target_link_libraries(vsipreload PRIVATE $<TARGET_NAME:${GDAL_LIB_TARGET_NAME}> ${CMAKE_DL_LIBS})
-    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
-      set_property(SOURCE vsipreload.cpp PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
-    endif ()
+    set_property(SOURCE vsipreload.cpp PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
 
     # For musl / Alpine
     foreach(_header IN ITEMS stdio.h fcntl.h unistd.h dirent.h sys/stat.h)
@@ -382,3 +372,25 @@ if (NOT CMAKE_CROSSCOMPILING AND BUILD_VSIPRELOAD AND "${CMAKE_SYSTEM}" MATCHES 
     endforeach()
   endif ()
 endif ()
+
+if (GDAL_USE_ICONV)
+    # Utility to generate cpl_character_sets.h and .c
+    add_executable(character_set_conv_table_generator EXCLUDE_FROM_ALL character_set_conv_table_generator.c)
+
+      if (NOT Iconv_IS_BUILT_IN)
+        if (APPLE)
+          # linkage against OSX's system iconv is going to require LIBICONV_PLUG to be defined, but other self-built
+          # situations like CondaForge or Homebrew might not need this
+          if (HAVE_ICONV_CLOSE)
+            target_compile_definitions(character_set_conv_table_generator PRIVATE -DLIBICONV_PLUG)
+          endif (HAVE_ICONV_CLOSE)
+        endif (APPLE)
+        target_link_libraries(character_set_conv_table_generator PRIVATE Iconv::Iconv)
+      endif ()
+
+    # Custom target that must be manually invoked if character_set_conv_table_generator.c is modified
+    add_custom_target(generate_cpl_character_sets
+                      COMMAND $<TARGET_FILE:character_set_conv_table_generator>
+                      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                      DEPENDS character_set_conv_table_generator)
+endif()

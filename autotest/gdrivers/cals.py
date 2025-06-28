@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test CALS driver
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2015, Even Rouault, <even dot rouault at spatialys dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -44,7 +27,7 @@ def test_cals_1():
 
     tst = gdaltest.GDALTest("CALS", "hfa/small1bit.img", 1, 9907)
 
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -56,7 +39,7 @@ def test_cals_2():
     # Has no color table
     tst = gdaltest.GDALTest("CALS", "../../gcore/data/oddsize1bit.tif", 1, 3883)
 
-    return tst.testCreateCopy()
+    tst.testCreateCopy()
 
 
 ###############################################################################
@@ -90,48 +73,36 @@ def test_cals_4():
 
     # 0 band
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 0)
-    gdal.PushErrorHandler()
-    out_ds = gdal.GetDriverByName("CALS").CreateCopy("/vsimem/cals_4.cal", src_ds)
-    gdal.PopErrorHandler()
-    assert out_ds is None
+    with pytest.raises(Exception):
+        gdal.GetDriverByName("CALS").CreateCopy("/vsimem/cals_4.cal", src_ds)
 
     # 2 bands
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 2)
-    gdal.PushErrorHandler()
-    out_ds = gdal.GetDriverByName("CALS").CreateCopy(
-        "/vsimem/cals_4.cal", src_ds, strict=True
-    )
-    gdal.PopErrorHandler()
-    assert out_ds is None
+    with pytest.raises(Exception):
+        gdal.GetDriverByName("CALS").CreateCopy(
+            "/vsimem/cals_4.cal", src_ds, strict=True
+        )
 
     # 1 band but not 1-bit
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 1)
-    gdal.PushErrorHandler()
-    out_ds = gdal.GetDriverByName("CALS").CreateCopy(
-        "/vsimem/cals_4.cal", src_ds, strict=True
-    )
-    gdal.PopErrorHandler()
-    assert out_ds is None
+    with pytest.raises(Exception):
+        gdal.GetDriverByName("CALS").CreateCopy(
+            "/vsimem/cals_4.cal", src_ds, strict=True
+        )
 
     # Dimension > 999999
     src_ds = gdal.GetDriverByName("MEM").Create("", 1000000, 1, 1)
     src_ds.GetRasterBand(1).SetMetadataItem("NBITS", "1", "IMAGE_STRUCTURE")
-    gdal.PushErrorHandler()
-    out_ds = gdal.GetDriverByName("CALS").CreateCopy(
-        "/vsimem/cals_4.cal", src_ds, strict=True
-    )
-    gdal.PopErrorHandler()
-    assert out_ds is None
+    with pytest.raises(Exception):
+        gdal.GetDriverByName("CALS").CreateCopy(
+            "/vsimem/cals_4.cal", src_ds, strict=True
+        )
 
     # Invalid output filename
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 1)
     src_ds.GetRasterBand(1).SetMetadataItem("NBITS", "1", "IMAGE_STRUCTURE")
-    gdal.PushErrorHandler()
-    out_ds = gdal.GetDriverByName("CALS").CreateCopy(
-        "/not_existing_dir/cals_4.cal", src_ds
-    )
-    gdal.PopErrorHandler()
-    assert out_ds is None
+    with pytest.raises(Exception):
+        gdal.GetDriverByName("CALS").CreateCopy("/not_existing_dir/cals_4.cal", src_ds)
 
 
 ###############################################################################

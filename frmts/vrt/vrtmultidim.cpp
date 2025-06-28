@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     vrtmultidim.cpp
  * Purpose:  Implementation of VRTDriver
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 /*! @cond Doxygen_Suppress */
@@ -39,6 +22,12 @@
 #include "cpl_minixml.h"
 #include "cpl_multiproc.h"
 #include "vrtdataset.h"
+
+VRTMDArraySource::~VRTMDArraySource() = default;
+
+static std::shared_ptr<GDALMDArray> ParseArray(const CPLXMLNode *psTree,
+                                               const char *pszVRTPath,
+                                               const char *pszParentXMLNode);
 
 struct VRTArrayDatasetWrapper
 {
@@ -77,6 +66,16 @@ static lru11::Cache<std::string, CacheEntry> g_cacheSources(100);
 std::shared_ptr<GDALGroup> VRTDataset::GetRootGroup() const
 {
     return m_poRootGroup;
+}
+
+/************************************************************************/
+/*                              VRTGroup()                              */
+/************************************************************************/
+
+VRTGroup::VRTGroup(const char *pszVRTPath)
+    : GDALGroup(std::string(), std::string()),
+      m_poRefSelf(std::make_shared<Ref>(this)), m_osVRTPath(pszVRTPath)
+{
 }
 
 /************************************************************************/
@@ -138,6 +137,18 @@ VRTGroup *VRTGroup::GetRootGroup() const
         return m_poSharedRefRootGroup->m_ptr;
     auto ref(m_poWeakRefRootGroup.lock());
     return ref ? ref->m_ptr : nullptr;
+}
+
+/************************************************************************/
+/*                       GetRootGroupSharedPtr()                        */
+/************************************************************************/
+
+std::shared_ptr<GDALGroup> VRTGroup::GetRootGroupSharedPtr() const
+{
+    auto group = GetRootGroup();
+    if (group)
+        return group->m_pSelf.lock();
+    return nullptr;
 }
 
 /************************************************************************/
@@ -381,7 +392,7 @@ VRTGroup::GetDimensionFromFullName(const std::string &name,
                 return nullptr;
             }
         }
-        auto poDim(curGroup->GetDimension(aosTokens[aosTokens.size() - 1]));
+        auto poDim(curGroup->GetDimension(aosTokens.back()));
         if (!poDim)
         {
             if (bEmitError)
@@ -466,7 +477,7 @@ std::shared_ptr<GDALGroup> VRTGroup::CreateGroup(const std::string &osName,
         return nullptr;
     }
     SetDirty();
-    auto newGroup(std::make_shared<VRTGroup>(GetFullName(), osName.c_str()));
+    auto newGroup(VRTGroup::Create(GetFullName(), osName.c_str()));
     newGroup->SetRootGroupRef(GetRootGroupRef());
     m_oMapGroups[osName] = newGroup;
     return newGroup;
@@ -932,7 +943,7 @@ VRTMDArray::Create(const std::shared_ptr<VRTGroup> &poThisGroup,
     std::unique_ptr<OGRSpatialReference> poSRS;
     if (psSRSNode)
     {
-        poSRS = cpl::make_unique<OGRSpatialReference>();
+        poSRS = std::make_unique<OGRSpatialReference>();
         poSRS->SetFromUserInput(
             CPLGetXMLValue(psSRSNode, nullptr, ""),
             OGRSpatialReference::SET_FROM_USER_INPUT_LIMITATIONS_get());
@@ -1085,6 +1096,21 @@ VRTMDArray::Create(const std::shared_ptr<VRTGroup> &poThisGroup,
 }
 
 /************************************************************************/
+/*                              Create()                                */
+/************************************************************************/
+
+std::shared_ptr<VRTMDArray> VRTMDArray::Create(const char *pszVRTPath,
+                                               const CPLXMLNode *psNode)
+{
+    auto poDummyGroup =
+        std::shared_ptr<VRTGroup>(new VRTGroup(pszVRTPath ? pszVRTPath : ""));
+    auto poArray = Create(poDummyGroup, std::string(), psNode);
+    if (poArray)
+        poArray->m_poDummyOwningGroup = std::move(poDummyGroup);
+    return poArray;
+}
+
+/************************************************************************/
 /*                            GetAttributes()                           */
 /************************************************************************/
 
@@ -1131,9 +1157,9 @@ void VRTMDArraySourceRegularlySpaced::Serialize(CPLXMLNode *psParent,
     CPLXMLNode *psSource =
         CPLCreateXMLNode(psParent, CXT_Element, "RegularlySpacedValues");
     CPLAddXMLAttributeAndValue(psSource, "start",
-                               CPLSPrintf("%.18g", m_dfStart));
+                               CPLSPrintf("%.17g", m_dfStart));
     CPLAddXMLAttributeAndValue(psSource, "increment",
-                               CPLSPrintf("%.18g", m_dfIncrement));
+                               CPLSPrintf("%.17g", m_dfIncrement));
 }
 
 /************************************************************************/
@@ -1302,7 +1328,7 @@ VRTMDArraySourceInlinedValues::Create(const VRTMDArray *array,
         pabyPtr += nDTSize;
     }
 
-    return cpl::make_unique<VRTMDArraySourceInlinedValues>(
+    return std::make_unique<VRTMDArraySourceInlinedValues>(
         array, bIsConstantValue, std::move(anOffset), std::move(anCount),
         std::move(abyValues));
 }
@@ -1329,16 +1355,20 @@ VRTMDArraySourceInlinedValues::~VRTMDArraySourceInlinedValues()
 /************************************************************************/
 /*                                   Read()                             */
 /************************************************************************/
-CPL_NOSANITIZE_UNSIGNED_INT_OVERFLOW
 static inline void IncrPointer(const GByte *&ptr, GInt64 nInc, size_t nIncSize)
 {
-    ptr += nInc * nIncSize;
+    if (nInc < 0)
+        ptr -= (-nInc) * nIncSize;
+    else
+        ptr += nInc * nIncSize;
 }
 
-CPL_NOSANITIZE_UNSIGNED_INT_OVERFLOW
 static inline void IncrPointer(GByte *&ptr, GPtrDiff_t nInc, size_t nIncSize)
 {
-    ptr += nInc * nIncSize;
+    if (nInc < 0)
+        ptr -= (-nInc) * nIncSize;
+    else
+        ptr += nInc * nIncSize;
 }
 
 bool VRTMDArraySourceInlinedValues::Read(
@@ -1410,7 +1440,7 @@ bool VRTMDArraySourceInlinedValues::Read(
     std::vector<GByte *> abyStackDstPtr(nDims + 1);
     abyStackDstPtr[0] = static_cast<GByte *>(pDstBuffer) + nDstOffset;
 
-    const auto dt(m_poDstArray->GetDataType());
+    const auto &dt(m_poDstArray->GetDataType());
     std::vector<size_t> anStackCount(nDims);
     size_t iDim = 0;
 
@@ -1453,7 +1483,7 @@ lbl_next_depth:
 void VRTMDArraySourceInlinedValues::Serialize(CPLXMLNode *psParent,
                                               const char *) const
 {
-    const auto dt(m_poDstArray->GetDataType());
+    const auto &dt(m_poDstArray->GetDataType());
     CPLXMLNode *psSource = CPLCreateXMLNode(psParent, CXT_Element,
                                             m_bIsConstantValue ? "ConstantValue"
                                             : dt.GetClass() == GEDTC_STRING
@@ -1698,7 +1728,7 @@ VRTMDArraySourceFromArray::Create(const VRTMDArray *poDstArray,
         }
     }
 
-    return cpl::make_unique<VRTMDArraySourceFromArray>(
+    return std::make_unique<VRTMDArraySourceFromArray>(
         poDstArray, bRelativeToVRTSet, bRelativeToVRT, pszFilename, pszArray,
         pszSourceBand, std::move(anTransposedAxis), pszView,
         std::move(anSrcOffset), std::move(anCount), std::move(anStep),
@@ -1849,7 +1879,7 @@ VRTMDArraySourceFromArray::~VRTMDArraySourceFromArray()
         CPLDebug("VRT", "Dropping reference to %s", key.c_str());
         CacheEntry oPair;
         g_cacheSources.tryGet(key, oPair);
-        oPair.second.erase(oPair.second.find(this));
+        oPair.second.erase(this);
         g_cacheSources.insert(key, oPair);
     }
 }
@@ -1909,8 +1939,8 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
 
     const std::string osFilename =
         m_bRelativeToVRT
-            ? std::string(CPLProjectRelativeFilename(
-                  m_poDstArray->GetVRTPath().c_str(), m_osFilename.c_str()))
+            ? CPLProjectRelativeFilenameSafe(m_poDstArray->GetVRTPath().c_str(),
+                                             m_osFilename.c_str())
             : m_osFilename;
     const std::string key(CreateKey(osFilename));
 
@@ -1932,14 +1962,14 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
         else
         {
             poSrcDS = GDALDataset::Open(
-                m_osFilename.c_str(),
+                osFilename.c_str(),
                 (m_osBand.empty() ? GDAL_OF_MULTIDIM_RASTER : GDAL_OF_RASTER) |
                     GDAL_OF_INTERNAL | GDAL_OF_VERBOSE_ERROR,
                 nullptr, nullptr, nullptr);
             if (!poSrcDS)
                 return false;
             poSrcDSWrapper = std::make_shared<VRTArrayDatasetWrapper>(poSrcDS);
-            oPair.first = poSrcDSWrapper;
+            oPair.first = std::move(poSrcDSWrapper);
             oPair.second.insert(this);
             g_cacheSources.insert(key, oPair);
         }
@@ -1972,6 +2002,25 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
         poArray = poBand->AsMDArray();
         CPLAssert(poArray);
     }
+
+    std::string osViewExpr = m_osViewExpr;
+    if (STARTS_WITH(osViewExpr.c_str(), "resample=true,") ||
+        osViewExpr == "resample=true")
+    {
+        poArray =
+            poArray->GetResampled(std::vector<std::shared_ptr<GDALDimension>>(
+                                      poArray->GetDimensionCount()),
+                                  GRIORA_NearestNeighbour, nullptr, nullptr);
+        if (poArray == nullptr)
+        {
+            return false;
+        }
+        if (osViewExpr == "resample=true")
+            osViewExpr.clear();
+        else
+            osViewExpr = osViewExpr.substr(strlen("resample=true,"));
+    }
+
     if (!m_anTransposedAxis.empty())
     {
         poArray = poArray->Transpose(m_anTransposedAxis);
@@ -1980,9 +2029,9 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
             return false;
         }
     }
-    if (!m_osViewExpr.empty())
+    if (!osViewExpr.empty())
     {
-        poArray = poArray->GetView(m_osViewExpr);
+        poArray = poArray->GetView(osViewExpr);
         if (poArray == nullptr)
         {
             return false;
@@ -2175,7 +2224,15 @@ bool VRTMDArray::IRead(const GUInt64 *arrayStartIdx, const size_t *count,
         std::vector<GByte *> abyStackDstPtr;
         size_t iDim = 0;
         abyStackDstPtr.push_back(static_cast<GByte *>(pDstBuffer));
+        // GCC 15.1 on msys2-mingw64
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
         abyStackDstPtr.resize(nDims + 1);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     lbl_next_depth:
         if (iDim == nDims)
         {
@@ -2502,13 +2559,13 @@ void VRTMDArray::Serialize(CPLXMLNode *psParent, const char *pszVRTPath) const
     if (m_bHasOffset)
     {
         CPLCreateXMLElementAndValue(psArray, "Offset",
-                                    CPLSPrintf("%.18g", m_dfOffset));
+                                    CPLSPrintf("%.17g", m_dfOffset));
     }
 
     if (m_bHasScale)
     {
         CPLCreateXMLElementAndValue(psArray, "Scale",
-                                    CPLSPrintf("%.18g", m_dfScale));
+                                    CPLSPrintf("%.17g", m_dfScale));
     }
 
     for (const auto &poSource : m_sources)
@@ -2520,6 +2577,425 @@ void VRTMDArray::Serialize(CPLXMLNode *psParent, const char *pszVRTPath) const
     {
         iter.second->Serialize(psArray);
     }
+}
+
+/************************************************************************/
+/*                           VRTArraySource()                           */
+/************************************************************************/
+
+class VRTArraySource : public VRTSource
+{
+    std::unique_ptr<CPLXMLNode, CPLXMLTreeCloserDeleter> m_poXMLTree{};
+    std::unique_ptr<GDALDataset> m_poDS{};
+    std::unique_ptr<VRTSimpleSource> m_poSimpleSource{};
+
+  public:
+    VRTArraySource() = default;
+
+    CPLErr RasterIO(GDALDataType eBandDataType, int nXOff, int nYOff,
+                    int nXSize, int nYSize, void *pData, int nBufXSize,
+                    int nBufYSize, GDALDataType eBufType, GSpacing nPixelSpace,
+                    GSpacing nLineSpace, GDALRasterIOExtraArg *psExtraArg,
+                    WorkingState &oWorkingState) override;
+
+    double GetMinimum(int nXSize, int nYSize, int *pbSuccess) override
+    {
+        return m_poSimpleSource->GetMinimum(nXSize, nYSize, pbSuccess);
+    }
+
+    double GetMaximum(int nXSize, int nYSize, int *pbSuccess) override
+    {
+        return m_poSimpleSource->GetMaximum(nXSize, nYSize, pbSuccess);
+    }
+
+    CPLErr GetHistogram(int nXSize, int nYSize, double dfMin, double dfMax,
+                        int nBuckets, GUIntBig *panHistogram,
+                        int bIncludeOutOfRange, int bApproxOK,
+                        GDALProgressFunc pfnProgress,
+                        void *pProgressData) override
+    {
+        return m_poSimpleSource->GetHistogram(
+            nXSize, nYSize, dfMin, dfMax, nBuckets, panHistogram,
+            bIncludeOutOfRange, bApproxOK, pfnProgress, pProgressData);
+    }
+
+    const char *GetType() const override
+    {
+        return "ArraySource";
+    }
+
+    CPLErr XMLInit(const CPLXMLNode *psTree, const char *pszVRTPath,
+                   VRTMapSharedResources &oMapSharedSources) override;
+    CPLXMLNode *SerializeToXML(const char *pszVRTPath) override;
+};
+
+/************************************************************************/
+/*                              RasterIO()                              */
+/************************************************************************/
+
+CPLErr VRTArraySource::RasterIO(GDALDataType eBandDataType, int nXOff,
+                                int nYOff, int nXSize, int nYSize, void *pData,
+                                int nBufXSize, int nBufYSize,
+                                GDALDataType eBufType, GSpacing nPixelSpace,
+                                GSpacing nLineSpace,
+                                GDALRasterIOExtraArg *psExtraArg,
+                                WorkingState &oWorkingState)
+{
+    return m_poSimpleSource->RasterIO(eBandDataType, nXOff, nYOff, nXSize,
+                                      nYSize, pData, nBufXSize, nBufYSize,
+                                      eBufType, nPixelSpace, nLineSpace,
+                                      psExtraArg, oWorkingState);
+}
+
+/************************************************************************/
+/*                        ParseSingleSourceArray()                      */
+/************************************************************************/
+
+static std::shared_ptr<GDALMDArray>
+ParseSingleSourceArray(const CPLXMLNode *psSingleSourceArray,
+                       const char *pszVRTPath)
+{
+    const auto psSourceFileNameNode =
+        CPLGetXMLNode(psSingleSourceArray, "SourceFilename");
+    if (!psSourceFileNameNode)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Cannot find <SourceFilename> in <SingleSourceArray>");
+        return nullptr;
+    }
+    const char *pszSourceFilename =
+        CPLGetXMLValue(psSourceFileNameNode, nullptr, "");
+    const bool bRelativeToVRT = CPL_TO_BOOL(
+        atoi(CPLGetXMLValue(psSourceFileNameNode, "relativeToVRT", "0")));
+
+    const char *pszSourceArray =
+        CPLGetXMLValue(psSingleSourceArray, "SourceArray", nullptr);
+    if (!pszSourceArray)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Cannot find <SourceArray> in <SingleSourceArray>");
+        return nullptr;
+    }
+    const std::string osSourceFilename(
+        bRelativeToVRT
+            ? CPLProjectRelativeFilenameSafe(pszVRTPath, pszSourceFilename)
+            : std::string(pszSourceFilename));
+    auto poDS = std::unique_ptr<GDALDataset>(
+        GDALDataset::Open(osSourceFilename.c_str(),
+                          GDAL_OF_MULTIDIM_RASTER | GDAL_OF_VERBOSE_ERROR,
+                          nullptr, nullptr, nullptr));
+    if (!poDS)
+        return nullptr;
+    auto poRG = poDS->GetRootGroup();
+    if (!poRG)
+        return nullptr;
+    auto poArray = poRG->OpenMDArrayFromFullname(pszSourceArray);
+    if (!poArray)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Cannot find array '%s' in %s",
+                 pszSourceArray, osSourceFilename.c_str());
+    }
+    return poArray;
+}
+
+/************************************************************************/
+/*                              XMLInit()                               */
+/************************************************************************/
+
+CPLErr VRTArraySource::XMLInit(const CPLXMLNode *psTree, const char *pszVRTPath,
+                               VRTMapSharedResources & /*oMapSharedSources*/)
+{
+    const auto poArray = ParseArray(psTree, pszVRTPath, "ArraySource");
+    if (!poArray)
+    {
+        return CE_Failure;
+    }
+    if (poArray->GetDimensionCount() != 2)
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "Array referenced in <ArraySource> should be a "
+                 "two-dimensional array");
+        return CE_Failure;
+    }
+
+    m_poDS.reset(poArray->AsClassicDataset(1, 0));
+    if (!m_poDS)
+        return CE_Failure;
+
+    m_poSimpleSource = std::make_unique<VRTSimpleSource>();
+    auto poBand = m_poDS->GetRasterBand(1);
+    m_poSimpleSource->SetSrcBand(poBand);
+    m_poDS->Reference();
+
+    if (m_poSimpleSource->ParseSrcRectAndDstRect(psTree) != CE_None)
+        return CE_Failure;
+    if (!CPLGetXMLNode(psTree, "SrcRect"))
+        m_poSimpleSource->SetSrcWindow(0, 0, poBand->GetXSize(),
+                                       poBand->GetYSize());
+    if (!CPLGetXMLNode(psTree, "DstRect"))
+        m_poSimpleSource->SetDstWindow(0, 0, poBand->GetXSize(),
+                                       poBand->GetYSize());
+
+    m_poXMLTree.reset(CPLCloneXMLTree(psTree));
+    return CE_None;
+}
+
+/************************************************************************/
+/*                          SerializeToXML()                            */
+/************************************************************************/
+
+CPLXMLNode *VRTArraySource::SerializeToXML(const char * /*pszVRTPath*/)
+{
+    if (m_poXMLTree)
+    {
+        return CPLCloneXMLTree(m_poXMLTree.get());
+    }
+    else
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "VRTArraySource::SerializeToXML() not implemented");
+        return nullptr;
+    }
+}
+
+/************************************************************************/
+/*                     VRTDerivedArrayCreate()                          */
+/************************************************************************/
+
+std::shared_ptr<GDALMDArray> VRTDerivedArrayCreate(const char *pszVRTPath,
+                                                   const CPLXMLNode *psTree)
+{
+    auto poArray = ParseArray(psTree, pszVRTPath, "DerivedArray");
+
+    const auto GetOptions =
+        [](const CPLXMLNode *psParent, CPLStringList &aosOptions)
+    {
+        for (const CPLXMLNode *psOption = CPLGetXMLNode(psParent, "Option");
+             psOption; psOption = psOption->psNext)
+        {
+            if (psOption->eType == CXT_Element &&
+                strcmp(psOption->pszValue, "Option") == 0)
+            {
+                const char *pszName = CPLGetXMLValue(psOption, "name", nullptr);
+                if (!pszName)
+                {
+                    CPLError(
+                        CE_Failure, CPLE_AppDefined,
+                        "Cannot find 'name' attribute in <Option> element");
+                    return false;
+                }
+                const char *pszValue = CPLGetXMLValue(psOption, nullptr, "");
+                aosOptions.SetNameValue(pszName, pszValue);
+            }
+        }
+        return true;
+    };
+
+    for (const CPLXMLNode *psStep = CPLGetXMLNode(psTree, "Step");
+         psStep && poArray; psStep = psStep->psNext)
+    {
+        if (psStep->eType != CXT_Element ||
+            strcmp(psStep->pszValue, "Step") != 0)
+            continue;
+
+        if (const CPLXMLNode *psView = CPLGetXMLNode(psStep, "View"))
+        {
+            const char *pszExpr = CPLGetXMLValue(psView, "expr", nullptr);
+            if (!pszExpr)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Cannot find 'expr' attribute in <View> element");
+                return nullptr;
+            }
+            poArray = poArray->GetView(pszExpr);
+        }
+        else if (const CPLXMLNode *psTranspose =
+                     CPLGetXMLNode(psStep, "Transpose"))
+        {
+            const char *pszOrder =
+                CPLGetXMLValue(psTranspose, "newOrder", nullptr);
+            if (!pszOrder)
+            {
+                CPLError(
+                    CE_Failure, CPLE_AppDefined,
+                    "Cannot find 'newOrder' attribute in <Transpose> element");
+                return nullptr;
+            }
+            std::vector<int> anMapNewAxisToOldAxis;
+            const CPLStringList aosItems(CSLTokenizeString2(pszOrder, ",", 0));
+            for (int i = 0; i < aosItems.size(); ++i)
+                anMapNewAxisToOldAxis.push_back(atoi(aosItems[i]));
+            poArray = poArray->Transpose(anMapNewAxisToOldAxis);
+        }
+        else if (const CPLXMLNode *psResample =
+                     CPLGetXMLNode(psStep, "Resample"))
+        {
+            std::vector<std::shared_ptr<GDALDimension>> apoNewDims;
+            auto poDummyGroup = std::shared_ptr<VRTGroup>(
+                new VRTGroup(pszVRTPath ? pszVRTPath : ""));
+            for (const CPLXMLNode *psDimension =
+                     CPLGetXMLNode(psResample, "Dimension");
+                 psDimension; psDimension = psDimension->psNext)
+            {
+                if (psDimension->eType == CXT_Element &&
+                    strcmp(psDimension->pszValue, "Dimension") == 0)
+                {
+                    auto apoDim = VRTDimension::Create(
+                        poDummyGroup, std::string(), psDimension);
+                    if (!apoDim)
+                        return nullptr;
+                    apoNewDims.emplace_back(std::move(apoDim));
+                }
+            }
+            if (apoNewDims.empty())
+                apoNewDims.resize(poArray->GetDimensionCount());
+
+            const char *pszResampleAlg =
+                CPLGetXMLValue(psResample, "ResampleAlg", "NEAR");
+            const auto eResampleAlg =
+                GDALRasterIOGetResampleAlg(pszResampleAlg);
+
+            std::unique_ptr<OGRSpatialReference> poSRS;
+            const char *pszSRS = CPLGetXMLValue(psResample, "SRS", nullptr);
+            if (pszSRS)
+            {
+                poSRS = std::make_unique<OGRSpatialReference>();
+                poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+                if (poSRS->SetFromUserInput(
+                        pszSRS, OGRSpatialReference::
+                                    SET_FROM_USER_INPUT_LIMITATIONS_get()) !=
+                    OGRERR_NONE)
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Invalid value for <SRS>");
+                    return nullptr;
+                }
+            }
+
+            CPLStringList aosOptions;
+            if (!GetOptions(psResample, aosOptions))
+                return nullptr;
+
+            poArray = poArray->GetResampled(apoNewDims, eResampleAlg,
+                                            poSRS.get(), aosOptions.List());
+        }
+        else if (const CPLXMLNode *psGrid = CPLGetXMLNode(psStep, "Grid"))
+        {
+            const char *pszGridOptions =
+                CPLGetXMLValue(psGrid, "GridOptions", nullptr);
+            if (!pszGridOptions)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Cannot find <GridOptions> in <Grid> element");
+                return nullptr;
+            }
+
+            std::shared_ptr<GDALMDArray> poXArray;
+            if (const CPLXMLNode *psXArrayNode =
+                    CPLGetXMLNode(psGrid, "XArray"))
+            {
+                poXArray = ParseArray(psXArrayNode, pszVRTPath, "XArray");
+                if (!poXArray)
+                    return nullptr;
+            }
+
+            std::shared_ptr<GDALMDArray> poYArray;
+            if (const CPLXMLNode *psYArrayNode =
+                    CPLGetXMLNode(psGrid, "YArray"))
+            {
+                poYArray = ParseArray(psYArrayNode, pszVRTPath, "YArray");
+                if (!poYArray)
+                    return nullptr;
+            }
+
+            CPLStringList aosOptions;
+            if (!GetOptions(psGrid, aosOptions))
+                return nullptr;
+
+            poArray = poArray->GetGridded(pszGridOptions, poXArray, poYArray,
+                                          aosOptions.List());
+        }
+        else if (const CPLXMLNode *psGetMask = CPLGetXMLNode(psStep, "GetMask"))
+        {
+            CPLStringList aosOptions;
+            if (!GetOptions(psGetMask, aosOptions))
+                return nullptr;
+
+            poArray = poArray->GetMask(aosOptions.List());
+        }
+        else if (CPLGetXMLNode(psStep, "GetUnscaled"))
+        {
+            poArray = poArray->GetUnscaled();
+        }
+        else
+        {
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "Unknown <Step>.<%s> element",
+                     psStep->psChild ? psStep->psChild->pszValue : "(null)");
+            return nullptr;
+        }
+    }
+
+    return poArray;
+}
+
+/************************************************************************/
+/*                              ParseArray()                            */
+/************************************************************************/
+
+static std::shared_ptr<GDALMDArray> ParseArray(const CPLXMLNode *psTree,
+                                               const char *pszVRTPath,
+                                               const char *pszParentXMLNode)
+{
+    if (const CPLXMLNode *psSingleSourceArrayNode =
+            CPLGetXMLNode(psTree, "SingleSourceArray"))
+        return ParseSingleSourceArray(psSingleSourceArrayNode, pszVRTPath);
+
+    if (const CPLXMLNode *psArrayNode = CPLGetXMLNode(psTree, "Array"))
+    {
+        return VRTMDArray::Create(pszVRTPath, psArrayNode);
+    }
+
+    if (const CPLXMLNode *psDerivedArrayNode =
+            CPLGetXMLNode(psTree, "DerivedArray"))
+    {
+        return VRTDerivedArrayCreate(pszVRTPath, psDerivedArrayNode);
+    }
+
+    CPLError(
+        CE_Failure, CPLE_AppDefined,
+        "Cannot find a <SimpleSourceArray>, <Array> or <DerivedArray> in <%s>",
+        pszParentXMLNode);
+    return nullptr;
+}
+
+/************************************************************************/
+/*                       VRTParseArraySource()                          */
+/************************************************************************/
+
+VRTSource *VRTParseArraySource(const CPLXMLNode *psChild,
+                               const char *pszVRTPath,
+                               VRTMapSharedResources &oMapSharedSources)
+{
+    VRTSource *poSource = nullptr;
+
+    if (EQUAL(psChild->pszValue, "ArraySource"))
+    {
+        poSource = new VRTArraySource();
+    }
+    else
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "VRTParseArraySource() - Unknown source : %s",
+                 psChild->pszValue);
+        return nullptr;
+    }
+
+    if (poSource->XMLInit(psChild, pszVRTPath, oMapSharedSources) == CE_None)
+        return poSource;
+
+    delete poSource;
+    return nullptr;
 }
 
 /*! @endcond */

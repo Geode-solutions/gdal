@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2014-2015 NextGIS <info@nextgis.ru>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "reader_alos.h"
@@ -47,21 +31,21 @@ GDALMDReaderALOS::GDALMDReaderALOS(const char *pszPath,
                                    char **papszSiblingFiles)
     : GDALMDReaderBase(pszPath, papszSiblingFiles)
 {
-    CPLString osDirName = CPLGetDirname(pszPath);
-    CPLString osBaseName = CPLGetBasename(pszPath);
+    const CPLString osDirName = CPLGetDirnameSafe(pszPath);
+    const CPLString osBaseName = CPLGetBasenameSafe(pszPath);
 
     CPLString osIMDSourceFilename =
-        CPLFormFilename(osDirName, "summary", ".txt");
+        CPLFormFilenameSafe(osDirName, "summary", ".txt");
     if (CPLCheckForFile(&osIMDSourceFilename[0], papszSiblingFiles))
     {
-        m_osIMDSourceFilename = osIMDSourceFilename;
+        m_osIMDSourceFilename = std::move(osIMDSourceFilename);
     }
     else
     {
-        osIMDSourceFilename = CPLFormFilename(osDirName, "SUMMARY", ".TXT");
+        osIMDSourceFilename = CPLFormFilenameSafe(osDirName, "SUMMARY", ".TXT");
         if (CPLCheckForFile(&osIMDSourceFilename[0], papszSiblingFiles))
         {
-            m_osIMDSourceFilename = osIMDSourceFilename;
+            m_osIMDSourceFilename = std::move(osIMDSourceFilename);
         }
     }
 
@@ -69,19 +53,21 @@ GDALMDReaderALOS::GDALMDReaderALOS(const char *pszPath,
     {
         // check if this is separate band or whole image
         // test without 6 symbols
-        CPLString osHDRFileName = CPLFormFilename(
-            osDirName, CPLSPrintf("HDR%s", osBaseName + 6), "txt");
+        CPLString osHDRFileName = CPLFormFilenameSafe(
+            osDirName, (std::string("HDR") + (osBaseName.c_str() + 6)).c_str(),
+            "txt");
         if (CPLCheckForFile(&osHDRFileName[0], papszSiblingFiles))
         {
-            m_osHDRSourceFilename = osHDRFileName;
+            m_osHDRSourceFilename = std::move(osHDRFileName);
         }
         else
         {
-            osHDRFileName = CPLFormFilename(
-                osDirName, CPLSPrintf("HDR%s", osBaseName + 6), "TXT");
+            osHDRFileName = CPLFormFilenameSafe(
+                osDirName,
+                (std::string("HDR") + (osBaseName.c_str() + 6)).c_str(), "TXT");
             if (CPLCheckForFile(&osHDRFileName[0], papszSiblingFiles))
             {
-                m_osHDRSourceFilename = osHDRFileName;
+                m_osHDRSourceFilename = std::move(osHDRFileName);
             }
         }
     }
@@ -89,19 +75,21 @@ GDALMDReaderALOS::GDALMDReaderALOS(const char *pszPath,
     // test without 3 symbols
     if (osBaseName.size() >= 3 && m_osHDRSourceFilename.empty())
     {
-        CPLString osHDRFileName = CPLFormFilename(
-            osDirName, CPLSPrintf("HDR%s", osBaseName + 3), "txt");
+        CPLString osHDRFileName = CPLFormFilenameSafe(
+            osDirName, (std::string("HDR") + (osBaseName.c_str() + 3)).c_str(),
+            "txt");
         if (CPLCheckForFile(&osHDRFileName[0], papszSiblingFiles))
         {
-            m_osHDRSourceFilename = osHDRFileName;
+            m_osHDRSourceFilename = std::move(osHDRFileName);
         }
         else
         {
-            osHDRFileName = CPLFormFilename(
-                osDirName, CPLSPrintf("HDR%s", osBaseName + 3), "TXT");
+            osHDRFileName = CPLFormFilenameSafe(
+                osDirName,
+                (std::string("HDR") + (osBaseName.c_str() + 3)).c_str(), "TXT");
             if (CPLCheckForFile(&osHDRFileName[0], papszSiblingFiles))
             {
-                m_osHDRSourceFilename = osHDRFileName;
+                m_osHDRSourceFilename = std::move(osHDRFileName);
             }
         }
     }
@@ -109,19 +97,21 @@ GDALMDReaderALOS::GDALMDReaderALOS(const char *pszPath,
     // test without 6 symbols
     if (osBaseName.size() >= 6)
     {
-        CPLString osRPCFileName = CPLFormFilename(
-            osDirName, CPLSPrintf("RPC%s", osBaseName + 6), "txt");
+        CPLString osRPCFileName = CPLFormFilenameSafe(
+            osDirName, (std::string("RPC") + (osBaseName.c_str() + 6)).c_str(),
+            "txt");
         if (CPLCheckForFile(&osRPCFileName[0], papszSiblingFiles))
         {
-            m_osRPBSourceFilename = osRPCFileName;
+            m_osRPBSourceFilename = std::move(osRPCFileName);
         }
         else
         {
-            osRPCFileName = CPLFormFilename(
-                osDirName, CPLSPrintf("RPC%s", osBaseName + 6), "TXT");
+            osRPCFileName = CPLFormFilenameSafe(
+                osDirName,
+                (std::string("RPC") + (osBaseName.c_str() + 6)).c_str(), "TXT");
             if (CPLCheckForFile(&osRPCFileName[0], papszSiblingFiles))
             {
-                m_osRPBSourceFilename = osRPCFileName;
+                m_osRPBSourceFilename = std::move(osRPCFileName);
             }
         }
     }
@@ -129,19 +119,21 @@ GDALMDReaderALOS::GDALMDReaderALOS(const char *pszPath,
     // test without 3 symbols
     if (osBaseName.size() >= 3 && m_osRPBSourceFilename.empty())
     {
-        CPLString osRPCFileName = CPLFormFilename(
-            osDirName, CPLSPrintf("RPC%s", osBaseName + 3), "txt");
+        CPLString osRPCFileName = CPLFormFilenameSafe(
+            osDirName, (std::string("RPC") + (osBaseName.c_str() + 3)).c_str(),
+            "txt");
         if (CPLCheckForFile(&osRPCFileName[0], papszSiblingFiles))
         {
-            m_osRPBSourceFilename = osRPCFileName;
+            m_osRPBSourceFilename = std::move(osRPCFileName);
         }
         else
         {
-            osRPCFileName = CPLFormFilename(
-                osDirName, CPLSPrintf("RPC%s", osBaseName + 3), "TXT");
+            osRPCFileName = CPLFormFilenameSafe(
+                osDirName,
+                (std::string("RPC") + (osBaseName.c_str() + 3)).c_str(), "TXT");
             if (CPLCheckForFile(&osRPCFileName[0], papszSiblingFiles))
             {
-                m_osRPBSourceFilename = osRPCFileName;
+                m_osRPBSourceFilename = std::move(osRPCFileName);
             }
         }
     }
@@ -299,10 +291,6 @@ void GDALMDReaderALOS::LoadMetadata()
     }
 }
 
-static const char *const apszRPCTXT20ValItems[] = {
-    RPC_LINE_NUM_COEFF, RPC_LINE_DEN_COEFF, RPC_SAMP_NUM_COEFF,
-    RPC_SAMP_DEN_COEFF, nullptr};
-
 /**
  * LoadRPCTxtFile
  */
@@ -311,74 +299,77 @@ char **GDALMDReaderALOS::LoadRPCTxtFile()
     if (m_osRPBSourceFilename.empty())
         return nullptr;
 
-    char **papszLines = CSLLoad(m_osRPBSourceFilename);
-    if (nullptr == papszLines)
+    const CPLStringList aosLines(CSLLoad(m_osRPBSourceFilename));
+    if (aosLines.empty())
         return nullptr;
 
-    const char *pszFirstRow = papszLines[0];
-    char **papszRPB = nullptr;
+    const char *pszFirstRow = aosLines[0];
+    CPLStringList aosRPB;
     if (nullptr != pszFirstRow)
     {
-        char buff[50] = {0};
-        int nOffset = 0;
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 7);
-        nOffset += 6;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_LINE_OFF, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 6);
-        nOffset += 5;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_SAMP_OFF, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 9);
-        nOffset += 8;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_LAT_OFF, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 10);
-        nOffset += 9;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_LONG_OFF, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 6);
-        nOffset += 5;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_HEIGHT_OFF, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 7);
-        nOffset += 6;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_LINE_SCALE, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 6);
-        nOffset += 5;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_SAMP_SCALE, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 9);
-        nOffset += 8;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_LAT_SCALE, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 10);
-        nOffset += 9;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_LONG_SCALE, buff);
-
-        CPLStrlcpy(buff, pszFirstRow + nOffset, 6);
-        nOffset += 5;
-        papszRPB = CSLAddNameValue(papszRPB, RPC_HEIGHT_SCALE, buff);
-
-        int i, j;
-        for (i = 0; apszRPCTXT20ValItems[i] != nullptr; i++)
+        static const struct
         {
-            CPLString value;
-            for (j = 1; j < 21; j++)
-            {
-                CPLStrlcpy(buff, pszFirstRow + nOffset, 13);
-                nOffset += 12;
+            const char *pszName;
+            int nSize;
+        } apsFieldDescriptors[] = {
+            {RPC_LINE_OFF, 6},     {RPC_SAMP_OFF, 5},   {RPC_LAT_OFF, 8},
+            {RPC_LONG_OFF, 9},     {RPC_HEIGHT_OFF, 5}, {RPC_LINE_SCALE, 6},
+            {RPC_SAMP_SCALE, 5},   {RPC_LAT_SCALE, 8},  {RPC_LONG_SCALE, 9},
+            {RPC_HEIGHT_SCALE, 5},
+        };
 
-                value = value + " " + CPLString(buff);
+        int nRequiredSize = 0;
+        for (const auto &sFieldDescriptor : apsFieldDescriptors)
+        {
+            nRequiredSize += sFieldDescriptor.nSize;
+        }
+
+        static const char *const apszRPCTXT20ValItems[] = {
+            RPC_LINE_NUM_COEFF, RPC_LINE_DEN_COEFF, RPC_SAMP_NUM_COEFF,
+            RPC_SAMP_DEN_COEFF};
+
+        constexpr int RPC_COEFF_COUNT1 = CPL_ARRAYSIZE(apszRPCTXT20ValItems);
+        constexpr int RPC_COEFF_COUNT2 = 20;
+        constexpr int RPC_COEFF_SIZE = 12;
+        nRequiredSize += RPC_COEFF_COUNT1 * RPC_COEFF_COUNT2 * RPC_COEFF_SIZE;
+        if (strlen(pszFirstRow) < static_cast<size_t>(nRequiredSize))
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "%s has only %d bytes wherea %d are required",
+                     m_osRPBSourceFilename.c_str(), int(strlen(pszFirstRow)),
+                     nRequiredSize);
+            return nullptr;
+        }
+
+        int nOffset = 0;
+        char buff[16] = {0};
+        for (const auto &sFieldDescriptor : apsFieldDescriptors)
+        {
+            CPLAssert(sFieldDescriptor.nSize < int(sizeof(buff)));
+            memcpy(buff, pszFirstRow + nOffset, sFieldDescriptor.nSize);
+            buff[sFieldDescriptor.nSize] = 0;
+            aosRPB.SetNameValue(sFieldDescriptor.pszName, buff);
+            nOffset += sFieldDescriptor.nSize;
+        }
+
+        for (const char *pszItem : apszRPCTXT20ValItems)
+        {
+            std::string osValue;
+            for (int j = 0; j < RPC_COEFF_COUNT2; j++)
+            {
+                memcpy(buff, pszFirstRow + nOffset, RPC_COEFF_SIZE);
+                buff[RPC_COEFF_SIZE] = 0;
+                nOffset += RPC_COEFF_SIZE;
+
+                if (!osValue.empty())
+                    osValue += " ";
+                osValue += buff;
             }
-            papszRPB =
-                CSLAddNameValue(papszRPB, apszRPCTXT20ValItems[i], value);
+            aosRPB.SetNameValue(pszItem, osValue.c_str());
         }
     }
-    CSLDestroy(papszLines);
 
-    return papszRPB;
+    return aosRPB.StealList();
 }
 
 /**

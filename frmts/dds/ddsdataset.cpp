@@ -8,34 +8,17 @@
  * Copyright (c) 2013, Alan Boudreault
  * Copyright (c) 2013,2019, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************/
 
 #include "crunch_headers.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "ddsdrivercore.h"
 
 #include <algorithm>
 
 using namespace crnlib;
-
-#define DDS_SIGNATURE "DDS "
 
 enum
 {
@@ -67,7 +50,6 @@ class DDSDataset final : public GDALPamDataset
     ~DDSDataset();
 
   public:
-    static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
     static GDALDataset *CreateCopy(const char *pszFilename,
                                    GDALDataset *poSrcDS, int bStrict,
@@ -86,6 +68,7 @@ class DDSRasterBand final : public GDALPamRasterBand
 {
   protected:
     CPLErr IReadBlock(int, int, void *) override;
+
     GDALColorInterp GetColorInterpretation() override
     {
         return static_cast<GDALColorInterp>(GCI_RedBand + nBand - 1);
@@ -125,6 +108,7 @@ class DDSRasterBandAllDecoded final : public GDALPamRasterBand
 {
   protected:
     CPLErr IReadBlock(int, int, void *) override;
+
     GDALColorInterp GetColorInterpretation() override
     {
         return static_cast<GDALColorInterp>(GCI_RedBand + nBand - 1);
@@ -181,8 +165,7 @@ CPLErr DDSRasterBand::IReadBlock(int, int nYBlock, void *pImage)
             return CE_Failure;
         }
 
-        const uint32_t num_blocks_x =
-            (nRasterXSize + cDXTBlockSize - 1) / cDXTBlockSize;
+        const uint32_t num_blocks_x = DIV_ROUND_UP(nRasterXSize, cDXTBlockSize);
         const GByte *pabySrc =
             static_cast<const GByte *>(poGDS->pCompressedBuffer);
         crn_uint32
@@ -236,32 +219,12 @@ CPLErr DDSRasterBand::IReadBlock(int, int nYBlock, void *pImage)
 }
 
 /************************************************************************/
-/*                              Identify()                              */
-/************************************************************************/
-
-int DDSDataset::Identify(GDALOpenInfo *poOpenInfo)
-{
-    if (poOpenInfo->fpL == nullptr || poOpenInfo->eAccess == GA_Update ||
-        static_cast<size_t>(poOpenInfo->nHeaderBytes) <
-            strlen(DDS_SIGNATURE) + sizeof(crnlib::DDSURFACEDESC2))
-    {
-        return false;
-    }
-
-    // Check signature and dwSize member of DDSURFACEDESC2
-    return memcmp(poOpenInfo->pabyHeader, DDS_SIGNATURE,
-                  strlen(DDS_SIGNATURE)) == 0 &&
-           CPL_LSBUINT32PTR(poOpenInfo->pabyHeader + strlen(DDS_SIGNATURE)) ==
-               sizeof(crnlib::DDSURFACEDESC2);
-}
-
-/************************************************************************/
 /*                                Open()                                */
 /************************************************************************/
 
 GDALDataset *DDSDataset::Open(GDALOpenInfo *poOpenInfo)
 {
-    if (!Identify(poOpenInfo))
+    if (!DDSDriverIdentify(poOpenInfo))
         return nullptr;
 
     crnlib::DDSURFACEDESC2 ddsDesc;
@@ -336,10 +299,8 @@ GDALDataset *DDSDataset::Open(GDALOpenInfo *poOpenInfo)
     }
 
     const uint32_t bytesPerBlock = crn_get_bytes_per_dxt_block(fmt);
-    const uint32_t num_blocks_x =
-        (ddsDesc.dwWidth + cDXTBlockSize - 1) / cDXTBlockSize;
-    const uint32_t num_blocks_y =
-        (ddsDesc.dwHeight + cDXTBlockSize - 1) / cDXTBlockSize;
+    const uint32_t num_blocks_x = DIV_ROUND_UP(ddsDesc.dwWidth, cDXTBlockSize);
+    const uint32_t num_blocks_y = DIV_ROUND_UP(ddsDesc.dwHeight, cDXTBlockSize);
     const uint32_t compressed_size_per_row = num_blocks_x * bytesPerBlock;
     const vsi_l_offset nCompressedDataSize =
         static_cast<vsi_l_offset>(compressed_size_per_row) * num_blocks_y;
@@ -660,8 +621,8 @@ GDALDataset *DDSDataset::CreateCopy(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     const uint32_t bytesPerBlock = crn_get_bytes_per_dxt_block(fmt);
     CPLErr eErr = CE_None;
-    const uint32_t nYNumBlocks = (nYSize + cDXTBlockSize - 1) / cDXTBlockSize;
-    const uint32_t num_blocks_x = (nXSize + cDXTBlockSize - 1) / cDXTBlockSize;
+    const uint32_t nYNumBlocks = DIV_ROUND_UP(nYSize, cDXTBlockSize);
+    const uint32_t num_blocks_x = DIV_ROUND_UP(nXSize, cDXTBlockSize);
     const uint32_t total_compressed_size = num_blocks_x * bytesPerBlock;
 
     void *pCompressed_data = CPLMalloc(total_compressed_size);
@@ -691,7 +652,7 @@ GDALDataset *DDSDataset::CreateCopy(const char *pszFilename,
 
         crn_uint32 *pSrc_image = nullptr;
         if (nColorType == DDS_COLOR_TYPE_RGB_ALPHA)
-            pSrc_image = (crn_uint32 *)pabyScanlines;
+            pSrc_image = reinterpret_cast<crn_uint32 *>(pabyScanlines);
         else if (nColorType == DDS_COLOR_TYPE_RGB)
         { /* crunch needs 32bits integers */
             int nPixels = nXSize * cDXTBlockSize;
@@ -760,41 +721,12 @@ GDALDataset *DDSDataset::CreateCopy(const char *pszFilename,
 
 void GDALRegister_DDS()
 {
-    if (GDALGetDriverByName("DDS") != nullptr)
+    if (GDALGetDriverByName(DRIVER_NAME) != nullptr)
         return;
 
     GDALDriver *poDriver = new GDALDriver();
+    DDSDriverSetCommonMetadata(poDriver);
 
-    poDriver->SetDescription("DDS");
-    poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "DirectDraw Surface");
-    poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/dds.html");
-    poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "dds");
-    poDriver->SetMetadataItem(GDAL_DMD_MIMETYPE, "image/dds");
-
-    poDriver->SetMetadataItem(
-        GDAL_DMD_CREATIONOPTIONLIST,
-        "<CreationOptionList>\n"
-        "   <Option name='FORMAT' type='string-select' description='Texture "
-        "format' default='DXT3'>\n"
-        "     <Value>DXT1</Value>\n"
-        "     <Value>DXT1A</Value>\n"
-        "     <Value>DXT3</Value>\n"
-        "     <Value>DXT5</Value>\n"
-        "     <Value>ETC1</Value>\n"
-        "   </Option>\n"
-        "   <Option name='QUALITY' type='string-select' "
-        "description='Compression Quality' default='NORMAL'>\n"
-        "     <Value>SUPERFAST</Value>\n"
-        "     <Value>FAST</Value>\n"
-        "     <Value>NORMAL</Value>\n"
-        "     <Value>BETTER</Value>\n"
-        "     <Value>UBER</Value>\n"
-        "   </Option>\n"
-        "</CreationOptionList>\n");
-
-    poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-    poDriver->pfnIdentify = DDSDataset::Identify;
     poDriver->pfnOpen = DDSDataset::Open;
     poDriver->pfnCreateCopy = DDSDataset::CreateCopy;
 

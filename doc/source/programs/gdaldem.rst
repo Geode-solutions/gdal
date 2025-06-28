@@ -15,47 +15,50 @@ Synopsis
 
 .. code-block::
 
-    gdaldem <mode> <input> <output> <options>
+    gdaldem [--help] [--help-general] <mode> <input> <output> <options>
 
-Generate a shaded relief map from any GDAL-supported elevation raster:
+From any GDAL-supported elevation raster:
 
-.. code-block::
-
-    gdaldem hillshade input_dem output_hillshade
-                [-z ZFactor (default=1)] [-s scale* (default=1)]
-                [-az Azimuth (default=315)] [-alt Altitude (default=45)]
-                [-alg Horn|ZevenbergenThorne] [-combined | -multidirectional | -igor]
-                [-compute_edges] [-b Band (default=1)] [-of format] [-co "NAME=VALUE"]* [-q]
-
-Generate a slope map from any GDAL-supported elevation raster:
+Generate a shaded relief map:
 
 .. code-block::
 
-    gdaldem slope input_dem output_slope_map
-                [-p use percent slope (default=degrees)] [-s scale* (default=1)]
-                [-alg Horn|ZevenbergenThorne]
-                [-compute_edges] [-b Band (default=1)] [-of format] [-co "NAME=VALUE"]* [-q]
+     gdaldem hillshade <input_dem> <output_hillshade>
+                 [-z <zfactor>] [[-s <scale>] | [-xscale <xscale> -yscale <yscale>]]
+                 [-az <azimuth>] [-alt <altitude>]
+                 [-alg ZevenbergenThorne] [-combined | -multidirectional | -igor]
+                 [-compute_edges] [-b <Band>] [-of <format>] [-co <NAME>=<VALUE>]... [-q]
 
-Generate an aspect map from any GDAL-supported elevation raster,
+Generate a slope map:
+
+.. code-block::
+
+     gdaldem slope <input_dem> <output_slope_map>
+                 [-p] [[-s <scale>] | [-xscale <xscale> -yscale <yscale>]]
+                 [-alg ZevenbergenThorne]
+                 [-compute_edges] [-b <band>] [-of <format>] [-co <NAME>=<VALUE>]... [-q]
+
+Generate an aspect map,
 outputs a 32-bit float raster with pixel values from 0-360 indicating azimuth:
 
 .. code-block::
 
-    gdaldem aspect input_dem output_aspect_map
-                [-trigonometric] [-zero_for_flat]
-                [-alg Horn|ZevenbergenThorne]
-                [-compute_edges] [-b Band (default=1)] [-of format] [-co "NAME=VALUE"]* [-q]
+     gdaldem aspect <input_dem> <output_aspect_map>
+                 [-trigonometric] [-zero_for_flat]
+                 [-alg ZevenbergenThorne]
+                 [-compute_edges] [-b <band>] [-of format] [-co <NAME>=<VALUE>]... [-q]
 
-Generate a color relief map from any GDAL-supported elevation raster:
+Generate a color relief map:
 
 .. code-block::
 
-    gdaldem color-relief input_dem color_text_file output_color_relief_map
-                [-alpha] [-exact_color_entry | -nearest_color_entry]
-                [-b Band (default=1)] [-of format] [-co "NAME=VALUE"]* [-q]
-    where color_text_file contains lines of the format "elevation_value red green blue"
+    gdaldem color-relief <input_dem> <color_text_file> <output_color_relief_map>
+                 [-alpha] [-exact_color_entry | -nearest_color_entry]
+                 [-b <band>] [-of format] [-co <NAME>=<VALUE>]... [-q]
 
-Generate a Terrain Ruggedness Index (TRI) map from any GDAL-supported elevation raster:
+    where color_text_file contains lines of the format "elevation_value red green blue [alpha]". If alpha column is present it can be enabled for use with '-alpha'.
+
+Generate a Terrain Ruggedness Index (TRI) map:
 
 .. code-block::
 
@@ -63,26 +66,39 @@ Generate a Terrain Ruggedness Index (TRI) map from any GDAL-supported elevation 
                 [-alg Wilson|Riley]
                 [-compute_edges] [-b Band (default=1)] [-of format] [-q]
 
-Generate a Topographic Position Index (TPI) map from any GDAL-supported elevation raster:
+Generate a Topographic Position Index (TPI) map:
 
 .. code-block::
 
-    gdaldem TPI input_dem output_TPI_map
-                [-compute_edges] [-b Band (default=1)] [-of format] [-q]
+     gdaldem TPI <input_dem> <output_TPI_map>
+                 [-compute_edges] [-b <band>] [-of <format>] [-co <NAME>=<VALUE>]... [-q]
 
-Generate a roughness map from any GDAL-supported elevation raster:
+Generate a roughness map:
 
 .. code-block::
 
-    gdaldem roughness input_dem output_roughness_map
-                [-compute_edges] [-b Band (default=1)] [-of format] [-q]
+     gdaldem roughness <input_dem> <output_roughness_map>
+                 [-compute_edges] [-b <band>] [-of <format>] [-co <NAME>=<VALUE>]... [-q]
 
 Description
 -----------
 
-The :program:`gdaldem` generally assumes that x, y and z units are identical.
-If x (east-west) and y (north-south) units are identical, but z (elevation)
-units are different, the scale (-s) option can be used to set the ratio of
+The :program:`gdaldem` generates output rasters using different algorithms for
+terrain analysis.
+
+In general, it assumes that x, y and z units are identical. However, for hillshade
+and slope computation, starting with GDAL 3.11, if none of :option:`-scale`,
+:option:`-xscale` and :option:`-yscale` are specified, and the CRS is a
+geographic or projected CRS, :program:`gdaldem` will automatically determine the
+appropriate ratio from the units of the CRS, as well as the potential value of
+the units of the raster band (as returned by :cpp:func:`GDALRasterBand::GetUnitType`, if it
+is metre, foot international or US survey foot). Note that for geographic CRS,
+the result for source datasets at high latitudes may be incorrect, and prior
+reprojection to a polar projection might be needed.
+
+For hillshade and slope computation, if x (east-west) and y (north-south) units
+are identical, but z (elevation) units are different, the :option:`-scale` option
+(or :option:`-xscale` and :option:`-yscale`) can be used to set the ratio of
 vertical units to horizontal.
 For LatLong projections near the equator, where units of latitude and units of
 longitude are similar, elevation (z) units can be converted to be compatible
@@ -124,11 +140,13 @@ grid using gdalwarp before using gdaldem.
 
 The following general options are available:
 
-.. option:: input_dem
+.. include:: options/help_and_help_general.rst
+
+.. option:: <input_dem>
 
     The input DEM raster to be processed
 
-.. option:: output_xxx_map
+.. option:: <output_xxx_map>
 
     The output raster produced
 
@@ -186,7 +204,53 @@ The following specific options are available :
 
 .. option:: -s <scale>
 
-    Ratio of vertical units to horizontal. If the horizontal unit of the source DEM is degrees (e.g Lat/Long WGS84 projection), you can use scale=111120 if the vertical units are meters (or scale=370400 if they are in feet)
+    Ratio of vertical units to horizontal units. If the horizontal unit of the source DEM is degrees (e.g Lat/Long WGS84 projection), you can use scale=111120 if the vertical units are meters (or scale=370400 if they are in feet).
+
+    Starting with GDAL 3.11, if none of :option:`-scale`, :option:`-xscale` and
+    :option:`-yscale` are specified, and the CRS is a geographic or projected CRS,
+    :program:`gdaldem` will automatically determine the appropriate ratio from
+    the units of the CRS, as well as the potential value of the units of the
+    raster band (as returned by :cpp:func:`GDALRasterBand::GetUnitType`, if it
+    is metre, foot international or US survey foot). Note that for geographic CRS,
+    the result for source datasets at high latitudes may be incorrect, and prior
+    reprojection to a polar projection might be needed.
+
+    The effect of this option is the same as specifying :option:`-xscale` and :option:`-yscale` with the same value as :option:`-scale`.
+    :option:`-scale` is mutually exclusive with :option:`-xscale` and :option:`-yscale`
+
+.. option:: -xscale <scale>
+
+    .. versionadded:: 3.11
+
+    Ratio of vertical units to horizontal X axis units. If the horizontal unit of the source DEM is degrees (e.g Lat/Long WGS84 projection), you can use scale=111120 if the vertical units are meters (or scale=370400 if they are in feet).
+
+    Starting with GDAL 3.11, if none of :option:`-scale`, :option:`-xscale` and
+    :option:`-yscale` are specified, and the CRS is a geographic or projected CRS,
+    :program:`gdaldem` will automatically determine the appropriate ratio from
+    the units of the CRS, as well as the potential value of the units of the
+    raster band (as returned by :cpp:func:`GDALRasterBand::GetUnitType`, if it
+    is metre, foot international or US survey foot). Note that for geographic CRS,
+    the result for source datasets at high latitudes may be incorrect, and prior
+    reprojection to a polar projection might be needed.
+
+    If :option:`-xscale` is specified, :option:`-yscale` must also be specified.
+
+.. option:: -yscale <scale>
+
+    .. versionadded:: 3.11
+
+    Ratio of vertical units to horizontal Y axis units. If the horizontal unit of the source DEM is degrees (e.g Lat/Long WGS84 projection), you can use scale=111120 if the vertical units are meters (or scale=370400 if they are in feet)
+
+    Starting with GDAL 3.11, if none of :option:`-scale`, :option:`-xscale` and
+    :option:`-yscale` are specified, and the CRS is a geographic or projected CRS,
+    :program:`gdaldem` will automatically determine the appropriate ratio from
+    the units of the CRS, as well as the potential value of the units of the
+    raster band (as returned by :cpp:func:`GDALRasterBand::GetUnitType`, if it
+    is metre, foot international or US survey foot). Note that for geographic CRS,
+    the result for source datasets at high latitudes may be incorrect, and prior
+    reprojection to a polar projection might be needed.
+
+    If :option:`-yscale` is specified, :option:`-xscale` must also be specified.
 
 .. option:: -az <azimuth>
 
@@ -233,9 +297,55 @@ The following specific options are available :
 
     If specified, the slope will be expressed as percent slope. Otherwise, it is expressed as degrees
 
-:option:`-s`
+.. option:: -s <scale>
 
-    Ratio of vertical units to horizontal. If the horizontal unit of the source DEM is degrees (e.g Lat/Long WGS84 projection), you can use scale=111120 if the vertical units are meters (or scale=370400 if they are in feet).
+    Ratio of vertical units to horizontal units. If the horizontal unit of the source DEM is degrees (e.g Lat/Long WGS84 projection), you can use scale=111120 if the vertical units are meters (or scale=370400 if they are in feet).
+
+    Starting with GDAL 3.11, if none of :option:`-scale`, :option:`-xscale` and
+    :option:`-yscale` are specified, and the CRS is a geographic or projected CRS,
+    :program:`gdaldem` will automatically determine the appropriate ratio from
+    the units of the CRS, as well as the potential value of the units of the
+    raster band (as returned by :cpp:func:`GDALRasterBand::GetUnitType`, if it
+    is metre, foot international or US survey foot). Note that for geographic CRS,
+    the result for source datasets at high latitudes may be incorrect, and prior
+    reprojection to a polar projection might be needed.
+
+    The effect of this option is the same as specifying :option:`-xscale` and :option:`-yscale` with the same value as :option:`-scale`.
+    :option:`-scale` is mutually exclusive with :option:`-xscale` and :option:`-yscale`
+
+.. option:: -xscale <scale>
+
+    .. versionadded:: 3.11
+
+    Ratio of vertical units to horizontal X axis units. If the horizontal unit of the source DEM is degrees (e.g Lat/Long WGS84 projection), you can use scale=111120 if the vertical units are meters (or scale=370400 if they are in feet).
+
+    Starting with GDAL 3.11, if none of :option:`-scale`, :option:`-xscale` and
+    :option:`-yscale` are specified, and the CRS is a geographic or projected CRS,
+    :program:`gdaldem` will automatically determine the appropriate ratio from
+    the units of the CRS, as well as the potential value of the units of the
+    raster band (as returned by :cpp:func:`GDALRasterBand::GetUnitType`, if it
+    is metre, foot international or US survey foot). Note that for geographic CRS,
+    the result for source datasets at high latitudes may be incorrect, and prior
+    reprojection to a polar projection might be needed.
+
+    If :option:`-xscale` is specified, :option:`-yscale` must also be specified.
+
+.. option:: -yscale <scale>
+
+    .. versionadded:: 3.11
+
+    Ratio of vertical units to horizontal Y axis units. If the horizontal unit of the source DEM is degrees (e.g Lat/Long WGS84 projection), you can use scale=111120 if the vertical units are meters (or scale=370400 if they are in feet)
+
+    Starting with GDAL 3.11, if none of :option:`-scale`, :option:`-xscale` and
+    :option:`-yscale` are specified, and the CRS is a geographic or projected CRS,
+    :program:`gdaldem` will automatically determine the appropriate ratio from
+    the units of the CRS, as well as the potential value of the units of the
+    raster band (as returned by :cpp:func:`GDALRasterBand::GetUnitType`, if it
+    is metre, foot international or US survey foot). Note that for geographic CRS,
+    the result for source datasets at high latitudes may be incorrect, and prior
+    reprojection to a polar projection might be needed.
+
+    If :option:`-yscale` is specified, :option:`-xscale` must also be specified.
 
 aspect
 ^^^^^^
@@ -408,8 +518,8 @@ See also
 
 Documentation of related GRASS utilities:
 
-https://grass.osgeo.org/grass79/manuals/r.slope.aspect.html
+https://grass.osgeo.org/grass84/manuals/r.slope.aspect.html
 
-https://grass.osgeo.org/grass79/manuals/r.relief.html
+https://grass.osgeo.org/grass84/manuals/r.relief.html
 
-https://grass.osgeo.org/grass79/manuals/r.colors.html
+https://grass.osgeo.org/grass84/manuals/r.colors.html

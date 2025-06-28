@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2009-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -41,6 +25,8 @@
 #include "cpl_error.h"
 #include "cpl_multiproc.h"
 #include "gdal_csv.h"
+
+#include <algorithm>
 
 /* ==================================================================== */
 /*      The CSVTable is a persistent set of info about an open CSV      */
@@ -529,36 +515,38 @@ static void CSVIngest(const char *pszFilename)
 /** Detect which field separator is used.
  *
  * Currently, it can detect comma, semicolon, space, tabulation or pipe.
- * In case of ambiguity or no separator found, comma will be considered as the
- * separator.
+ * In case of ambiguity, starting with GDAL 3.7.1, the separator with the
+ * most occurrences will be selected (and a warning emitted).
+ * If no separator found, comma will be considered as the separator.
  *
  * @return ',', ';', ' ', tabulation character or '|'.
  */
 char CSVDetectSeperator(const char *pszLine)
 {
     bool bInString = false;
-    char chDelimiter = '\0';
+    int nCountComma = 0;
+    int nCountSemicolon = 0;
+    int nCountTab = 0;
+    int nCountPipe = 0;
     int nCountSpace = 0;
 
     for (; *pszLine != '\0'; pszLine++)
     {
-        if (!bInString && (*pszLine == ',' || *pszLine == ';' ||
-                           *pszLine == '\t' || *pszLine == '|'))
+        if (!bInString && *pszLine == ',')
         {
-            if (chDelimiter == '\0')
-            {
-                chDelimiter = *pszLine;
-            }
-            else if (chDelimiter != *pszLine)
-            {
-                // The separator is not consistent on the line.
-                CPLDebug("CSV",
-                         "Inconsistent separator. '%c' and '%c' found. "
-                         "Using ',' as default",
-                         chDelimiter, *pszLine);
-                chDelimiter = ',';
-                break;
-            }
+            nCountComma++;
+        }
+        else if (!bInString && *pszLine == ';')
+        {
+            nCountSemicolon++;
+        }
+        else if (!bInString && *pszLine == '\t')
+        {
+            nCountTab++;
+        }
+        else if (!bInString && *pszLine == '|')
+        {
+            nCountPipe++;
         }
         else if (!bInString && *pszLine == ' ')
         {
@@ -578,12 +566,45 @@ char CSVDetectSeperator(const char *pszLine)
         }
     }
 
-    if (chDelimiter == '\0')
+    const int nMaxCountExceptSpace =
+        std::max(std::max(nCountComma, nCountSemicolon),
+                 std::max(nCountTab, nCountPipe));
+    char chDelimiter = ',';
+    if (nMaxCountExceptSpace == 0)
     {
         if (nCountSpace > 0)
             chDelimiter = ' ';
-        else
+    }
+    else
+    {
+        bool bWarn = false;
+        if (nCountComma == nMaxCountExceptSpace)
+        {
             chDelimiter = ',';
+            bWarn = (nCountSemicolon > 0 || nCountTab > 0 || nCountPipe > 0);
+        }
+        else if (nCountSemicolon == nMaxCountExceptSpace)
+        {
+            chDelimiter = ';';
+            bWarn = (nCountComma > 0 || nCountTab > 0 || nCountPipe > 0);
+        }
+        else if (nCountTab == nMaxCountExceptSpace)
+        {
+            chDelimiter = '\t';
+            bWarn = (nCountComma > 0 || nCountSemicolon > 0 || nCountPipe > 0);
+        }
+        else /* if( nCountPipe == nMaxCountExceptSpace ) */
+        {
+            chDelimiter = '|';
+            bWarn = (nCountComma > 0 || nCountSemicolon > 0 || nCountTab > 0);
+        }
+        if (bWarn)
+        {
+            CPLError(CE_Warning, CPLE_AppDefined,
+                     "Selecting '%c' as CSV field separator, but "
+                     "other candidate separator(s) have been found.",
+                     chDelimiter);
+        }
     }
 
     return chDelimiter;
@@ -626,45 +647,74 @@ CSVReadParseLineGeneric(void *fp, const char *(*pfnReadLine)(void *, size_t),
         return CSVSplitLine(pszLine, pszDelimiter, bKeepLeadingAndClosingQuotes,
                             bMergeDelimiter);
 
+    const size_t nDelimiterLength = strlen(pszDelimiter);
+    bool bInString = false;           // keep in that scope !
+    std::string osWorkLine(pszLine);  // keep in that scope !
+    size_t i = 0;                     // keep in that scope !
+
     try
     {
-        // We must now count the quotes in our working string, and as
-        // long as it is odd, keep adding new lines.
-        std::string osWorkLine(pszLine);
-
-        size_t i = 0;
-        int nCount = 0;
-
         while (true)
         {
-            for (; i < osWorkLine.size(); i++)
+            for (; i < osWorkLine.size(); ++i)
             {
                 if (osWorkLine[i] == '\"')
-                    nCount++;
+                {
+                    if (!bInString)
+                    {
+                        // Only consider " as the start of a quoted string
+                        // if it is the first character of the line, or
+                        // if it is immediately after the field delimiter.
+                        if (i == 0 ||
+                            (i >= nDelimiterLength &&
+                             osWorkLine.compare(i - nDelimiterLength,
+                                                nDelimiterLength, pszDelimiter,
+                                                nDelimiterLength) == 0))
+                        {
+                            bInString = true;
+                        }
+                    }
+                    else if (i + 1 < osWorkLine.size() &&
+                             osWorkLine[i + 1] == '"')
+                    {
+                        // Escaped double quote in a quoted string
+                        ++i;
+                    }
+                    else
+                    {
+                        bInString = false;
+                    }
+                }
             }
 
-            if (nCount % 2 == 0)
-                break;
+            if (!bInString)
+            {
+                return CSVSplitLine(osWorkLine.c_str(), pszDelimiter,
+                                    bKeepLeadingAndClosingQuotes,
+                                    bMergeDelimiter);
+            }
 
-            pszLine = pfnReadLine(fp, nMaxLineSize);
-            if (pszLine == nullptr)
+            const char *pszNewLine = pfnReadLine(fp, nMaxLineSize);
+            if (pszNewLine == nullptr)
                 break;
 
             osWorkLine.append("\n");
-            osWorkLine.append(pszLine);
+            osWorkLine.append(pszNewLine);
         }
-
-        char **papszReturn =
-            CSVSplitLine(osWorkLine.c_str(), pszDelimiter,
-                         bKeepLeadingAndClosingQuotes, bMergeDelimiter);
-
-        return papszReturn;
     }
     catch (const std::exception &e)
     {
         CPLError(CE_Failure, CPLE_OutOfMemory, "%s", e.what());
-        return nullptr;
     }
+
+    if (bInString)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "CSV file has unbalanced number of double-quotes. Corrupted "
+                 "data will likely be returned");
+    }
+
+    return nullptr;
 }
 
 /************************************************************************/
@@ -1455,13 +1505,13 @@ will take in a CSV filename and return a full path to the file. The
 returned string should be to an internal static buffer so that the
 caller doesn't have to free the result.
 
-<b>Example:</b><br>
+Example:
 
 The listgeo utility uses the following override function if the user
 specified a CSV file directory with the -t commandline switch (argument
-put into CSVDirName).  <p>
+put into CSVDirName).
 
-<pre>
+\code{.cpp}
 
     ...
     SetCSVFilenameHook( CSVFileOverride );
@@ -1476,7 +1526,7 @@ static const char *CSVFileOverride( const char * pszInput )
 
     return szPath;
 }
-</pre>
+\endcode
 
 */
 
@@ -1486,4 +1536,5 @@ void SetCSVFilenameHook(const char *(*pfnNewHook)(const char *))
 {
     pfnCSVFilenameHook = pfnNewHook;
 }
+
 CPL_C_END

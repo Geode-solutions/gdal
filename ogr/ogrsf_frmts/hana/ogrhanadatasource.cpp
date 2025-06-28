@@ -7,27 +7,12 @@
  ******************************************************************************
  * Copyright (c) 2020, SAP SE
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_hana.h"
 #include "ogrhanautils.h"
+#include "ogrhanadrivercore.h"
 
 #include "odbc/Connection.h"
 #include "odbc/Environment.h"
@@ -49,106 +34,6 @@ using namespace OGRHANA;
 
 namespace
 {
-
-class LayerCreationOptionsConstants
-{
-  public:
-    LayerCreationOptionsConstants() = delete;
-
-  public:
-    static constexpr const char *OVERWRITE = "OVERWRITE";
-    static constexpr const char *LAUNDER = "LAUNDER";
-    static constexpr const char *PRECISION = "PRECISION";
-    static constexpr const char *DEFAULT_STRING_SIZE = "DEFAULT_STRING_SIZE";
-    static constexpr const char *GEOMETRY_NAME = "GEOMETRY_NAME";
-    static constexpr const char *GEOMETRY_NULLABLE = "GEOMETRY_NULLABLE";
-    static constexpr const char *GEOMETRY_INDEX = "GEOMETRY_INDEX";
-    static constexpr const char *SRID = "SRID";
-    static constexpr const char *FID = "FID";
-    static constexpr const char *FID64 = "FID64";
-    static constexpr const char *COLUMN_TYPES = "COLUMN_TYPES";
-    static constexpr const char *BATCH_SIZE = "BATCH_SIZE";
-
-    // clang-format off
-    static const char* GetList()
-    {
-        return
-               "<LayerCreationOptionList>"
-               "  <Option name='OVERWRITE' type='boolean' description='Specifies whether to overwrite an existing table with the layer name to be created' default='NO'/>"
-               "  <Option name='LAUNDER' type='boolean' description='Specifies whether layer and field names will be laundered' default='YES'/>"
-               "  <Option name='PRECISION' type='boolean' description='Specifies whether fields created should keep the width and precision' default='YES'/>"
-               "  <Option name='DEFAULT_STRING_SIZE' type='int' description='Specifies default string column size' default='256'/>"
-               "  <Option name='GEOMETRY_NAME' type='string' description='Specifies name of geometry column.' default='OGR_GEOMETRY'/>"
-               "  <Option name='GEOMETRY_NULLABLE' type='boolean' description='Specifies whether the values of the geometry column can be NULL' default='YES'/>"
-               "  <Option name='GEOMETRY_INDEX' type='string' description='Specifies which spatial index to use for the geometry column' default='DEFAULT'/>"
-               "  <Option name='SRID' type='int' description='Forced SRID of the layer'/>"
-               "  <Option name='FID' type='string' description='Specifies the name of the FID column to create' default='OGR_FID'/>"
-               "  <Option name='FID64' type='boolean' description='Specifies whether to create the FID column with BIGINT type to handle 64bit wide ids' default='NO'/>"
-               "  <Option name='COLUMN_TYPES' type='string' description='Specifies a comma-separated list of strings in the format field_name=hana_field_type that define column types.'/>"
-               "  <Option name='BATCH_SIZE' type='int' description='Specifies the number of bytes to be written per one batch' default='4194304'/>"
-               "</LayerCreationOptionList>";
-    }
-    // clang-format on
-};
-
-class OpenOptionsConstants
-{
-  public:
-    OpenOptionsConstants() = delete;
-
-  public:
-    static constexpr const char *DSN = "DSN";
-    static constexpr const char *DRIVER = "DRIVER";
-    static constexpr const char *HOST = "HOST";
-    static constexpr const char *PORT = "PORT";
-    static constexpr const char *DATABASE = "DATABASE";
-    static constexpr const char *USER = "USER";
-    static constexpr const char *PASSWORD = "PASSWORD";
-    static constexpr const char *SCHEMA = "SCHEMA";
-    static constexpr const char *TABLES = "TABLES";
-
-    static constexpr const char *ENCRYPT = "ENCRYPT";
-    static constexpr const char *SSL_CRYPTO_PROVIDER = "SSL_CRYPTO_PROVIDER";
-    static constexpr const char *SSL_KEY_STORE = "SSL_KEY_STORE";
-    static constexpr const char *SSL_TRUST_STORE = "SSL_TRUST_STORE";
-    static constexpr const char *SSL_VALIDATE_CERTIFICATE =
-        "SSL_VALIDATE_CERTIFICATE";
-    static constexpr const char *SSL_HOST_NAME_CERTIFICATE =
-        "SSL_HOST_NAME_CERTIFICATE";
-
-    static constexpr const char *CONNECTION_TIMEOUT = "CONNECTION_TIMEOUT";
-    static constexpr const char *PACKET_SIZE = "PACKET_SIZE";
-    static constexpr const char *SPLIT_BATCH_COMMANDS = "SPLIT_BATCH_COMMANDS";
-
-    static constexpr const char *DETECT_GEOMETRY_TYPE = "DETECT_GEOMETRY_TYPE";
-
-    // clang-format off
-    static const char* GetList()
-    {
-        return
-               "<OpenOptionList>"
-               "  <Option name='DRIVER' type='string' description='Name or a path to a driver.For example, DRIVER={HDBODBC} or DRIVER=/usr/sap/hdbclient/libodbcHDB.so' required='true'/>"
-               "  <Option name='HOST' type='string' description='Server hostname' required='true'/>"
-               "  <Option name='PORT' type='int' description='Port number' required='true'/>"
-               "  <Option name='DATABASE' type='string' description='Specifies the name of the database to connect to' required='true'/>"
-               "  <Option name='USER' type='string' description='Specifies the user name' required='true'/>"
-               "  <Option name='PASSWORD' type='string' description='Specifies the user password' required='true'/>"
-               "  <Option name='SCHEMA' type='string' description='Specifies the schema used for tables listed in TABLES option' required='true'/>"
-               "  <Option name='TABLES' type='string' description='Restricted set of tables to list (comma separated)'/>"
-               "  <Option name='ENCRYPT' type='boolean' description='Enables or disables TLS/SSL encryption' default='NO'/>"
-               "  <Option name='SSL_CRYPTO_PROVIDER' type='string' description='Cryptographic library provider used for SSL communication (commoncrypto| sapcrypto | openssl)'/>"
-               "  <Option name='SSL_KEY_STORE' type='string' description='Path to the keystore file that contains the server&apos;s private key'/>"
-               "  <Option name='SSL_TRUST_STORE' type='string' description='Path to trust store file that contains the server&apos;s public certificate(s) (OpenSSL only)'/>"
-               "  <Option name='SSL_VALIDATE_CERTIFICATE' type='boolean' description='If set to true, the server&apos;s certificate is validated' default='YES'/>"
-               "  <Option name='SSL_HOST_NAME_IN_CERTIFICATE' type='string' description='Host name used to verify server&apos;s identity'/>"
-               "  <Option name='CONNECTION_TIMEOUT' type='int' description='Connection timeout measured in milliseconds. Setting this option to 0 disables the timeout'/>"
-               "  <Option name='PACKET_SIZE' type='int' description='Sets the maximum size of a request packet sent from the client to the server, in bytes. The minimum is 1 MB.'/>"
-               "  <Option name='SPLIT_BATCH_COMMANDS' type='boolean' description='Allows split and parallel execution of batch commands on partitioned tables' default='YES'/>"
-               "  <Option name='DETECT_GEOMETRY_TYPE' type='boolean' description='Specifies whether to detect the type of geometry columns. Note, the detection may take a significant amount of time for large tables' default='YES'/>"
-               "</OpenOptionList>";
-    }
-    // clang-format on
-};
 
 CPLString BuildConnectionString(char **openOptions)
 {
@@ -197,50 +82,88 @@ CPLString BuildConnectionString(char **openOptions)
         addParameter(paramName, paramValue);
     };
 
-    const char *paramDSN = getOptValue(OpenOptionsConstants::DSN);
-    if (paramDSN != nullptr)
+    auto checkIgnoredOptParameter = [&](const char *optionName)
     {
-        addParameter(OpenOptionsConstants::DSN, paramDSN);
+        if (getOptValue(optionName))
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Connection parameter '%s' is ignored in the current "
+                     "combination.",
+                     optionName);
+    };
+
+    if (const char *paramUserStoreKey =
+            getOptValue(OGRHanaOpenOptionsConstants::USER_STORE_KEY))
+    {
+        addOptParameter(OGRHanaOpenOptionsConstants::DRIVER, "DRIVER", true);
+        CPLString node = CPLString().Printf("@%s", paramUserStoreKey);
+        addParameter("SERVERNODE", node.c_str());
+
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::DSN);
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::HOST);
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::PORT);
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::DATABASE);
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::USER);
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::PASSWORD);
+    }
+    else if (const char *paramDSN =
+                 getOptValue(OGRHanaOpenOptionsConstants::DSN))
+    {
+        addParameter(OGRHanaOpenOptionsConstants::DSN, paramDSN);
+        addOptParameter(OGRHanaOpenOptionsConstants::USER, "UID", true);
+        addOptParameter(OGRHanaOpenOptionsConstants::PASSWORD, "PWD", true);
+
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::DRIVER);
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::HOST);
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::PORT);
+        checkIgnoredOptParameter(OGRHanaOpenOptionsConstants::DATABASE);
     }
     else
     {
-        addOptParameter(OpenOptionsConstants::DRIVER, "DRIVER", true);
-        const char *paramHost = getOptValue(OpenOptionsConstants::HOST, true);
-        const char *paramPort = getOptValue(OpenOptionsConstants::PORT, true);
+        addOptParameter(OGRHanaOpenOptionsConstants::DRIVER, "DRIVER", true);
+        const char *paramHost =
+            getOptValue(OGRHanaOpenOptionsConstants::HOST, true);
+        const char *paramPort =
+            getOptValue(OGRHanaOpenOptionsConstants::PORT, true);
         if (paramHost != nullptr && paramPort != nullptr)
         {
             CPLString node = CPLString().Printf("%s:%s", paramHost, paramPort);
             addParameter("SERVERNODE", node.c_str());
         }
-        addOptParameter(OpenOptionsConstants::DATABASE, "DATABASENAME");
+        addOptParameter(OGRHanaOpenOptionsConstants::USER, "UID", true);
+        addOptParameter(OGRHanaOpenOptionsConstants::PASSWORD, "PWD", true);
+        addOptParameter(OGRHanaOpenOptionsConstants::DATABASE, "DATABASENAME");
     }
 
-    addOptParameter(OpenOptionsConstants::USER, "UID", true);
-    addOptParameter(OpenOptionsConstants::PASSWORD, "PWD", true);
-    const char *paramSchema = getOptValue(OpenOptionsConstants::SCHEMA, true);
-    if (paramSchema != nullptr)
+    if (const char *paramSchema =
+            getOptValue(OGRHanaOpenOptionsConstants::SCHEMA, true))
     {
         CPLString schema = CPLString().Printf("\"%s\"", paramSchema);
         addParameter("CURRENTSCHEMA", schema.c_str());
     }
 
-    if (CPLFetchBool(openOptions, OpenOptionsConstants::ENCRYPT, false))
+    if (CPLFetchBool(openOptions, OGRHanaOpenOptionsConstants::ENCRYPT, false))
     {
-        addOptParameter(OpenOptionsConstants::ENCRYPT, "ENCRYPT");
-        addOptParameter(OpenOptionsConstants::SSL_CRYPTO_PROVIDER,
+        addOptParameter(OGRHanaOpenOptionsConstants::ENCRYPT, "ENCRYPT");
+        addOptParameter(OGRHanaOpenOptionsConstants::SSL_CRYPTO_PROVIDER,
                         "sslCryptoProvider");
-        addOptParameter(OpenOptionsConstants::SSL_KEY_STORE, "sslKeyStore");
-        addOptParameter(OpenOptionsConstants::SSL_TRUST_STORE, "sslTrustStore");
-        addOptParameter(OpenOptionsConstants::SSL_VALIDATE_CERTIFICATE,
+        addOptParameter(OGRHanaOpenOptionsConstants::SSL_KEY_STORE,
+                        "sslKeyStore");
+        addOptParameter(OGRHanaOpenOptionsConstants::SSL_TRUST_STORE,
+                        "sslTrustStore");
+        addOptParameter(OGRHanaOpenOptionsConstants::SSL_VALIDATE_CERTIFICATE,
                         "sslValidateCertificate");
-        addOptParameter(OpenOptionsConstants::SSL_HOST_NAME_CERTIFICATE,
+        addOptParameter(OGRHanaOpenOptionsConstants::SSL_HOST_NAME_CERTIFICATE,
                         "sslHostNameInCertificate");
     }
 
-    addOptParameter(OpenOptionsConstants::PACKET_SIZE, "PACKETSIZE");
-    addOptParameter(OpenOptionsConstants::SPLIT_BATCH_COMMANDS,
+    addOptParameter(OGRHanaOpenOptionsConstants::PACKET_SIZE, "PACKETSIZE");
+    addOptParameter(OGRHanaOpenOptionsConstants::SPLIT_BATCH_COMMANDS,
                     "SPLITBATCHCOMMANDS");
     addParameter("CHAR_AS_UTF8", "1");
+
+    CPLString appName;
+    appName.Printf("GDAL %s", GDALVersionInfo("RELEASE_NAME"));
+    addParameter("sessionVariable:APPLICATION", appName.c_str());
 
     return isValid ? JoinStrings(params, ";") : "";
 }
@@ -423,11 +346,14 @@ GetGeometryColumnDescription(odbc::Connection &conn, const CPLString &query,
     CPLString clmName = columnName;
     if (needColumnName)
     {
-        auto it = std::search(preparedQuery.begin(), preparedQuery.end(),
-                              columnName.begin(), columnName.end(),
-                              [](char ch1, char ch2) {
-                                  return std::toupper(ch1) == std::toupper(ch2);
-                              });
+        auto it = std::search(
+            preparedQuery.begin(), preparedQuery.end(), columnName.begin(),
+            columnName.end(),
+            [](char ch1, char ch2)
+            {
+                return CPLToupper(static_cast<unsigned char>(ch1)) ==
+                       CPLToupper(static_cast<unsigned char>(ch2));
+            });
 
         if (it != preparedQuery.end())
         {
@@ -469,42 +395,43 @@ CPLString FormatDefaultValue(const char *value, short dataType)
 
     switch (dataType)
     {
-        case odbc::SQLDataTypes::Bit:
-        case odbc::SQLDataTypes::Boolean:
+        case QGRHanaDataTypes::Bit:
+        case QGRHanaDataTypes::Boolean:
             return value;
-        case odbc::SQLDataTypes::TinyInt:
-        case odbc::SQLDataTypes::SmallInt:
-        case odbc::SQLDataTypes::Integer:
-        case odbc::SQLDataTypes::BigInt:
-        case odbc::SQLDataTypes::Real:
-        case odbc::SQLDataTypes::Float:
-        case odbc::SQLDataTypes::Double:
-        case odbc::SQLDataTypes::Decimal:
-        case odbc::SQLDataTypes::Numeric:
+        case QGRHanaDataTypes::TinyInt:
+        case QGRHanaDataTypes::SmallInt:
+        case QGRHanaDataTypes::Integer:
+        case QGRHanaDataTypes::BigInt:
+        case QGRHanaDataTypes::Real:
+        case QGRHanaDataTypes::Float:
+        case QGRHanaDataTypes::Double:
+        case QGRHanaDataTypes::Decimal:
+        case QGRHanaDataTypes::Numeric:
             return value;
-        case odbc::SQLDataTypes::Char:
-        case odbc::SQLDataTypes::VarChar:
-        case odbc::SQLDataTypes::LongVarChar:
-        case odbc::SQLDataTypes::WChar:
-        case odbc::SQLDataTypes::WVarChar:
-        case odbc::SQLDataTypes::WLongVarChar:
+        case QGRHanaDataTypes::Char:
+        case QGRHanaDataTypes::VarChar:
+        case QGRHanaDataTypes::LongVarChar:
+        case QGRHanaDataTypes::WChar:
+        case QGRHanaDataTypes::WVarChar:
+        case QGRHanaDataTypes::WLongVarChar:
             return Literal(value);
-        case odbc::SQLDataTypes::Binary:
-        case odbc::SQLDataTypes::VarBinary:
-        case odbc::SQLDataTypes::LongVarBinary:
+        case QGRHanaDataTypes::Binary:
+        case QGRHanaDataTypes::VarBinary:
+        case QGRHanaDataTypes::LongVarBinary:
+        case QGRHanaDataTypes::RealVector:
             return value;
-        case odbc::SQLDataTypes::Date:
-        case odbc::SQLDataTypes::TypeDate:
+        case QGRHanaDataTypes::Date:
+        case QGRHanaDataTypes::TypeDate:
             if (EQUAL(value, "CURRENT_DATE"))
                 return value;
             return Literal(value);
-        case odbc::SQLDataTypes::Time:
-        case odbc::SQLDataTypes::TypeTime:
+        case QGRHanaDataTypes::Time:
+        case QGRHanaDataTypes::TypeTime:
             if (EQUAL(value, "CURRENT_TIME"))
                 return value;
             return Literal(value);
-        case odbc::SQLDataTypes::Timestamp:
-        case odbc::SQLDataTypes::TypeTimestamp:
+        case QGRHanaDataTypes::Timestamp:
+        case QGRHanaDataTypes::TypeTimestamp:
             if (EQUAL(value, "CURRENT_TIMESTAMP"))
                 return value;
             return Literal(value);
@@ -516,37 +443,37 @@ CPLString FormatDefaultValue(const char *value, short dataType)
 short GetArrayDataType(const CPLString &typeName)
 {
     if (typeName == "BOOLEAN ARRAY")
-        return odbc::SQLDataTypes::Boolean;
+        return QGRHanaDataTypes::Boolean;
     else if (typeName == "TINYINT ARRAY")
-        return odbc::SQLDataTypes::TinyInt;
+        return QGRHanaDataTypes::TinyInt;
     else if (typeName == "SMALLINT ARRAY")
-        return odbc::SQLDataTypes::SmallInt;
+        return QGRHanaDataTypes::SmallInt;
     else if (typeName == "INTEGER ARRAY")
-        return odbc::SQLDataTypes::Integer;
+        return QGRHanaDataTypes::Integer;
     else if (typeName == "BIGINT ARRAY")
-        return odbc::SQLDataTypes::BigInt;
+        return QGRHanaDataTypes::BigInt;
     else if (typeName == "DOUBLE ARRAY")
-        return odbc::SQLDataTypes::Double;
+        return QGRHanaDataTypes::Double;
     else if (typeName == "REAL ARRAY")
-        return odbc::SQLDataTypes::Float;
+        return QGRHanaDataTypes::Float;
     else if (typeName == "DECIMAL ARRAY" || typeName == "SMALLDECIMAL ARRAY")
-        return odbc::SQLDataTypes::Decimal;
+        return QGRHanaDataTypes::Decimal;
     else if (typeName == "CHAR ARRAY")
-        return odbc::SQLDataTypes::Char;
+        return QGRHanaDataTypes::Char;
     else if (typeName == "VARCHAR ARRAY")
-        return odbc::SQLDataTypes::VarChar;
+        return QGRHanaDataTypes::VarChar;
     else if (typeName == "NCHAR ARRAY")
-        return odbc::SQLDataTypes::WChar;
+        return QGRHanaDataTypes::WChar;
     else if (typeName == "NVARCHAR ARRAY")
-        return odbc::SQLDataTypes::WVarChar;
+        return QGRHanaDataTypes::WVarChar;
     else if (typeName == "DATE ARRAY")
-        return odbc::SQLDataTypes::Date;
+        return QGRHanaDataTypes::Date;
     else if (typeName == "TIME ARRAY")
-        return odbc::SQLDataTypes::Time;
+        return QGRHanaDataTypes::Time;
     else if (typeName == "TIMESTAMP ARRAY" || typeName == "SECONDDATE ARRAY")
-        return odbc::SQLDataTypes::Timestamp;
+        return QGRHanaDataTypes::Timestamp;
 
-    return odbc::SQLDataTypes::Unknown;
+    return QGRHanaDataTypes::Unknown;
 }
 
 std::vector<CPLString> GetSupportedArrayTypes()
@@ -556,32 +483,34 @@ std::vector<CPLString> GetSupportedArrayTypes()
 
 bool IsKnownDataType(short dataType)
 {
-    return dataType == odbc::SQLDataTypes::Bit ||
-           dataType == odbc::SQLDataTypes::Boolean ||
-           dataType == odbc::SQLDataTypes::TinyInt ||
-           dataType == odbc::SQLDataTypes::SmallInt ||
-           dataType == odbc::SQLDataTypes::Integer ||
-           dataType == odbc::SQLDataTypes::BigInt ||
-           dataType == odbc::SQLDataTypes::Double ||
-           dataType == odbc::SQLDataTypes::Real ||
-           dataType == odbc::SQLDataTypes::Float ||
-           dataType == odbc::SQLDataTypes::Decimal ||
-           dataType == odbc::SQLDataTypes::Numeric ||
-           dataType == odbc::SQLDataTypes::Char ||
-           dataType == odbc::SQLDataTypes::VarChar ||
-           dataType == odbc::SQLDataTypes::LongVarChar ||
-           dataType == odbc::SQLDataTypes::WChar ||
-           dataType == odbc::SQLDataTypes::WVarChar ||
-           dataType == odbc::SQLDataTypes::WLongVarChar ||
-           dataType == odbc::SQLDataTypes::Date ||
-           dataType == odbc::SQLDataTypes::TypeDate ||
-           dataType == odbc::SQLDataTypes::Time ||
-           dataType == odbc::SQLDataTypes::TypeTime ||
-           dataType == odbc::SQLDataTypes::Timestamp ||
-           dataType == odbc::SQLDataTypes::TypeTimestamp ||
-           dataType == odbc::SQLDataTypes::Binary ||
-           dataType == odbc::SQLDataTypes::VarBinary ||
-           dataType == odbc::SQLDataTypes::LongVarBinary;
+    return dataType == QGRHanaDataTypes::Bit ||
+           dataType == QGRHanaDataTypes::Boolean ||
+           dataType == QGRHanaDataTypes::TinyInt ||
+           dataType == QGRHanaDataTypes::SmallInt ||
+           dataType == QGRHanaDataTypes::Integer ||
+           dataType == QGRHanaDataTypes::BigInt ||
+           dataType == QGRHanaDataTypes::Double ||
+           dataType == QGRHanaDataTypes::Real ||
+           dataType == QGRHanaDataTypes::Float ||
+           dataType == QGRHanaDataTypes::Decimal ||
+           dataType == QGRHanaDataTypes::Numeric ||
+           dataType == QGRHanaDataTypes::Char ||
+           dataType == QGRHanaDataTypes::VarChar ||
+           dataType == QGRHanaDataTypes::LongVarChar ||
+           dataType == QGRHanaDataTypes::WChar ||
+           dataType == QGRHanaDataTypes::WVarChar ||
+           dataType == QGRHanaDataTypes::WLongVarChar ||
+           dataType == QGRHanaDataTypes::Date ||
+           dataType == QGRHanaDataTypes::TypeDate ||
+           dataType == QGRHanaDataTypes::Time ||
+           dataType == QGRHanaDataTypes::TypeTime ||
+           dataType == QGRHanaDataTypes::Timestamp ||
+           dataType == QGRHanaDataTypes::TypeTimestamp ||
+           dataType == QGRHanaDataTypes::Binary ||
+           dataType == QGRHanaDataTypes::VarBinary ||
+           dataType == QGRHanaDataTypes::LongVarBinary ||
+           dataType == QGRHanaDataTypes::Geometry ||
+           dataType == QGRHanaDataTypes::RealVector;
 }
 
 }  // anonymous namespace
@@ -592,35 +521,7 @@ bool IsKnownDataType(short dataType)
 
 const char *OGRHanaDataSource::GetPrefix()
 {
-    return "HANA:";
-}
-
-/************************************************************************/
-/*                         GetLayerCreationOptions()                    */
-/************************************************************************/
-
-const char *OGRHanaDataSource::GetLayerCreationOptions()
-{
-    return LayerCreationOptionsConstants::GetList();
-}
-
-/************************************************************************/
-/*                           GetOpenOptions()                           */
-/************************************************************************/
-
-const char *OGRHanaDataSource::GetOpenOptions()
-{
-    return OpenOptionsConstants::GetList();
-}
-
-/************************************************************************/
-/*                         GetSupportedDataTypes()                      */
-/************************************************************************/
-
-const char *OGRHanaDataSource::GetSupportedDataTypes()
-{
-    return "Integer Integer64 Real String Date DateTime Time IntegerList "
-           "Integer64List RealList StringList Binary";
+    return HANA_PREFIX;
 }
 
 /************************************************************************/
@@ -667,14 +568,14 @@ int OGRHanaDataSource::Open(const char *newName, char **openOptions, int update)
 
     updateMode_ = update;
     detectGeometryType_ = CPLFetchBool(
-        openOptions, OpenOptionsConstants::DETECT_GEOMETRY_TYPE, true);
+        openOptions, OGRHanaOpenOptionsConstants::DETECT_GEOMETRY_TYPE, true);
 
     std::size_t prefixLength = strlen(GetPrefix());
     char **connOptions =
         CSLTokenizeStringComplex(newName + prefixLength, ";", TRUE, FALSE);
 
     const char *paramSchema = CSLFetchNameValueDef(
-        connOptions, OpenOptionsConstants::SCHEMA, nullptr);
+        connOptions, OGRHanaOpenOptionsConstants::SCHEMA, nullptr);
     if (paramSchema != nullptr)
         schemaName_ = paramSchema;
 
@@ -689,7 +590,8 @@ int OGRHanaDataSource::Open(const char *newName, char **openOptions, int update)
         conn_->setAutoCommit(false);
 
         const char *paramConnTimeout = CSLFetchNameValueDef(
-            connOptions, OpenOptionsConstants::CONNECTION_TIMEOUT, nullptr);
+            connOptions, OGRHanaOpenOptionsConstants::CONNECTION_TIMEOUT,
+            nullptr);
         if (paramConnTimeout != nullptr)
             conn_->setConnectionTimeout(
                 static_cast<unsigned long>(atoi(paramConnTimeout)));
@@ -706,13 +608,10 @@ int OGRHanaDataSource::Open(const char *newName, char **openOptions, int update)
 
         if (conn_->connected())
         {
-            odbc::DatabaseMetaDataRef dbmd = conn_->getDatabaseMetaData();
-            CPLString dbVersion(dbmd->getDBMSVersion());
-            majorVersion_ =
-                atoi(dbVersion.substr(0u, dbVersion.find('.')).c_str());
+            DetermineVersions();
 
             const char *paramTables = CSLFetchNameValueDef(
-                connOptions, OpenOptionsConstants::TABLES, "");
+                connOptions, OGRHanaOpenOptionsConstants::TABLES, "");
             InitializeLayers(paramSchema, paramTables);
             ret = TRUE;
         }
@@ -778,6 +677,29 @@ void OGRHanaDataSource::CreateTable(
     }
 
     ExecuteSQL(sql);
+}
+
+void OGRHanaDataSource::DetermineVersions()
+{
+    odbc::DatabaseMetaDataRef dbmd = conn_->getDatabaseMetaData();
+    CPLString dbVersion(dbmd->getDBMSVersion());
+    hanaVersion_ = HanaVersion::fromString(dbVersion);
+
+    if (hanaVersion_.major() < 4)
+    {
+        cloudVersion_ = HanaVersion(0, 0, 0);
+        return;
+    }
+
+    odbc::StatementRef stmt = conn_->createStatement();
+    const char *sql = "SELECT CLOUD_VERSION FROM SYS.M_DATABASE;";
+
+    odbc::ResultSetRef rsVersion = stmt->executeQuery(sql);
+    if (rsVersion->next())
+        cloudVersion_ =
+            HanaVersion::fromString(rsVersion->getString(1)->c_str());
+
+    rsVersion->close();
 }
 
 /************************************************************************/
@@ -955,7 +877,7 @@ OGRSpatialReference *OGRHanaDataSource::GetSrsById(int srid)
 /*                               GetSrsId()                             */
 /************************************************************************/
 
-int OGRHanaDataSource::GetSrsId(OGRSpatialReference *srs)
+int OGRHanaDataSource::GetSrsId(const OGRSpatialReference *srs)
 {
     if (srs == nullptr)
         return UNDETERMINED_SRID;
@@ -1118,7 +1040,6 @@ OGRErr OGRHanaDataSource::GetQueryColumns(
 
     columnDescriptions.reserve(numColumns);
 
-    CPLString tableName = rsmd->getTableName(1);
     odbc::DatabaseMetaDataRef dmd = conn_->getDatabaseMetaData();
     odbc::PreparedStatementRef stmtArrayTypeInfo =
         PrepareStatement("SELECT DATA_TYPE_NAME FROM "
@@ -1134,7 +1055,7 @@ OGRErr OGRHanaDataSource::GetQueryColumns(
             continue;
 
         bool isArray = false;
-        bool isGeometry = false;
+        CPLString tableName = rsmd->getTableName(clmIndex);
         CPLString columnName = rsmd->getColumnName(clmIndex);
         CPLString defaultValue;
         short dataType = rsmd->getColumnType(clmIndex);
@@ -1165,7 +1086,7 @@ OGRErr OGRHanaDataSource::GetQueryColumns(
                 typeName = *rsArrayTypes->getString(1);
                 dataType = GetArrayDataType(typeName);
 
-                if (dataType == odbc::SQLDataTypes::Unknown)
+                if (dataType == QGRHanaDataTypes::Unknown)
                 {
                     CPLError(
                         CE_Failure, CPLE_AppDefined,
@@ -1190,18 +1111,13 @@ OGRErr OGRHanaDataSource::GetQueryColumns(
                 if (name->compare("SHORTTEXT") == 0 ||
                     name->compare("ALPHANUM") == 0)
                 {
-                    dataType = odbc::SQLDataTypes::WVarChar;
-                }
-                else if (name->compare("ST_GEOMETRY") == 0 ||
-                         name->compare("ST_POINT") == 0)
-                {
-                    isGeometry = true;
+                    dataType = QGRHanaDataTypes::WVarChar;
                 }
             }
             rsTypeInfo->close();
         }
 
-        if (isGeometry)
+        if (dataType == QGRHanaDataTypes::Geometry)
         {
             GeometryColumnDescription geometryColumnDesc;
             if (schemaName.empty() || tableName.empty())
@@ -1213,15 +1129,15 @@ OGRErr OGRHanaDataSource::GetQueryColumns(
                     detectGeometryType_);
             geometryColumnDesc.isNullable = rsmd->isNullable(clmIndex);
 
-            columnDescriptions.push_back(
-                {true, AttributeColumnDescription(), geometryColumnDesc});
+            columnDescriptions.push_back({true, AttributeColumnDescription(),
+                                          std::move(geometryColumnDesc)});
         }
         else
         {
             AttributeColumnDescription attributeColumnDesc;
-            attributeColumnDesc.name = columnName;
+            attributeColumnDesc.name = std::move(columnName);
             attributeColumnDesc.type = dataType;
-            attributeColumnDesc.typeName = typeName;
+            attributeColumnDesc.typeName = std::move(typeName);
             attributeColumnDesc.isArray = isArray;
             attributeColumnDesc.isNullable = rsmd->isNullable(clmIndex);
             attributeColumnDesc.isAutoIncrement =
@@ -1230,10 +1146,10 @@ OGRErr OGRHanaDataSource::GetQueryColumns(
                 static_cast<int>(rsmd->getColumnLength(clmIndex));
             attributeColumnDesc.precision = rsmd->getPrecision(clmIndex);
             attributeColumnDesc.scale = rsmd->getScale(clmIndex);
-            attributeColumnDesc.defaultValue = defaultValue;
+            attributeColumnDesc.defaultValue = std::move(defaultValue);
 
-            columnDescriptions.push_back(
-                {false, attributeColumnDesc, GeometryColumnDescription()});
+            columnDescriptions.push_back({false, std::move(attributeColumnDesc),
+                                          GeometryColumnDescription()});
         }
     }
 
@@ -1269,7 +1185,8 @@ OGRHanaDataSource::GetTablePrimaryKeys(const char *schemaName,
 void OGRHanaDataSource::InitializeLayers(const char *schemaName,
                                          const char *tableNames)
 {
-    std::vector<CPLString> tables = SplitStrings(tableNames, ",");
+    std::vector<CPLString> tablesToFind = SplitStrings(tableNames, ",");
+    const bool hasTablesToFind = !tablesToFind.empty();
 
     auto addLayersFromQuery = [&](const char *query, bool updatable)
     {
@@ -1281,11 +1198,12 @@ void OGRHanaDataSource::InitializeLayers(const char *schemaName,
             odbc::String tableName = rsTables->getString(1);
             if (tableName.isNull())
                 continue;
-            auto pos = std::find(tables.begin(), tables.end(), *tableName);
-            if (pos != tables.end())
-                tables.erase(pos);
+            auto pos =
+                std::find(tablesToFind.begin(), tablesToFind.end(), *tableName);
+            if (pos != tablesToFind.end())
+                tablesToFind.erase(pos);
 
-            auto layer = cpl::make_unique<OGRHanaTableLayer>(
+            auto layer = std::make_unique<OGRHanaTableLayer>(
                 this, schemaName_.c_str(), tableName->c_str(), updatable);
             layers_.push_back(std::move(layer));
         }
@@ -1295,23 +1213,27 @@ void OGRHanaDataSource::InitializeLayers(const char *schemaName,
     // Look for layers in Tables
     std::ostringstream osTables;
     osTables << "SELECT TABLE_NAME FROM SYS.TABLES WHERE SCHEMA_NAME = ?";
-    if (!tables.empty())
-        osTables << " AND TABLE_NAME IN (" << JoinStrings(tables, ",", Literal)
-                 << ")";
+    if (!tablesToFind.empty())
+        osTables << " AND TABLE_NAME IN ("
+                 << JoinStrings(tablesToFind, ",", Literal) << ")";
 
     addLayersFromQuery(osTables.str().c_str(), updateMode_);
 
-    // Look for layers in Views
-    std::ostringstream osViews;
-    osViews << "SELECT VIEW_NAME FROM SYS.VIEWS WHERE SCHEMA_NAME = ?";
-    if (!tables.empty())
-        osViews << " AND VIEW_NAME IN (" << JoinStrings(tables, ",", Literal)
-                << ")";
+    if (!(hasTablesToFind && tablesToFind.empty()))
+    {
+        // Look for layers in Views
+        std::ostringstream osViews;
+        osViews << "SELECT VIEW_NAME FROM SYS.VIEWS WHERE SCHEMA_NAME = ?";
+        // cppcheck-suppress knownConditionTrueFalse
+        if (!tablesToFind.empty())
+            osViews << " AND VIEW_NAME IN ("
+                    << JoinStrings(tablesToFind, ",", Literal) << ")";
 
-    addLayersFromQuery(osViews.str().c_str(), false);
+        addLayersFromQuery(osViews.str().c_str(), false);
+    }
 
     // Report about tables that could not be found
-    for (const auto &tableName : tables)
+    for (const auto &tableName : tablesToFind)
     {
         const char *layerName = tableName.c_str();
         if (GetLayerByName(layerName) == nullptr)
@@ -1364,7 +1286,8 @@ std::pair<OGRErr, CPLString> OGRHanaDataSource::LaunderName(const char *name)
             if (c == '-' || c == '#')
                 newName[i] = '_';
             else
-                newName[i] = static_cast<char>(toupper(c));
+                newName[i] = static_cast<char>(
+                    CPLToupper(static_cast<unsigned char>(c)));
         }
         else
         {
@@ -1496,7 +1419,7 @@ void OGRHanaDataSource::CreateSpatialReferenceSystem(
 void OGRHanaDataSource::CreateParseArrayFunctions(const char *schemaName)
 {
     auto replaceAll = [](const CPLString &str, const CPLString &before,
-                         const CPLString &after)
+                         const CPLString &after) -> CPLString
     {
         CPLString res = str;
         return res.replaceAll(before, after);
@@ -1620,13 +1543,18 @@ OGRLayer *OGRHanaDataSource::GetLayerByName(const char *name)
 /*                              ICreateLayer()                          */
 /************************************************************************/
 
-OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
-                                          OGRSpatialReference *srs,
-                                          OGRwkbGeometryType geomType,
-                                          char **options)
+OGRLayer *
+OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
+                                const OGRGeomFieldDefn *poGeomFieldDefn,
+                                CSLConstList options)
 {
     if (layerNameIn == nullptr)
         return nullptr;
+
+    const auto geomType =
+        poGeomFieldDefn ? poGeomFieldDefn->GetType() : wkbNone;
+    const auto srs =
+        poGeomFieldDefn ? poGeomFieldDefn->GetSpatialRef() : nullptr;
 
     // Check if we are allowed to create new objects in the database
     odbc::DatabaseMetaDataRef dmd = conn_->getDatabaseMetaData();
@@ -1639,8 +1567,8 @@ OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
         return nullptr;
     }
 
-    bool launderNames =
-        CPLFetchBool(options, LayerCreationOptionsConstants::LAUNDER, true);
+    bool launderNames = CPLFetchBool(
+        options, OGRHanaLayerCreationOptionsConstants::LAUNDER, true);
     CPLString layerName(layerNameIn);
     if (launderNames)
     {
@@ -1656,7 +1584,7 @@ OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
     if (layerIndex >= 0)
     {
         bool overwriteLayer = CPLFetchBool(
-            options, LayerCreationOptionsConstants::OVERWRITE, false);
+            options, OGRHanaLayerCreationOptionsConstants::OVERWRITE, false);
         if (!overwriteLayer)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
@@ -1670,32 +1598,35 @@ OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
         DeleteLayer(layerIndex);
     }
 
-    int batchSize = CPLFetchInt(
-        options, LayerCreationOptionsConstants::BATCH_SIZE, DEFAULT_BATCH_SIZE);
+    int batchSize =
+        CPLFetchInt(options, OGRHanaLayerCreationOptionsConstants::BATCH_SIZE,
+                    DEFAULT_BATCH_SIZE);
     if (batchSize <= 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Unable to create layer %s. The value of %s parameter must be "
                  "greater than 0.",
-                 layerName.c_str(), LayerCreationOptionsConstants::BATCH_SIZE);
+                 layerName.c_str(),
+                 OGRHanaLayerCreationOptionsConstants::BATCH_SIZE);
         return nullptr;
     }
 
-    int defaultStringSize =
-        CPLFetchInt(options, LayerCreationOptionsConstants::DEFAULT_STRING_SIZE,
-                    DEFAULT_STRING_SIZE);
+    int defaultStringSize = CPLFetchInt(
+        options, OGRHanaLayerCreationOptionsConstants::DEFAULT_STRING_SIZE,
+        DEFAULT_STRING_SIZE);
     if (defaultStringSize <= 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Unable to create layer %s. The value of %s parameter must be "
                  "greater than 0.",
                  layerName.c_str(),
-                 LayerCreationOptionsConstants::DEFAULT_STRING_SIZE);
+                 OGRHanaLayerCreationOptionsConstants::DEFAULT_STRING_SIZE);
         return nullptr;
     }
 
     CPLString geomColumnName(CSLFetchNameValueDef(
-        options, LayerCreationOptionsConstants::GEOMETRY_NAME, "OGR_GEOMETRY"));
+        options, OGRHanaLayerCreationOptionsConstants::GEOMETRY_NAME,
+        "OGR_GEOMETRY"));
     if (launderNames)
     {
         auto nameRes = LaunderName(geomColumnName.c_str());
@@ -1705,12 +1636,13 @@ OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
     }
 
     const bool geomColumnNullable = CPLFetchBool(
-        options, LayerCreationOptionsConstants::GEOMETRY_NULLABLE, true);
+        options, OGRHanaLayerCreationOptionsConstants::GEOMETRY_NULLABLE, true);
     CPLString geomColumnIndexType(CSLFetchNameValueDef(
-        options, LayerCreationOptionsConstants::GEOMETRY_INDEX, "DEFAULT"));
+        options, OGRHanaLayerCreationOptionsConstants::GEOMETRY_INDEX,
+        "DEFAULT"));
 
     const char *paramFidName = CSLFetchNameValueDef(
-        options, LayerCreationOptionsConstants::FID, "OGR_FID");
+        options, OGRHanaLayerCreationOptionsConstants::FID, "OGR_FID");
     CPLString fidName(paramFidName);
     if (launderNames)
     {
@@ -1721,7 +1653,8 @@ OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
     }
 
     CPLString fidType =
-        CPLFetchBool(options, LayerCreationOptionsConstants::FID64, false)
+        CPLFetchBool(options, OGRHanaLayerCreationOptionsConstants::FID64,
+                     false)
             ? "BIGINT"
             : "INTEGER";
 
@@ -1729,7 +1662,7 @@ OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
     CPLDebug("HANA", "FID Column Name %s, Type %s.", fidName.c_str(),
              fidType.c_str());
 
-    int srid = CPLFetchInt(options, LayerCreationOptionsConstants::SRID,
+    int srid = CPLFetchInt(options, OGRHanaLayerCreationOptionsConstants::SRID,
                            UNDETERMINED_SRID);
     if (srid < 0 && srs != nullptr)
         srid = GetSrsId(srs);
@@ -1748,7 +1681,7 @@ OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
     }
 
     // Create new layer object
-    auto layer = cpl::make_unique<OGRHanaTableLayer>(this, schemaName_.c_str(),
+    auto layer = std::make_unique<OGRHanaTableLayer>(this, schemaName_.c_str(),
                                                      layerName.c_str(), true);
     if (geomType != wkbNone && layer->GetLayerDefn()->GetGeomFieldCount() > 0)
         layer->GetLayerDefn()->GetGeomFieldDefn(0)->SetNullable(FALSE);
@@ -1758,14 +1691,14 @@ OGRLayer *OGRHanaDataSource::ICreateLayer(const char *layerNameIn,
         layer->SetDefaultStringSize(
             static_cast<std::size_t>(defaultStringSize));
     layer->SetLaunderFlag(launderNames);
-    layer->SetPrecisionFlag(
-        CPLFetchBool(options, LayerCreationOptionsConstants::PRECISION, true));
+    layer->SetPrecisionFlag(CPLFetchBool(
+        options, OGRHanaLayerCreationOptionsConstants::PRECISION, true));
     layer->SetCustomColumnTypes(CSLFetchNameValue(
-        options, LayerCreationOptionsConstants::COLUMN_TYPES));
+        options, OGRHanaLayerCreationOptionsConstants::COLUMN_TYPES));
 
     layers_.push_back(std::move(layer));
 
-    return layers_[layers_.size() - 1].get();
+    return layers_.back().get();
 }
 
 /************************************************************************/
@@ -1817,7 +1750,7 @@ OGRLayer *OGRHanaDataSource::ExecuteSQL(const char *sqlCommand,
         if (stmt.isNull())
             return nullptr;
 
-        auto layer = cpl::make_unique<OGRHanaResultLayer>(this, sqlCommand);
+        auto layer = std::make_unique<OGRHanaResultLayer>(this, sqlCommand);
         if (spatialFilter != nullptr)
             layer->SetSpatialFilter(spatialFilter);
         return layer.release();

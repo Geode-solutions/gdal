@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test HTTP Driver.
@@ -11,23 +10,7 @@
 # Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009-2012, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -48,6 +31,13 @@ except ImportError:
 
 
 pytestmark = pytest.mark.require_driver("HTTP")
+
+
+###############################################################################
+@pytest.fixture(autouse=True, scope="module")
+def module_disable_exceptions():
+    with gdaltest.disable_exceptions():
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -73,13 +63,18 @@ def skip_if_unreachable(url, try_read=False):
 
 
 def test_http_1():
+    # Regularly fails on Travis graviton2 configuration
+    gdaltest.skip_on_travis()
+
     url = "http://gdal.org/gdalicon.png"
     tst = gdaltest.GDALTest("PNG", url, 1, 7617, filename_absolute=1)
     try:
         tst.testOpen()
     except Exception:
         skip_if_unreachable(url)
-        if gdaltest.is_travis_branch("build-windows-conda"):
+        if gdaltest.is_travis_branch(
+            "build-windows-conda"
+        ) or gdaltest.is_travis_branch("build-windows-minimum"):
             pytest.xfail("randomly fail on that configuration for unknown reason")
         pytest.fail()
 
@@ -91,8 +86,10 @@ def test_http_1():
 def test_http_2():
     url = "https://raw.githubusercontent.com/OSGeo/gdal/release/3.1/autotest/gcore/data/byte.tif"
     tst = gdaltest.GDALTest("GTiff", "/vsicurl/" + url, 1, 4672, filename_absolute=1)
-    ret = tst.testOpen()
-    if ret == "fail":
+
+    try:
+        tst.testOpen()
+    except Exception:
         skip_if_unreachable(url)
         pytest.fail()
 
@@ -113,10 +110,10 @@ def test_http_3():
 # Verify /vsicurl (ftp)
 
 
+@pytest.mark.skip(reason="remove server does not work")
 def test_http_4():
     # Too unreliable
-    if gdaltest.skip_on_travis():
-        pytest.skip()
+    gdaltest.skip_on_travis()
 
     url = "ftp://download.osgeo.org/gdal/data/gtiff/utm.tif"
     ds = gdal.Open("/vsicurl/" + url)
@@ -151,7 +148,7 @@ def test_http_6():
 
 def test_http_ssl_verifystatus():
     with gdaltest.config_option("GDAL_HTTP_SSL_VERIFYSTATUS", "YES"):
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             # For now this URL doesn't support OCSP stapling...
             gdal.OpenEx("https://google.com", allowed_drivers=["HTTP"])
     last_err = gdal.GetLastErrorMsg()
@@ -181,7 +178,7 @@ def test_http_ssl_verifystatus():
 
 def test_http_use_capi_store():
     if sys.platform != "win32":
-        with gdaltest.error_handler():
+        with gdal.quiet_errors():
             return test_http_use_capi_store_sub()
 
     # Prints this to stderr in many cases (but doesn't error)
@@ -193,7 +190,9 @@ def test_http_use_capi_store():
 
 def test_http_use_capi_store_sub():
 
-    with gdaltest.config_option("GDAL_HTTP_USE_CAPI_STORE", "YES"):
+    with gdaltest.disable_exceptions(), gdaltest.config_option(
+        "GDAL_HTTP_USE_CAPI_STORE", "YES"
+    ):
         gdal.OpenEx("https://google.com", allowed_drivers=["HTTP"])
 
 

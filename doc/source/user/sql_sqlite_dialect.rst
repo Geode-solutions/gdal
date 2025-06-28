@@ -6,15 +6,15 @@ SQL SQLite dialect
 
 .. highlight:: sql
 
-The SQLite "dialect" can be used as an alternate SQL dialect to the
+The ``SQLite`` dialect can be used as an alternate SQL dialect to the
 :ref:`ogr_sql_dialect`.
 This assumes that GDAL/OGR is built with support for SQLite, and preferably
 with `Spatialite <https://www.gaia-gis.it/fossil/libspatialite/index>`_ support too to benefit from spatial functions.
 
-The SQLite dialect may be used with any OGR datasource, like the OGR SQL dialect. It
-is available through the GDALDataset::ExecuteSQL() method by specifying the pszDialect to
-"SQLITE". For the :ref:`ogrinfo` or :ref:`ogr2ogr`
-utility, you must specify the "-dialect SQLITE" option.
+The SQLite dialect may be used with any OGR datasource, like the OGR SQL dialect.
+The ``SQLite`` dialect can be requested with the ``SQLite`` string passed
+as the dialect parameter of :cpp:func:`GDALDataset::ExecuteSQL`, or with the
+`-dialect` option of the :ref:`ogrinfo` or :ref:`ogr2ogr` utilities.
 
 This is mainly aimed to execute SELECT statements, but, for datasources that support
 update, INSERT/UPDATE/DELETE statements can also be run. GDAL is internally using
@@ -68,7 +68,8 @@ be used in joins are searched from the master database.
 
 .. code-block:: shell
 
-    ogrinfo jointest.gpkg -dialect INDIRECT_SQLITE -sql "SELECT a.ID,b.ID FROM jointest a JOIN \"jointest2.shp\".\"jointest2\" b ON a.ID=b.ID"
+    ogrinfo jointest.gpkg -dialect INDIRECT_SQLITE -sql \
+    "SELECT a.ID,b.ID FROM jointest a JOIN \"jointest2.shp\".\"jointest2\" b ON a.ID=b.ID"
 
 The column names that can be used in the result column list, in WHERE, JOIN, ... clauses
 are the field names of the layers. Expressions, SQLite functions, spatial functions, etc...
@@ -79,6 +80,23 @@ The conditions on fields expressed in WHERE clauses, or in JOINs are
 translated, as far as possible, as attribute filters that are applied on the
 underlying OGR layers. Joins can be very expensive operations if the secondary table is not
 indexed on the key field being used.
+
+LIKE operator
++++++++++++++
+
+In SQLite, the LIKE operator is case insensitive, unless ``PRAGMA case_sensitive_like = 1``
+has been issued.
+
+Starting with GDAL 3.9, GDAL installs a custom LIKE comparison, such that UTF-8
+characters are taken into account by ``LIKE`` operator.
+
+For case insensitive comparisons, this is restricted to the
+`ASCII <https://en.wikipedia.org/wiki/Basic_Latin_(Unicode_block)>`__,
+`Latin-1 Supplement <https://en.wikipedia.org/wiki/Latin-1_Supplement_(Unicode_block)>`__,
+`Latin Extended-A <https://en.wikipedia.org/wiki/Latin_Extended-A>`__,
+`Latin Extended-B <https://en.wikipedia.org/wiki/Latin_Extended-B>`__,
+`Greek and Coptic <https://en.wikipedia.org/wiki/Greek_and_Coptic>`__
+and `Cyrillic <https://en.wikipedia.org/wiki/Greek_and_Coptic>`__ Unicode categories.
 
 Delimited identifiers
 +++++++++++++++++++++
@@ -102,16 +120,15 @@ between double quotes, the internal double quotes must be escaped with \\
 Geometry field
 ++++++++++++++
 
-The ``GEOMETRY`` special field represents the geometry of the feature
-returned by OGRFeature::GetGeometryRef(). It can be explicitly specified
-in the result column list of a SELECT, and is automatically selected if the
-* wildcard is used.
+Geometry fields can be explicitly specified in the result column list of a SELECT,
+or automatically selected if the * wildcard is used.
 
 For OGR layers that have a non-empty geometry column name (generally for RDBMS datasources),
 as returned by OGRLayer::GetGeometryColumn(), the name of the geometry special field
-in the SQL statement will be the name of the geometry column of the underlying OGR layer.
+in the SQL statement must be the name of the geometry column of the underlying OGR layer.
 If the name of the geometry column in the source layer is empty, like with shapefiles etc.,
-the name to use in the SQL statement is always "geometry".
+the name to use in the SQL statement must be "geometry". Here we'll use it case-insensitively
+(as all field names are in a SELECT statement):
 
 .. code-block::
 
@@ -139,13 +156,18 @@ returns:
     PRFEDEA (String) = 35043411
     POLYGON ((479819.84375 4765180.5,479690.1875 4765259.5,[...],479819.84375 4765180.5))
 
-Feature id
-++++++++++
+Feature id (FID)
+++++++++++++++++
 
 The feature id is a special property of a feature and not treated
 as an attribute of the feature.  In some cases it is convenient to be able to
 utilize the feature id in queries and result sets as a regular field.  To do
-so use the name ``rowid``. The field wildcard expansions will not include
+so use the name ``rowid``.
+
+Starting with GDAL 3.8, if the layer has a named FID column
+(:cpp:func:`OGRLayer::GetFIDColumn` != ""), this name may also be used.
+
+The field wildcard expansions will not include
 the feature id, but it may be explicitly included using a syntax like:
 
 .. code-block::
@@ -169,6 +191,25 @@ For example we can select the annotation features as:
 .. code-block::
 
     SELECT * FROM nation WHERE OGR_STYLE LIKE 'LABEL%'
+
+Statistics functions
+++++++++++++++++++++
+
+In addition to standard COUNT(), SUM(), AVG(), MIN(), MAX(), the following
+aggregate functions are available:
+
+- ``STDDEV_POP(numeric_value)``: (GDAL >= 3.10) numerical population standard deviation.
+- ``STDDEV_SAMP(numeric_value)``: (GDAL >= 3.10) numerical `sample standard deviation <https://en.wikipedia.org/wiki/Standard_deviation#Sample_standard_deviation>`__
+
+Ordered-set aggregate functions
++++++++++++++++++++++++++++++++
+
+The following aggregate functions are available. Note that they require to allocate an amount of memory proportional to the number of selected rows (for ``MEDIAN``, ``PERCENTILE`` and ``PERCENTILE_CONT``) or to the number of values (for ``MODE``).
+
+- ``MEDIAN(numeric_value)``: (GDAL >= 3.10) (continuous) median (equivalent to ``PERCENTILE(numeric_value, 50)``). NULL values are ignored.
+- ``PERCENTILE(numeric_value, percentage)``: (GDAL >= 3.10) (continuous) percentile, with percentage between 0 and 100 (equivalent to ``PERCENTILE_CONT(numeric_value, percentage / 100)``). NULL values are ignored.
+- ``PERCENTILE_CONT(numeric_value, fraction)``: (GDAL >= 3.10) (continuous) percentile, with fraction between 0 and 1. NULL values are ignored.
+- ``MODE(value)``: (GDAL >= 3.10): mode, i.e. most frequent input value (strings and numeric values are supported), arbitrarily choosing the first one if there are multiple equally-frequent results. NULL values are ignored.
 
 Spatialite SQL functions
 ++++++++++++++++++++++++
@@ -198,6 +239,15 @@ returns:
     EAS_ID (Real) = 170
     area (Real) = 5268.8125
 
+Note that due to the loose typing mechanism of SQLite, if a geometry expression
+returns a NULL value for the first row, this will generally cause OGR not to
+recognize the column as a geometry column. It might be then useful to sort
+the results by making sure that non-null geometries are returned first:
+
+::
+
+   ogrinfo test.shp -sql "SELECT * FROM (SELECT ST_Buffer(geometry,5) AS geometry FROM test) ORDER BY geometry IS NULL ASC" -dialect sqlite
+
 OGR datasource SQL functions
 ++++++++++++++++++++++++++++
 
@@ -209,7 +259,7 @@ function can be used to automatically load all the layers of a datasource as
 
     sqlite> SELECT load_extension('libgdal.so');
 
-    sqlite> SELECT load_extension('libspatialite.so');
+    sqlite> SELECT load_extension('mod_spatialite');
 
     sqlite> SELECT ogr_datasource_load_layers('poly.shp');
     1
@@ -266,7 +316,7 @@ The ``gdal_get_pixel_value()`` function (added in GDAL 3.7) can be used to extra
 of a pixel in a GDAL dataset. It requires the configuration option OGR_SQLITE_ALLOW_EXTERNAL_ACCESS
 to be set to YES (for security reasons).
 
-It takes 5 arguments:
+It takes 5 or 6 arguments:
 
 * a string with the dataset name
 * a band number (numbering starting at 1)
@@ -275,11 +325,13 @@ It takes 5 arguments:
   pixel space
 * georeferenced X value or column number
 * georeferenced Y value or line number
+* resampling method among ``nearest`` (default), ``bilinear``, ``cubic``, ``cubicspline``. Optional, added in GDAL 3.10
 
 .. code-block::
 
     SELECT gdal_get_pixel_value('../gcore/data/byte.tif', 1, 'georef', 440720, 3751320)
     SELECT gdal_get_pixel_value('../gcore/data/byte.tif', 1, 'pixel', 0, 0)
+    SELECT gdal_get_pixel_value('../gcore/data/byte.tif', 1, 'pixel', 0.5, 0.5, 'bilinear')  -- GDAL >= 3.10
 
 
 OGR geocoding functions
@@ -305,11 +357,11 @@ returns:
 ::
 
     OGRFeature(SELECT):0
-    POINT (2.342878767069653 48.85661793020374)
+    POINT (2.34287687375113 48.856622357411)
 
 .. code-block:: shell
 
-    ogrinfo cities.csv -dialect sqlite -sql "SELECT *, ogr_geocode(city, 'country') AS country, ST_Centroid(ogr_geocode(city)) FROM cities"
+    ogrinfo cities.csv -dialect sqlite -sql "SELECT *, ogr_geocode(city, 'country_code') AS country_code, ST_Centroid(ogr_geocode(city)) FROM cities"
 
 returns:
 
@@ -319,57 +371,30 @@ returns:
 ::
 
     OGRFeature(SELECT):0
-    id (Real) = 1
-    city (String) = Paris
-    country (String) = France métropolitaine
-    POINT (2.342878767069653 48.85661793020374)
+      city (String) = Paris
+      country_code (String) = fr
+      POINT (2.34287687375113 48.856622357411)
 
     OGRFeature(SELECT):1
-    id (Real) = 2
-    city (String) = London
-    country (String) = United Kingdom
-    POINT (-0.109369427546499 51.500506667319407)
+      city (String) = London
+      country_code (String) = gb
+      POINT (-0.109415723431508 51.5004964757441)
 
     OGRFeature(SELECT):2
-    id (Real) = 3
-    city (String) = Rennes
-    country (String) = France métropolitaine
-    POINT (-1.68185153381778 48.111663929761093)
+      city (String) = Rennes
+      country_code (String) = fr
+      POINT (-1.68185479486048 48.1116771631195)
 
     OGRFeature(SELECT):3
-    id (Real) = 4
-    city (String) = Strasbourg
-    country (String) = France métropolitaine
-    POINT (7.767762859150757 48.571233274141846)
+      city (String) = New York
+      country_code (String) = us
+      POINT (-73.9388908443975 40.6632061220125)
 
     OGRFeature(SELECT):4
-    id (Real) = 5
-    city (String) = New York
-    country (String) = United States of America
-    POINT (-73.938140243499049 40.663799577449979)
+      city (String) = Beijing
+      country_code (String) = cn
+      POINT (116.3912972 39.9057136)
 
-    OGRFeature(SELECT):5
-    id (Real) = 6
-    city (String) = Berlin
-    country (String) = Deutschland
-    POINT (13.402306623451983 52.501470321410636)
-
-    OGRFeature(SELECT):6
-    id (Real) = 7
-    city (String) = Beijing
-    POINT (116.391195 39.9064702)
-
-    OGRFeature(SELECT):7
-    id (Real) = 8
-    city (String) = Brasilia
-    country (String) = Brasil
-    POINT (-52.830435216371839 -10.828214867369699)
-
-    OGRFeature(SELECT):8
-    id (Real) = 9
-    city (String) = Moscow
-    country (String) = Российская Федерация
-    POINT (37.367988106866868 55.556208255649558)
 
 .. highlight:: sql
 

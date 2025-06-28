@@ -6,7 +6,7 @@ BYN - Natural Resources Canada's Geoid file format (.byn)
 
 .. shortname:: BYN
 
-.. built_in_by_default:: 
+.. built_in_by_default::
 
 Files with extension ".byn" have a binary format. The format includes
 two sections which are the Header and the Data. The data are stored by
@@ -43,10 +43,6 @@ will have variable Data equal to 1 or 3.
 Driver capabilities
 -------------------
 
-.. supports_createcopy::
-
-.. supports_create::
-
 .. supports_georeferencing::
 
 .. supports_virtualio::
@@ -54,7 +50,7 @@ Driver capabilities
 Factor
 ------
 
-When translating from or into BYN file to or from another formats the
+When translating from BYN file to or from another formats the
 scale will affect the result profoundly.
 
 Translating to a format that supports Scale (GTIFF for example) will
@@ -77,5 +73,5 @@ NOTE: The BYN header variable **Factor** is the inverse of GDAL
 See Also
 --------
 
--  Implemented as ``gdal/frmts/raw/byndataset.{h,cpp}``.
+-  Implemented as :source_file:`frmts/raw/byndataset.cpp`.
 -  `www.nrcan.gc.ca <https://www.nrcan.gc.ca>`__

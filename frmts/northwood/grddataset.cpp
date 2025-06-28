@@ -8,23 +8,7 @@
  * Copyright (c) 2006, Waypoint Information Technology
  * Copyright (c) 2009-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <string>
@@ -34,11 +18,14 @@
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
 #include "northwood.h"
+#include "ogrmitabspatialref.h"
 
+#ifndef NO_MITAB_SUPPORT
 #ifdef MSVC
 #include "..\..\ogr\ogrsf_frmts\mitab\mitab.h"
 #else
 #include "../../ogr/ogrsf_frmts/mitab/mitab.h"
+#endif
 #endif
 
 constexpr float NODATA = -1.e37f;
@@ -46,6 +33,7 @@ constexpr double SCALE16BIT = 65534.0;
 constexpr double SCALE32BIT = 4294967294.0;
 
 void replaceExt(std::string &s, const std::string &newExt);
+
 /************************************************************************/
 /* Replace the extension on a filepath with an alternative extension    */
 /************************************************************************/
@@ -78,9 +66,11 @@ class NWT_GRDDataset final : public GDALPamDataset
     bool bUpdateHeader;
     mutable OGRSpatialReference *m_poSRS = nullptr;
 
+#ifndef NO_MITAB_SUPPORT
     // Update the header data with latest changes
     int UpdateHeader();
     int WriteTab();
+#endif
 
     NWT_GRDDataset(const NWT_GRDDataset &) = delete;
     NWT_GRDDataset &operator=(const NWT_GRDDataset &) = delete;
@@ -91,6 +81,8 @@ class NWT_GRDDataset final : public GDALPamDataset
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
+
+#ifndef NO_MITAB_SUPPORT
     static GDALDataset *Create(const char *pszFilename, int nXSize, int nYSize,
                                int nBandsIn, GDALDataType eType,
                                char **papszParamList);
@@ -99,13 +91,17 @@ class NWT_GRDDataset final : public GDALPamDataset
                                    char **papszOptions,
                                    GDALProgressFunc pfnProgress,
                                    void *pProgressData);
+#endif
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
-    CPLErr SetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     CPLErr FlushCache(bool bAtClosing) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
+
+#ifndef NO_MITAB_SUPPORT
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
+#endif
 };
 
 /************************************************************************/
@@ -450,8 +446,11 @@ NWT_GRDDataset::~NWT_GRDDataset()
     {
         NWT_GRDDataset::FlushCache(true);
     }
-    pGrd->fp = nullptr;  // this prevents nwtCloseGrid from closing the fp
-    nwtCloseGrid(pGrd);
+    if (pGrd)
+    {
+        pGrd->fp = nullptr;  // this prevents nwtCloseGrid from closing the fp
+        nwtCloseGrid(pGrd);
+    }
     if (m_poSRS)
         m_poSRS->Release();
 
@@ -465,9 +464,11 @@ NWT_GRDDataset::~NWT_GRDDataset()
 CPLErr NWT_GRDDataset::FlushCache(bool bAtClosing)
 {
     // Ensure the header and TAB file are up to date
-    if (bUpdateHeader)
+    if (bUpdateHeader && pGrd)
     {
+#ifndef NO_MITAB_SUPPORT
         UpdateHeader();
+#endif
     }
 
     // Call the parent method
@@ -478,15 +479,15 @@ CPLErr NWT_GRDDataset::FlushCache(bool bAtClosing)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr NWT_GRDDataset::GetGeoTransform(double *padfTransform)
+CPLErr NWT_GRDDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    padfTransform[0] = pGrd->dfMinX - (pGrd->dfStepSize * 0.5);
-    padfTransform[3] = pGrd->dfMaxY + (pGrd->dfStepSize * 0.5);
-    padfTransform[1] = pGrd->dfStepSize;
-    padfTransform[2] = 0.0;
+    gt[0] = pGrd->dfMinX - (pGrd->dfStepSize * 0.5);
+    gt[3] = pGrd->dfMaxY + (pGrd->dfStepSize * 0.5);
+    gt[1] = pGrd->dfStepSize;
+    gt[2] = 0.0;
 
-    padfTransform[4] = 0.0;
-    padfTransform[5] = -1 * pGrd->dfStepSize;
+    gt[4] = 0.0;
+    gt[5] = -1 * pGrd->dfStepSize;
 
     return CE_None;
 }
@@ -495,22 +496,22 @@ CPLErr NWT_GRDDataset::GetGeoTransform(double *padfTransform)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr NWT_GRDDataset::SetGeoTransform(double *padfTransform)
+CPLErr NWT_GRDDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
-    if (padfTransform[2] != 0.0 || padfTransform[4] != 0.0)
+    if (gt[2] != 0.0 || gt[4] != 0.0)
     {
 
         CPLError(CE_Failure, CPLE_NotSupported,
                  "GRD datasets do not support skew/rotation");
         return CE_Failure;
     }
-    pGrd->dfStepSize = padfTransform[1];
+    pGrd->dfStepSize = gt[1];
 
     // GRD format sets the min/max coordinates to the centre of the
     // cell; We must account for this when copying the GDAL geotransform
     // which references the top left corner
-    pGrd->dfMinX = padfTransform[0] + (pGrd->dfStepSize * 0.5);
-    pGrd->dfMaxY = padfTransform[3] - (pGrd->dfStepSize * 0.5);
+    pGrd->dfMinX = gt[0] + (pGrd->dfStepSize * 0.5);
+    pGrd->dfMaxY = gt[3] - (pGrd->dfStepSize * 0.5);
 
     // Now set the miny and maxx
     pGrd->dfMaxX = pGrd->dfMinX + (pGrd->dfStepSize * (nRasterXSize - 1));
@@ -539,9 +540,11 @@ const OGRSpatialReference *NWT_GRDDataset::GetSpatialRef() const
     OGRSpatialReference *poSpatialRef =
         MITABCoordSys2SpatialRef(pGrd->cMICoordSys);
     m_poSRS = poSpatialRef;
+
     return m_poSRS;
 }
 
+#ifndef NO_MITAB_SUPPORT
 /************************************************************************/
 /*                            SetSpatialRef()                           */
 /************************************************************************/
@@ -562,6 +565,7 @@ CPLErr NWT_GRDDataset::SetSpatialRef(const OGRSpatialReference *poSRS)
 
     return CE_None;
 }
+#endif
 
 /************************************************************************/
 /*                              Identify()                              */
@@ -624,6 +628,11 @@ GDALDataset *NWT_GRDDataset::Open(GDALOpenInfo *poOpenInfo)
     VSIFSeekL(poDS->fp, 0, SEEK_SET);
     VSIFReadL(poDS->abyHeader, 1, 1024, poDS->fp);
     poDS->pGrd = reinterpret_cast<NWT_GRID *>(calloc(1, sizeof(NWT_GRID)));
+    if (!poDS->pGrd)
+    {
+        delete poDS;
+        return nullptr;
+    }
 
     poDS->pGrd->fp = poDS->fp;
 
@@ -670,6 +679,7 @@ GDALDataset *NWT_GRDDataset::Open(GDALOpenInfo *poOpenInfo)
     return poDS;
 }
 
+#ifndef NO_MITAB_SUPPORT
 /************************************************************************/
 /*                                UpdateHeader()                        */
 /************************************************************************/
@@ -782,7 +792,7 @@ int NWT_GRDDataset::UpdateHeader()
 int NWT_GRDDataset::WriteTab()
 {
     // Create the filename for the .tab file.
-    const std::string sTabFile(CPLResetExtension(pGrd->szFileName, "tab"));
+    const std::string sTabFile(CPLResetExtensionSafe(pGrd->szFileName, "tab"));
 
     VSILFILE *tabfp = VSIFOpenL(sTabFile.c_str(), "wt");
     if (tabfp == nullptr)
@@ -900,6 +910,11 @@ GDALDataset *NWT_GRDDataset::Create(const char *pszFilename, int nXSize,
     NWT_GRDDataset *poDS = new NWT_GRDDataset();
     poDS->eAccess = GA_Update;
     poDS->pGrd = static_cast<NWT_GRID *>(calloc(1, sizeof(NWT_GRID)));
+    if (!poDS->pGrd)
+    {
+        delete poDS;
+        return nullptr;
+    }
 
     // We currently only support GRD grid types (could potentially support GRC
     // in the papszParamList). Also only support GDT_Float32 as the data type.
@@ -1123,6 +1138,7 @@ GDALDataset *NWT_GRDDataset::CreateCopy(const char *pszFilename,
 
     return poDstDS;
 }
+#endif  // NO_MITAB_SUPPORT
 
 /************************************************************************/
 /*                          GDALRegister_GRD()                          */
@@ -1141,7 +1157,6 @@ void GDALRegister_NWT_GRD()
     poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/nwtgrd.html");
     poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "grd");
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
-    poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES, "Float32");
 
     poDriver->SetMetadataItem(
         GDAL_DMD_OPENOPTIONLIST,
@@ -1150,6 +1165,12 @@ void GDALRegister_NWT_GRD()
         "(RGBZ). Only used in read-only mode' default='4'/>"
         "</OpenOptionList>");
 
+    poDriver->pfnOpen = NWT_GRDDataset::Open;
+    poDriver->pfnIdentify = NWT_GRDDataset::Identify;
+
+#ifndef NO_MITAB_SUPPORT
+
+    poDriver->SetMetadataItem(GDAL_DMD_CREATIONDATATYPES, "Float32");
     poDriver->SetMetadataItem(
         GDAL_DMD_CREATIONOPTIONLIST,
         "<CreationOptionList>"
@@ -1171,10 +1192,9 @@ void GDALRegister_NWT_GRD()
         "MapInfo' default='0'/>"
         "</CreationOptionList>");
 
-    poDriver->pfnOpen = NWT_GRDDataset::Open;
-    poDriver->pfnIdentify = NWT_GRDDataset::Identify;
     poDriver->pfnCreate = NWT_GRDDataset::Create;
     poDriver->pfnCreateCopy = NWT_GRDDataset::CreateCopy;
+#endif
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
 }

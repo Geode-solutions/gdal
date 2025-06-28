@@ -5,23 +5,7 @@
 ###############################################################################
 # Copyright (c) 2016, Andrew Sudorgin
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -38,7 +22,7 @@ pytestmark = pytest.mark.require_driver("PRF")
 def test_prf_1():
 
     tst = gdaltest.GDALTest("prf", "./PRF/ph.prf", 1, 43190)
-    return tst.testOpen(check_gt=(1, 2, 3, -7, 5, 6))
+    tst.testOpen(check_gt=(1, 2, 3, -7, 5, 6))
 
 
 def test_prf_2():
@@ -85,10 +69,25 @@ def test_prf_3():
     ds = None
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_prf_4():
 
     tst = gdaltest.GDALTest("prf", "./PRF/dem.x-dem", 1, 0)
-    return tst.testOpen(check_gt=(1.5, 1.0, 0.0, 9329.0, 0.0, -2.0))
+    tst.testOpen(check_gt=(1.5, 1.0, 0.0, 9329.0, 0.0, -2.0))
+
+
+def test_prf_5():
+
+    ds = gdal.Open("./data/PRF/ph.prf")
+
+    assert (
+        ds.GetSpatialRef().GetAuthorityCode("PROJCS") == "32601"
+    ), "Invalid spatial reference"
+
+    ds = None
 
 
 ###############################################################################
