@@ -20,6 +20,7 @@
 
 #include "cpl_vsi_virtual.h"
 #include "gdal_priv_templates.hpp"
+#include "gdal_priv.h"
 #include "gtiff.h"
 #include "tifvsi.h"
 
@@ -465,12 +466,14 @@ CPLErr GTiffRasterBand::SetColorInterpretation(GDALColorInterp eInterp)
         }
     }
 
-    // Mark alpha band / undefined in extrasamples.
-    if (eInterp == GCI_AlphaBand || eInterp == GCI_Undefined)
+    // Mark non-RGB in extrasamples.
+    if (eInterp != GCI_RedBand && eInterp != GCI_GreenBand &&
+        eInterp != GCI_BlueBand)
     {
         uint16_t *v = nullptr;
         uint16_t count = 0;
-        if (TIFFGetField(m_poGDS->m_hTIFF, TIFFTAG_EXTRASAMPLES, &count, &v))
+        if (TIFFGetField(m_poGDS->m_hTIFF, TIFFTAG_EXTRASAMPLES, &count, &v) &&
+            count > 0)
         {
             const int nBaseSamples = m_poGDS->m_nSamplesPerPixel - count;
 

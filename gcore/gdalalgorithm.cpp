@@ -19,6 +19,7 @@
 #include "cpl_multiproc.h"
 
 #include "gdalalgorithm.h"
+#include "gdalalg_abstract_pipeline.h"
 #include "gdal_priv.h"
 #include "ogrsf_frmts.h"
 #include "ogr_spatialref.h"
@@ -37,11 +38,9 @@
 #define _(x) (x)
 #endif
 
-constexpr const char *GDAL_ARG_NAME_INPUT_FORMAT = "input-format";
-
 constexpr const char *GDAL_ARG_NAME_OUTPUT_DATA_TYPE = "output-data-type";
 
-constexpr const char *GDAL_ARG_NAME_OPEN_OPTION = "open-option";
+constexpr const char *GDAL_ARG_NAME_OUTPUT_OPEN_OPTION = "output-open-option";
 
 constexpr const char *GDAL_ARG_NAME_BAND = "band";
 
@@ -254,7 +253,7 @@ bool GDALAlgorithmArg::ProcessString(std::string &value) const
     {
         GByte *pabyData = nullptr;
         if (VSIIngestFile(nullptr, value.c_str() + 1, &pabyData, nullptr,
-                          1024 * 1024))
+                          10 * 1024 * 1024))
         {
             // Remove UTF-8 BOM
             size_t offset = 0;
@@ -1027,20 +1026,124 @@ bool GDALAlgorithmArg::RunValidationActions()
             ret = ValidateRealRange(v) && ret;
     }
 
-    for (const auto &f : m_validationActions)
+    if (GDALAlgorithmArgTypeIsList(GetType()))
     {
-        if (!f())
+        int valueCount = 0;
+        if (GetType() == GAAT_STRING_LIST)
+        {
+            valueCount =
+                static_cast<int>(Get<std::vector<std::string>>().size());
+        }
+        else if (GetType() == GAAT_INTEGER_LIST)
+        {
+            valueCount = static_cast<int>(Get<std::vector<int>>().size());
+        }
+        else if (GetType() == GAAT_REAL_LIST)
+        {
+            valueCount = static_cast<int>(Get<std::vector<double>>().size());
+        }
+        else if (GetType() == GAAT_DATASET_LIST)
+        {
+            valueCount = static_cast<int>(
+                Get<std::vector<GDALArgDatasetValue>>().size());
+        }
+
+        if (valueCount != GetMinCount() && GetMinCount() == GetMaxCount())
+        {
+            ReportError(CE_Failure, CPLE_AppDefined,
+                        "%d value%s been specified for argument '%s', "
+                        "whereas exactly %d %s expected.",
+                        valueCount, valueCount > 1 ? "s have" : " has",
+                        GetName().c_str(), GetMinCount(),
+                        GetMinCount() > 1 ? "were" : "was");
             ret = false;
+        }
+        else if (valueCount < GetMinCount())
+        {
+            ReportError(CE_Failure, CPLE_AppDefined,
+                        "Only %d value%s been specified for argument '%s', "
+                        "whereas at least %d %s expected.",
+                        valueCount, valueCount > 1 ? "s have" : " has",
+                        GetName().c_str(), GetMinCount(),
+                        GetMinCount() > 1 ? "were" : "was");
+            ret = false;
+        }
+        else if (valueCount > GetMaxCount())
+        {
+            ReportError(CE_Failure, CPLE_AppDefined,
+                        "%d value%s been specified for argument '%s', "
+                        "whereas at most %d %s expected.",
+                        valueCount, valueCount > 1 ? "s have" : " has",
+                        GetName().c_str(), GetMaxCount(),
+                        GetMaxCount() > 1 ? "were" : "was");
+            ret = false;
+        }
+    }
+
+    if (ret)
+    {
+        for (const auto &f : m_validationActions)
+        {
+            if (!f())
+                ret = false;
+        }
     }
 
     return ret;
 }
 
 /************************************************************************/
+/*                    GDALAlgorithmArg::ReportError()                   */
+/************************************************************************/
+
+void GDALAlgorithmArg::ReportError(CPLErr eErrClass, CPLErrorNum err_no,
+                                   const char *fmt, ...) const
+{
+    va_list args;
+    va_start(args, fmt);
+    if (m_owner)
+    {
+        m_owner->ReportError(eErrClass, err_no, "%s",
+                             CPLString().vPrintf(fmt, args).c_str());
+    }
+    else
+    {
+        CPLError(eErrClass, err_no, "%s",
+                 CPLString().vPrintf(fmt, args).c_str());
+    }
+    va_end(args);
+}
+
+/************************************************************************/
+/*                 GDALAlgorithmArg::GetEscapedString()                 */
+/************************************************************************/
+
+/* static */
+std::string GDALAlgorithmArg::GetEscapedString(const std::string &s)
+{
+    if (s.find_first_of("\" \\,") != std::string::npos &&
+        !(s.size() > 4 &&
+          s[0] == GDALAbstractPipelineAlgorithm::OPEN_NESTED_PIPELINE[0] &&
+          s[1] == ' ' && s[s.size() - 2] == ' ' &&
+          s.back() == GDALAbstractPipelineAlgorithm::CLOSE_NESTED_PIPELINE[0]))
+    {
+        return std::string("\"")
+            .append(
+                CPLString(s).replaceAll('\\', "\\\\").replaceAll('"', "\\\""))
+            .append("\"");
+    }
+    else
+    {
+        return s;
+    }
+}
+
+/************************************************************************/
 /*                    GDALAlgorithmArg::Serialize()                     */
 /************************************************************************/
 
-bool GDALAlgorithmArg::Serialize(std::string &serializedArg) const
+bool GDALAlgorithmArg::Serialize(std::string &serializedArg,
+                                 bool absolutePath) const
 {
     serializedArg.clear();
 
@@ -1057,22 +1160,33 @@ bool GDALAlgorithmArg::Serialize(std::string &serializedArg) const
         return true;
     }
 
-    const auto AppendString = [&ret](const std::string &str)
+    const auto AddListValueSeparator = [this, &ret]()
     {
-        if (str.find('"') != std::string::npos ||
-            str.find(' ') != std::string::npos ||
-            str.find('\\') != std::string::npos ||
-            str.find(',') != std::string::npos)
+        if (GetPackedValuesAllowed())
         {
-            ret += '"';
-            ret +=
-                CPLString(str).replaceAll('\\', "\\\\").replaceAll('"', "\\\"");
-            ret += '"';
+            ret += ',';
         }
         else
         {
-            ret += str;
+            ret += " --";
+            ret += GetName();
+            ret += ' ';
         }
+    };
+
+    const auto MakeAbsolutePath = [](const std::string &filename)
+    {
+        VSIStatBufL sStat;
+        if (VSIStatL(filename.c_str(), &sStat) != 0 ||
+            !CPLIsFilenameRelative(filename.c_str()))
+            return filename;
+        char *pszCWD = CPLGetCurrentDir();
+        if (!pszCWD)
+            return filename;
+        const auto absPath =
+            CPLFormFilenameSafe(pszCWD, filename.c_str(), nullptr);
+        CPLFree(pszCWD);
+        return absPath;
     };
 
     ret += ' ';
@@ -1083,7 +1197,7 @@ bool GDALAlgorithmArg::Serialize(std::string &serializedArg) const
         case GAAT_STRING:
         {
             const auto &val = Get<std::string>();
-            AppendString(val);
+            ret += GetEscapedString(val);
             break;
         }
         case GAAT_INTEGER:
@@ -1104,7 +1218,7 @@ bool GDALAlgorithmArg::Serialize(std::string &serializedArg) const
             {
                 return false;
             }
-            AppendString(str);
+            ret += GetEscapedString(absolutePath ? MakeAbsolutePath(str) : str);
             break;
         }
         case GAAT_STRING_LIST:
@@ -1113,8 +1227,8 @@ bool GDALAlgorithmArg::Serialize(std::string &serializedArg) const
             for (size_t i = 0; i < vals.size(); ++i)
             {
                 if (i > 0)
-                    ret += ',';
-                AppendString(vals[i]);
+                    AddListValueSeparator();
+                ret += GetEscapedString(vals[i]);
             }
             break;
         }
@@ -1124,7 +1238,7 @@ bool GDALAlgorithmArg::Serialize(std::string &serializedArg) const
             for (size_t i = 0; i < vals.size(); ++i)
             {
                 if (i > 0)
-                    ret += ',';
+                    AddListValueSeparator();
                 ret += CPLSPrintf("%d", vals[i]);
             }
             break;
@@ -1135,7 +1249,7 @@ bool GDALAlgorithmArg::Serialize(std::string &serializedArg) const
             for (size_t i = 0; i < vals.size(); ++i)
             {
                 if (i > 0)
-                    ret += ',';
+                    AddListValueSeparator();
                 ret += CPLSPrintf("%.17g", vals[i]);
             }
             break;
@@ -1146,14 +1260,15 @@ bool GDALAlgorithmArg::Serialize(std::string &serializedArg) const
             for (size_t i = 0; i < vals.size(); ++i)
             {
                 if (i > 0)
-                    ret += ',';
+                    AddListValueSeparator();
                 const auto &val = vals[i];
                 const auto &str = val.GetName();
                 if (str.empty())
                 {
                     return false;
                 }
-                AppendString(str);
+                ret += GetEscapedString(absolutePath ? MakeAbsolutePath(str)
+                                                     : str);
             }
             break;
         }
@@ -1395,8 +1510,7 @@ GDALInConstructionAlgorithmArg &GDALInConstructionAlgorithmArg::SetIsCRSArg(
         {
             bool bIsRaster = false;
             OGREnvelope sDatasetLongLatEnv;
-            OGRSpatialReference oDSCRS;
-            const char *pszCelestialBodyName = nullptr;
+            std::string osCelestialBodyName;
             if (GetName() == "dst-crs")
             {
                 auto inputArg = m_owner->GetArg(GDAL_ARG_NAME_INPUT);
@@ -1412,30 +1526,18 @@ GDALInConstructionAlgorithmArg &GDALInConstructionAlgorithmArg::SetIsCRSArg(
                         if (poDS)
                         {
                             bIsRaster = poDS->GetRasterCount() != 0;
-                            const OGRSpatialReference *poCRS;
-                            if ((poCRS = poDS->GetSpatialRef()) != nullptr)
+                            if (auto poCRS = poDS->GetSpatialRef())
                             {
-                                oDSCRS = *poCRS;
-                            }
-                            else if (poDS->GetLayerCount() >= 1)
-                            {
-                                if (auto poLayer = poDS->GetLayer(0))
-                                {
-                                    if ((poCRS = poLayer->GetSpatialRef()) !=
-                                        nullptr)
-                                        oDSCRS = *poCRS;
-                                }
-                            }
-                            if (!oDSCRS.IsEmpty())
-                            {
-                                pszCelestialBodyName =
-                                    oDSCRS.GetCelestialBodyName();
+                                const char *pszCelestialBodyName =
+                                    poCRS->GetCelestialBodyName();
+                                if (pszCelestialBodyName)
+                                    osCelestialBodyName = pszCelestialBodyName;
 
                                 if (!pszCelestialBodyName ||
                                     !EQUAL(pszCelestialBodyName, "Earth"))
                                 {
                                     OGRSpatialReference oLongLat;
-                                    oLongLat.CopyGeogCSFrom(&oDSCRS);
+                                    oLongLat.CopyGeogCSFrom(poCRS);
                                     oLongLat.SetAxisMappingStrategy(
                                         OAMS_TRADITIONAL_GIS_ORDER);
                                     poDS->GetExtent(&sDatasetLongLatEnv,
@@ -1454,7 +1556,7 @@ GDALInConstructionAlgorithmArg &GDALInConstructionAlgorithmArg::SetIsCRSArg(
 
             const auto IsCRSCompatible =
                 [bIsRaster, &sDatasetLongLatEnv,
-                 pszCelestialBodyName](const OSRCRSInfo *crsInfo)
+                 &osCelestialBodyName](const OSRCRSInfo *crsInfo)
             {
                 if (!sDatasetLongLatEnv.IsInit())
                     return true;
@@ -1467,11 +1569,11 @@ GDALInConstructionAlgorithmArg &GDALInConstructionAlgorithmArg::SetIsCRSArg(
                        sDatasetLongLatEnv.MaxX > crsInfo->dfWestLongitudeDeg &&
                        sDatasetLongLatEnv.MinY < crsInfo->dfNorthLatitudeDeg &&
                        sDatasetLongLatEnv.MaxY > crsInfo->dfSouthLatitudeDeg &&
-                       ((pszCelestialBodyName &&
+                       ((!osCelestialBodyName.empty() &&
                          crsInfo->pszCelestialBodyName &&
-                         EQUAL(pszCelestialBodyName,
-                               crsInfo->pszCelestialBodyName)) ||
-                        (!pszCelestialBodyName &&
+                         osCelestialBodyName ==
+                             crsInfo->pszCelestialBodyName) ||
+                        (osCelestialBodyName.empty() &&
                          !crsInfo->pszCelestialBodyName));
             };
 
@@ -1609,7 +1711,7 @@ GDALAlgorithm::GDALAlgorithm(const std::string &name,
                         : m_helpURL)
 {
     AddArg("help", 'h', _("Display help message and exit"), &m_helpRequested)
-        .SetOnlyForCLI()
+        .SetHiddenForAPI()
         .SetCategory(GAAC_COMMON)
         .AddAction([this]() { m_specialActionRequested = true; });
     AddArg("help-doc", 0, _("Display help message for use by documentation"),
@@ -1618,12 +1720,12 @@ GDALAlgorithm::GDALAlgorithm(const std::string &name,
         .AddAction([this]() { m_specialActionRequested = true; });
     AddArg("json-usage", 0, _("Display usage as JSON document and exit"),
            &m_JSONUsageRequested)
-        .SetOnlyForCLI()
+        .SetHiddenForAPI()
         .SetCategory(GAAC_COMMON)
         .AddAction([this]() { m_specialActionRequested = true; });
     AddArg("config", 0, _("Configuration option"), &m_dummyConfigOptions)
         .SetMetaVar("<KEY>=<VALUE>")
-        .SetOnlyForCLI()
+        .SetHiddenForAPI()
         .SetCategory(GAAC_COMMON)
         .AddAction(
             [this]()
@@ -1746,7 +1848,9 @@ bool GDALAlgorithm::ParseArgument(
         {
             const CPLStringList aosTokens(
                 arg->GetPackedValuesAllowed()
-                    ? CSLTokenizeString2(value.c_str(), ",", CSLT_HONOURSTRINGS)
+                    ? CSLTokenizeString2(value.c_str(), ",",
+                                         CSLT_HONOURSTRINGS |
+                                             CSLT_PRESERVEQUOTES)
                     : CSLAddString(nullptr, value.c_str()));
             if (!cpl::contains(inConstructionValues, arg))
             {
@@ -1834,17 +1938,25 @@ bool GDALAlgorithm::ParseArgument(
 
         case GAAT_DATASET_LIST:
         {
-            const CPLStringList aosTokens(
-                CSLTokenizeString2(value.c_str(), ",", CSLT_HONOURSTRINGS));
             if (!cpl::contains(inConstructionValues, arg))
             {
                 inConstructionValues[arg] = std::vector<GDALArgDatasetValue>();
             }
             auto &valueVector = std::get<std::vector<GDALArgDatasetValue>>(
                 inConstructionValues[arg]);
-            for (const char *v : aosTokens)
+            if (!value.empty() && value[0] == '{' && value.back() == '}')
             {
-                valueVector.push_back(GDALArgDatasetValue(v));
+                valueVector.push_back(GDALArgDatasetValue(value));
+            }
+            else
+            {
+                const CPLStringList aosTokens(CSLTokenizeString2(
+                    value.c_str(), ",",
+                    CSLT_HONOURSTRINGS | CSLT_PRESERVEQUOTES));
+                for (const char *v : aosTokens)
+                {
+                    valueVector.push_back(GDALArgDatasetValue(v));
+                }
             }
             break;
         }
@@ -1945,7 +2057,13 @@ bool GDALAlgorithm::ParseCommandLineArguments(
             name = (equalPos != std::string::npos) ? strArg.substr(0, equalPos)
                                                    : strArg;
             const std::string nameWithoutDash = name.substr(2);
-            const auto iterArg = m_mapLongNameToArg.find(nameWithoutDash);
+            auto iterArg = m_mapLongNameToArg.find(nameWithoutDash);
+            if (m_arbitraryLongNameArgsAllowed &&
+                iterArg == m_mapLongNameToArg.end())
+            {
+                GetArg(nameWithoutDash);
+                iterArg = m_mapLongNameToArg.find(nameWithoutDash);
+            }
             if (iterArg == m_mapLongNameToArg.end())
             {
                 const std::string bestCandidate =
@@ -2472,7 +2590,7 @@ bool GDALAlgorithm::ProcessDatasetArg(GDALAlgorithmArg *arg,
         if ((arg == outputArg || !outputArg) && update)
             flags |= GDAL_OF_UPDATE | GDAL_OF_VERBOSE_ERROR;
 
-        const auto readOnlyArg = algForOutput->GetArg(GDAL_ARG_NAME_READ_ONLY);
+        const auto readOnlyArg = GetArg(GDAL_ARG_NAME_READ_ONLY);
         const bool readOnly =
             (readOnlyArg && readOnlyArg->GetType() == GAAT_BOOLEAN &&
              readOnlyArg->Get<bool>());
@@ -2483,15 +2601,28 @@ bool GDALAlgorithm::ProcessDatasetArg(GDALAlgorithmArg *arg,
         CPLStringList aosAllowedDrivers;
         if (arg->IsInput())
         {
-            const auto ooArg = GetArg(GDAL_ARG_NAME_OPEN_OPTION);
-            if (ooArg && ooArg->GetType() == GAAT_STRING_LIST)
-                aosOpenOptions =
-                    CPLStringList(ooArg->Get<std::vector<std::string>>());
+            if (arg == outputArg)
+            {
+                if (update && !overwrite)
+                {
+                    const auto ooArg = GetArg(GDAL_ARG_NAME_OUTPUT_OPEN_OPTION);
+                    if (ooArg && ooArg->GetType() == GAAT_STRING_LIST)
+                        aosOpenOptions = CPLStringList(
+                            ooArg->Get<std::vector<std::string>>());
+                }
+            }
+            else
+            {
+                const auto ooArg = GetArg(GDAL_ARG_NAME_OPEN_OPTION);
+                if (ooArg && ooArg->GetType() == GAAT_STRING_LIST)
+                    aosOpenOptions =
+                        CPLStringList(ooArg->Get<std::vector<std::string>>());
 
-            const auto ifArg = GetArg(GDAL_ARG_NAME_INPUT_FORMAT);
-            if (ifArg && ifArg->GetType() == GAAT_STRING_LIST)
-                aosAllowedDrivers =
-                    CPLStringList(ifArg->Get<std::vector<std::string>>());
+                const auto ifArg = GetArg(GDAL_ARG_NAME_INPUT_FORMAT);
+                if (ifArg && ifArg->GetType() == GAAT_STRING_LIST)
+                    aosAllowedDrivers =
+                        CPLStringList(ifArg->Get<std::vector<std::string>>());
+            }
         }
 
         std::string osDatasetName = val.GetName();
@@ -2519,11 +2650,43 @@ bool GDALAlgorithm::ProcessDatasetArg(GDALAlgorithmArg *arg,
             }
         }
 
-        auto poDS =
-            GDALDataset::Open(osDatasetName.c_str(), flags,
-                              aosAllowedDrivers.List(), aosOpenOptions.List());
+        auto oIter = m_oMapDatasetNameToDataset.find(osDatasetName.c_str());
+        auto poDS = oIter != m_oMapDatasetNameToDataset.end()
+                        ? oIter->second
+                        : GDALDataset::Open(osDatasetName.c_str(), flags,
+                                            aosAllowedDrivers.List(),
+                                            aosOpenOptions.List());
         if (poDS)
         {
+            if (oIter != m_oMapDatasetNameToDataset.end())
+            {
+                if (arg->GetType() == GAAT_DATASET)
+                    arg->Get<GDALArgDatasetValue>().Set(poDS->GetDescription());
+                poDS->Reference();
+                m_oMapDatasetNameToDataset.erase(oIter);
+            }
+
+            // A bit of a hack for situations like 'gdal raster clip --like "PG:..."'
+            // where the PG: dataset will be first opened with the PostGISRaster
+            // driver whereas the PostgreSQL (vector) one is actually wanted.
+            if (poDS->GetRasterCount() == 0 && (flags & GDAL_OF_RASTER) != 0 &&
+                (flags & GDAL_OF_VECTOR) != 0 && aosAllowedDrivers.empty() &&
+                aosOpenOptions.empty())
+            {
+                auto poDrv = poDS->GetDriver();
+                if (poDrv && EQUAL(poDrv->GetDescription(), "PostGISRaster"))
+                {
+                    // Retry with PostgreSQL (vector) driver
+                    std::unique_ptr<GDALDataset> poTmpDS(GDALDataset::Open(
+                        osDatasetName.c_str(), flags & ~GDAL_OF_RASTER));
+                    if (poTmpDS)
+                    {
+                        poDS->ReleaseRef();
+                        poDS = poTmpDS.release();
+                    }
+                }
+            }
+
             if (assignToOutputArg)
             {
                 // Avoid opening twice the same datasource if it is both
@@ -2545,6 +2708,7 @@ bool GDALAlgorithm::ProcessDatasetArg(GDALAlgorithmArg *arg,
                     outputArg->Get<GDALArgDatasetValue>().Set(poDS);
                 }
             }
+            val.SetDatasetOpenedByAlgorithm();
             val.Set(poDS);
             poDS->ReleaseRef();
         }
@@ -2593,16 +2757,67 @@ bool GDALAlgorithm::ProcessDatasetArg(GDALAlgorithmArg *arg,
                 {
                     if (!overwrite)
                     {
+                        std::string options;
+                        if (algForOutput->GetArg(GDAL_ARG_NAME_OVERWRITE_LAYER))
+                        {
+                            options += "--";
+                            options += GDAL_ARG_NAME_OVERWRITE_LAYER;
+                        }
+                        if (hasAppendArg)
+                        {
+                            if (!options.empty())
+                                options += '/';
+                            options += "--";
+                            options += GDAL_ARG_NAME_APPEND;
+                        }
+                        if (hasUpdateArg)
+                        {
+                            if (!options.empty())
+                                options += '/';
+                            options += "--";
+                            options += GDAL_ARG_NAME_UPDATE;
+                        }
+
+                        if (poDriver)
+                        {
+                            const char *pszPrefix = poDriver->GetMetadataItem(
+                                GDAL_DMD_CONNECTION_PREFIX);
+                            if (pszPrefix &&
+                                STARTS_WITH_CI(val.GetName().c_str(),
+                                               pszPrefix))
+                            {
+                                bool bExists = false;
+                                {
+                                    CPLErrorStateBackuper oBackuper(
+                                        CPLQuietErrorHandler);
+                                    bExists = std::unique_ptr<GDALDataset>(
+                                                  GDALDataset::Open(
+                                                      val.GetName().c_str())) !=
+                                              nullptr;
+                                }
+                                if (bExists)
+                                {
+                                    if (!options.empty())
+                                        options = " You may specify the " +
+                                                  options + " option.";
+                                    ReportError(CE_Failure, CPLE_AppDefined,
+                                                "%s '%s' already exists.%s",
+                                                pszType, val.GetName().c_str(),
+                                                options.c_str());
+                                    return false;
+                                }
+
+                                return true;
+                            }
+                        }
+
+                        if (!options.empty())
+                            options = '/' + options;
                         ReportError(
                             CE_Failure, CPLE_AppDefined,
-                            "%s '%s' already exists. Specify the --overwrite "
-                            "option to overwrite it%s.",
-                            pszType, val.GetName().c_str(),
-                            hasAppendArg
-                                ? " or the --append option to append to it"
-                            : hasUpdateArg
-                                ? " or the --update option to update it"
-                                : "");
+                            "%s '%s' already exists. You may specify the "
+                            "--overwrite%s option.",
+                            pszType, val.GetName().c_str(), options.c_str());
                         return false;
                     }
                     else if (EQUAL(pszType, "File"))
@@ -2632,6 +2847,14 @@ bool GDALAlgorithm::ProcessDatasetArg(GDALAlgorithmArg *arg,
         }
     }
 
+    // If outputting to stdout, automatically turn off progress bar
+    if (arg == outputArg && val.GetName() == "/vsistdout/")
+    {
+        auto quietArg = GetArg(GDAL_ARG_NAME_QUIET);
+        if (quietArg && quietArg->GetType() == GAAT_BOOLEAN)
+            quietArg->Set(true);
+    }
+
     return ret;
 }
 
@@ -2646,6 +2869,8 @@ bool GDALAlgorithm::ValidateArguments()
 
     if (m_specialActionRequested)
         return true;
+
+    m_arbitraryLongNameArgsAllowed = false;
 
     // If only --output=format=MEM/stream is specified and not --output,
     // then set empty name for --output.
@@ -2694,72 +2919,33 @@ bool GDALAlgorithm::ValidateArguments()
         if (arg->IsRequired() && !arg->IsExplicitlySet() &&
             !arg->HasDefaultValue())
         {
-            ReportError(CE_Failure, CPLE_AppDefined,
-                        "Required argument '%s' has not been specified.",
-                        arg->GetName().c_str());
-            ret = false;
+            bool emitError = true;
+            const auto &mutualExclusionGroup = arg->GetMutualExclusionGroup();
+            if (!mutualExclusionGroup.empty())
+            {
+                for (const auto &otherArg : m_args)
+                {
+                    if (otherArg->GetMutualExclusionGroup() ==
+                            mutualExclusionGroup &&
+                        otherArg->IsExplicitlySet())
+                    {
+                        emitError = false;
+                        break;
+                    }
+                }
+            }
+            if (emitError)
+            {
+                ReportError(CE_Failure, CPLE_AppDefined,
+                            "Required argument '%s' has not been specified.",
+                            arg->GetName().c_str());
+                ret = false;
+            }
         }
         else if (arg->IsExplicitlySet() && arg->GetType() == GAAT_DATASET)
         {
             if (!ProcessDatasetArg(arg.get(), this))
                 ret = false;
-        }
-        else if (arg->IsExplicitlySet() &&
-                 GDALAlgorithmArgTypeIsList(arg->GetType()))
-        {
-            int valueCount = 0;
-            if (arg->GetType() == GAAT_STRING_LIST)
-            {
-                valueCount = static_cast<int>(
-                    arg->Get<std::vector<std::string>>().size());
-            }
-            else if (arg->GetType() == GAAT_INTEGER_LIST)
-            {
-                valueCount =
-                    static_cast<int>(arg->Get<std::vector<int>>().size());
-            }
-            else if (arg->GetType() == GAAT_REAL_LIST)
-            {
-                valueCount =
-                    static_cast<int>(arg->Get<std::vector<double>>().size());
-            }
-            else if (arg->GetType() == GAAT_DATASET_LIST)
-            {
-                valueCount = static_cast<int>(
-                    arg->Get<std::vector<GDALArgDatasetValue>>().size());
-            }
-
-            if (valueCount != arg->GetMinCount() &&
-                arg->GetMinCount() == arg->GetMaxCount())
-            {
-                ReportError(CE_Failure, CPLE_AppDefined,
-                            "%d value%s been specified for argument '%s', "
-                            "whereas exactly %d %s expected.",
-                            valueCount, valueCount > 1 ? "s have" : " has",
-                            arg->GetName().c_str(), arg->GetMinCount(),
-                            arg->GetMinCount() > 1 ? "were" : "was");
-                ret = false;
-            }
-            else if (valueCount < arg->GetMinCount())
-            {
-                ReportError(CE_Failure, CPLE_AppDefined,
-                            "Only %d value%s been specified for argument '%s', "
-                            "whereas at least %d %s expected.",
-                            valueCount, valueCount > 1 ? "s have" : " has",
-                            arg->GetName().c_str(), arg->GetMinCount(),
-                            arg->GetMinCount() > 1 ? "were" : "was");
-                ret = false;
-            }
-            else if (valueCount > arg->GetMaxCount())
-            {
-                ReportError(CE_Failure, CPLE_AppDefined,
-                            "%d value%s been specified for argument '%s', "
-                            "whereas at most %d %s expected.",
-                            valueCount, valueCount > 1 ? "s have" : " has",
-                            arg->GetName().c_str(), arg->GetMaxCount(),
-                            arg->GetMaxCount() > 1 ? "were" : "was");
-                ret = false;
-            }
         }
 
         if (arg->IsExplicitlySet() && arg->GetType() == GAAT_DATASET_LIST &&
@@ -2833,6 +3019,9 @@ bool GDALAlgorithm::ValidateArguments()
                 }
             }
         }
+
+        if (arg->IsExplicitlySet() && !arg->RunValidationActions())
+            ret = false;
     }
 
     for (const auto &f : m_validationActions)
@@ -2929,16 +3118,28 @@ GDALAlgorithm::GetSuggestionForArgumentName(const std::string &osName) const
 }
 
 /************************************************************************/
+/*            GDALAlgorithm::IsKnownOutputRelatedBooleanArgName()       */
+/************************************************************************/
+
+/* static */
+bool GDALAlgorithm::IsKnownOutputRelatedBooleanArgName(std::string_view osName)
+{
+    return osName == GDAL_ARG_NAME_APPEND || osName == GDAL_ARG_NAME_UPDATE ||
+           osName == GDAL_ARG_NAME_OVERWRITE ||
+           osName == GDAL_ARG_NAME_OVERWRITE_LAYER;
+}
+
+/************************************************************************/
 /*                      GDALAlgorithm::GetArg()                         */
 /************************************************************************/
 
-const GDALAlgorithmArg *GDALAlgorithm::GetArg(const std::string &osName,
-                                              bool suggestionAllowed) const
+GDALAlgorithmArg *GDALAlgorithm::GetArg(const std::string &osName,
+                                        bool suggestionAllowed, bool isConst)
 {
     const auto nPos = osName.find_first_not_of('-');
     if (nPos == std::string::npos)
         return nullptr;
-    const std::string osKey = osName.substr(nPos);
+    std::string osKey = osName.substr(nPos);
     {
         const auto oIter = m_mapLongNameToArg.find(osKey);
         if (oIter != m_mapLongNameToArg.end())
@@ -2950,10 +3151,47 @@ const GDALAlgorithmArg *GDALAlgorithm::GetArg(const std::string &osName,
             return oIter->second;
     }
 
+    if (!isConst && m_arbitraryLongNameArgsAllowed)
+    {
+        const auto nDotPos = osKey.find('.');
+        const std::string osKeyEnd =
+            nDotPos == std::string::npos ? osKey : osKey.substr(nDotPos + 1);
+        if (IsKnownOutputRelatedBooleanArgName(osKeyEnd))
+        {
+            m_arbitraryLongNameArgsValuesBool.emplace_back(
+                std::make_unique<bool>());
+            AddArg(osKey, 0, std::string("User-provided argument ") + osKey,
+                   m_arbitraryLongNameArgsValuesBool.back().get())
+                .SetUserProvided();
+        }
+        else
+        {
+            const std::string osKeyInit = osKey;
+            if (osKey == "oo")
+                osKey = GDAL_ARG_NAME_OPEN_OPTION;
+            else if (osKey == "co")
+                osKey = GDAL_ARG_NAME_CREATION_OPTION;
+            else if (osKey == "of")
+                osKey = GDAL_ARG_NAME_OUTPUT_FORMAT;
+            else if (osKey == "if")
+                osKey = GDAL_ARG_NAME_INPUT_FORMAT;
+            m_arbitraryLongNameArgsValuesStr.emplace_back(
+                std::make_unique<std::string>());
+            auto &arg =
+                AddArg(osKey, 0, std::string("User-provided argument ") + osKey,
+                       m_arbitraryLongNameArgsValuesStr.back().get())
+                    .SetUserProvided();
+            if (osKey != osKeyInit)
+                arg.AddAlias(osKeyInit);
+        }
+        const auto oIter = m_mapLongNameToArg.find(osKey);
+        CPLAssert(oIter != m_mapLongNameToArg.end());
+        return oIter->second;
+    }
+
     if (suggestionAllowed)
     {
         const std::string bestCandidate = GetSuggestionForArgumentName(osName);
-        ;
         if (!bestCandidate.empty())
         {
             CPLError(CE_Failure, CPLE_AppDefined,
@@ -3384,6 +3622,8 @@ GDALInConstructionAlgorithmArg &GDALAlgorithm::AddInputDatasetArg(
     if (positionalAndRequired)
         arg.SetPositional().SetRequired();
 
+    SetAutoCompleteFunctionForFilename(arg, type);
+
     AddValidationAction(
         [pValue]()
         {
@@ -3701,6 +3941,109 @@ bool GDALAlgorithm::AddOptionsSuggestions(const char *pszXML, int datasetType,
 }
 
 /************************************************************************/
+/*              GDALAlgorithm::OpenOptionCompleteFunction()             */
+/************************************************************************/
+
+//! @cond Doxygen_Suppress
+std::vector<std::string>
+GDALAlgorithm::OpenOptionCompleteFunction(const std::string &currentValue) const
+{
+    std::vector<std::string> oRet;
+
+    int datasetType = GDAL_OF_RASTER | GDAL_OF_VECTOR | GDAL_OF_MULTIDIM_RASTER;
+    auto inputArg = GetArg(GDAL_ARG_NAME_INPUT);
+    if (inputArg && (inputArg->GetType() == GAAT_DATASET ||
+                     inputArg->GetType() == GAAT_DATASET_LIST))
+    {
+        datasetType = inputArg->GetDatasetType();
+    }
+
+    auto inputFormat = GetArg(GDAL_ARG_NAME_INPUT_FORMAT);
+    if (inputFormat && inputFormat->GetType() == GAAT_STRING_LIST &&
+        inputFormat->IsExplicitlySet())
+    {
+        const auto &aosAllowedDrivers =
+            inputFormat->Get<std::vector<std::string>>();
+        if (aosAllowedDrivers.size() == 1)
+        {
+            auto poDriver = GetGDALDriverManager()->GetDriverByName(
+                aosAllowedDrivers[0].c_str());
+            if (poDriver)
+            {
+                AddOptionsSuggestions(
+                    poDriver->GetMetadataItem(GDAL_DMD_OPENOPTIONLIST),
+                    datasetType, currentValue, oRet);
+            }
+            return oRet;
+        }
+    }
+
+    const auto AddSuggestions = [datasetType, &currentValue,
+                                 &oRet](const GDALArgDatasetValue &datasetValue)
+    {
+        auto poDM = GetGDALDriverManager();
+
+        const auto &osDSName = datasetValue.GetName();
+        const std::string osExt = CPLGetExtensionSafe(osDSName.c_str());
+        if (!osExt.empty())
+        {
+            std::set<std::string> oVisitedExtensions;
+            for (int i = 0; i < poDM->GetDriverCount(); ++i)
+            {
+                auto poDriver = poDM->GetDriver(i);
+                if (((datasetType & GDAL_OF_RASTER) != 0 &&
+                     poDriver->GetMetadataItem(GDAL_DCAP_RASTER)) ||
+                    ((datasetType & GDAL_OF_VECTOR) != 0 &&
+                     poDriver->GetMetadataItem(GDAL_DCAP_VECTOR)) ||
+                    ((datasetType & GDAL_OF_MULTIDIM_RASTER) != 0 &&
+                     poDriver->GetMetadataItem(GDAL_DCAP_MULTIDIM_RASTER)))
+                {
+                    const char *pszExtensions =
+                        poDriver->GetMetadataItem(GDAL_DMD_EXTENSIONS);
+                    if (pszExtensions)
+                    {
+                        const CPLStringList aosExts(
+                            CSLTokenizeString2(pszExtensions, " ", 0));
+                        for (const char *pszExt : cpl::Iterate(aosExts))
+                        {
+                            if (EQUAL(pszExt, osExt.c_str()) &&
+                                !cpl::contains(oVisitedExtensions, pszExt))
+                            {
+                                oVisitedExtensions.insert(pszExt);
+                                if (AddOptionsSuggestions(
+                                        poDriver->GetMetadataItem(
+                                            GDAL_DMD_OPENOPTIONLIST),
+                                        datasetType, currentValue, oRet))
+                                {
+                                    return;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    if (inputArg && inputArg->GetType() == GAAT_DATASET)
+    {
+        auto &datasetValue = inputArg->Get<GDALArgDatasetValue>();
+        AddSuggestions(datasetValue);
+    }
+    else if (inputArg && inputArg->GetType() == GAAT_DATASET_LIST)
+    {
+        auto &datasetValues = inputArg->Get<std::vector<GDALArgDatasetValue>>();
+        if (datasetValues.size() == 1)
+            AddSuggestions(datasetValues[0]);
+    }
+
+    return oRet;
+}
+
+//! @endcond
+
+/************************************************************************/
 /*                 GDALAlgorithm::AddOpenOptionsArg()                   */
 /************************************************************************/
 
@@ -3720,90 +4063,33 @@ GDALAlgorithm::AddOpenOptionsArg(std::vector<std::string> *pValue,
 
     arg.SetAutoCompleteFunction(
         [this](const std::string &currentValue)
-        {
-            std::vector<std::string> oRet;
+        { return OpenOptionCompleteFunction(currentValue); });
 
-            int datasetType =
-                GDAL_OF_RASTER | GDAL_OF_VECTOR | GDAL_OF_MULTIDIM_RASTER;
-            auto inputArg = GetArg(GDAL_ARG_NAME_INPUT);
-            if (inputArg && (inputArg->GetType() == GAAT_DATASET ||
-                             inputArg->GetType() == GAAT_DATASET_LIST))
-            {
-                datasetType = inputArg->GetDatasetType();
-            }
+    return arg;
+}
 
-            auto inputFormat = GetArg(GDAL_ARG_NAME_INPUT_FORMAT);
-            if (inputFormat && inputFormat->GetType() == GAAT_STRING_LIST &&
-                inputFormat->IsExplicitlySet())
-            {
-                const auto &aosAllowedDrivers =
-                    inputFormat->Get<std::vector<std::string>>();
-                if (aosAllowedDrivers.size() == 1)
-                {
-                    auto poDriver = GetGDALDriverManager()->GetDriverByName(
-                        aosAllowedDrivers[0].c_str());
-                    if (poDriver)
-                    {
-                        AddOptionsSuggestions(
-                            poDriver->GetMetadataItem(GDAL_DMD_OPENOPTIONLIST),
-                            datasetType, currentValue, oRet);
-                    }
-                    return oRet;
-                }
-            }
+/************************************************************************/
+/*               GDALAlgorithm::AddOutputOpenOptionsArg()               */
+/************************************************************************/
 
-            if (inputArg && inputArg->GetType() == GAAT_DATASET)
-            {
-                auto poDM = GetGDALDriverManager();
-                auto &datasetValue = inputArg->Get<GDALArgDatasetValue>();
-                const auto &osDSName = datasetValue.GetName();
-                const std::string osExt = CPLGetExtensionSafe(osDSName.c_str());
-                if (!osExt.empty())
-                {
-                    std::set<std::string> oVisitedExtensions;
-                    for (int i = 0; i < poDM->GetDriverCount(); ++i)
-                    {
-                        auto poDriver = poDM->GetDriver(i);
-                        if (((datasetType & GDAL_OF_RASTER) != 0 &&
-                             poDriver->GetMetadataItem(GDAL_DCAP_RASTER)) ||
-                            ((datasetType & GDAL_OF_VECTOR) != 0 &&
-                             poDriver->GetMetadataItem(GDAL_DCAP_VECTOR)) ||
-                            ((datasetType & GDAL_OF_MULTIDIM_RASTER) != 0 &&
-                             poDriver->GetMetadataItem(
-                                 GDAL_DCAP_MULTIDIM_RASTER)))
-                        {
-                            const char *pszExtensions =
-                                poDriver->GetMetadataItem(GDAL_DMD_EXTENSIONS);
-                            if (pszExtensions)
-                            {
-                                const CPLStringList aosExts(
-                                    CSLTokenizeString2(pszExtensions, " ", 0));
-                                for (const char *pszExt : cpl::Iterate(aosExts))
-                                {
-                                    if (EQUAL(pszExt, osExt.c_str()) &&
-                                        !cpl::contains(oVisitedExtensions,
-                                                       pszExt))
-                                    {
-                                        oVisitedExtensions.insert(pszExt);
-                                        if (AddOptionsSuggestions(
-                                                poDriver->GetMetadataItem(
-                                                    GDAL_DMD_OPENOPTIONLIST),
-                                                datasetType, currentValue,
-                                                oRet))
-                                        {
-                                            return oRet;
-                                        }
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+GDALInConstructionAlgorithmArg &
+GDALAlgorithm::AddOutputOpenOptionsArg(std::vector<std::string> *pValue,
+                                       const char *helpMessage)
+{
+    auto &arg =
+        AddArg(GDAL_ARG_NAME_OUTPUT_OPEN_OPTION, 0,
+               MsgOrDefault(helpMessage, _("Output open options")), pValue)
+            .AddAlias("output-oo")
+            .SetMetaVar("<KEY>=<VALUE>")
+            .SetPackedValuesAllowed(false)
+            .SetCategory(GAAC_ADVANCED);
 
-            return oRet;
-        });
+    arg.AddValidationAction([this, &arg]()
+                            { return ParseAndValidateKeyValue(arg); });
+
+    arg.SetAutoCompleteFunction(
+        [this](const std::string &currentValue)
+        { return OpenOptionCompleteFunction(currentValue); });
 
     return arg;
 }
@@ -3853,6 +4139,26 @@ bool GDALAlgorithm::ValidateFormat(const GDALAlgorithmArg &arg,
                 return false;
             }
 
+            const auto allowedFormats =
+                arg.GetMetadataItem(GAAMDI_ALLOWED_FORMATS);
+            if (allowedFormats && !allowedFormats->empty() &&
+                std::find(allowedFormats->begin(), allowedFormats->end(),
+                          val) != allowedFormats->end())
+            {
+                return true;
+            }
+
+            const auto excludedFormats =
+                arg.GetMetadataItem(GAAMDI_EXCLUDED_FORMATS);
+            if (excludedFormats && !excludedFormats->empty() &&
+                std::find(excludedFormats->begin(), excludedFormats->end(),
+                          val) != excludedFormats->end())
+            {
+                ReportError(CE_Failure, CPLE_NotSupported,
+                            "%s output is not supported.", val.c_str());
+                return false;
+            }
+
             auto hDriver = GDALGetDriverByName(val.c_str());
             if (!hDriver)
             {
@@ -3864,7 +4170,7 @@ bool GDALAlgorithm::ValidateFormat(const GDALAlgorithmArg &arg,
                         GDALGetMessageAboutMissingPluginDriver(poMissingDriver);
                     ReportError(CE_Failure, CPLE_AppDefined,
                                 "Invalid value for argument '%s'. Driver '%s' "
-                                "not found but it known. However plugin %s",
+                                "not found but is known. However plugin %s",
                                 arg.GetName().c_str(), val.c_str(),
                                 msg.c_str());
                 }
@@ -3909,6 +4215,17 @@ bool GDALAlgorithm::ValidateFormat(const GDALAlgorithmArg &arg,
                         }
                         else
                         {
+                            if (cap == GDAL_DCAP_CREATE)
+                            {
+                                auto updateArg = GetArg(GDAL_ARG_NAME_UPDATE);
+                                if (updateArg &&
+                                    updateArg->GetType() == GAAT_BOOLEAN &&
+                                    updateArg->IsExplicitlySet())
+                                {
+                                    continue;
+                                }
+                            }
+
                             ReportError(
                                 CE_Failure, CPLE_AppDefined,
                                 "Invalid value for argument '%s'. Driver '%s' "
@@ -3952,6 +4269,8 @@ std::vector<std::string> GDALAlgorithm::FormatAutoCompleteFunction(
     std::vector<std::string> res;
     auto poDM = GetGDALDriverManager();
     const auto vrtCompatible = arg.GetMetadataItem(GAAMDI_VRT_COMPATIBLE);
+    const auto allowedFormats = arg.GetMetadataItem(GAAMDI_ALLOWED_FORMATS);
+    const auto excludedFormats = arg.GetMetadataItem(GAAMDI_EXCLUDED_FORMATS);
     const auto caps = arg.GetMetadataItem(GAAMDI_REQUIRED_CAPABILITIES);
     for (int i = 0; i < poDM->GetDriverCount(); ++i)
     {
@@ -3962,6 +4281,19 @@ std::vector<std::string> GDALAlgorithm::FormatAutoCompleteFunction(
             EQUAL(poDriver->GetDescription(), "VRT"))
         {
             // do nothing
+        }
+        else if (allowedFormats && !allowedFormats->empty() &&
+                 std::find(allowedFormats->begin(), allowedFormats->end(),
+                           poDriver->GetDescription()) != allowedFormats->end())
+        {
+            res.push_back(poDriver->GetDescription());
+        }
+        else if (excludedFormats && !excludedFormats->empty() &&
+                 std::find(excludedFormats->begin(), excludedFormats->end(),
+                           poDriver->GetDescription()) !=
+                     excludedFormats->end())
+        {
+            continue;
         }
         else if (caps)
         {
@@ -4121,7 +4453,7 @@ GDALInConstructionAlgorithmArg &
 GDALAlgorithm::AddOutputStringArg(std::string *pValue, const char *helpMessage)
 {
     return AddArg(
-               "output-string", 0,
+               GDAL_ARG_NAME_OUTPUT_STRING, 0,
                MsgOrDefault(helpMessage,
                             _("Output string, in which the result is placed")),
                pValue)
@@ -4131,14 +4463,165 @@ GDALAlgorithm::AddOutputStringArg(std::string *pValue, const char *helpMessage)
 }
 
 /************************************************************************/
+/*                     GDALAlgorithm::AddStdoutArg()                    */
+/************************************************************************/
+
+GDALInConstructionAlgorithmArg &
+GDALAlgorithm::AddStdoutArg(bool *pValue, const char *helpMessage)
+{
+    return AddArg(GDAL_ARG_NAME_STDOUT, 0,
+                  MsgOrDefault(helpMessage,
+                               _("Directly output on stdout. If enabled, "
+                                 "output-string will be empty")),
+                  pValue)
+        .SetHidden();
+}
+
+/************************************************************************/
 /*                    GDALAlgorithm::AddLayerNameArg()                  */
 /************************************************************************/
 
 GDALInConstructionAlgorithmArg &
 GDALAlgorithm::AddLayerNameArg(std::string *pValue, const char *helpMessage)
 {
-    return AddArg("layer", 'l', MsgOrDefault(helpMessage, _("Layer name")),
-                  pValue);
+    return AddArg(GDAL_ARG_NAME_INPUT_LAYER, 'l',
+                  MsgOrDefault(helpMessage, _("Input layer name")), pValue);
+}
+
+/************************************************************************/
+/*                    GDALAlgorithm::AddArrayNameArg()                  */
+/************************************************************************/
+
+GDALInConstructionAlgorithmArg &
+GDALAlgorithm::AddArrayNameArg(std::string *pValue, const char *helpMessage)
+{
+    return AddArg("array", 0, MsgOrDefault(helpMessage, _("Array name")),
+                  pValue)
+        .SetAutoCompleteFunction([this](const std::string &)
+                                 { return AutoCompleteArrayName(); });
+}
+
+/************************************************************************/
+/*                    GDALAlgorithm::AddArrayNameArg()                  */
+/************************************************************************/
+
+GDALInConstructionAlgorithmArg &
+GDALAlgorithm::AddArrayNameArg(std::vector<std::string> *pValue,
+                               const char *helpMessage)
+{
+    return AddArg("array", 0, MsgOrDefault(helpMessage, _("Array name(s)")),
+                  pValue)
+        .SetAutoCompleteFunction([this](const std::string &)
+                                 { return AutoCompleteArrayName(); });
+}
+
+/************************************************************************/
+/*                  GDALAlgorithm::AutoCompleteArrayName()              */
+/************************************************************************/
+
+std::vector<std::string> GDALAlgorithm::AutoCompleteArrayName() const
+{
+    std::vector<std::string> ret;
+    std::string osDSName;
+    auto inputArg = GetArg(GDAL_ARG_NAME_INPUT);
+    if (inputArg && inputArg->GetType() == GAAT_DATASET_LIST)
+    {
+        auto &inputDatasets = inputArg->Get<std::vector<GDALArgDatasetValue>>();
+        if (!inputDatasets.empty())
+        {
+            osDSName = inputDatasets[0].GetName();
+        }
+    }
+    else if (inputArg && inputArg->GetType() == GAAT_DATASET)
+    {
+        auto &inputDataset = inputArg->Get<GDALArgDatasetValue>();
+        osDSName = inputDataset.GetName();
+    }
+
+    if (!osDSName.empty())
+    {
+        CPLStringList aosAllowedDrivers;
+        const auto ifArg = GetArg(GDAL_ARG_NAME_INPUT_FORMAT);
+        if (ifArg && ifArg->GetType() == GAAT_STRING_LIST)
+            aosAllowedDrivers =
+                CPLStringList(ifArg->Get<std::vector<std::string>>());
+
+        CPLStringList aosOpenOptions;
+        const auto ooArg = GetArg(GDAL_ARG_NAME_OPEN_OPTION);
+        if (ooArg && ooArg->GetType() == GAAT_STRING_LIST)
+            aosOpenOptions =
+                CPLStringList(ooArg->Get<std::vector<std::string>>());
+
+        if (auto poDS = std::unique_ptr<GDALDataset>(GDALDataset::Open(
+                osDSName.c_str(), GDAL_OF_MULTIDIM_RASTER,
+                aosAllowedDrivers.List(), aosOpenOptions.List(), nullptr)))
+        {
+            if (auto poRG = poDS->GetRootGroup())
+            {
+                ret = poRG->GetMDArrayFullNamesRecursive();
+            }
+        }
+    }
+
+    return ret;
+}
+
+/************************************************************************/
+/*                    GDALAlgorithm::AddMemorySizeArg()                  */
+/************************************************************************/
+
+GDALInConstructionAlgorithmArg &
+GDALAlgorithm::AddMemorySizeArg(size_t *pValue, std::string *pStrValue,
+                                const std::string &optionName,
+                                const char *helpMessage)
+{
+    return AddArg(optionName, 0, helpMessage, pStrValue)
+        .SetDefault(*pStrValue)
+        .AddValidationAction(
+            [this, pValue, pStrValue]()
+            {
+                CPLDebug("GDAL", "StrValue `%s`", pStrValue->c_str());
+                GIntBig nBytes;
+                bool bUnitSpecified;
+                if (CPLParseMemorySize(pStrValue->c_str(), &nBytes,
+                                       &bUnitSpecified) != CE_None)
+                {
+                    return false;
+                }
+                if (!bUnitSpecified)
+                {
+                    ReportError(CE_Failure, CPLE_AppDefined,
+                                "Memory size must have a unit or be a "
+                                "percentage of usable RAM (2GB, 5%%, etc.)");
+                    return false;
+                }
+                if constexpr (sizeof(std::uint64_t) > sizeof(size_t))
+                {
+                    if (static_cast<std::uint64_t>(nBytes) >
+                        std::numeric_limits<size_t>::max())
+                    {
+                        ReportError(CE_Failure, CPLE_AppDefined,
+                                    "Memory size %s is too large.",
+                                    pStrValue->c_str());
+                        return false;
+                    }
+                }
+
+                *pValue = static_cast<size_t>(nBytes);
+                return true;
+            });
+}
+
+/************************************************************************/
+/*                  GDALAlgorithm::AddOutputLayerNameArg()              */
+/************************************************************************/
+
+GDALInConstructionAlgorithmArg &
+GDALAlgorithm::AddOutputLayerNameArg(std::string *pValue,
+                                     const char *helpMessage)
+{
+    return AddArg(GDAL_ARG_NAME_OUTPUT_LAYER, 0,
+                  MsgOrDefault(helpMessage, _("Output layer name")), pValue);
 }
 
 /************************************************************************/
@@ -4149,8 +4632,8 @@ GDALInConstructionAlgorithmArg &
 GDALAlgorithm::AddLayerNameArg(std::vector<std::string> *pValue,
                                const char *helpMessage)
 {
-    return AddArg("layer", 'l', MsgOrDefault(helpMessage, _("Layer name")),
-                  pValue);
+    return AddArg(GDAL_ARG_NAME_INPUT_LAYER, 'l',
+                  MsgOrDefault(helpMessage, _("Input layer name")), pValue);
 }
 
 /************************************************************************/
@@ -4251,6 +4734,200 @@ void GDALAlgorithm::SetAutoCompleteFunctionForLayerName(
         });
 }
 
+/**************************************************************************/
+/*       GDALAlgorithm::SetAutoCompleteFunctionForFieldName()             */
+/**************************************************************************/
+
+void GDALAlgorithm::SetAutoCompleteFunctionForFieldName(
+    GDALInConstructionAlgorithmArg &fieldArg,
+    GDALInConstructionAlgorithmArg &layerNameArg,
+    std::vector<GDALArgDatasetValue> &datasetArg)
+{
+
+    fieldArg.SetAutoCompleteFunction(
+        [&datasetArg, &layerNameArg](const std::string &currentValue)
+        {
+            std::set<std::string> ret;
+            if (!datasetArg.empty())
+            {
+                CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+
+                auto getLayerFields = [&ret, &currentValue](OGRLayer *poLayer)
+                {
+                    auto poDefn = poLayer->GetLayerDefn();
+                    const int nFieldCount = poDefn->GetFieldCount();
+                    for (int iField = 0; iField < nFieldCount; iField++)
+                    {
+                        const char *fieldName =
+                            poDefn->GetFieldDefn(iField)->GetNameRef();
+                        if (currentValue == fieldName)
+                        {
+                            ret.clear();
+                            ret.insert(fieldName);
+                            break;
+                        }
+                        ret.insert(fieldName);
+                    }
+                };
+
+                GDALArgDatasetValue &dsVal = datasetArg[0];
+
+                if (!dsVal.GetName().empty())
+                {
+                    auto poDS = std::unique_ptr<GDALDataset>(
+                        GDALDataset::Open(dsVal.GetName().c_str(),
+                                          GDAL_OF_VECTOR | GDAL_OF_READONLY));
+                    if (poDS)
+                    {
+                        const auto &layerName = layerNameArg.Get<std::string>();
+                        if (layerName.empty())
+                        {
+                            // Loop through all layers
+                            for (auto &&poLayer : poDS->GetLayers())
+                            {
+                                getLayerFields(poLayer);
+                            }
+                        }
+                        else
+                        {
+                            const auto poLayer = poDS->GetLayerByName(
+                                layerNameArg.Get<std::string>().c_str());
+                            if (poLayer)
+                            {
+                                getLayerFields(poLayer);
+                            }
+                        }
+                    }
+                }
+            }
+            std::vector<std::string> retVector(ret.begin(), ret.end());
+            return retVector;
+        });
+}
+
+/************************************************************************/
+/*                  GDALAlgorithm::AddFieldNameArg()                    */
+/************************************************************************/
+
+GDALInConstructionAlgorithmArg &
+GDALAlgorithm::AddFieldNameArg(std::string *pValue, const char *helpMessage)
+{
+    return AddArg("field-name", 0, MsgOrDefault(helpMessage, _("Field name")),
+                  pValue);
+}
+
+/************************************************************************/
+/*           GDALAlgorithm::AddFieldTypeSubtypeArg()                    */
+/************************************************************************/
+
+GDALInConstructionAlgorithmArg &GDALAlgorithm::AddFieldTypeSubtypeArg(
+    OGRFieldType *pTypeValue, OGRFieldSubType *pSubtypeValue,
+    std::string *pStrValue, const std::string &argName, const char *helpMessage)
+{
+    auto &arg =
+        AddArg(argName.empty() ? std::string("field-type") : argName, 0,
+               MsgOrDefault(helpMessage, _("Field type or subtype")), pStrValue)
+            .SetAutoCompleteFunction(
+                [](const std::string &currentValue)
+                {
+                    std::vector<std::string> oRet;
+                    for (int i = 1; i <= OGRFieldSubType::OFSTMaxSubType; i++)
+                    {
+                        const char *pszSubType =
+                            OGRFieldDefn::GetFieldSubTypeName(
+                                static_cast<OGRFieldSubType>(i));
+                        if (pszSubType != nullptr)
+                        {
+                            if (currentValue.empty() ||
+                                STARTS_WITH(pszSubType, currentValue.c_str()))
+                            {
+                                oRet.push_back(pszSubType);
+                            }
+                        }
+                    }
+
+                    for (int i = 0; i <= OGRFieldType::OFTMaxType; i++)
+                    {
+                        // Skip deprecated
+                        if (static_cast<OGRFieldType>(i) ==
+                                OGRFieldType::OFTWideString ||
+                            static_cast<OGRFieldType>(i) ==
+                                OGRFieldType::OFTWideStringList)
+                            continue;
+                        const char *pszType = OGRFieldDefn::GetFieldTypeName(
+                            static_cast<OGRFieldType>(i));
+                        if (pszType != nullptr)
+                        {
+                            if (currentValue.empty() ||
+                                STARTS_WITH(pszType, currentValue.c_str()))
+                            {
+                                oRet.push_back(pszType);
+                            }
+                        }
+                    }
+                    return oRet;
+                });
+
+    auto validationFunction =
+        [this, &arg, pTypeValue, pSubtypeValue, pStrValue]()
+    {
+        bool isValid{true};
+        *pTypeValue = OGRFieldDefn::GetFieldTypeByName(pStrValue->c_str());
+
+        // String is returned for unknown types
+        if (!EQUAL(pStrValue->c_str(), "String") && *pTypeValue == OFTString)
+        {
+            isValid = false;
+        }
+
+        *pSubtypeValue =
+            OGRFieldDefn::GetFieldSubTypeByName(pStrValue->c_str());
+
+        if (*pSubtypeValue != OFSTNone)
+        {
+            isValid = true;
+            switch (*pSubtypeValue)
+            {
+                case OFSTBoolean:
+                case OFSTInt16:
+                {
+                    *pTypeValue = OFTInteger;
+                    break;
+                }
+                case OFSTFloat32:
+                {
+                    *pTypeValue = OFTReal;
+                    break;
+                }
+                default:
+                {
+                    *pTypeValue = OFTString;
+                    break;
+                }
+            }
+        }
+
+        if (!isValid)
+        {
+            ReportError(CE_Failure, CPLE_AppDefined,
+                        "Invalid value for argument '%s': '%s'",
+                        arg.GetName().c_str(), pStrValue->c_str());
+        }
+
+        return isValid;
+    };
+
+    if (!pStrValue->empty())
+    {
+        arg.SetDefault(*pStrValue);
+        validationFunction();
+    }
+
+    arg.AddValidationAction(std::move(validationFunction));
+
+    return arg;
+}
+
 /************************************************************************/
 /*                  GDALAlgorithm::ValidateBandArg()                    */
 /************************************************************************/
@@ -4259,7 +4936,7 @@ bool GDALAlgorithm::ValidateBandArg() const
 {
     bool ret = true;
     const auto bandArg = GetArg(GDAL_ARG_NAME_BAND);
-    const auto inputDatasetArg = GetArg(GDAL_ARG_NAME_INPUT, false);
+    const auto inputDatasetArg = GetArg(GDAL_ARG_NAME_INPUT);
     if (bandArg && bandArg->IsExplicitlySet() && inputDatasetArg &&
         (inputDatasetArg->GetType() == GAAT_DATASET ||
          inputDatasetArg->GetType() == GAAT_DATASET_LIST) &&
@@ -4566,7 +5243,8 @@ GDALAlgorithm::ProcessGDALGOutputRet GDALAlgorithm::ProcessGDALGOutput()
 
         osCommandLine += " --output-format stream --output streamed_dataset";
 
-        return SaveGDALG(filename, osCommandLine)
+        std::string outStringUnused;
+        return SaveGDALG(filename, outStringUnused, osCommandLine)
                    ? ProcessGDALGOutputRet::GDALG_OK
                    : ProcessGDALGOutputRet::GDALG_ERROR;
     }
@@ -4579,6 +5257,7 @@ GDALAlgorithm::ProcessGDALGOutputRet GDALAlgorithm::ProcessGDALGOutput()
 /************************************************************************/
 
 /* static */ bool GDALAlgorithm::SaveGDALG(const std::string &filename,
+                                           std::string &outString,
                                            const std::string &commandLine)
 {
     CPLJSONDocument oDoc;
@@ -4586,7 +5265,11 @@ GDALAlgorithm::ProcessGDALGOutputRet GDALAlgorithm::ProcessGDALGOutput()
     oDoc.GetRoot().Add("command_line", commandLine);
     oDoc.GetRoot().Add("gdal_version", GDALVersionInfo("VERSION_NUM"));
 
-    return oDoc.Save(filename);
+    if (!filename.empty())
+        return oDoc.Save(filename);
+
+    outString = oDoc.GetRoot().Format(CPLJSONObject::PrettyFormat::Pretty);
+    return true;
 }
 
 /************************************************************************/
@@ -4597,7 +5280,7 @@ GDALInConstructionAlgorithmArg &
 GDALAlgorithm::AddCreationOptionsArg(std::vector<std::string> *pValue,
                                      const char *helpMessage)
 {
-    auto &arg = AddArg("creation-option", 0,
+    auto &arg = AddArg(GDAL_ARG_NAME_CREATION_OPTION, 0,
                        MsgOrDefault(helpMessage, _("Creation option")), pValue)
                     .AddAlias("co")
                     .SetMetaVar("<KEY>=<VALUE>")
@@ -4699,7 +5382,7 @@ GDALAlgorithm::AddLayerCreationOptionsArg(std::vector<std::string> *pValue,
                                           const char *helpMessage)
 {
     auto &arg =
-        AddArg("layer-creation-option", 0,
+        AddArg(GDAL_ARG_NAME_LAYER_CREATION_OPTION, 0,
                MsgOrDefault(helpMessage, _("Layer creation option")), pValue)
             .AddAlias("lco")
             .SetMetaVar("<KEY>=<VALUE>")
@@ -4833,21 +5516,33 @@ GDALAlgorithm::AddNumThreadsArg(int *pValue, std::string *pStrValue,
                                 const char *helpMessage)
 {
     auto &arg =
-        AddArg("num-threads", 'j',
+        AddArg(GDAL_ARG_NAME_NUM_THREADS, 'j',
                MsgOrDefault(helpMessage, _("Number of jobs (or ALL_CPUS)")),
                pStrValue);
+
+    AddArg(GDAL_ARG_NAME_NUM_THREADS_INT_HIDDEN, 0,
+           _("Number of jobs (read-only, hidden argument)"), pValue)
+        .SetHidden();
+
     auto lambda = [this, &arg, pValue, pStrValue]
     {
-        int nNumCPUs = std::max(1, CPLGetNumCPUs());
+#ifdef DEBUG
+        const int nCPUCount = std::max(
+            1, atoi(CPLGetConfigOption("GDAL_DEBUG_CPU_COUNT",
+                                       CPLSPrintf("%d", CPLGetNumCPUs()))));
+#else
+        const int nCPUCount = std::max(1, CPLGetNumCPUs());
+#endif
+        int nNumThreads = nCPUCount;
         const char *pszThreads =
             CPLGetConfigOption("GDAL_NUM_THREADS", nullptr);
         if (pszThreads && !EQUAL(pszThreads, "ALL_CPUS"))
         {
-            nNumCPUs = std::clamp(atoi(pszThreads), 1, nNumCPUs);
+            nNumThreads = std::clamp(atoi(pszThreads), 1, nNumThreads);
         }
         if (EQUAL(pStrValue->c_str(), "ALL_CPUS"))
         {
-            *pValue = nNumCPUs;
+            *pValue = nNumThreads;
             return true;
         }
         else
@@ -4857,7 +5552,7 @@ GDALAlgorithm::AddNumThreadsArg(int *pValue, std::string *pStrValue,
             if (endptr == pStrValue->c_str() + pStrValue->size() && res >= 0 &&
                 res <= INT_MAX)
             {
-                *pValue = std::min(static_cast<int>(res), nNumCPUs);
+                *pValue = std::min(static_cast<int>(res), nNumThreads);
                 return true;
             }
             ReportError(CE_Failure, CPLE_IllegalArg,
@@ -4982,12 +5677,16 @@ GDALAlgorithm::AddPixelFunctionArgsArg(std::vector<std::string> *pValue,
 /*                  GDALAlgorithm::AddProgressArg()                     */
 /************************************************************************/
 
-GDALInConstructionAlgorithmArg &GDALAlgorithm::AddProgressArg()
+void GDALAlgorithm::AddProgressArg()
 {
-    return AddArg("progress", 0, _("Display progress bar"),
-                  &m_progressBarRequested)
-        .SetOnlyForCLI()
-        .SetCategory(GAAC_COMMON);
+    AddArg(GDAL_ARG_NAME_QUIET, 'q', _("Quiet mode (no progress bar)"),
+           &m_quiet)
+        .SetHiddenForAPI()
+        .SetCategory(GAAC_COMMON)
+        .AddAction([this]() { m_progressBarRequested = false; });
+
+    AddArg("progress", 0, _("Display progress bar"), &m_progressBarRequested)
+        .SetHidden();
 }
 
 /************************************************************************/
@@ -5193,6 +5892,13 @@ GDALAlgorithm::GetUsageForCLI(bool shortUsage,
             osRet += " <COMMAND>";
             if (hasNonPositionals)
                 osRet += " [OPTIONS]";
+            if (usageOptions.isPipelineStep)
+            {
+                const size_t nLenFirstLine = osRet.size();
+                osRet += '\n';
+                osRet.append(nLenFirstLine, '-');
+                osRet += '\n';
+            }
             osRet += "\nwhere <COMMAND> is one of:\n";
         }
         else
@@ -5200,6 +5906,13 @@ GDALAlgorithm::GetUsageForCLI(bool shortUsage,
             osRet += " <SUBCOMMAND>";
             if (hasNonPositionals)
                 osRet += " [OPTIONS]";
+            if (usageOptions.isPipelineStep)
+            {
+                const size_t nLenFirstLine = osRet.size();
+                osRet += '\n';
+                osRet.append(nLenFirstLine, '-');
+                osRet += '\n';
+            }
             osRet += "\nwhere <SUBCOMMAND> is one of:\n";
         }
         size_t maxNameLen = 0;
@@ -5312,6 +6025,10 @@ GDALAlgorithm::GetUsageForCLI(bool shortUsage,
         std::tie(options, maxOptLen) = GetArgNamesForCLI();
         if (usageOptions.maxOptLen)
             maxOptLen = usageOptions.maxOptLen;
+
+        const std::string userProvidedOpt = "--<user-provided-option>=<value>";
+        if (m_arbitraryLongNameArgsAllowed)
+            maxOptLen = std::max(maxOptLen, userProvidedOpt.size());
 
         const auto OutputArg =
             [this, maxOptLen, &osRet](const GDALAlgorithmArg *arg,
@@ -5513,7 +6230,7 @@ GDALAlgorithm::GetUsageForCLI(bool shortUsage,
                     }
                 }
             }
-            if (hasAdvanced)
+            if (hasAdvanced || m_arbitraryLongNameArgsAllowed)
                 categories.insert(categories.begin(), GAAC_ADVANCED);
             if (hasBase)
                 categories.insert(categories.begin(), GAAC_BASE);
@@ -5535,6 +6252,16 @@ GDALAlgorithm::GetUsageForCLI(bool shortUsage,
                 {
                     if (!arg->IsPositional() && arg->GetCategory() == category)
                         OutputArg(arg, opt);
+                }
+                if (m_arbitraryLongNameArgsAllowed && category == GAAC_ADVANCED)
+                {
+                    osRet += "  ";
+                    osRet += userProvidedOpt;
+                    osRet += "  ";
+                    if (userProvidedOpt.size() < maxOptLen)
+                        osRet.append(maxOptLen - userProvidedOpt.size(), ' ');
+                    osRet += "Argument provided by user";
+                    osRet += '\n';
                 }
             }
         }
@@ -5624,6 +6351,11 @@ std::string GDALAlgorithm::GetUsageAsJSON() const
     }
     oRoot.Add("sub_algorithms", jSubAlgorithms);
 
+    if (m_arbitraryLongNameArgsAllowed)
+    {
+        oRoot.Add("user_provided_arguments_allowed", true);
+    }
+
     const auto ProcessArg = [](const GDALAlgorithmArg *arg)
     {
         CPLJSONObject jArg;
@@ -5676,9 +6408,12 @@ std::string GDALAlgorithm::GetUsageAsJSON() const
                     }
                     else
                     {
-                        CPLError(CE_Warning, CPLE_AppDefined,
-                                 "Unhandled default value for arg %s",
-                                 arg->GetName().c_str());
+                        CPLJSONArray jArr;
+                        for (const auto &s : val)
+                        {
+                            jArr.Add(s);
+                        }
+                        jArg.Add("default", jArr);
                     }
                     break;
                 }
@@ -5691,9 +6426,12 @@ std::string GDALAlgorithm::GetUsageAsJSON() const
                     }
                     else
                     {
-                        CPLError(CE_Warning, CPLE_AppDefined,
-                                 "Unhandled default value for arg %s",
-                                 arg->GetName().c_str());
+                        CPLJSONArray jArr;
+                        for (int i : val)
+                        {
+                            jArr.Add(i);
+                        }
+                        jArg.Add("default", jArr);
                     }
                     break;
                 }
@@ -5706,9 +6444,12 @@ std::string GDALAlgorithm::GetUsageAsJSON() const
                     }
                     else
                     {
-                        CPLError(CE_Warning, CPLE_AppDefined,
-                                 "Unhandled default value for arg %s",
-                                 arg->GetName().c_str());
+                        CPLJSONArray jArr;
+                        for (double d : val)
+                        {
+                            jArr.Add(d);
+                        }
+                        jArg.Add("default", jArr);
                     }
                     break;
                 }
@@ -5815,8 +6556,7 @@ std::string GDALAlgorithm::GetUsageAsJSON() const
         CPLJSONArray jArgs;
         for (const auto &arg : m_args)
         {
-            if (!arg->IsHidden() && !arg->IsOnlyForCLI() && arg->IsInput() &&
-                !arg->IsOutput())
+            if (!arg->IsHiddenForAPI() && arg->IsInput() && !arg->IsOutput())
                 jArgs.Add(ProcessArg(arg.get()));
         }
         oRoot.Add("input_arguments", jArgs);
@@ -5826,8 +6566,7 @@ std::string GDALAlgorithm::GetUsageAsJSON() const
         CPLJSONArray jArgs;
         for (const auto &arg : m_args)
         {
-            if (!arg->IsHidden() && !arg->IsOnlyForCLI() && !arg->IsInput() &&
-                arg->IsOutput())
+            if (!arg->IsHiddenForAPI() && !arg->IsInput() && arg->IsOutput())
                 jArgs.Add(ProcessArg(arg.get()));
         }
         oRoot.Add("output_arguments", jArgs);
@@ -5837,8 +6576,7 @@ std::string GDALAlgorithm::GetUsageAsJSON() const
         CPLJSONArray jArgs;
         for (const auto &arg : m_args)
         {
-            if (!arg->IsHidden() && !arg->IsOnlyForCLI() && arg->IsInput() &&
-                arg->IsOutput())
+            if (!arg->IsHiddenForAPI() && arg->IsInput() && arg->IsOutput())
                 jArgs.Add(ProcessArg(arg.get()));
         }
         oRoot.Add("input_output_arguments", jArgs);
@@ -5898,6 +6636,7 @@ GDALAlgorithm::GetAutoComplete(std::vector<std::string> &args,
     }
     if (curAlg != this)
     {
+        curAlg->m_calledFromCommandLine = m_calledFromCommandLine;
         return curAlg->GetAutoComplete(args, lastWordIsComplete,
                                        /* showAllOptions = */ false);
     }
@@ -6392,7 +7131,35 @@ GDALAlgorithmArgH GDALAlgorithmGetArg(GDALAlgorithmH hAlg,
 {
     VALIDATE_POINTER1(hAlg, __func__, nullptr);
     VALIDATE_POINTER1(pszArgName, __func__, nullptr);
-    auto arg = hAlg->ptr->GetArg(pszArgName);
+    auto arg = hAlg->ptr->GetArg(pszArgName, /* suggestionAllowed = */ true,
+                                 /* isConst = */ true);
+    if (!arg)
+        return nullptr;
+    return std::make_unique<GDALAlgorithmArgHS>(arg).release();
+}
+
+/************************************************************************/
+/*                     GDALAlgorithmGetArgNonConst()                    */
+/************************************************************************/
+
+/** Return an argument from its name, possibly allowing creation of user-provided
+ * argument if the algorithm allow it.
+ *
+ * The lifetime of the returned object does not exceed the one of hAlg.
+ *
+ * @param hAlg Handle to an algorithm. Must NOT be null.
+ * @param pszArgName Argument name. Must NOT be null.
+ * @return an argument that must be released with GDALAlgorithmArgRelease(),
+ * or nullptr in case of error
+ * @since 3.12
+ */
+GDALAlgorithmArgH GDALAlgorithmGetArgNonConst(GDALAlgorithmH hAlg,
+                                              const char *pszArgName)
+{
+    VALIDATE_POINTER1(hAlg, __func__, nullptr);
+    VALIDATE_POINTER1(pszArgName, __func__, nullptr);
+    auto arg = hAlg->ptr->GetArg(pszArgName, /* suggestionAllowed = */ true,
+                                 /* isConst = */ false);
     if (!arg)
         return nullptr;
     return std::make_unique<GDALAlgorithmArgHS>(arg).release();
@@ -6450,7 +7217,7 @@ GDALAlgorithmArgType GDALAlgorithmArgGetType(GDALAlgorithmArgH hArg)
 /** Return the description of an argument.
  *
  * @param hArg Handle to an argument. Must NOT be null.
- * @return argument descriptioin whose lifetime is bound to hArg and which must not
+ * @return argument description whose lifetime is bound to hArg and which must not
  * be freed.
  * @since 3.11
  */
@@ -6707,6 +7474,232 @@ bool GDALAlgorithmArgHasDefaultValue(GDALAlgorithmArgH hArg)
 }
 
 /************************************************************************/
+/*                 GDALAlgorithmArgGetDefaultAsBoolean()                */
+/************************************************************************/
+
+/** Return the argument default value as a integer.
+ *
+ * Must only be called on arguments whose type is GAAT_BOOLEAN
+ *
+ * GDALAlgorithmArgHasDefaultValue() must be called to determine if the
+ * argument has a default value.
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @since 3.12
+ */
+bool GDALAlgorithmArgGetDefaultAsBoolean(GDALAlgorithmArgH hArg)
+{
+    VALIDATE_POINTER1(hArg, __func__, false);
+    if (hArg->ptr->GetType() != GAAT_BOOLEAN)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "%s must only be called on arguments of type GAAT_BOOLEAN",
+                 __func__);
+        return false;
+    }
+    return hArg->ptr->GetDefault<bool>();
+}
+
+/************************************************************************/
+/*                 GDALAlgorithmArgGetDefaultAsString()                 */
+/************************************************************************/
+
+/** Return the argument default value as a string.
+ *
+ * Must only be called on arguments whose type is GAAT_STRING.
+ *
+ * GDALAlgorithmArgHasDefaultValue() must be called to determine if the
+ * argument has a default value.
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @return string whose lifetime is bound to hArg and which must not
+ * be freed.
+ * @since 3.11
+ */
+const char *GDALAlgorithmArgGetDefaultAsString(GDALAlgorithmArgH hArg)
+{
+    VALIDATE_POINTER1(hArg, __func__, nullptr);
+    if (hArg->ptr->GetType() != GAAT_STRING)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "%s must only be called on arguments of type GAAT_STRING",
+                 __func__);
+        return nullptr;
+    }
+    return hArg->ptr->GetDefault<std::string>().c_str();
+}
+
+/************************************************************************/
+/*                 GDALAlgorithmArgGetDefaultAsInteger()                */
+/************************************************************************/
+
+/** Return the argument default value as a integer.
+ *
+ * Must only be called on arguments whose type is GAAT_INTEGER
+ *
+ * GDALAlgorithmArgHasDefaultValue() must be called to determine if the
+ * argument has a default value.
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @since 3.12
+ */
+int GDALAlgorithmArgGetDefaultAsInteger(GDALAlgorithmArgH hArg)
+{
+    VALIDATE_POINTER1(hArg, __func__, 0);
+    if (hArg->ptr->GetType() != GAAT_INTEGER)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "%s must only be called on arguments of type GAAT_INTEGER",
+                 __func__);
+        return 0;
+    }
+    return hArg->ptr->GetDefault<int>();
+}
+
+/************************************************************************/
+/*                 GDALAlgorithmArgGetDefaultAsDouble()                 */
+/************************************************************************/
+
+/** Return the argument default value as a double.
+ *
+ * Must only be called on arguments whose type is GAAT_REAL
+ *
+ * GDALAlgorithmArgHasDefaultValue() must be called to determine if the
+ * argument has a default value.
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @since 3.12
+ */
+double GDALAlgorithmArgGetDefaultAsDouble(GDALAlgorithmArgH hArg)
+{
+    VALIDATE_POINTER1(hArg, __func__, 0);
+    if (hArg->ptr->GetType() != GAAT_REAL)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "%s must only be called on arguments of type GAAT_REAL",
+                 __func__);
+        return 0;
+    }
+    return hArg->ptr->GetDefault<double>();
+}
+
+/************************************************************************/
+/*                GDALAlgorithmArgGetDefaultAsStringList()              */
+/************************************************************************/
+
+/** Return the argument default value as a string list.
+ *
+ * Must only be called on arguments whose type is GAAT_STRING_LIST.
+ *
+ * GDALAlgorithmArgHasDefaultValue() must be called to determine if the
+ * argument has a default value.
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @return a NULL terminated list of names, which must be destroyed with
+ * CSLDestroy()
+
+ * @since 3.12
+ */
+char **GDALAlgorithmArgGetDefaultAsStringList(GDALAlgorithmArgH hArg)
+{
+    VALIDATE_POINTER1(hArg, __func__, nullptr);
+    if (hArg->ptr->GetType() != GAAT_STRING_LIST)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "%s must only be called on arguments of type GAAT_STRING_LIST",
+                 __func__);
+        return nullptr;
+    }
+    return CPLStringList(hArg->ptr->GetDefault<std::vector<std::string>>())
+        .StealList();
+}
+
+/************************************************************************/
+/*               GDALAlgorithmArgGetDefaultAsIntegerList()              */
+/************************************************************************/
+
+/** Return the argument default value as a integer list.
+ *
+ * Must only be called on arguments whose type is GAAT_INTEGER_LIST.
+ *
+ * GDALAlgorithmArgHasDefaultValue() must be called to determine if the
+ * argument has a default value.
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @param[out] pnCount Pointer to the number of values in the list. Must NOT be null.
+ * @since 3.12
+ */
+const int *GDALAlgorithmArgGetDefaultAsIntegerList(GDALAlgorithmArgH hArg,
+                                                   size_t *pnCount)
+{
+    VALIDATE_POINTER1(hArg, __func__, nullptr);
+    VALIDATE_POINTER1(pnCount, __func__, nullptr);
+    if (hArg->ptr->GetType() != GAAT_INTEGER_LIST)
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "%s must only be called on arguments of type GAAT_INTEGER_LIST",
+            __func__);
+        *pnCount = 0;
+        return nullptr;
+    }
+    const auto &val = hArg->ptr->GetDefault<std::vector<int>>();
+    *pnCount = val.size();
+    return val.data();
+}
+
+/************************************************************************/
+/*               GDALAlgorithmArgGetDefaultAsDoubleList()               */
+/************************************************************************/
+
+/** Return the argument default value as a real list.
+ *
+ * Must only be called on arguments whose type is GAAT_REAL_LIST.
+ *
+ * GDALAlgorithmArgHasDefaultValue() must be called to determine if the
+ * argument has a default value.
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @param[out] pnCount Pointer to the number of values in the list. Must NOT be null.
+ * @since 3.12
+ */
+const double *GDALAlgorithmArgGetDefaultAsDoubleList(GDALAlgorithmArgH hArg,
+                                                     size_t *pnCount)
+{
+    VALIDATE_POINTER1(hArg, __func__, nullptr);
+    VALIDATE_POINTER1(pnCount, __func__, nullptr);
+    if (hArg->ptr->GetType() != GAAT_REAL_LIST)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "%s must only be called on arguments of type GAAT_REAL_LIST",
+                 __func__);
+        *pnCount = 0;
+        return nullptr;
+    }
+    const auto &val = hArg->ptr->GetDefault<std::vector<double>>();
+    *pnCount = val.size();
+    return val.data();
+}
+
+/************************************************************************/
+/*                   GDALAlgorithmArgIsHidden()                         */
+/************************************************************************/
+
+/** Return whether the argument is hidden (for GDAL internal use)
+ *
+ * This is an alias for GDALAlgorithmArgIsHiddenForCLI() &&
+ * GDALAlgorithmArgIsHiddenForAPI().
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @since 3.12
+ */
+bool GDALAlgorithmArgIsHidden(GDALAlgorithmArgH hArg)
+{
+    VALIDATE_POINTER1(hArg, __func__, false);
+    return hArg->ptr->IsHidden();
+}
+
+/************************************************************************/
 /*                   GDALAlgorithmArgIsHiddenForCLI()                   */
 /************************************************************************/
 
@@ -6725,20 +7718,42 @@ bool GDALAlgorithmArgIsHiddenForCLI(GDALAlgorithmArgH hArg)
 }
 
 /************************************************************************/
+/*                   GDALAlgorithmArgIsHiddenForAPI()                   */
+/************************************************************************/
+
+/** Return whether the argument must not be mentioned in the context of an
+ * API use.
+ * Said otherwise, if it is only for CLI usage.
+ *
+ * For example "--help"
+ *
+ * @param hArg Handle to an argument. Must NOT be null.
+ * @since 3.12
+ */
+bool GDALAlgorithmArgIsHiddenForAPI(GDALAlgorithmArgH hArg)
+{
+    VALIDATE_POINTER1(hArg, __func__, false);
+    return hArg->ptr->IsHiddenForAPI();
+}
+
+/************************************************************************/
 /*                   GDALAlgorithmArgIsOnlyForCLI()                     */
 /************************************************************************/
 
-/** Return whether the argument is only for CLI usage.
+/** Return whether the argument must not be mentioned in the context of an
+ * API use.
+ * Said otherwise, if it is only for CLI usage.
  *
  * For example "--help"
  *
  * @param hArg Handle to an argument. Must NOT be null.
  * @since 3.11
+ * @deprecated Use GDALAlgorithmArgIsHiddenForAPI() instead.
  */
 bool GDALAlgorithmArgIsOnlyForCLI(GDALAlgorithmArgH hArg)
 {
     VALIDATE_POINTER1(hArg, __func__, false);
-    return hArg->ptr->IsOnlyForCLI();
+    return hArg->ptr->IsHiddenForAPI();
 }
 
 /************************************************************************/
@@ -6897,7 +7912,7 @@ bool GDALAlgorithmArgGetAsBoolean(GDALAlgorithmArgH hArg)
 }
 
 /************************************************************************/
-/*                    GDALAlgorithmArgGetAsBoolean()                    */
+/*                    GDALAlgorithmArgGetAsString()                     */
 /************************************************************************/
 
 /** Return the argument value as a string.
@@ -7003,7 +8018,7 @@ double GDALAlgorithmArgGetAsDouble(GDALAlgorithmArgH hArg)
 /*                   GDALAlgorithmArgGetAsStringList()                  */
 /************************************************************************/
 
-/** Return the argument value as a double.
+/** Return the argument value as a string list.
  *
  * Must only be called on arguments whose type is GAAT_STRING_LIST.
  *
@@ -7031,9 +8046,9 @@ char **GDALAlgorithmArgGetAsStringList(GDALAlgorithmArgH hArg)
 /*                  GDALAlgorithmArgGetAsIntegerList()                  */
 /************************************************************************/
 
-/** Return the argument value as a integer.
+/** Return the argument value as a integer list.
  *
- * Must only be called on arguments whose type is GAAT_INTEGER
+ * Must only be called on arguments whose type is GAAT_INTEGER_LIST.
  *
  * @param hArg Handle to an argument. Must NOT be null.
  * @param[out] pnCount Pointer to the number of values in the list. Must NOT be null.
@@ -7062,9 +8077,9 @@ const int *GDALAlgorithmArgGetAsIntegerList(GDALAlgorithmArgH hArg,
 /*                  GDALAlgorithmArgGetAsDoubleList()                   */
 /************************************************************************/
 
-/** Return the argument value as a integer.
+/** Return the argument value as a real list.
  *
- * Must only be called on arguments whose type is GAAT_INTEGER
+ * Must only be called on arguments whose type is GAAT_REAL_LIST.
  *
  * @param hArg Handle to an argument. Must NOT be null.
  * @param[out] pnCount Pointer to the number of values in the list. Must NOT be null.

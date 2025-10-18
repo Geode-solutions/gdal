@@ -17,6 +17,10 @@
 #include <climits>
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "northwood.h"
 #include "ogrmitabspatialref.h"
 
@@ -77,7 +81,7 @@ class NWT_GRDDataset final : public GDALPamDataset
 
   public:
     NWT_GRDDataset();
-    ~NWT_GRDDataset();
+    ~NWT_GRDDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -122,12 +126,12 @@ class NWT_GRDRasterBand final : public GDALPamRasterBand
   public:
     NWT_GRDRasterBand(NWT_GRDDataset *, int, int);
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
-    virtual CPLErr IWriteBlock(int, int, void *) override;
-    virtual double GetNoDataValue(int *pbSuccess) override;
-    virtual CPLErr SetNoDataValue(double dfNoData) override;
+    CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IWriteBlock(int, int, void *) override;
+    double GetNoDataValue(int *pbSuccess) override;
+    CPLErr SetNoDataValue(double dfNoData) override;
 
-    virtual GDALColorInterp GetColorInterpretation() override;
+    GDALColorInterp GetColorInterpretation() override;
 };
 
 /************************************************************************/
@@ -627,7 +631,7 @@ GDALDataset *NWT_GRDDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     VSIFSeekL(poDS->fp, 0, SEEK_SET);
     VSIFReadL(poDS->abyHeader, 1, 1024, poDS->fp);
-    poDS->pGrd = reinterpret_cast<NWT_GRID *>(calloc(1, sizeof(NWT_GRID)));
+    poDS->pGrd = static_cast<NWT_GRID *>(calloc(1, sizeof(NWT_GRID)));
     if (!poDS->pGrd)
     {
         delete poDS;

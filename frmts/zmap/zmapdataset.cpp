@@ -14,6 +14,10 @@
 #include "cpl_vsi_virtual.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 
 #include <array>
 #include <cmath>
@@ -45,9 +49,9 @@ class ZMapDataset final : public GDALPamDataset
 
   public:
     ZMapDataset();
-    virtual ~ZMapDataset();
+    ~ZMapDataset() override;
 
-    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -71,8 +75,8 @@ class ZMapRasterBand final : public GDALPamRasterBand
   public:
     explicit ZMapRasterBand(ZMapDataset *);
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
-    virtual double GetNoDataValue(int *pbSuccess = nullptr) override;
+    CPLErr IReadBlock(int, int, void *) override;
+    double GetNoDataValue(int *pbSuccess = nullptr) override;
 };
 
 /************************************************************************/

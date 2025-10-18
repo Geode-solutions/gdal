@@ -40,15 +40,28 @@ ZarrV2Group::Create(const std::shared_ptr<ZarrSharedResource> &poSharedResource,
 
 ZarrV2Group::~ZarrV2Group()
 {
+    ZarrV2Group::Close();
+}
+
+/************************************************************************/
+/*                            Close()                                   */
+/************************************************************************/
+
+bool ZarrV2Group::Close()
+{
+    bool bRet = ZarrGroupBase::Close();
+
     if (m_bValid && m_oAttrGroup.IsModified())
     {
         CPLJSONDocument oDoc;
         oDoc.SetRoot(m_oAttrGroup.Serialize());
         const std::string osAttrFilename =
             CPLFormFilenameSafe(m_osDirectoryName.c_str(), ".zattrs", nullptr);
-        oDoc.Save(osAttrFilename);
+        bRet = oDoc.Save(osAttrFilename) && bRet;
         m_poSharedResource->SetZMetadataItem(osAttrFilename, oDoc.GetRoot());
     }
+
+    return bRet;
 }
 
 /************************************************************************/
@@ -91,9 +104,9 @@ void ZarrV2Group::ExploreDirectory() const
                 CPLFormFilenameSafe(osSubDir.c_str(), ".zarray", nullptr);
             if (VSIStatL(osFilename.c_str(), &sStat) == 0)
             {
-                if (std::find(m_aosArrays.begin(), m_aosArrays.end(),
-                              aosFiles[i]) == m_aosArrays.end())
+                if (!cpl::contains(m_oSetArrayNames, aosFiles[i]))
                 {
+                    m_oSetArrayNames.insert(aosFiles[i]);
                     m_aosArrays.emplace_back(aosFiles[i]);
                 }
             }
@@ -101,8 +114,12 @@ void ZarrV2Group::ExploreDirectory() const
             {
                 osFilename =
                     CPLFormFilenameSafe(osSubDir.c_str(), ".zgroup", nullptr);
-                if (VSIStatL(osFilename.c_str(), &sStat) == 0)
+                if (VSIStatL(osFilename.c_str(), &sStat) == 0 &&
+                    !cpl::contains(m_oSetGroupNames, aosFiles[i]))
+                {
+                    m_oSetGroupNames.insert(aosFiles[i]);
                     m_aosGroups.emplace_back(aosFiles[i]);
+                }
             }
         }
     }
@@ -245,6 +262,7 @@ ZarrV2Group::GetOrCreateSubGroup(const std::string &osSubGroupFullname)
     poSubGroup->SetUpdatable(m_bUpdatable);
 
     poBelongingGroup->m_oMapGroups[poSubGroup->GetName()] = poSubGroup;
+    poBelongingGroup->m_oSetGroupNames.insert(poSubGroup->GetName());
     poBelongingGroup->m_aosGroups.emplace_back(poSubGroup->GetName());
     return poSubGroup;
 }
@@ -480,47 +498,39 @@ bool ZarrV2Group::InitFromZGroup(const CPLJSONObject &obj)
 
         const auto vars = nczarrGroup["vars"].ToArray();
         // open first indexing variables
-        std::set<std::string> oSetIndexingArrayNames;
         for (const auto &var : vars)
         {
             const auto osVarName = var.ToString();
             if (IsValidName(osVarName) &&
                 m_oMapDimensions.find(osVarName) != m_oMapDimensions.end() &&
-                m_oMapMDArrays.find(osVarName) == m_oMapMDArrays.end() &&
-                oSetIndexingArrayNames.find(osVarName) ==
-                    oSetIndexingArrayNames.end())
+                !cpl::contains(m_oSetArrayNames, osVarName))
             {
-                oSetIndexingArrayNames.insert(osVarName);
                 OpenMDArray(osVarName);
             }
         }
 
         // add regular arrays
-        std::set<std::string> oSetRegularArrayNames;
         for (const auto &var : vars)
         {
             const auto osVarName = var.ToString();
             if (IsValidName(osVarName) &&
                 m_oMapDimensions.find(osVarName) == m_oMapDimensions.end() &&
-                m_oMapMDArrays.find(osVarName) == m_oMapMDArrays.end() &&
-                oSetRegularArrayNames.find(osVarName) ==
-                    oSetRegularArrayNames.end())
+                !cpl::contains(m_oSetArrayNames, osVarName))
             {
-                oSetRegularArrayNames.insert(osVarName);
+                m_oSetArrayNames.insert(osVarName);
                 m_aosArrays.emplace_back(osVarName);
             }
         }
 
         // Finally list groups
-        std::set<std::string> oSetGroups;
         const auto groups = nczarrGroup["groups"].ToArray();
         for (const auto &group : groups)
         {
             const auto osGroupName = group.ToString();
             if (IsValidName(osGroupName) &&
-                oSetGroups.find(osGroupName) == oSetGroups.end())
+                !cpl::contains(m_oSetGroupNames, osGroupName))
             {
-                oSetGroups.insert(osGroupName);
+                m_oSetGroupNames.insert(osGroupName);
                 m_aosGroups.emplace_back(osGroupName);
             }
         }
@@ -602,8 +612,7 @@ ZarrV2Group::CreateGroup(const std::string &osName,
 
     GetGroupNames();
 
-    if (std::find(m_aosGroups.begin(), m_aosGroups.end(), osName) !=
-        m_aosGroups.end())
+    if (cpl::contains(m_oSetGroupNames, osName))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "A group with same name already exists");
@@ -619,6 +628,7 @@ ZarrV2Group::CreateGroup(const std::string &osName,
     poGroup->m_poParent =
         std::dynamic_pointer_cast<ZarrGroupBase>(m_pSelf.lock());
     m_oMapGroups[osName] = poGroup;
+    m_oSetGroupNames.insert(osName);
     m_aosGroups.emplace_back(osName);
     return poGroup;
 }
@@ -869,8 +879,7 @@ std::shared_ptr<GDALMDArray> ZarrV2Group::CreateMDArray(
 
     GetMDArrayNames();
 
-    if (std::find(m_aosArrays.begin(), m_aosArrays.end(), osName) !=
-        m_aosArrays.end())
+    if (cpl::contains(m_oSetArrayNames, osName))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "An array with same name already exists");
@@ -1126,7 +1135,8 @@ std::shared_ptr<GDALMDArray> ZarrV2Group::CreateMDArray(
     poArray->SetFilters(oFilters);
     poArray->SetUpdatable(true);
     poArray->SetDefinitionModified(true);
-    poArray->Flush();
+    if (!cpl::starts_with(osZarrayFilename, "/vsi") && !poArray->Flush())
+        return nullptr;
     RegisterArray(poArray);
 
     return poArray;

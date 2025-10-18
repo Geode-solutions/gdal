@@ -12,6 +12,11 @@
 
 #include "cpl_json.h"
 #include "cpl_http.h"
+#include "gdal_frmts.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "vrtdataset.h"
 #include "ogr_spatialref.h"
 
@@ -111,6 +116,9 @@ int STACITDataset::Identify(GDALOpenInfo *poOpenInfo)
     {
         return false;
     }
+
+    if (poOpenInfo->IsExtensionEqualToCI("zarr"))
+        return false;
 
     for (int i = 0; i < 2; i++)
     {
@@ -544,19 +552,9 @@ bool STACITDataset::SetupDataset(
                 osRet += osFilename;
             }
         }
-        else if (STARTS_WITH(osFilename.c_str(), "file://"))
-        {
-            osRet = osFilename.substr(strlen("file://"));
-        }
-        else if (STARTS_WITH(osFilename.c_str(), "s3://"))
-        {
-            osRet = "/vsis3/";
-            osRet += osFilename.substr(strlen("s3://"));
-        }
-
         else
         {
-            osRet = osFilename;
+            osRet = VSIURIToVSIPath(osFilename);
         }
         return osRet;
     };

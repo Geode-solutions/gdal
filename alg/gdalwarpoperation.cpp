@@ -266,8 +266,7 @@ int GDALWarpOperation::ValidateOptions()
     }
 
     if (GDALDataTypeIsComplex(psOptions->eWorkingDataType) != 0 &&
-        (psOptions->eResampleAlg == GRA_Mode ||
-         psOptions->eResampleAlg == GRA_Max ||
+        (psOptions->eResampleAlg == GRA_Max ||
          psOptions->eResampleAlg == GRA_Min ||
          psOptions->eResampleAlg == GRA_Med ||
          psOptions->eResampleAlg == GRA_Q1 ||
@@ -436,6 +435,19 @@ int GDALWarpOperation::ValidateOptions()
                  "GDALWarpOptions.Validate(): "
                  "pfnDstDensityMaskFunc provided as well as a DstAlphaBand.");
         return FALSE;
+    }
+
+    GDALRasterBandH hSrcBand =
+        GDALGetRasterBand(psOptions->hSrcDS, psOptions->panSrcBands[0]);
+    if (GDALGetMaskFlags(hSrcBand) == GMF_PER_DATASET &&
+        psOptions->padfSrcNoDataReal != nullptr)
+    {
+        CPLError(
+            CE_Warning, CPLE_AppDefined,
+            "Source dataset has both a per-dataset mask band and the warper "
+            "has been also configured with a source nodata value. Only taking "
+            "into account the latter (i.e. ignoring the per-dataset mask "
+            "band)");
     }
 
     const bool bErrorOutIfEmptySourceWindow = CPLFetchBool(
@@ -818,19 +830,20 @@ CPLErr GDALWarpOperation::InitializeDestinationBuffer(void *pDstBuffer,
         {
             if (psOptions->padfDstNoDataReal == nullptr)
             {
-                // TODO: Change to CE_Failure for GDAL 3.12
+                // TODO: Change to CE_Failure and error out for GDAL 3.13
                 // See https://github.com/OSGeo/gdal/pull/12189
                 CPLError(CE_Warning, CPLE_AppDefined,
                          "INIT_DEST was set to NO_DATA, but a NoData value was "
                          "not defined. This warning will become a failure in a "
                          "future GDAL release.");
-                return CE_Failure;
             }
-
-            adfInitRealImag[0] = psOptions->padfDstNoDataReal[iBand];
-            if (psOptions->padfDstNoDataImag != nullptr)
+            else
             {
-                adfInitRealImag[1] = psOptions->padfDstNoDataImag[iBand];
+                adfInitRealImag[0] = psOptions->padfDstNoDataReal[iBand];
+                if (psOptions->padfDstNoDataImag != nullptr)
+                {
+                    adfInitRealImag[1] = psOptions->padfDstNoDataImag[iBand];
+                }
             }
         }
         else
@@ -2285,7 +2298,8 @@ CPLErr GDALWarpOperation::WarpRegionToBuffer(
         oWK.panUnifiedSrcValid == nullptr && psOptions->nSrcAlphaBand <= 0 &&
         (GDALGetMaskFlags(hSrcBand) & GMF_PER_DATASET)
         // Need to double check for -nosrcalpha case.
-        && !(GDALGetMaskFlags(hSrcBand) & GMF_ALPHA) && nSrcXSize > 0 &&
+        && !(GDALGetMaskFlags(hSrcBand) & GMF_ALPHA) &&
+        psOptions->padfSrcNoDataReal == nullptr && nSrcXSize > 0 &&
         nSrcYSize > 0)
 
     {
@@ -3246,11 +3260,10 @@ CPLErr GDALWarpOperation::ComputeSourceWindow(
     /*      fallback to adding a bit to the window if any points failed     */
     /*      to transform.                                                   */
     /* -------------------------------------------------------------------- */
-    if (CSLFetchNameValue(psOptions->papszWarpOptions, "SOURCE_EXTRA") !=
-        nullptr)
+    if (const char *pszSourceExtra =
+            CSLFetchNameValue(psOptions->papszWarpOptions, "SOURCE_EXTRA"))
     {
-        const int nSrcExtra = atoi(
-            CSLFetchNameValue(psOptions->papszWarpOptions, "SOURCE_EXTRA"));
+        const int nSrcExtra = atoi(pszSourceExtra);
         nXRadius += nSrcExtra;
         nYRadius += nSrcExtra;
     }

@@ -12,6 +12,8 @@
 
 #include "ogrsf_frmts.h"
 #include "gdal_priv.h"
+#include "gdalplugindriverproxy.h"
+#include "gdalsubdatasetinfo.h"
 
 #include "netcdfdrivercore.h"
 
@@ -211,7 +213,7 @@ static int netCDFDatasetIdentify(GDALOpenInfo *poOpenInfo)
 /*                    NCDFDriverGetSubdatasetInfo()                     */
 /************************************************************************/
 
-struct NCDFDriverSubdatasetInfo : public GDALSubdatasetInfo
+struct NCDFDriverSubdatasetInfo final : public GDALSubdatasetInfo
 {
   public:
     explicit NCDFDriverSubdatasetInfo(const std::string &fileName)

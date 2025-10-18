@@ -104,6 +104,52 @@ def test_gdalalg_raster_clip_like():
     assert ds.GetRasterBand(1).Checksum() == 3695
 
 
+@pytest.mark.require_driver("PostgreSQL")
+def test_gdalalg_raster_clip_like_postgis():
+
+    val = gdal.GetConfigOption("OGR_PG_CONNECTION_STRING", None)
+    if val is not None:
+        pg_connection_string = val
+    else:
+        pg_connection_string = "dbname=autotest"
+
+    try:
+        pg_ds = gdal.OpenEx(
+            "PG:" + pg_connection_string, gdal.OF_VECTOR | gdal.OF_UPDATE
+        )
+        pg_ds.CreateLayer("test_gdalalg_raster_clip_like_postgis_one")
+        pg_ds.CreateLayer("test_gdalalg_raster_clip_like_postgis_two")
+        pg_ds.Close()
+
+    except RuntimeError:
+        if val is None:
+            pytest.skip(
+                f"OGR_PG_CONNECTION_STRING not specified; Postgres is not available using default connection string {pg_connection_string}"
+            )
+        else:
+            pytest.skip(
+                f"Postgres is not available using supplied OGR_PG_CONNECTION_STRING {pg_connection_string}"
+            )
+
+    try:
+        alg = get_alg()
+        alg["input"] = "../gcore/data/byte.tif"
+        alg["output"] = ""
+        alg["output-format"] = "MEM"
+        alg["like"] = "PG:" + pg_connection_string
+        with pytest.raises(
+            Exception,
+            match="Only single layer dataset can be specified with --like when neither --like-layer or --like-sql have been specified",
+        ):
+            alg.Run()
+    finally:
+        pg_ds = gdal.OpenEx(
+            "PG:" + pg_connection_string, gdal.OF_VECTOR | gdal.OF_UPDATE
+        )
+        pg_ds.ExecuteSQL("DROP TABLE test_gdalalg_raster_clip_like_postgis_one CASCADE")
+        pg_ds.ExecuteSQL("DROP TABLE test_gdalalg_raster_clip_like_postgis_two CASCADE")
+
+
 def test_gdalalg_raster_clip_like_error(tmp_vsimem):
 
     alg = get_alg()
@@ -134,15 +180,15 @@ def test_gdalalg_raster_clip_bbox_outside_source(bbox_pos, allow_bbox_outside_so
     if allow_bbox_outside_source:
         alg["allow-bbox-outside-source"] = True
     if bbox_pos == "partially outside":
-        alg["bbox"] = [0, 0, 441920, 3751320]
+        alg["bbox"] = [440720 - 100, 3750120, 441920, 3751320]
     elif bbox_pos == "completely outside":
-        alg["bbox"] = [0, 100, 0, 100]
+        alg["bbox"] = [440720 - 100, 3750120 - 100, 440720 - 50, 3750120 - 50]
 
     alg["input"] = "../gcore/data/byte.tif"
     alg["output"] = ""
     alg["output-format"] = "MEM"
     if allow_bbox_outside_source:
-        with gdaltest.error_raised(gdal.CE_Warning):
+        with gdaltest.error_raised(gdal.CE_None):
             assert alg.Run()
     else:
         with pytest.raises(Exception, match=bbox_pos):
@@ -158,7 +204,7 @@ def test_gdalalg_raster_clip_bbox_crs():
     alg["bbox"] = [-117.631, 33.89, -117.628, 33.9005]
     alg["bbox-crs"] = "NAD27"
     alg["allow-bbox-outside-source"] = True
-    with gdaltest.error_raised(gdal.CE_Warning):
+    with gdaltest.error_raised(gdal.CE_None):
         assert alg.Run()
     ds = alg["output"].GetDataset()
     assert ds.RasterXSize == 6
@@ -166,6 +212,28 @@ def test_gdalalg_raster_clip_bbox_crs():
     assert ds.GetSpatialRef().GetAuthorityCode(None) == "26711"
     assert ds.GetGeoTransform() == pytest.approx(
         (441620.0, 60.0, 0.0, 3751140.0, 0.0, -60.0), rel=1e-8
+    )
+
+
+def test_gdalgalg_raster_clip_geometry(tmp_vsimem):
+
+    alg = get_alg()
+
+    alg["input"] = "../gcore/data/byte.tif"
+    alg["output"] = ""
+    alg["output-format"] = "MEM"
+    alg[
+        "geometry"
+    ] = "POLYGON ((440885 3750741, 441344 3750294, 441612 3750501, 441773 3751203, 441545 3751254, 441576 3750847, 441576 3750847, 440885 3750741))"
+
+    assert alg.Run()
+
+    ds = alg["output"].GetDataset()
+    assert ds.RasterXSize == 16
+    assert ds.RasterYSize == 17
+    assert ds.GetSpatialRef().GetAuthorityCode(None) == "26711"
+    assert ds.GetGeoTransform() == pytest.approx(
+        (440840, 60.0, 0.0, 3751260, 0.0, -60.0), rel=1e-8
     )
 
 
@@ -313,3 +381,44 @@ def test_gdalalg_raster_clip_geometry_outside_extent(allow_bbox_outside_source):
             match="Clipping geometry is partially or totally outside the extent of the raster",
         ):
             alg.Run()
+
+
+def test_gdalalg_raster_clip_window():
+
+    alg = get_alg()
+    alg["input"] = "../gcore/data/byte.tif"
+    alg["output-format"] = "MEM"
+    alg["window"] = [1, 2, 3, 4]
+    alg.Run()
+    ds = alg["output"].GetDataset()
+    assert ds.RasterXSize == 3
+    assert ds.RasterYSize == 4
+    assert ds.GetRasterBand(1).Checksum() == 105
+
+
+def test_gdalalg_raster_clip_window_invalid():
+
+    alg = get_alg()
+
+    with pytest.raises(
+        Exception,
+        match="Value of 'window' should be col,line,width,height with width > 0 and height > 0",
+    ):
+        alg["window"] = [1, 2, 0, 4]
+
+    with pytest.raises(
+        Exception,
+        match="Value of 'window' should be col,line,width,height with width > 0 and height > 0",
+    ):
+        alg["window"] = [1, 2, 3, 0]
+
+    alg["input"] = "../gcore/data/byte.tif"
+    alg["output-format"] = "MEM"
+    alg["window"] = [1, 2, 3, 4]
+    alg["add-alpha"] = True
+
+    with pytest.raises(
+        Exception,
+        match="clip: 'alpha' argument is not supported with 'window'",
+    ):
+        alg.Run()

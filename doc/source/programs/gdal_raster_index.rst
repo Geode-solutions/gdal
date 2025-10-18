@@ -123,12 +123,11 @@ Standard options
     metadata.
     This option may be repeated.
 
-Advanced options
-++++++++++++++++
+.. option:: --skip-errors
 
-.. include:: gdal_options/oo.rst
+    .. versionadded:: 3.12
 
-.. include:: gdal_options/if.rst
+    Skip errors related to input datasets.
 
 Examples
 --------

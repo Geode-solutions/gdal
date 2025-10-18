@@ -31,6 +31,7 @@
 #include "gdal.h"
 #include "gdal_alg.h"
 #include "gdal_priv.h"
+#include "gdal_maskbands.h"
 #include "ogr_api.h"
 #include "ogr_core.h"
 #include "memdataset.h"
@@ -1124,17 +1125,49 @@ static bool GDALFootprintProcess(GDALDataset *poSrcDS, OGRLayer *poDstLayer,
                 continue;
         }
 
+        const auto GeomIsNullOrEmpty = [&poGeom]
+        { return !poGeom || poGeom->IsEmpty(); };
+
         if (psOptions->bConvexHull)
         {
             poGeom.reset(poGeom->ConvexHull());
-            if (!poGeom || poGeom->IsEmpty())
+            if (GeomIsNullOrEmpty())
                 continue;
         }
 
+        const auto DoSimplification = [&poMemLayer, &poGeom](double dfTolerance)
+        {
+            std::string osLastErrorMsg;
+            {
+                CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+                CPLErrorReset();
+                poGeom.reset(poGeom->Simplify(dfTolerance));
+                osLastErrorMsg = CPLGetLastErrorMsg();
+            }
+            if (!poGeom || poGeom->IsEmpty())
+            {
+                if (poMemLayer->GetFeatureCount(false) == 1)
+                {
+                    if (!osLastErrorMsg.empty())
+                        CPLError(CE_Failure, CPLE_AppDefined, "%s",
+                                 osLastErrorMsg.c_str());
+                    else
+                        CPLError(CE_Failure, CPLE_AppDefined,
+                                 "Simplification resulted in empty geometry");
+                    return false;
+                }
+                if (!osLastErrorMsg.empty())
+                    CPLError(CE_Warning, CPLE_AppDefined, "%s",
+                             osLastErrorMsg.c_str());
+            }
+            return true;
+        };
+
         if (psOptions->dfSimplifyTolerance != 0)
         {
-            poGeom.reset(poGeom->Simplify(psOptions->dfSimplifyTolerance));
-            if (!poGeom || poGeom->IsEmpty())
+            if (!DoSimplification(psOptions->dfSimplifyTolerance))
+                return false;
+            if (GeomIsNullOrEmpty())
                 continue;
         }
 
@@ -1172,8 +1205,10 @@ static bool GDALFootprintProcess(GDALDataset *poSrcDS, OGRLayer *poDstLayer,
                     tolMin = tol;
                 }
             }
-            poGeom.reset(poGeom->Simplify(tolMax));
-            if (!poGeom || poGeom->IsEmpty())
+
+            if (!DoSimplification(tolMax))
+                return false;
+            if (GeomIsNullOrEmpty())
                 continue;
         }
 

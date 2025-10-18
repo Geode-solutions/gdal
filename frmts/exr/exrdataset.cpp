@@ -9,7 +9,9 @@
  * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
+#include "cpl_multiproc.h"
 #include "gdal_pam.h"
+#include "gdal_frmts.h"
 #include "ogr_spatialref.h"
 
 #include <algorithm>
@@ -21,8 +23,6 @@
 
 using namespace OPENEXR_IMF_NAMESPACE;
 using namespace IMATH_NAMESPACE;
-
-extern "C" CPL_DLL void GDALRegister_EXR();
 
 static const char *const apszCompressions[] = {
     "NONE", "RLE", "ZIPS", "ZIP", "PIZ", "PXR24", "B44", "B44A", "DWAA", "DWAB",
@@ -69,7 +69,7 @@ class GDALEXRDataset final : public GDALPamDataset
 
   public:
     GDALEXRDataset() = default;
-    ~GDALEXRDataset();
+    ~GDALEXRDataset() override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
@@ -442,23 +442,23 @@ class GDALEXRIOStream final : public IStream, public OStream
     {
     }
 
-    ~GDALEXRIOStream()
+    ~GDALEXRIOStream() override
     {
         VSIFCloseL(m_fp);
     }
 
-    virtual bool read(char c[/*n*/], int n) override;
-    virtual void write(const char c[/*n*/], int n) override;
-    virtual IoInt64Type tellg() override;
+    bool read(char c[/*n*/], int n) override;
+    void write(const char c[/*n*/], int n) override;
+    IoInt64Type tellg() override;
 
-    virtual IoInt64Type tellp() override
+    IoInt64Type tellp() override
     {
         return tellg();
     }
 
-    virtual void seekg(IoInt64Type pos) override;
+    void seekg(IoInt64Type pos) override;
 
-    virtual void seekp(IoInt64Type pos) override
+    void seekp(IoInt64Type pos) override
     {
         return seekg(pos);
     }

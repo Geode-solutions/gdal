@@ -27,9 +27,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
 
 #include <algorithm>
 #include <limits>
@@ -88,7 +85,7 @@ class AAIGDataset CPL_NON_FINAL : public GDALPamDataset
     double dfNoDataValue;
     CPLString osUnits{};
 
-    virtual int ParseHeader(const char *pszHeader, const char *pszDataType);
+    virtual bool ParseHeader(const char *pszHeader, const char *pszDataType);
 
   public:
     AAIGDataset();
@@ -121,16 +118,10 @@ class AAIGDataset CPL_NON_FINAL : public GDALPamDataset
 
 class GRASSASCIIDataset final : public AAIGDataset
 {
-    int ParseHeader(const char *pszHeader, const char *pszDataType) override;
+    bool ParseHeader(const char *pszHeader, const char *pszDataType) override;
 
   public:
-    GRASSASCIIDataset() : AAIGDataset()
-    {
-    }
-
-    ~GRASSASCIIDataset() override
-    {
-    }
+    GRASSASCIIDataset() = default;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -144,12 +135,10 @@ class GRASSASCIIDataset final : public AAIGDataset
 
 class ISGDataset final : public AAIGDataset
 {
-    int ParseHeader(const char *pszHeader, const char *pszDataType) override;
+    bool ParseHeader(const char *pszHeader, const char *pszDataType) override;
 
   public:
-    ISGDataset() : AAIGDataset()
-    {
-    }
+    ISGDataset() = default;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);

@@ -230,7 +230,6 @@ static bool OGRGeocodeHasStringValidFormat(const char *pszQueryTemplate)
  * @return a handle that should be freed with OGRGeocodeDestroySession(), or
  *         NULL in case of failure.
  *
- * @since GDAL 1.10
  */
 /* clang-format on */
 
@@ -366,7 +365,6 @@ OGRGeocodingSessionH OGRGeocodeCreateSession(char **papszOptions)
 
  * @param hSession the handle to destroy.
  *
- * @since GDAL 1.10
  */
 void OGRGeocodeDestroySession(OGRGeocodingSessionH hSession)
 {
@@ -587,7 +585,7 @@ static bool OGRGeocodePutIntoCache(OGRGeocodingSessionH hSession,
 static OGRLayerH OGRGeocodeMakeRawLayer(const char *pszContent)
 {
     OGRMemLayer *poLayer = new OGRMemLayer("result", nullptr, wkbNone);
-    OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
+    const OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
     OGRFieldDefn oFieldDefnRaw("raw", OFTString);
     poLayer->CreateField(&oFieldDefnRaw);
     OGRFeature *poFeature = new OGRFeature(poFDefn);
@@ -606,7 +604,7 @@ static OGRLayerH OGRGeocodeBuildLayerNominatim(CPLXMLNode *psSearchResults,
                                                const bool bAddRawFeature)
 {
     OGRMemLayer *poLayer = new OGRMemLayer("place", nullptr, wkbUnknown);
-    OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
+    const OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
 
     CPLXMLNode *psPlace = psSearchResults->psChild;
     // First iteration to add fields.
@@ -752,7 +750,7 @@ static OGRLayerH OGRGeocodeReverseBuildLayerNominatim(
     }
 
     OGRMemLayer *poLayer = new OGRMemLayer("result", nullptr, wkbNone);
-    OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
+    const OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
 
     bool bFoundLat = false;
     bool bFoundLon = false;
@@ -881,7 +879,7 @@ static OGRLayerH OGRGeocodeBuildLayerYahoo(CPLXMLNode *psResultSet,
                                            bool bAddRawFeature)
 {
     OGRMemLayer *poLayer = new OGRMemLayer("place", nullptr, wkbPoint);
-    OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
+    const OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
 
     // First iteration to add fields.
     CPLXMLNode *psPlace = psResultSet->psChild;
@@ -1022,7 +1020,7 @@ static OGRLayerH OGRGeocodeBuildLayerBing(CPLXMLNode *psResponse,
         return nullptr;
 
     OGRMemLayer *poLayer = new OGRMemLayer("place", nullptr, wkbPoint);
-    OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
+    const OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
 
     // First iteration to add fields.
     CPLXMLNode *psPlace = psResources->psChild;
@@ -1402,7 +1400,6 @@ static OGRLayerH OGRGeocodeCommon(OGRGeocodingSessionH hSession,
  * @return a OGR layer with the result(s), or NULL in case of error.
  *         The returned layer must be freed with OGRGeocodeFreeResult().
  *
- * @since GDAL 1.10
  */
 /* clang-format on */
 
@@ -1549,7 +1546,6 @@ static CPLString OGRGeocodeReverseSubstitute(CPLString osURL, double dfLon,
  * @return a OGR layer with the result(s), or NULL in case of error.
  *         The returned layer must be freed with OGRGeocodeFreeResult().
  *
- * @since GDAL 1.10
  */
 /* clang-format on */
 
@@ -1592,7 +1588,6 @@ OGRLayerH OGRGeocodeReverse(OGRGeocodingSessionH hSession, double dfLon,
  * @param hLayer the layer returned by OGRGeocode() or OGRGeocodeReverse()
  *               to destroy.
  *
- * @since GDAL 1.10
  */
 void OGRGeocodeFreeResult(OGRLayerH hLayer)
 {

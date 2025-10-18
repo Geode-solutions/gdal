@@ -737,6 +737,18 @@ def test_ogr_dxf_15(tmp_path):
 
 
 ###############################################################################
+# Test that ENCODING open option works
+
+
+def test_ogr_dxf_ENCODING_open_option():
+
+    with gdal.OpenEx("data/dxf/utf-8.dxf", open_options={"ENCODING": "UTF-8"}) as ds:
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f["Layer"] == "\u00E9ven"
+
+
+###############################################################################
 # Test reading without DXF blocks inlined.
 
 
@@ -4323,3 +4335,160 @@ def test_ogr_dxf_insert_col_count_zero():
         with ogr.Open("data/dxf/insert_only_col_count_zero.dxf") as ds:
             lyr = ds.GetLayerByName("blocks")
             assert lyr.GetFeatureCount() == 1
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_dxf_read_binary_dxf_r12():
+
+    with ogr.Open("data/dxf/bin_dxf_r12.dxf") as ds:
+        lyr = ds.GetLayer(0)
+        assert lyr.GetFeatureCount() == 3
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_dxf_read_binary_dxf_r2000():
+
+    with ogr.Open("data/dxf/bin_dxf_r2000.dxf") as ds:
+        lyr = ds.GetLayer(0)
+        assert lyr.GetFeatureCount() == 1
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_dxf_convert_from_binary_dxf_r12(tmp_vsimem):
+
+    gdal.VectorTranslate(tmp_vsimem / "out.dxf", "data/dxf/bin_dxf_r12.dxf")
+    with ogr.Open(tmp_vsimem / "out.dxf") as ds:
+        lyr = ds.GetLayer(0)
+        assert lyr.GetFeatureCount() == 3
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_dxf_convert_from_binary_dxf_r2000(tmp_vsimem):
+
+    gdal.VectorTranslate(tmp_vsimem / "out.dxf", "data/dxf/bin_dxf_r2000.dxf")
+    with ogr.Open(tmp_vsimem / "out.dxf") as ds:
+        lyr = ds.GetLayer(0)
+        assert lyr.GetFeatureCount() == 1
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_dxf_read_wipeout_binary():
+
+    ds = ogr.Open("data/dxf/BINARY_wipeout.dxf")
+    lyr = ds.GetLayer(0)
+
+    feat = lyr.GetNextFeature()
+    ogrtest.check_feature_geometry(
+        feat,
+        "POLYGON ((448381.028869725 6913933.17804321,448381.232017696 6913933.39891582,448380.807997101 6913933.38119118,448381.028869725 6913933.17804321,448381.011145071 6913933.6020638,448381.232017696 6913933.39891582,448381.028869725 6913933.17804321))",
+    )
+
+    feat = lyr.GetNextFeature()
+    ogrtest.check_feature_geometry(
+        feat,
+        "POLYGON ((448380.538954307 6913930.73282502,448380.538954307 6913930.73282502,448380.538954307 6913931.73282502,448381.538954307 6913931.73282502,448381.538954307 6913930.73282502,448380.538954307 6913930.73282502))",
+    )
+
+
+###############################################################################
+# Test reading transparency 440 block
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_dxf_read_transparency():
+
+    with ogr.Open("data/dxf/transparency.dxf") as ds:
+        lyr = ds.GetLayer(0)
+        feat = lyr.GetNextFeature()
+        assert feat.GetStyleString() == "PEN(c:#ffbeb87f)"
+
+
+###############################################################################
+# Test writing true color and transparency
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_dxf_write_true_color_and_transparency(tmp_path):
+
+    # Check that we perfectly roundtry transparency.dxf
+    gdal.VectorTranslate(
+        tmp_path / "out.dxf",
+        "data/dxf/transparency.dxf",
+        datasetCreationOptions=["FIRST_ENTITY=131072"],
+    )
+
+    with gdal.VSIFile(tmp_path / "out.dxf", "rb") as fout, gdal.VSIFile(
+        "data/dxf/transparency.dxf", "rb"
+    ) as fin:
+        assert fout.read() == fin.read()
+
+
+###############################################################################
+# Test hatch pattern support
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize(
+    "style_string",
+    [
+        'BRUSH(fc:#00000000,id:"ogr-brush-1")',
+        'BRUSH(fc:#ff0000,bc:#0000ff,id:"ogr-brush-2")',  # using indexed colors
+        'BRUSH(fc:#123456,bc:#7890ab,id:"ogr-brush-3")',
+        'BRUSH(fc:#123456,bc:#7890ab,id:"ogr-brush-4")',
+        'BRUSH(fc:#123456,bc:#7890ab,id:"ogr-brush-5")',
+        'BRUSH(fc:#123456,bc:#7890ab,id:"ogr-brush-6")',
+        'BRUSH(fc:#123456,bc:#7890ab,id:"ogr-brush-7")',
+        'BRUSH(fc:#123456,bc:#7890ab,id:"ogr-brush-7",a:10.000000)',
+        'BRUSH(fc:#123456,bc:#7890ab,id:"ogr-brush-7",s:5.000000)',
+    ],
+)
+def test_ogr_dxf_hatch_pattern(tmp_path, style_string):
+
+    with ogr.GetDriverByName("DXF").CreateDataSource(tmp_path / "hatch.dxf") as ds:
+        lyr = ds.CreateLayer("test")
+        f = ogr.Feature(lyr.GetLayerDefn())
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POLYGON ((0 0,0 10,10 10,10 0,0 0))"))
+        f.SetStyleString(style_string)
+        lyr.CreateFeature(f)
+
+    with ogr.Open(tmp_path / "hatch.dxf") as ds:
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f.GetGeometryRef().ExportToWkt() == "POLYGON ((0 0,0 10,10 10,10 0,0 0))"
+        assert f.GetStyleString() == style_string
+
+
+###############################################################################
+# Test hatch pattern support
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_dxf_hatch_pattern_read():
+    with ogr.Open("data/dxf/hatch_pattern_generated_by_gdal.dxf") as ds:
+        lyr = ds.GetLayer(0)
+        styles = [f.GetStyleString() for f in lyr]
+        expected_styles = [
+            "BRUSH(fc:#ff00ff)",
+            'BRUSH(fc:#ff0000,bc:#7f7f7f,id:"ogr-brush-7")',
+            'BRUSH(fc:#ff0000,bc:#0000ff,id:"ogr-brush-6")',
+            'BRUSH(fc:#00ff00,bc:#123456,id:"ogr-brush-5")',
+            'BRUSH(fc:#ff0000,bc:#00ff00,id:"ogr-brush-4")',
+            'BRUSH(fc:#ffff00,bc:#123456,id:"ogr-brush-3")',
+            'BRUSH(fc:#ff0000,bc:#0080ff,id:"ogr-brush-2",s:0.500000)',
+        ]
+        assert styles == expected_styles

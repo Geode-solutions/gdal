@@ -19,7 +19,7 @@ GML2 and GML3 that can                  GML 2.1.2 or GML 3 SF-0
 be translated into simple feature model (GML 3.1.1 Compliance level SF-0)
 ======================================= =================================
 
-Starting with GDAL 2.2, another driver, :ref:`GMLAS <vector.gmlas>`, for
+Another driver, :ref:`GMLAS <vector.gmlas>`, for
 GML driven by application schemas, is also available. Both GML and GMLAS
 drivers have their use cases.
 
@@ -89,6 +89,14 @@ The following configuration options are available:
 
      Control the gml:xlink resolving. See `gml:xlink resolving`_.
 
+- .. config:: GML_SKIP_CORRUPTED_FEATURES
+     :choices: YES, NO
+     :default: NO
+
+     If set to **YES**, skip features that cannot be parsed correctly.
+     If set to **NO**, the driver will fail with an error when it encounters
+     a feature that cannot be parsed correctly.
+
 - .. config:: GML_SAVE_RESOLVED_TO
      :choices: SAME, <filename>
 
@@ -149,8 +157,8 @@ CRS support
 The GML driver has coordinate system support. This is
 only reported when all the geometries of a layer have a srsName
 attribute, whose value is the same for all geometries. For srsName such
-as "urn:ogc:def:crs:EPSG:" (or "http://www.opengis.net/def/crs/EPSG/0/"
-starting with GDAL 2.1.2), for geographic coordinate systems (as
+as "urn:ogc:def:crs:EPSG:" or "http://www.opengis.net/def/crs/EPSG/0/",
+for geographic coordinate systems (as
 returned by WFS 1.1.0 for example), the axis order should be (latitude,
 longitude) as required by the standards, but this is unusual and can
 cause issues with applications unaware of axis order. So by default, the
@@ -171,7 +179,7 @@ to **YES**, the rules explained in the previous paragraph will be applied.
 The above also applied for projected coordinate systems
 whose EPSG preferred axis order is (northing, easting).
 
-Starting with GDAL 2.1.2, the :oo:`SWAP_COORDINATES` open option (or
+The :oo:`SWAP_COORDINATES` open option (or
 :config:`GML_SWAP_COORDINATES` configuration option) can
 be set to AUTO/YES/NO. It
 controls whether the order of the x/y or long/lat coordinates should be
@@ -304,6 +312,7 @@ SurfacePropertyType, MultiCurvePropertyType or MultiSurfacePropertyType
 will be also interpreted as being potential non-linear geometries, and
 corresponding OGR geometry type will be used for the layer geometry
 type.
+
 
 gml:xlink resolving
 -------------------
@@ -585,6 +594,14 @@ The following open options are supported:
        Whether to
        consider srsName like EPSG:XXXX as respecting EPSG axis order.
 
+-  .. oo:: SKIP_CORRUPTED_FEATURES
+      :choices: YES, NO
+      :default: NO
+
+      If set to **YES**, skip features that cannot be parsed correctly.
+      If set to **NO**, the driver will fail with an error when it encounters
+      a feature that cannot be parsed correctly.
+
 -  .. oo:: SWAP_COORDINATES
       :choices: AUTO, YES, NO
       :default: AUTO
@@ -597,6 +614,12 @@ The following open options are supported:
       :oo:`INVERT_AXIS_ORDER_IF_LAT_LONG`. When :oo:`SWAP_COORDINATES` is set to YES,
       coordinates will be always swapped regarding the order they appear in
       the GML, and when it set to NO, they will be kept in the same order.
+
+-  .. oo:: SKIP_RESOLVE_ELEMS
+        :choices: NONE, ALL, HUGE, <list>
+        :default: ALL
+
+        Control the gml:xlink resolving. See `gml:xlink resolving`_.
 
 -  .. oo:: READ_MODE
       :choices: AUTO, STANDARD, SEQUENTIAL_LAYERS, INTERLEAVED_LAYERS
@@ -763,8 +786,7 @@ The following dataset creation options are supported:
       :choices: SHORT, OGC_URN, OGC_URL
       :default: OGC_URN
 
-      (Only valid for
-      :dsco:`FORMAT=GML3/GML3Degree/GML3.2`, GDAL >= 2.2). If
+      (Only valid for :dsco:`FORMAT=GML3/GML3Degree/GML3.2`). If
       SHORT, then srsName will be in the form AUTHORITY_NAME:AUTHORITY_CODE
       If OGC_URN, then srsName will be in the form
       urn:ogc:def:crs:AUTHORITY_NAME::AUTHORITY_CODE If OGC_URL, then

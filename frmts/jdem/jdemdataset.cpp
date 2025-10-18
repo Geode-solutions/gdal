@@ -14,6 +14,10 @@
 #include "cpl_port.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 
 #include <algorithm>
 
@@ -73,7 +77,7 @@ class JDEMDataset final : public GDALPamDataset
 
   public:
     JDEMDataset();
-    ~JDEMDataset();
+    ~JDEMDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -98,9 +102,9 @@ class JDEMRasterBand final : public GDALPamRasterBand
 
   public:
     JDEMRasterBand(JDEMDataset *, int);
-    ~JDEMRasterBand();
+    ~JDEMRasterBand() override;
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IReadBlock(int, int, void *) override;
 };
 
 /************************************************************************/

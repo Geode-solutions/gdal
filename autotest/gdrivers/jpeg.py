@@ -25,6 +25,7 @@ from osgeo import gdal, gdalconst
 
 pytestmark = pytest.mark.require_driver("JPEG")
 
+
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
 def module_disable_exceptions():
@@ -156,12 +157,9 @@ def test_jpeg_3():
 
 def test_jpeg_4():
 
-    try:
-        gdalconst.GMF_ALL_VALID
-    except AttributeError:
-        pytest.skip()
-
     ds = gdal.Open("data/jpeg/masked.jpg")
+
+    assert ds.GetMetadataDomainList() == ["IMAGE_STRUCTURE", "DERIVED_SUBDATASETS"]
 
     refband = ds.GetRasterBand(1)
 
@@ -176,11 +174,6 @@ def test_jpeg_4():
 
 
 def test_jpeg_5():
-
-    try:
-        gdalconst.GMF_ALL_VALID
-    except AttributeError:
-        pytest.skip()
 
     ds = gdal.Open("data/jpeg/masked.jpg")
 
@@ -499,12 +492,11 @@ def test_jpeg_15():
 # Test overview support
 
 
-def test_jpeg_16(jpeg_version):
+def test_jpeg_16(jpeg_version, tmp_path):
 
-    shutil.copy("data/jpeg/albania.jpg", "tmp/albania.jpg")
-    gdal.Unlink("tmp/albania.jpg.ovr")
+    shutil.copy("data/jpeg/albania.jpg", tmp_path / "albania.jpg")
 
-    ds = gdal.Open("tmp/albania.jpg")
+    ds = gdal.Open(tmp_path / "albania.jpg")
     assert ds.GetRasterBand(1).GetOverviewCount() == 1
     assert ds.GetRasterBand(1).GetOverview(-1) is None
     assert ds.GetRasterBand(1).GetOverview(1) is None
@@ -532,7 +524,7 @@ def test_jpeg_16(jpeg_version):
     ds = None
 
     # Check we are using external overviews
-    ds = gdal.Open("tmp/albania.jpg")
+    ds = gdal.Open(tmp_path / "albania.jpg")
     assert ds.GetRasterBand(1).GetOverviewCount() == 2
     cs = ds.GetRasterBand(1).GetOverview(0).Checksum()
     if jpeg_version in ("8", "9b"):
@@ -541,7 +533,9 @@ def test_jpeg_16(jpeg_version):
         expected_cs = 32460
     assert cs == expected_cs
 
-    ds = None
+    assert ds.Close() == gdal.CE_None
+    os.unlink(tmp_path / "albania.jpg")
+    os.unlink(tmp_path / "albania.jpg.ovr")
 
 
 ###############################################################################
@@ -767,13 +761,13 @@ def test_jpeg_mask_lsb_order_issue_4351():
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 15, 4, 3)
     src_ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-    src_ds.GetRasterBand(1).GetMaskBand().WriteRaster(7, 2, 2, 1, b"\xFF" * 2)
+    src_ds.GetRasterBand(1).GetMaskBand().WriteRaster(7, 2, 2, 1, b"\xff" * 2)
     tmpfilename = "/vsimem/test_jpeg_mask_lsb_order_issue_4351.jpg"
     assert gdal.GetDriverByName("JPEG").CreateCopy(tmpfilename, src_ds)
     ds = gdal.Open(tmpfilename)
     assert (
         ds.GetRasterBand(1).GetMaskBand().ReadRaster(0, 2, 15, 1)
-        == b"\x00" * 7 + b"\xFF" * 2 + b"\x00" * 6
+        == b"\x00" * 7 + b"\xff" * 2 + b"\x00" * 6
     )
     ds = None
     gdal.GetDriverByName("JPEG").Delete(tmpfilename)
@@ -1274,6 +1268,7 @@ def test_jpeg_flir_png():
     ds = gdal.Open("data/jpeg/flir/FLIR.jpg")
     assert ds.GetMetadataDomainList() == [
         "IMAGE_STRUCTURE",
+        "",
         "FLIR",
         "SUBDATASETS",
         "DERIVED_SUBDATASETS",
@@ -1346,30 +1341,113 @@ def test_jpeg_flir_png():
 # Open JPEG image with FLIR metadata and raw thermal image as PNG 16 bit
 
 
-def test_jpeg_flir_png_16_bit():
+def test_jpeg_flir_png_16_bit(tmp_vsimem):
 
-    ds = gdal.Open('JPEG:"data/jpeg/flir/FLIR_16bit.jpg":FLIR_RAW_THERMAL_IMAGE')
-    assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
-    assert ds.GetRasterBand(1).ComputeRasterMinMax(False) == (65280, 65280)
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "tmp.jpg", open("data/jpeg/flir/FLIR_16bit.jpg", "rb").read()
+    )
+
+    with gdal.Open(f'JPEG:"{tmp_vsimem}/tmp.jpg":FLIR_RAW_THERMAL_IMAGE') as ds:
+        assert (
+            ds.GetDescription() == f'JPEG:"{tmp_vsimem}/tmp.jpg":FLIR_RAW_THERMAL_IMAGE'
+        )
+        assert ds.GetFileList() == [str(tmp_vsimem / "tmp.jpg")]
+        assert ds.GetDriver().GetDescription() == "PNG"
+        assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
+        assert ds.GetRasterBand(1).GetStatistics(False, True) == [
+            65280.0,
+            65280.0,
+            65280.0,
+            0.0,
+        ]
+
+    assert gdal.VSIStatL(tmp_vsimem / "tmp.jpg.aux.xml") is not None
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "tmp.jpg.aux.xml",
+        """<PAMDataset>
+  <Subdataset name="PNG_THERMAL_IMAGE">
+    <PAMDataset>
+      <PAMRasterBand band="1">
+        <Metadata>
+          <MDI key="STATISTICS_MINIMUM">1</MDI>
+          <MDI key="STATISTICS_MAXIMUM">2</MDI>
+          <MDI key="STATISTICS_MEAN">3</MDI>
+          <MDI key="STATISTICS_STDDEV">4</MDI>
+          <MDI key="STATISTICS_VALID_PERCENT">100</MDI>
+        </Metadata>
+      </PAMRasterBand>
+    </PAMDataset>
+  </Subdataset>
+</PAMDataset>""",
+    )
+
+    with gdal.Open(f'JPEG:"{tmp_vsimem}/tmp.jpg":FLIR_RAW_THERMAL_IMAGE') as ds:
+        assert ds.GetFileList() == [
+            str(tmp_vsimem / "tmp.jpg"),
+            str(tmp_vsimem / "tmp.jpg.aux.xml"),
+        ]
+        assert ds.GetRasterBand(1).GetStatistics(False, True) == [1, 2, 3, 4]
 
 
 ###############################################################################
 # Open JPEG image with FLIR metadata and raw thermal image as raw
 
 
-def test_jpeg_flir_raw():
+def test_jpeg_flir_raw(tmp_vsimem):
 
-    ds = gdal.Open(
-        "data/jpeg/flir/Image_thermique_de_l_emission_d_un_radiateur_a_travers_un_mur.jpg"
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "tmp.jpg",
+        open(
+            "data/jpeg/flir/Image_thermique_de_l_emission_d_un_radiateur_a_travers_un_mur.jpg",
+            "rb",
+        ).read(),
     )
-    subds = ds.GetSubDatasets()
-    assert len(subds) == 1
 
-    ds = gdal.Open(subds[0][0])
-    assert ds is not None
-    assert ds.RasterCount == 1
-    assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
-    assert ds.GetRasterBand(1).Checksum() == 30310
+    with gdal.Open(tmp_vsimem / "tmp.jpg") as ds:
+        subds = ds.GetSubDatasets()
+        assert len(subds) == 1
+
+    with gdal.Open(subds[0][0]) as ds:
+        assert ds is not None
+        assert ds.GetDescription() == subds[0][0]
+        assert ds.GetFileList() == [str(tmp_vsimem / "tmp.jpg")]
+        assert ds.RasterCount == 1
+        assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
+        assert ds.GetRasterBand(1).GetStatistics(False, True) == [
+            13872.0,
+            16040.0,
+            14657.947135416667,
+            542.8919524629978,
+        ]
+
+    assert gdal.VSIStatL(tmp_vsimem / "tmp.jpg.aux.xml") is not None
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "tmp.jpg.aux.xml",
+        """<PAMDataset>
+  <Subdataset name="RAW_THERMAL_IMAGE">
+    <PAMDataset>
+      <PAMRasterBand band="1">
+        <Metadata>
+          <MDI key="STATISTICS_MINIMUM">1</MDI>
+          <MDI key="STATISTICS_MAXIMUM">2</MDI>
+          <MDI key="STATISTICS_MEAN">3</MDI>
+          <MDI key="STATISTICS_STDDEV">4</MDI>
+          <MDI key="STATISTICS_VALID_PERCENT">100</MDI>
+        </Metadata>
+      </PAMRasterBand>
+    </PAMDataset>
+  </Subdataset>
+</PAMDataset>""",
+    )
+
+    with gdal.Open(subds[0][0]) as ds:
+        assert ds.GetFileList() == [
+            str(tmp_vsimem / "tmp.jpg"),
+            str(tmp_vsimem / "tmp.jpg.aux.xml"),
+        ]
+        assert ds.GetRasterBand(1).GetStatistics(False, True) == [1, 2, 3, 4]
 
 
 ###############################################################################
@@ -1388,6 +1466,43 @@ def test_jpeg_flir_error_flir_subds():
     with gdal.quiet_errors():
         ds = gdal.Open("JPEG:data/jpeg/masked.jpg:FLIR_RAW_THERMAL_IMAGE")
         assert ds is None
+
+
+###############################################################################
+# Open JPEG image with DJI raw thermal image as raw
+
+
+def test_jpeg_dji_thermal_metadata():
+
+    ds = gdal.Open("data/jpeg/dji/DJI_M3T.JPG")
+    assert sorted(ds.GetMetadataDomainList()) == [
+        "",
+        "DERIVED_SUBDATASETS",
+        "DJI",
+        "IMAGE_STRUCTURE",
+        "SUBDATASETS",
+        "xml:XMP",
+    ]
+    assert ds.GetMetadata("DJI") == {
+        "RawThermalImageHeight": "512",
+        "RawThermalImageWidth": "640",
+    }
+    assert ds.RasterCount == 3
+    subds = ds.GetSubDatasets()
+    assert len(subds) == 1
+
+    ds = gdal.Open(subds[0][0])
+    assert ds is not None
+    assert ds.RasterCount == 1
+    assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
+    assert ds.GetRasterBand(1).Checksum() == 50952
+
+
+def test_jpeg_dji_thermal_raw():
+
+    ds = gdal.Open('JPEG:"data/jpeg/dji/DJI_M3T.JPG":DJI_RAW_THERMAL_IMAGE')
+    assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
+    assert ds.GetRasterBand(1).Checksum() == 50952
 
 
 ###############################################################################
@@ -1654,6 +1769,7 @@ def test_jpeg_read_pix4d_xmp_crs_vertcs_orthometric():
     # exiftool "-xmp<=pix4d_xmp_crs_vertcs_orthometric.xml"  pix4d_xmp_crs_vertcs_orthometric.jpg
     # where pix4d_xmp_crs_vertcs_orthometric.xml is the XMP content
     ds = gdal.Open("data/jpeg/pix4d_xmp_crs_vertcs_orthometric.jpg")
+    assert ds.GetMetadataDomainList() == ["xml:XMP", "DERIVED_SUBDATASETS"]
     srs = ds.GetSpatialRef()
     assert srs.GetAuthorityCode("GEOGCS") == "6318"
     assert srs.GetAuthorityCode("VERT_CS") == "6360"
@@ -1674,9 +1790,26 @@ def test_jpeg_read_pix4d_xmp_crs_vertcs_ellipsoidal():
 
 
 ###############################################################################
-# Cleanup
 
 
-def test_jpeg_cleanup():
-    gdal.Unlink("tmp/albania.jpg")
-    gdal.Unlink("tmp/albania.jpg.ovr")
+def test_jpeg_create_copy_only_visible_at_close_time(tmp_path):
+
+    src_ds = gdal.Open("data/byte.tif")
+    out_filename = tmp_path / "tmp.jpg"
+
+    def my_callback(pct, msg, user_data):
+        if pct < 1:
+            assert gdal.VSIStatL(out_filename) is None
+        return True
+
+    drv = gdal.GetDriverByName("JPEG")
+    assert drv.GetMetadataItem(gdal.DCAP_CREATE_ONLY_VISIBLE_AT_CLOSE_TIME) == "YES"
+    drv.CreateCopy(
+        out_filename,
+        src_ds,
+        options=["@CREATE_ONLY_VISIBLE_AT_CLOSE_TIME=YES"],
+        callback=my_callback,
+    )
+
+    with gdal.Open(out_filename) as ds:
+        ds.GetRasterBand(1).Checksum()

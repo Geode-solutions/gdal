@@ -16,6 +16,10 @@
 #include "cpl_port.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "ogr_spatialref.h"
 
 #include <algorithm>
@@ -60,7 +64,7 @@ class IRISDataset final : public GDALPamDataset
 
   public:
     IRISDataset();
-    virtual ~IRISDataset();
+    ~IRISDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -184,12 +188,12 @@ class IRISRasterBand final : public GDALPamRasterBand
 
   public:
     IRISRasterBand(IRISDataset *, int);
-    virtual ~IRISRasterBand();
+    ~IRISRasterBand() override;
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IReadBlock(int, int, void *) override;
 
-    virtual double GetNoDataValue(int *) override;
-    virtual CPLErr SetNoDataValue(double) override;
+    double GetNoDataValue(int *) override;
+    CPLErr SetNoDataValue(double) override;
 };
 
 /************************************************************************/

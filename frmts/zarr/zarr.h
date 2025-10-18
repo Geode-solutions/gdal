@@ -16,7 +16,7 @@
 #include "cpl_compressor.h"
 #include "cpl_json.h"
 #include "gdal_priv.h"
-#include "gdal_pam.h"
+#include "gdal_pam_multidim.h"
 #include "memmultidim.h"
 
 #include <array>
@@ -35,6 +35,8 @@ const CPLCompressor *ZarrGetQuantizeDecompressor();
 const CPLCompressor *ZarrGetTIFFDecompressor();
 const CPLCompressor *ZarrGetFixedScaleOffsetDecompressor();
 
+class ZarrGroupBase;
+
 /************************************************************************/
 /*                            ZarrDataset                               */
 /************************************************************************/
@@ -43,7 +45,7 @@ class ZarrDataset final : public GDALDataset
 {
     friend class ZarrRasterBand;
 
-    std::shared_ptr<GDALGroup> m_poRootGroup{};
+    std::shared_ptr<ZarrGroupBase> m_poRootGroup{};
     CPLStringList m_aosSubdatasets{};
     GDALGeoTransform m_gt{};
     bool m_bHasGT = false;
@@ -55,7 +57,7 @@ class ZarrDataset final : public GDALDataset
                                      CSLConstList papszOpenOptions);
 
   public:
-    explicit ZarrDataset(const std::shared_ptr<GDALGroup> &poRootGroup);
+    explicit ZarrDataset(const std::shared_ptr<ZarrGroupBase> &poRootGroup);
     ~ZarrDataset() override;
 
     CPLErr FlushCache(bool bAtClosing = false) override;
@@ -87,10 +89,7 @@ class ZarrDataset final : public GDALDataset
     CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
-    std::shared_ptr<GDALGroup> GetRootGroup() const override
-    {
-        return m_poRootGroup;
-    }
+    std::shared_ptr<GDALGroup> GetRootGroup() const override;
 };
 
 /************************************************************************/
@@ -146,6 +145,8 @@ class ZarrAttributeGroup
   public:
     explicit ZarrAttributeGroup(const std::string &osParentName,
                                 bool bContainerIsGroup);
+
+    bool Close();
 
     void Init(const CPLJSONObject &obj, bool bUpdatable);
 
@@ -232,8 +233,6 @@ class ZarrAttributeGroup
 /************************************************************************/
 /*                         ZarrSharedResource                           */
 /************************************************************************/
-
-class ZarrGroupBase;
 
 class ZarrSharedResource
     : public std::enable_shared_from_this<ZarrSharedResource>
@@ -367,7 +366,9 @@ class ZarrGroupBase CPL_NON_FINAL : public GDALGroup
     mutable std::map<CPLString, std::shared_ptr<ZarrDimension>>
         m_oMapDimensions{};
     mutable bool m_bDirectoryExplored = false;
+    mutable std::set<std::string> m_oSetGroupNames{};
     mutable std::vector<std::string> m_aosGroups{};
+    mutable std::set<std::string> m_oSetArrayNames{};
     mutable std::vector<std::string> m_aosArrays{};
     mutable ZarrAttributeGroup m_oAttrGroup;
     mutable bool m_bAttributesLoaded = false;
@@ -397,6 +398,8 @@ class ZarrGroupBase CPL_NON_FINAL : public GDALGroup
 
   public:
     ~ZarrGroupBase() override;
+
+    virtual bool Close();
 
     std::shared_ptr<GDALAttribute>
     GetAttribute(const std::string &osName) const override
@@ -516,6 +519,8 @@ class ZarrV2Group final : public ZarrGroupBase
     {
     }
 
+    bool Close() override;
+
   public:
     static std::shared_ptr<ZarrV2Group>
     Create(const std::shared_ptr<ZarrSharedResource> &poSharedResource,
@@ -568,6 +573,8 @@ class ZarrV3Group final : public ZarrGroupBase
     ZarrV3Group(const std::shared_ptr<ZarrSharedResource> &poSharedResource,
                 const std::string &osParentName, const std::string &osName,
                 const std::string &osDirectoryName);
+
+    bool Close() override;
 
   public:
     ~ZarrV3Group() override;
@@ -1042,7 +1049,7 @@ class ZarrArray CPL_NON_FINAL : public GDALPamMDArray
 
     void ParentRenamed(const std::string &osNewParentFullName) override;
 
-    virtual void Flush() = 0;
+    virtual bool Flush() = 0;
 
     std::shared_ptr<GDALGroup> GetRootGroup() const override
     {
@@ -1086,7 +1093,7 @@ class ZarrV2Array final : public ZarrArray
                 const std::vector<DtypeElt> &aoDtypeElts,
                 const std::vector<GUInt64> &anBlockSize, bool bFortranOrder);
 
-    void Serialize();
+    bool Serialize();
 
     bool LoadTileData(const uint64_t *tileIndices, bool bUseMutex,
                       const CPLCompressor *psDecompressor,
@@ -1130,7 +1137,7 @@ class ZarrV2Array final : public ZarrArray
 
     void SetFilters(const CPLJSONArray &oFiltersArray);
 
-    void Flush() override;
+    bool Flush() override;
 
   protected:
     std::string GetDataDirectory() const override;
@@ -1478,7 +1485,7 @@ class ZarrV3Array final : public ZarrArray
                 const std::vector<DtypeElt> &aoDtypeElts,
                 const std::vector<GUInt64> &anBlockSize);
 
-    void Serialize(const CPLJSONObject &oAttrs);
+    bool Serialize(const CPLJSONObject &oAttrs);
 
     bool NeedDecodedBuffer() const;
 
@@ -1513,7 +1520,7 @@ class ZarrV3Array final : public ZarrArray
         m_poCodecs = std::move(poCodecs);
     }
 
-    void Flush() override;
+    bool Flush() override;
 
   protected:
     std::string GetDataDirectory() const override;

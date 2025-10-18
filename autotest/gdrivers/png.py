@@ -143,7 +143,7 @@ def test_png_7():
 # recovery from errors caused by reading broken file..
 
 
-def test_png_8():
+def test_png_8(tmp_path):
 
     drv = gdal.GetDriverByName("PNG")
     ds_src = gdal.Open("data/png/idat_broken.png")
@@ -166,15 +166,13 @@ def test_png_8():
     assert err != 0, "error condition expected"
 
     with gdal.quiet_errors():
-        ds_dst = drv.CreateCopy("tmp/idat_broken.png", ds_src)
+        ds_dst = drv.CreateCopy(tmp_path / "idat_broken.png", ds_src)
         err = gdal.GetLastErrorNo()
     ds_src = None
 
     assert err != 0, "error condition expected"
 
     assert ds_dst is None, "dataset not expected"
-
-    os.remove("tmp/idat_broken.png")
 
 
 ###############################################################################
@@ -419,6 +417,90 @@ def test_png_whole_image_optim(options, nbands, xsize, ysize):
 
 
 ###############################################################################
+
+
+def test_png_background_color_gray(tmp_vsimem):
+
+    filename = tmp_vsimem / "out.png"
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src_ds.SetMetadataItem("BACKGROUND_COLOR", "123")
+
+    gdal.GetDriverByName("PNG").CreateCopy(filename, src_ds)
+    gdal.Unlink(str(filename) + ".aux.xml")
+    with gdal.Open(filename) as ds:
+        assert ds.GetMetadataItem("BACKGROUND_COLOR") == "123"
+
+
+###############################################################################
+
+
+def test_png_background_color_gray_alpha(tmp_vsimem):
+
+    filename = tmp_vsimem / "out.png"
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 2)
+    src_ds.SetMetadataItem("BACKGROUND_COLOR", "123")
+
+    gdal.GetDriverByName("PNG").CreateCopy(filename, src_ds)
+    gdal.Unlink(str(filename) + ".aux.xml")
+    with gdal.Open(filename) as ds:
+        assert ds.GetMetadataItem("BACKGROUND_COLOR") == "123"
+
+
+###############################################################################
+
+
+def test_png_background_color_index(tmp_vsimem):
+
+    filename = tmp_vsimem / "out.png"
+
+    ct_ds = gdal.Open("data/png/test.png")
+    ct = ct_ds.GetRasterBand(1).GetRasterColorTable()
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src_ds.GetRasterBand(1).SetColorTable(ct)
+    src_ds.SetMetadataItem("BACKGROUND_COLOR", "3")
+
+    gdal.GetDriverByName("PNG").CreateCopy(filename, src_ds)
+    gdal.Unlink(str(filename) + ".aux.xml")
+    with gdal.Open(filename) as ds:
+        assert ds.GetMetadataItem("BACKGROUND_COLOR") == "3"
+
+
+###############################################################################
+
+
+def test_png_background_color_rgb(tmp_vsimem):
+
+    filename = tmp_vsimem / "out.png"
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 3)
+    src_ds.SetMetadataItem("BACKGROUND_COLOR", "123,234,67")
+
+    gdal.GetDriverByName("PNG").CreateCopy(filename, src_ds)
+    gdal.Unlink(str(filename) + ".aux.xml")
+    with gdal.Open(filename) as ds:
+        assert ds.GetMetadataItem("BACKGROUND_COLOR") == "123,234,67"
+
+
+###############################################################################
+
+
+def test_png_background_color_rgba(tmp_vsimem):
+
+    filename = tmp_vsimem / "out.png"
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 4)
+    src_ds.SetMetadataItem("BACKGROUND_COLOR", "123,234,67")
+
+    gdal.GetDriverByName("PNG").CreateCopy(filename, src_ds)
+    gdal.Unlink(str(filename) + ".aux.xml")
+    with gdal.Open(filename) as ds:
+        assert ds.GetMetadataItem("BACKGROUND_COLOR") == "123,234,67"
+
+
+###############################################################################
 def test_png_copy_mdd():
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
@@ -481,3 +563,60 @@ def test_png_read_interlace_16_bit():
 
     ds = gdal.Open("data/png/uint16_interlaced.png")
     assert ds.GetRasterBand(1).Checksum() == 4672
+
+
+###############################################################################
+
+
+def test_png_create_copy_only_visible_at_close_time(tmp_path):
+
+    src_ds = gdal.Open("data/byte.tif")
+    out_filename = tmp_path / "tmp.png"
+
+    def my_callback(pct, msg, user_data):
+        if pct < 1:
+            assert gdal.VSIStatL(out_filename) is None
+        return True
+
+    drv = gdal.GetDriverByName("PNG")
+    assert drv.GetMetadataItem(gdal.DCAP_CREATE_ONLY_VISIBLE_AT_CLOSE_TIME) == "YES"
+    drv.CreateCopy(
+        out_filename,
+        src_ds,
+        options=["@CREATE_ONLY_VISIBLE_AT_CLOSE_TIME=YES"],
+        callback=my_callback,
+    )
+
+    with gdal.Open(out_filename) as ds:
+        assert ds.GetRasterBand(1).Checksum() == 4672
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize("zlevel", [-1, 0, 9, 10])
+def test_png_create_zlevel(tmp_vsimem, zlevel):
+
+    src_ds = gdal.Open("data/byte.tif")
+    if zlevel < 0 or zlevel > 9:
+        with pytest.raises(Exception, match="Illegal ZLEVEL value"):
+            gdal.GetDriverByName("PNG").CreateCopy(
+                tmp_vsimem / "out.png", src_ds, options=[f"ZLEVEL={zlevel}"]
+            )
+    else:
+        gdal.GetDriverByName("PNG").CreateCopy(
+            tmp_vsimem / "out.png", src_ds, options=[f"ZLEVEL={zlevel}"]
+        )
+
+
+###############################################################################
+
+
+def test_png_close(tmp_path):
+
+    ds = gdal.GetDriverByName("PNG").CreateCopy(
+        tmp_path / "out.png", gdal.Open("data/byte.tif")
+    )
+    ds.Close()
+    os.remove(tmp_path / "out.png")

@@ -21,6 +21,10 @@
 
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 
 /************************************************************************/
 /* ==================================================================== */
@@ -55,7 +59,7 @@ class GS7BGDataset final : public GDALPamDataset
     {
     }
 
-    ~GS7BGDataset();
+    ~GS7BGDataset() override;
 
     static int Identify(GDALOpenInfo *);
     static GDALDataset *Open(GDALOpenInfo *);
@@ -107,7 +111,7 @@ class GS7BGRasterBand final : public GDALPamRasterBand
 
   public:
     GS7BGRasterBand(GS7BGDataset *, int);
-    ~GS7BGRasterBand();
+    ~GS7BGRasterBand() override;
 
     CPLErr IReadBlock(int, int, void *) override;
     CPLErr IWriteBlock(int, int, void *) override;
@@ -154,7 +158,7 @@ GS7BGRasterBand::~GS7BGRasterBand()
 CPLErr GS7BGRasterBand::ScanForMinMaxZ()
 
 {
-    GS7BGDataset *poGDS = reinterpret_cast<GS7BGDataset *>(poDS);
+    GS7BGDataset *poGDS = cpl::down_cast<GS7BGDataset *>(poDS);
     double *pafRowVals =
         (double *)VSI_MALLOC2_VERBOSE(nRasterXSize, sizeof(double));
 
@@ -429,7 +433,7 @@ CPLErr GS7BGRasterBand::IWriteBlock(int nBlockXOff, int nBlockYOff,
 
 double GS7BGRasterBand::GetNoDataValue(int *pbSuccess)
 {
-    GS7BGDataset *poGDS = reinterpret_cast<GS7BGDataset *>(poDS);
+    GS7BGDataset *poGDS = cpl::down_cast<GS7BGDataset *>(poDS);
     if (pbSuccess)
         *pbSuccess = TRUE;
 
@@ -1019,20 +1023,38 @@ CPLErr GS7BGDataset::WriteHeader(VSILFILE *fp, GInt32 nXSize, GInt32 nYSize,
 }
 
 /************************************************************************/
+/*                      GS7BGCreateCheckDims()                          */
+/************************************************************************/
+
+static bool GS7BGCreateCheckDims(int nXSize, int nYSize)
+{
+    if (nXSize <= 1 || nYSize <= 1)
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg,
+                 "Unable to create grid, both X and Y size must be "
+                 "larger or equal to 2.");
+        return false;
+    }
+    if (nXSize > INT_MAX / nYSize / static_cast<int>(sizeof(double)))
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg,
+                 "Unable to create grid, too large X and Y size.");
+        return false;
+    }
+    return true;
+}
+
+/************************************************************************/
 /*                               Create()                               */
 /************************************************************************/
 
 GDALDataset *GS7BGDataset::Create(const char *pszFilename, int nXSize,
                                   int nYSize, int nBandsIn, GDALDataType eType,
-                                  CPL_UNUSED char **papszParamList)
+                                  char ** /* papszParamList*/)
 
 {
-    if (nXSize <= 0 || nYSize <= 0)
+    if (!GS7BGCreateCheckDims(nXSize, nYSize))
     {
-        CPLError(CE_Failure, CPLE_IllegalArg,
-                 "Unable to create grid, both X and Y size must be "
-                 "non-negative.\n");
-
         return nullptr;
     }
 
@@ -1101,7 +1123,7 @@ GDALDataset *GS7BGDataset::Create(const char *pszFilename, int nXSize,
 
 GDALDataset *GS7BGDataset::CreateCopy(const char *pszFilename,
                                       GDALDataset *poSrcDS, int bStrict,
-                                      CPL_UNUSED char **papszOptions,
+                                      char ** /*papszOptions*/,
                                       GDALProgressFunc pfnProgress,
                                       void *pProgressData)
 {
@@ -1130,6 +1152,13 @@ GDALDataset *GS7BGDataset::CreateCopy(const char *pszFilename,
                      "raster band, first band will be copied.\n");
     }
 
+    const int nXSize = poSrcDS->GetRasterXSize();
+    const int nYSize = poSrcDS->GetRasterXSize();
+    if (!GS7BGCreateCheckDims(nXSize, nYSize))
+    {
+        return nullptr;
+    }
+
     GDALRasterBand *poSrcBand = poSrcDS->GetRasterBand(1);
 
     if (!pfnProgress(0.0, nullptr, pProgressData))
@@ -1147,8 +1176,6 @@ GDALDataset *GS7BGDataset::CreateCopy(const char *pszFilename,
         return nullptr;
     }
 
-    GInt32 nXSize = poSrcBand->GetXSize();
-    GInt32 nYSize = poSrcBand->GetYSize();
     GDALGeoTransform gt;
     poSrcDS->GetGeoTransform(gt);
 

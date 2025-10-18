@@ -13,6 +13,7 @@
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
@@ -93,7 +94,7 @@ CPLErr EIRDataset::Close()
         if (nBands > 0 && GetAccess() == GA_Update)
         {
             RawRasterBand *poBand =
-                reinterpret_cast<RawRasterBand *>(GetRasterBand(1));
+                cpl::down_cast<RawRasterBand *>(GetRasterBand(1));
 
             int bNoDataSet = FALSE;
             const double dfNoData = poBand->GetNoDataValue(&bNoDataSet);
@@ -327,6 +328,12 @@ GDALDataset *EIRDataset::Open(GDALOpenInfo *poOpenInfo)
         }
         else if (EQUAL(aosTokens[0], "PIXEL_FILES"))
         {
+            if (CPLHasPathTraversal(aosTokens[1]))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s", aosTokens[1]);
+                return nullptr;
+            }
             osRasterFilename = CPLFormCIFilenameSafe(osPath, aosTokens[1], "");
         }
         else if (EQUAL(aosTokens[0], "FORMAT"))

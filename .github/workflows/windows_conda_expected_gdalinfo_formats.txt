@@ -1,11 +1,11 @@
 Supported Formats: (ro:read-only, rw:read-write, +:write from scratch, u:update, v:virtual-I/O s:subdatasets)
-  VRT -raster,multidimensional raster- (rw+uv): Virtual Raster (*.vrt)
   DERIVED -raster- (ro): Derived datasets using VRT pixel functions
   GTI -raster- (rov): GDAL Raster Tile Index (*.gti.gpkg, *.gti.fgb, *.gti)
   SNAP_TIFF -raster- (rov): Sentinel Application Processing GeoTIFF
   GTiff -raster- (rw+uvs): GeoTIFF (*.tif, *.tiff)
   COG -raster- (wv): Cloud optimized GeoTIFF generator (*.tif, *.tiff)
   LIBERTIFF -raster- (rov): GeoTIFF (using LIBERTIFF library) (*.tif, *.tiff)
+  VRT -raster,multidimensional raster- (rw+uv): Virtual Raster (*.vrt)
   NITF -raster- (rw+uvs): National Imagery Transmission Format (*.ntf)
   RPFTOC -raster- (rovs): Raster Product Format TOC format (*.toc)
   ECRGTOC -raster- (rovs): ECRG TOC format (*.xml)
@@ -59,6 +59,7 @@ Supported Formats: (ro:read-only, rw:read-write, +:write from scratch, u:update,
   MSGN -raster- (rov): EUMETSAT Archive native (.nat) (*.nat)
   MSG -raster- (ro): MSG HRIT Data
   RST -raster- (rw+v): Idrisi Raster A.1 (*.rst)
+  GSAG -raster- (rwv): Golden Software ASCII Grid (.grd) (*.grd)
   GSBG -raster- (rw+v): Golden Software Binary Grid (.grd) (*.grd)
   GS7BG -raster- (rw+v): Golden Software 7 Binary Grid (.grd) (*.grd)
   COSAR -raster- (rov): COSAR Annotated Binary Matrix (TerraSAR-X)
@@ -78,11 +79,11 @@ Supported Formats: (ro:read-only, rw:read-write, +:write from scratch, u:update,
   PNM -raster- (rw+v): Portable Pixmap Format (netpbm) (*.pgm, *.ppm, *.pnm)
   DOQ1 -raster- (rov): USGS DOQ (Old Style)
   DOQ2 -raster- (rov): USGS DOQ (New Style)
-  PAux -raster- (rov): PCI .aux Labelled
   MFF -raster- (rov): Vexcel MFF Raster (*.hdr)
   MFF2 -raster- (ro): Vexcel MFF2 (HKV) Raster
   GSC -raster- (rov): GSC Geogrid
   FAST -raster- (rov): EOSAT FAST Format
+  BT -raster- (rw+v): VTP .bt (Binary Terrain) 1.3 Format (*.bt)
   LAN -raster- (rov): Erdas .LAN/.GIS
   CPG -raster- (rov): Convair PolGASP
   NDF -raster- (rov): NLAPS Data Format
@@ -137,6 +138,8 @@ Supported Formats: (ro:read-only, rw:read-write, +:write from scratch, u:update,
   CAD -raster,vector- (rovs): AutoCAD Driver (*.dwg)
   PLSCENES -raster,vector- (ro): Planet Labs Scenes API
   NGW -raster,vector- (rw+s): NextGIS Web
+  MiraMonRaster -raster- (rovs): MiraMon Raster Images (*.rel, *.img)
+  PAux -raster- (rov): PCI .aux Labelled
   GenBin -raster- (rov): Generic Binary (.hdr Labelled)
   ENVI -raster- (rw+uv): ENVI .hdr Labelled
   EHdr -raster- (rw+uv): ESRI .hdr Labelled (*.bil)

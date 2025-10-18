@@ -70,7 +70,6 @@ Andrey
 AndreyK
 andsize
 anMapNewAxisToOldAxis
-annd
 Antalya
 antialias
 antimeridian
@@ -99,7 +98,6 @@ Arrayname
 arrayStartIdx
 ASC
 ascii
-askin
 aspatial
 Aspatial
 assumerolewithwebidentity
@@ -174,6 +172,7 @@ bak
 bAllowPromotingToCurves
 bAllowResizeOutptr
 bandblockcache
+BandMetadataItem
 BandN
 BandsCount
 bAnglesInPackedDMSFormat
@@ -237,6 +236,7 @@ blockings
 blocksize
 BlockSizeX
 BlockSizeY
+BlockWindows
 blocky
 bLookForCircular
 bLookForNonLinear
@@ -269,13 +269,11 @@ bOwnMask
 bOwnSubtransformer
 bPixelIsPoint
 bpw
-branche
 Brashear
 bRelativeToReferencePath
 Bresenham
 bReversed
 Brezenham
-brighest
 Brodin
 Brotli
 Brovey
@@ -300,6 +298,8 @@ buildbot
 Buildbot
 BuildVRT
 BuildVRTOptions
+bulleted
+Bulleted
 bumpmap
 BUnits
 bUnlinkAndSeize
@@ -382,6 +382,7 @@ ClassificationCode
 Clayers
 CleanTimeout
 clearerr
+CLI
 clib
 clipdst
 clipdstlayer
@@ -425,6 +426,7 @@ Coeff
 Coefs
 colname
 colorinterp
+ColorInterpretation
 colormap
 colormapped
 colorspace
@@ -438,7 +440,6 @@ commandline
 Commandline
 CommitTransaction
 comparator
-comparible
 compilable
 ComplexSource
 compoundcurves
@@ -460,6 +461,8 @@ connectedness
 const
 constexpr
 contensts
+contextlib
+contextmanager
 ContourOptions
 Contrarty
 conv
@@ -531,6 +534,7 @@ cvs
 Cxx
 Cygwin
 dall
+Damerau
 dan
 DanB
 DanielM
@@ -687,7 +691,6 @@ dialogs
 differencing
 dimensionality
 dimensioned
-dimensons
 dimN
 DINSTALL
 dir
@@ -922,6 +925,7 @@ fld
 flippmoke
 floodfill
 flurstueck
+flushable
 Fonseca
 FootprintOptions
 fopen
@@ -932,6 +936,7 @@ ForceTo
 forceToMultiPolygon
 forecolor
 Foris
+formatter
 formatters
 formly
 Fortran
@@ -944,6 +949,7 @@ fpRawL
 fprintf
 fpSource
 fputc
+frac
 franca
 france
 FrankW
@@ -997,6 +1003,8 @@ gdalabstractbandblockcache
 gdaladdo
 gdalalljni
 gdalallregister
+GDALArgDatasetValue
+GDALArgDatasetValue
 gdalarraybandblockcache
 gdalasyncread
 GDALAsyncReader
@@ -1144,6 +1152,7 @@ GetFieldAsDateTime
 GetFieldCount
 GetFieldDefn
 GetFieldSubTypeName
+GetFileList
 GetGeomFieldCount
 GetGeomFieldDefn
 GetLayerDefn
@@ -1162,7 +1171,6 @@ getter
 getters
 GetTiledVirtualMem
 GetTileService
-gettings
 GetType
 GetView
 GetVirtualArray
@@ -1210,6 +1218,7 @@ gnot
 Gohlke
 Golang
 Golomb
+Goode
 goog
 googleapis
 gpkg
@@ -1260,6 +1269,7 @@ gz
 gzip
 GZip
 gzipped
+Hadoop
 Haff
 Halasz
 hana
@@ -1322,6 +1332,7 @@ hMaskBand
 hMutex
 hNewSubGeom
 hObject
+hOutDS
 hobu
 hoc
 holded
@@ -1375,6 +1386,7 @@ hypercubes
 hyperspectral
 hypsometric
 Hypsometric
+hZonesDS
 iAxis
 iBand
 iChild
@@ -1407,6 +1419,7 @@ igor
 IIP
 ij
 iLayer
+iLength
 ili
 imag
 imagefile
@@ -1471,6 +1484,7 @@ isdst
 IsEmpty
 IsNullable
 isspace
+iStartRow
 iSubGeom
 ISurface
 itemtypes
@@ -1582,6 +1596,7 @@ leftfov
 LegalConstraints
 len
 Leveller
+Levenshtein
 lf
 libaom
 libarchive
@@ -1642,7 +1657,6 @@ libpython
 librarified
 librasterlite
 libregis
-librray
 libs
 libspatialite
 libsqlite
@@ -1740,6 +1754,7 @@ mapbox
 Mapbox
 Maperitive
 mapFieldType
+Mapfile
 mapinfo
 Mapinfo
 maplist
@@ -1765,6 +1780,8 @@ maxdistance
 maxheight
 maximising
 MaximumLong
+maxlat
+maxlon
 maxOccurs
 MaxSize
 maxwidth
@@ -1775,6 +1792,7 @@ MaxX
 maxy
 maxY
 MaxY
+maxz
 MaxZ
 mbtiles
 mbtowc
@@ -1803,6 +1821,7 @@ Miara
 MiB
 Microstation
 mif
+MikeS
 millimetric
 mimetype
 miniconda
@@ -1817,11 +1836,14 @@ minimalistic
 minimising
 Minio
 minixml
+minlat
+minlon
 minsize
 minX
 miny
 minY
 MinY
+minz
 MinZ
 Mipmaps
 MiraD
@@ -1846,6 +1868,7 @@ Mollweide
 Mongo
 MONGOCXX
 mongocxxv
+MongoDB
 monoblock
 Monospace
 Morissette
@@ -1891,6 +1914,7 @@ multilines
 multilinestring
 multilinestrings
 Multipage
+multipart
 multipatch
 Multiplatform
 multipoint
@@ -2001,6 +2025,7 @@ neighbouring
 neighbours
 nEndVertex
 nEntryCount
+netBSD
 netcdf
 netCDF
 netcore
@@ -2237,7 +2262,6 @@ openjpeg
 OpenJPEG
 openlayers
 Operationen
-operationg
 opj
 optfile
 optfiles
@@ -2279,6 +2303,7 @@ outptr
 outputBounds
 outputer
 outputSchema
+outString
 Oversample
 OverviewCount
 ovf
@@ -2358,6 +2383,7 @@ papszOptions
 papszOverride
 papszSiblingFiles
 papszSrcDSNames
+papszStrList
 papszURL
 papszVectorTranslateArguments
 papszWarpOptions
@@ -2365,7 +2391,9 @@ Paquet
 paradygm
 parallelisation
 parallelising
+Parallelization
 parallelize
+parallelized
 param
 parameterisation
 parametrized
@@ -2505,6 +2533,7 @@ poFeatureDefn
 poFieldDefn
 poFilterGeom
 poGCP
+poGeom
 poGeomFieldDefn
 PointFromColumns
 PointOnSurface
@@ -2587,6 +2616,7 @@ precompiled
 precompute
 predefine
 predelete
+preinstalled
 prelimenary
 preload
 premultiplication
@@ -2594,7 +2624,6 @@ Prepar
 preparse
 prepended
 prepending
-preprare
 preprocessing
 prescanning
 preserveFID
@@ -2670,6 +2699,7 @@ pszDestFilename
 pszDomain
 pszDstFilename
 pszElement
+pszExt
 pszFile
 pszFilename
 pszFileName
@@ -2757,6 +2787,7 @@ rasterize
 Rasterize
 rasterized
 RasterizeOptions
+rasterizes
 rasterizing
 rasterlite
 Rasterlite
@@ -2807,7 +2838,6 @@ referenceSystemIdentifier
 referenceSystemInfo
 referer
 Referer
-refererenced
 reflectance
 reflectances
 refSysID
@@ -3054,7 +3084,6 @@ Spatio
 spc
 specialised
 speciffed
-specificaiton
 specificities
 Specifieds
 SpectralBand
@@ -3091,6 +3120,7 @@ StartTransaction
 stat'ed
 stateful
 stderr
+stdev
 stdin
 stdout
 stealInteriorRing
@@ -3129,6 +3159,8 @@ Struve
 styleurl
 styleurls
 su
+subalgorithm
+subalgorithms
 subarcs
 subarray
 subbottom
@@ -3581,6 +3613,8 @@ webmercator
 WebP
 WEBP
 webviewer
+weighted_frac
+weighted_stdev
 wellformedness
 Westervelt
 westing

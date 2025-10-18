@@ -12,6 +12,7 @@
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
@@ -184,7 +185,7 @@ double NSIDCbinRasterBand::GetScale(int *pbSuccess)
         *pbSuccess = TRUE;
     // again just use a constant unless we see other file variants
     // also, this might be fraction rather than percentage
-    // atof(reinterpret_cast<NSIDCbinDataset*>(poDS)->sHeader.scaling)/100;
+    // atof(cpl::down_cast<NSIDCbinDataset*>(poDS)->sHeader.scaling)/100;
     return 0.4;
 }
 

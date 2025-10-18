@@ -140,7 +140,7 @@ const GDALColorEntry *CPL_STDCALL GDALGetColorEntry(GDALColorTableH hTable,
  *
  * @param i entry offset from zero to GetColorEntryCount()-1.
  *
- * @param poEntry the existing GDALColorEntry to be overrwritten with the RGB
+ * @param poEntry the existing GDALColorEntry to be overwritten with the RGB
  * values.
  *
  * @return TRUE on success, or FALSE if the conversion isn't supported.
@@ -446,7 +446,6 @@ void CPL_STDCALL GDALCreateColorRamp(GDALColorTableH hTable, int nStartIndex,
  *
  * @param poOtherCT other color table to be compared to.
  * @return TRUE if both color tables are identical.
- * @since GDAL 2.0
  */
 
 int GDALColorTable::IsSame(const GDALColorTable *poOtherCT) const
@@ -551,7 +550,7 @@ static const CPLXMLNode *FindRasterRenderer(const CPLXMLNode *psNode)
  *
  * Supported formats are:
  * - QGIS Layer Style File (.qml) or QGIS Layer Definition File (.qlr) using
- *   "Palette/unique values" raster renderer or "Singleband pseudocolor" renderer
+ *   "Palette/unique values" raster renderer or "Single band pseudocolor" renderer
  * - GMT or GRASS text files, when entry index are integers
  *
  * @return a new color table, or NULL in case of error.
@@ -724,9 +723,9 @@ static bool GDALFindNamedColor(const char *pszColorName, int *pnR, int *pnG,
     {
         if (EQUAL(pszColorName, namedColor.name))
         {
-            *pnR = static_cast<int>(255.0 * namedColor.r);
-            *pnG = static_cast<int>(255.0 * namedColor.g);
-            *pnB = static_cast<int>(255.0 * namedColor.b);
+            *pnR = static_cast<int>(255.0f * namedColor.r);
+            *pnG = static_cast<int>(255.0f * namedColor.g);
+            *pnB = static_cast<int>(255.0f * namedColor.b);
             return true;
         }
     }

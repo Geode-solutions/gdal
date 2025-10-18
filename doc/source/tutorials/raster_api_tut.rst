@@ -15,6 +15,9 @@ Once the drivers are registered, the application should call the free standing :
 
    .. code-tab:: c++
 
+      // Note: since GDAL >= 3.12, "gdal_raster_cpp.h" can also be used
+      // or finer grained include files such as "gdal_drivermanager.h",
+      // "gdal_dataset.h" and "gdal_rasterband.h".
       #include "gdal_priv.h"
 
       #include <errno.h>
@@ -25,7 +28,7 @@ Once the drivers are registered, the application should call the free standing :
               return EINVAL;
           }
           const char* pszFilename = argv[1];
-     
+
           GDALDatasetUniquePtr poDataset;
           GDALAllRegister();
           const GDALAccess eAccess = GA_ReadOnly;
@@ -50,7 +53,7 @@ Once the drivers are registered, the application should call the free standing :
               return EINVAL;
           }
           const char* pszFilename = argv[1];
-   
+
           GDALDatasetH  hDataset;
           GDALAllRegister();
           const GDALAccess eAccess = GA_ReadOnly;
@@ -150,7 +153,7 @@ If we wanted to print some general information about the dataset we might do the
 Fetching a Raster Band
 ----------------------
 
-At this time access to raster data via GDAL is done one band at a time. Also, there is metadata, block sizes, color tables, and various other information available on a band by band basis. The following codes fetches a :cpp:class:`GDALRasterBand` object from the dataset (numbered 1 through :cpp:func:`GDALRasterBand::GetRasterCount`) and displays a little information about it.
+At this time access to raster data via GDAL is done one band at a time. Also, there is metadata, block sizes, color tables, and various other information available on a band by band basis. The following codes fetches a :cpp:class:`GDALRasterBand` object from the dataset (numbered 1 through :cpp:func:`GDALDataset::GetRasterCount`) and displays a little information about it.
 
 .. tabs::
 

@@ -12,6 +12,10 @@
 #include "cpl_string.h"
 #include "gdal_pam.h"
 #include "gdal_frmts.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "iso8211.h"
 #include "ogr_spatialref.h"
 
@@ -948,8 +952,7 @@ char **ADRGDataset::GetIMGListFromGEN(const char *pszFileName,
                                       int *pnRecordIndex)
 {
     DDFRecord *record = nullptr;
-    int nFilenames = 0;
-    char **papszFileNames = nullptr;
+    CPLStringList aosFilenames;
     int nRecordIndex = -1;
 
     if (pnRecordIndex)
@@ -997,7 +1000,6 @@ char **ADRGDataset::GetIMGListFromGEN(const char *pszFileName,
             const char *NWO = record->GetStringSubfield("GEN", 0, "NWO", 0);
             if (NWO == nullptr)
             {
-                CSLDestroy(papszFileNames);
                 return nullptr;
             }
 
@@ -1016,12 +1018,16 @@ char **ADRGDataset::GetIMGListFromGEN(const char *pszFileName,
             if (pszBAD == nullptr || strlen(pszBAD) != 12)
                 continue;
             std::string osBAD = pszBAD;
-            {
-                char *c = (char *)strchr(osBAD.c_str(), ' ');
-                if (c)
-                    *c = 0;
-            }
+            const auto nSpacePos = osBAD.find(' ');
+            if (nSpacePos != std::string::npos)
+                osBAD.resize(nSpacePos);
             CPLDebug("ADRG", "BAD=%s", osBAD.c_str());
+            if (CPLHasPathTraversal(osBAD.c_str()))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s", osBAD.c_str());
+                return nullptr;
+            }
 
             /* Build full IMG file name from BAD value */
             CPLString osGENDir(CPLGetDirnameSafe(pszFileName));
@@ -1061,18 +1067,14 @@ char **ADRGDataset::GetIMGListFromGEN(const char *pszFileName,
                 CSLDestroy(papszDirContent);
             }
 
-            if (nFilenames == 0 && pnRecordIndex)
+            if (aosFilenames.empty() && pnRecordIndex)
                 *pnRecordIndex = nRecordIndex;
 
-            papszFileNames = (char **)CPLRealloc(
-                papszFileNames, sizeof(char *) * (nFilenames + 2));
-            papszFileNames[nFilenames] = CPLStrdup(osBAD.c_str());
-            papszFileNames[nFilenames + 1] = nullptr;
-            nFilenames++;
+            aosFilenames.AddString(osBAD.c_str());
         }
     }
 
-    return papszFileNames;
+    return aosFilenames.StealList();
 }
 
 /************************************************************************/

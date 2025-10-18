@@ -550,8 +550,16 @@ TEST_F(test_ogr, style_manager)
 
 TEST_F(test_ogr, OGRParseDate)
 {
+    const auto OGRParseDateWrapper =
+        [](const char *str, OGRField *psField, int nFlags)
+    {
+        // Putting inside a std::string helps Valgrind and other checkers to
+        // detect out-of-bounds access
+        return OGRParseDate(std::string(str).c_str(), psField, nFlags);
+    };
+
     OGRField sField;
-    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017/11/31 12:34:56", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
     EXPECT_EQ(sField.Date.Month, 11);
     EXPECT_EQ(sField.Date.Day, 31);
@@ -560,32 +568,35 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 56.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56+00", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017/11/31 12:34:56+00", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.TZFlag, 100);
 
-    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56+12:00", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017/11/31 12:34:56+12:00", &sField, 0),
+              TRUE);
     EXPECT_EQ(sField.Date.TZFlag, 100 + 12 * 4);
 
-    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56+1200", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017/11/31 12:34:56+1200", &sField, 0),
+              TRUE);
     EXPECT_EQ(sField.Date.TZFlag, 100 + 12 * 4);
 
-    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56+815", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017/11/31 12:34:56+815", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.TZFlag, 100 + 8 * 4 + 1);
 
-    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56-12:00", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017/11/31 12:34:56-12:00", &sField, 0),
+              TRUE);
     EXPECT_EQ(sField.Date.TZFlag, 100 - 12 * 4);
 
-    EXPECT_EQ(OGRParseDate(" 2017/11/31 12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper(" 2017/11/31 12:34:56", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
 
-    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:56.789", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017/11/31 12:34:56.789", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Second, 56.789f);
 
     // Leap second
-    EXPECT_EQ(OGRParseDate("2017/11/31 12:34:60", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017/11/31 12:34:60", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Second, 60.0f);
 
-    EXPECT_EQ(OGRParseDate("2017-11-31T12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017-11-31T12:34:56", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
     EXPECT_EQ(sField.Date.Month, 11);
     EXPECT_EQ(sField.Date.Day, 31);
@@ -594,15 +605,22 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 56.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("2017-11-31T12:34:56Z", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017-11-31T12:34:56Z", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Second, 56.0f);
     EXPECT_EQ(sField.Date.TZFlag, 100);
 
-    EXPECT_EQ(OGRParseDate("2017-11-31T12:34:56.789Z", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017-11-31T12:34:56.789Z", &sField, 0),
+              TRUE);
     EXPECT_EQ(sField.Date.Second, 56.789f);
     EXPECT_EQ(sField.Date.TZFlag, 100);
 
-    EXPECT_EQ(OGRParseDate("2017-11-31", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017-11-31T23:59:59.999999Z", &sField, 0),
+              TRUE);
+    EXPECT_EQ(sField.Date.Hour, 23);
+    EXPECT_EQ(sField.Date.Minute, 59);
+    EXPECT_EQ(sField.Date.Second, 59.999f);
+
+    EXPECT_EQ(OGRParseDateWrapper("2017-11-31", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
     EXPECT_EQ(sField.Date.Month, 11);
     EXPECT_EQ(sField.Date.Day, 31);
@@ -611,7 +629,7 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 0.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("2017-11-31Z", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017-11-31Z", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
     EXPECT_EQ(sField.Date.Month, 11);
     EXPECT_EQ(sField.Date.Day, 31);
@@ -620,7 +638,7 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 0.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("12:34", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("12:34", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 0);
     EXPECT_EQ(sField.Date.Month, 0);
     EXPECT_EQ(sField.Date.Day, 0);
@@ -629,10 +647,10 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 0.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("12:34:56", &sField, 0), TRUE);
-    EXPECT_EQ(OGRParseDate("12:34:56.789", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("12:34:56.789", &sField, 0), TRUE);
 
-    EXPECT_EQ(OGRParseDate("T12:34:56", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("T12:34:56", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 0);
     EXPECT_EQ(sField.Date.Month, 0);
     EXPECT_EQ(sField.Date.Day, 0);
@@ -641,7 +659,7 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 56.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("T123456", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("T123456", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 0);
     EXPECT_EQ(sField.Date.Month, 0);
     EXPECT_EQ(sField.Date.Day, 0);
@@ -650,7 +668,7 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 56.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("T123456.789", &sField, 0), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("T123456.789", &sField, 0), TRUE);
     EXPECT_EQ(sField.Date.Year, 0);
     EXPECT_EQ(sField.Date.Month, 0);
     EXPECT_EQ(sField.Date.Day, 0);
@@ -660,46 +678,49 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
     CPLPushErrorHandler(CPLQuietErrorHandler);
-    EXPECT_TRUE(!OGRParseDate("123456-01-01", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("123456-01-01", &sField, 0));
     CPLPopErrorHandler();
-    EXPECT_TRUE(!OGRParseDate("2017", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017x-01-01", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-1-01", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-1", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-01x", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("12:", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("12:3", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("1:23", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("12:34:5", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("1a:34", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-a-31T12:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-00-31T12:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-13-31T12:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-00T12:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-aT12:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-32T12:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("a:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-01Ta:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-01T25:34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-01T00:a:00", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-01T00: 34:56", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-01T00:61:00", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-01T00:00:61", &sField, 0));
-    EXPECT_TRUE(!OGRParseDate("2017-01-01T00:00:a", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017x-01-01", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-1-01", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-1", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-01x", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("12:", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("12:3", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("1:23", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("12:34:5", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("1a:34", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-a-31T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-00-31T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-13-31T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-00T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-aT12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-32T12:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("a:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-01Ta:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-01T25:34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-01T00:a:00", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-01T00: 34:56", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-01T00:61:00", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-01T00:00:61", &sField, 0));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-01-01T00:00:a", &sField, 0));
 
     // Test OGRPARSEDATE_OPTION_LAX
-    EXPECT_EQ(OGRParseDate("2017-1-9", &sField, OGRPARSEDATE_OPTION_LAX), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("2017-1-9", &sField, OGRPARSEDATE_OPTION_LAX),
+              TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
     EXPECT_EQ(sField.Date.Month, 1);
     EXPECT_EQ(sField.Date.Day, 9);
 
-    EXPECT_EQ(OGRParseDate("2017-1-31", &sField, OGRPARSEDATE_OPTION_LAX),
-              TRUE);
+    EXPECT_EQ(
+        OGRParseDateWrapper("2017-1-31", &sField, OGRPARSEDATE_OPTION_LAX),
+        TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
     EXPECT_EQ(sField.Date.Month, 1);
     EXPECT_EQ(sField.Date.Day, 31);
 
-    EXPECT_EQ(OGRParseDate("2017-1-31T1:2:3", &sField, OGRPARSEDATE_OPTION_LAX),
+    EXPECT_EQ(OGRParseDateWrapper("2017-1-31T1:2:3", &sField,
+                                  OGRPARSEDATE_OPTION_LAX),
               TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
     EXPECT_EQ(sField.Date.Month, 1);
@@ -709,8 +730,9 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 3.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("2017-1-31T1:3", &sField, OGRPARSEDATE_OPTION_LAX),
-              TRUE);
+    EXPECT_EQ(
+        OGRParseDateWrapper("2017-1-31T1:3", &sField, OGRPARSEDATE_OPTION_LAX),
+        TRUE);
     EXPECT_EQ(sField.Date.Year, 2017);
     EXPECT_EQ(sField.Date.Month, 1);
     EXPECT_EQ(sField.Date.Day, 31);
@@ -719,7 +741,8 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 0.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_EQ(OGRParseDate("1:3", &sField, OGRPARSEDATE_OPTION_LAX), TRUE);
+    EXPECT_EQ(OGRParseDateWrapper("1:3", &sField, OGRPARSEDATE_OPTION_LAX),
+              TRUE);
     EXPECT_EQ(sField.Date.Year, 0);
     EXPECT_EQ(sField.Date.Month, 0);
     EXPECT_EQ(sField.Date.Day, 0);
@@ -728,22 +751,31 @@ TEST_F(test_ogr, OGRParseDate)
     EXPECT_EQ(sField.Date.Second, 0.0f);
     EXPECT_EQ(sField.Date.TZFlag, 0);
 
-    EXPECT_TRUE(!OGRParseDate("2017-a-01", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("2017-0-01", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("2017-1", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("2017-1-", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("2017-1-a", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("2017-1-0", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("2017-1-32", &sField, OGRPARSEDATE_OPTION_LAX));
     EXPECT_TRUE(
-        !OGRParseDate("2017-1-1Ta:00:00", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("2017-1-1T1", &sField, OGRPARSEDATE_OPTION_LAX));
+        !OGRParseDateWrapper("2017-a-01", &sField, OGRPARSEDATE_OPTION_LAX));
     EXPECT_TRUE(
-        !OGRParseDate("2017-1-1T00:a:00", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("2017-1-1T1:", &sField, OGRPARSEDATE_OPTION_LAX));
+        !OGRParseDateWrapper("2017-0-01", &sField, OGRPARSEDATE_OPTION_LAX));
     EXPECT_TRUE(
-        !OGRParseDate("2017-1-1T00:00:a", &sField, OGRPARSEDATE_OPTION_LAX));
-    EXPECT_TRUE(!OGRParseDate("1a:3", &sField, OGRPARSEDATE_OPTION_LAX));
+        !OGRParseDateWrapper("2017-1", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDateWrapper("2017-1-", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDateWrapper("2017-1-a", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDateWrapper("2017-1-0", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDateWrapper("2017-1-32", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-1-1Ta:00:00", &sField,
+                                     OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDateWrapper("2017-1-1T1", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-1-1T00:a:00", &sField,
+                                     OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(
+        !OGRParseDateWrapper("2017-1-1T1:", &sField, OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDateWrapper("2017-1-1T00:00:a", &sField,
+                                     OGRPARSEDATE_OPTION_LAX));
+    EXPECT_TRUE(!OGRParseDateWrapper("1a:3", &sField, OGRPARSEDATE_OPTION_LAX));
 }
 
 // Test OGRPolygon::IsPointOnSurface()
@@ -1428,155 +1460,241 @@ TEST_F(test_ogr, DatasetFeature_and_LayerFeature_iterators)
     if (!GDALGetDriverByName("ESRI Shapefile"))
     {
         GTEST_SKIP() << "ESRI Shapefile driver missing";
-        return;
     }
-
-    std::string file(data_ + SEP + "poly.shp");
-    GDALDatasetUniquePtr poDS(GDALDataset::Open(file.c_str(), GDAL_OF_VECTOR));
-    ASSERT_TRUE(poDS != nullptr);
-
+    else
     {
-        GIntBig nExpectedFID = 0;
-        for (const auto &oFeatureLayerPair : poDS->GetFeatures())
-        {
-            ASSERT_EQ(oFeatureLayerPair.feature->GetFID(), nExpectedFID);
-            nExpectedFID++;
-            ASSERT_EQ(oFeatureLayerPair.layer, poDS->GetLayer(0));
-        }
-        ASSERT_EQ(nExpectedFID, 10);
-    }
+        std::string file(data_ + SEP + "poly.shp");
+        GDALDatasetUniquePtr poDS(
+            GDALDataset::Open(file.c_str(), GDAL_OF_VECTOR));
+        ASSERT_TRUE(poDS != nullptr);
 
-    ASSERT_EQ(poDS->GetLayers().size(), 1U);
-    ASSERT_EQ(poDS->GetLayers()[0], poDS->GetLayer(0));
-    ASSERT_EQ(poDS->GetLayers()[static_cast<size_t>(0)], poDS->GetLayer(0));
-    ASSERT_EQ(poDS->GetLayers()["poly"], poDS->GetLayer(0));
-
-    for (auto poLayer : poDS->GetLayers())
-    {
-        GIntBig nExpectedFID = 0;
-        for (const auto &poFeature : poLayer)
         {
-            ASSERT_EQ(poFeature->GetFID(), nExpectedFID);
-            nExpectedFID++;
-        }
-        ASSERT_EQ(nExpectedFID, 10);
-
-        nExpectedFID = 0;
-        for (const auto &oFeatureLayerPair : poDS->GetFeatures())
-        {
-            ASSERT_EQ(oFeatureLayerPair.feature->GetFID(), nExpectedFID);
-            nExpectedFID++;
-            ASSERT_EQ(oFeatureLayerPair.layer, poLayer);
-        }
-        ASSERT_EQ(nExpectedFID, 10);
-
-        nExpectedFID = 0;
-        OGR_FOR_EACH_FEATURE_BEGIN(hFeat, reinterpret_cast<OGRLayerH>(poLayer))
-        {
-            if (nExpectedFID == 0)
+            GIntBig nExpectedFID = 0;
+            for (const auto &oFeatureLayerPair : poDS->GetFeatures())
             {
-                nExpectedFID = 1;
-                continue;
+                ASSERT_EQ(oFeatureLayerPair.feature->GetFID(), nExpectedFID);
+                nExpectedFID++;
+                ASSERT_EQ(oFeatureLayerPair.layer, poDS->GetLayer(0));
             }
-            ASSERT_EQ(OGR_F_GetFID(hFeat), nExpectedFID);
-            nExpectedFID++;
-            if (nExpectedFID == 5)
-                break;
+            ASSERT_EQ(nExpectedFID, 10);
         }
-        OGR_FOR_EACH_FEATURE_END(hFeat)
-        ASSERT_EQ(nExpectedFID, 5);
 
-        auto oIter = poLayer->begin();
-        CPLPushErrorHandler(CPLQuietErrorHandler);
-        // Only one feature iterator can be active at a time
-        auto oIter2 = poLayer->begin();
-        CPLPopErrorHandler();
-        ASSERT_TRUE(!(oIter2 != poLayer->end()));
-        ASSERT_TRUE(oIter != poLayer->end());
-    }
+        ASSERT_EQ(poDS->GetLayers().size(), 1U);
+        ASSERT_EQ(poDS->GetLayers()[0], poDS->GetLayer(0));
+        ASSERT_EQ(poDS->GetLayers()[static_cast<size_t>(0)], poDS->GetLayer(0));
+        ASSERT_EQ(poDS->GetLayers()["poly"], poDS->GetLayer(0));
 
-    poDS.reset(GetGDALDriverManager()->GetDriverByName("MEM")->Create(
-        "", 0, 0, 0, GDT_Unknown, nullptr));
-    int nCountLayers = 0;
-    for (auto poLayer : poDS->GetLayers())
-    {
-        CPL_IGNORE_RET_VAL(poLayer);
-        nCountLayers++;
-    }
-    ASSERT_EQ(nCountLayers, 0);
-
-    poDS->CreateLayer("foo");
-    poDS->CreateLayer("bar", nullptr);
-    for (auto poLayer : poDS->GetLayers())
-    {
-        if (nCountLayers == 0)
+        for (auto poLayer : poDS->GetLayers())
         {
-            EXPECT_STREQ(poLayer->GetName(), "foo")
-                << "layer " << poLayer->GetName();
+            GIntBig nExpectedFID = 0;
+            for (const auto &poFeature : poLayer)
+            {
+                ASSERT_EQ(poFeature->GetFID(), nExpectedFID);
+                nExpectedFID++;
+            }
+            ASSERT_EQ(nExpectedFID, 10);
+
+            nExpectedFID = 0;
+            for (const auto &oFeatureLayerPair : poDS->GetFeatures())
+            {
+                ASSERT_EQ(oFeatureLayerPair.feature->GetFID(), nExpectedFID);
+                nExpectedFID++;
+                ASSERT_EQ(oFeatureLayerPair.layer, poLayer);
+            }
+            ASSERT_EQ(nExpectedFID, 10);
+
+            nExpectedFID = 0;
+            OGR_FOR_EACH_FEATURE_BEGIN(hFeat,
+                                       reinterpret_cast<OGRLayerH>(poLayer))
+            {
+                if (nExpectedFID == 0)
+                {
+                    nExpectedFID = 1;
+                    continue;
+                }
+                ASSERT_EQ(OGR_F_GetFID(hFeat), nExpectedFID);
+                nExpectedFID++;
+                if (nExpectedFID == 5)
+                    break;
+            }
+            OGR_FOR_EACH_FEATURE_END(hFeat)
+            ASSERT_EQ(nExpectedFID, 5);
+
+            auto oIter = poLayer->begin();
+            CPLPushErrorHandler(CPLQuietErrorHandler);
+            // Only one feature iterator can be active at a time
+            auto oIter2 = poLayer->begin();
+            CPLPopErrorHandler();
+            ASSERT_TRUE(!(oIter2 != poLayer->end()));
+            ASSERT_TRUE(oIter != poLayer->end());
         }
-        else if (nCountLayers == 1)
+
+        poDS.reset(GetGDALDriverManager()->GetDriverByName("MEM")->Create(
+            "", 0, 0, 0, GDT_Unknown, nullptr));
+        int nCountLayers = 0;
+        for (auto poLayer : poDS->GetLayers())
         {
-            EXPECT_STREQ(poLayer->GetName(), "bar")
-                << "layer " << poLayer->GetName();
+            CPL_IGNORE_RET_VAL(poLayer);
+            nCountLayers++;
         }
-        nCountLayers++;
-    }
-    ASSERT_EQ(nCountLayers, 2);
+        ASSERT_EQ(nCountLayers, 0);
 
-    // std::copy requires a InputIterator
-    std::vector<OGRLayer *> oTarget;
-    oTarget.resize(2);
-    auto layers = poDS->GetLayers();
-    std::copy(layers.begin(), layers.end(), oTarget.begin());
-    ASSERT_EQ(oTarget[0], layers[0]);
-    ASSERT_EQ(oTarget[1], layers[1]);
+        poDS->CreateLayer("foo");
+        poDS->CreateLayer("bar", nullptr);
+        for (auto poLayer : poDS->GetLayers())
+        {
+            if (nCountLayers == 0)
+            {
+                EXPECT_STREQ(poLayer->GetName(), "foo")
+                    << "layer " << poLayer->GetName();
+            }
+            else if (nCountLayers == 1)
+            {
+                EXPECT_STREQ(poLayer->GetName(), "bar")
+                    << "layer " << poLayer->GetName();
+            }
+            nCountLayers++;
+        }
+        ASSERT_EQ(nCountLayers, 2);
 
-    // but in practice not necessarily uses the postincrement iterator.
-    oTarget.clear();
-    oTarget.resize(2);
-    auto input_iterator = layers.begin();
-    auto output_iterator = oTarget.begin();
-    while (input_iterator != layers.end())
-    {
-        *output_iterator++ = *input_iterator++;
-    }
-    ASSERT_EQ(oTarget[0], layers[0]);
-    ASSERT_EQ(oTarget[1], layers[1]);
+        auto layers = poDS->GetLayers();
+        {
+            // std::copy requires a InputIterator
+            std::vector<OGRLayer *> oTarget;
+            oTarget.resize(2);
+            std::copy(layers.begin(), layers.end(), oTarget.begin());
+            ASSERT_EQ(oTarget[0], layers[0]);
+            ASSERT_EQ(oTarget[1], layers[1]);
 
-    // Test copy constructor
-    {
-        GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
-        ++srcIter;
-        GDALDataset::Layers::Iterator newIter(srcIter);
-        srcIter = layers.begin();  // avoid Coverity Scan warning
-        ASSERT_EQ(*newIter, layers[1]);
-    }
+            // but in practice not necessarily uses the postincrement iterator.
+            oTarget.clear();
+            oTarget.resize(2);
+            auto input_iterator = layers.begin();
+            auto output_iterator = oTarget.begin();
+            while (input_iterator != layers.end())
+            {
+                *output_iterator++ = *input_iterator++;
+            }
+            ASSERT_EQ(oTarget[0], layers[0]);
+            ASSERT_EQ(oTarget[1], layers[1]);
+        }
 
-    // Test assignment operator
-    {
-        GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
-        ++srcIter;
-        GDALDataset::Layers::Iterator newIter;
-        newIter = srcIter;
-        srcIter = layers.begin();  // avoid Coverity Scan warning
-        ASSERT_EQ(*newIter, layers[1]);
-    }
+        // Test copy constructor
+        {
+            GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
+            ++srcIter;
+            GDALDataset::Layers::Iterator newIter(srcIter);
+            srcIter = layers.begin();  // avoid Coverity Scan warning
+            ASSERT_EQ(*newIter, layers[1]);
+        }
 
-    // Test move constructor
-    {
-        GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
-        ++srcIter;
-        GDALDataset::Layers::Iterator newIter(std::move(srcIter));
-        ASSERT_EQ(*newIter, layers[1]);
-    }
+        // Test assignment operator
+        {
+            GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
+            ++srcIter;
+            GDALDataset::Layers::Iterator newIter;
+            newIter = srcIter;
+            srcIter = layers.begin();  // avoid Coverity Scan warning
+            ASSERT_EQ(*newIter, layers[1]);
+        }
 
-    // Test move assignment operator
-    {
-        GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
-        ++srcIter;
-        GDALDataset::Layers::Iterator newIter;
-        newIter = std::move(srcIter);
-        ASSERT_EQ(*newIter, layers[1]);
+        // Test move constructor
+        {
+            GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
+            ++srcIter;
+            GDALDataset::Layers::Iterator newIter(std::move(srcIter));
+            ASSERT_EQ(*newIter, layers[1]);
+        }
+
+        // Test move assignment operator
+        {
+            GDALDataset::Layers::Iterator srcIter(poDS->GetLayers().begin());
+            ++srcIter;
+            GDALDataset::Layers::Iterator newIter;
+            newIter = std::move(srcIter);
+            ASSERT_EQ(*newIter, layers[1]);
+        }
+
+        const GDALDataset *poConstDS = poDS.get();
+        ASSERT_EQ(poConstDS->GetLayers().size(), 2U);
+        ASSERT_EQ(poConstDS->GetLayers()[0], poConstDS->GetLayer(0));
+        ASSERT_EQ(poConstDS->GetLayers()[static_cast<size_t>(0)],
+                  poConstDS->GetLayer(0));
+        ASSERT_EQ(poConstDS->GetLayers()["foo"], poConstDS->GetLayer(0));
+        nCountLayers = 0;
+        for (auto &&poLayer : poDS->GetLayers())
+        {
+            if (nCountLayers == 0)
+            {
+                EXPECT_STREQ(poLayer->GetName(), "foo")
+                    << "layer " << poLayer->GetName();
+            }
+            else if (nCountLayers == 1)
+            {
+                EXPECT_STREQ(poLayer->GetName(), "bar")
+                    << "layer " << poLayer->GetName();
+            }
+            nCountLayers++;
+        }
+        ASSERT_EQ(nCountLayers, 2);
+
+        auto constLayers = poConstDS->GetLayers();
+        {
+            // std::copy requires a InputIterator
+            std::vector<const OGRLayer *> oTarget;
+            oTarget.resize(2);
+            std::copy(constLayers.begin(), constLayers.end(), oTarget.begin());
+            ASSERT_EQ(oTarget[0], constLayers[0]);
+            ASSERT_EQ(oTarget[1], constLayers[1]);
+
+            // but in practice not necessarily uses the postincrement iterator.
+            oTarget.clear();
+            oTarget.resize(2);
+            auto input_iterator = constLayers.begin();
+            auto output_iterator = oTarget.begin();
+            while (input_iterator != constLayers.end())
+            {
+                *output_iterator++ = *input_iterator++;
+            }
+            ASSERT_EQ(oTarget[0], constLayers[0]);
+            ASSERT_EQ(oTarget[1], constLayers[1]);
+        }
+
+        // Test copy constructor
+        {
+            auto srcIter(poConstDS->GetLayers().begin());
+            ++srcIter;
+            auto newIter(srcIter);
+            srcIter = constLayers.begin();  // avoid Coverity Scan warning
+            ASSERT_EQ(*newIter, constLayers[1]);
+        }
+
+        // Test assignment operator
+        {
+            auto srcIter(poConstDS->GetLayers().begin());
+            ++srcIter;
+            GDALDataset::ConstLayers::Iterator newIter;
+            newIter = srcIter;
+            srcIter = constLayers.begin();  // avoid Coverity Scan warning
+            ASSERT_EQ(*newIter, constLayers[1]);
+        }
+
+        // Test move constructor
+        {
+            auto srcIter(poConstDS->GetLayers().begin());
+            ++srcIter;
+            auto newIter(std::move(srcIter));
+            ASSERT_EQ(*newIter, constLayers[1]);
+        }
+
+        // Test move assignment operator
+        {
+            auto srcIter(poConstDS->GetLayers().begin());
+            ++srcIter;
+            GDALDataset::ConstLayers::Iterator newIter;
+            newIter = std::move(srcIter);
+            ASSERT_EQ(*newIter, constLayers[1]);
+        }
     }
 }
 
@@ -2453,7 +2571,8 @@ TEST_F(test_ogr, feature_defn_fields_iterator)
         OGRFieldDefn oFieldDefn("field2", OFTString);
         oFDefn.AddFieldDefn(&oFieldDefn);
     }
-    EXPECT_EQ(oFDefn.GetFields().size(), oFDefn.GetFieldCount());
+    EXPECT_EQ(oFDefn.GetFields().size(),
+              static_cast<size_t>(oFDefn.GetFieldCount()));
     int i = 0;
     for (const auto *poFieldDefn : oFDefn.GetFields())
     {
@@ -2476,7 +2595,8 @@ TEST_F(test_ogr, feature_defn_geomfields_iterator)
         OGRGeomFieldDefn oGeomFieldDefn("field2", wkbUnknown);
         oFDefn.AddGeomFieldDefn(&oGeomFieldDefn);
     }
-    EXPECT_EQ(oFDefn.GetGeomFields().size(), oFDefn.GetGeomFieldCount());
+    EXPECT_EQ(oFDefn.GetGeomFields().size(),
+              static_cast<size_t>(oFDefn.GetGeomFieldCount()));
     int i = 0;
     for (const auto *poGeomFieldDefn : oFDefn.GetGeomFields())
     {
@@ -2583,7 +2703,7 @@ TEST_F(test_ogr, GDALDatasetSetQueryLoggerFunc)
         OGRFeature::FromHandle(OGR_L_GetNextFeature(hLayer)));
     auto hFeature = OGRFeature::ToHandle(poFeature.get());
     ASSERT_TRUE(hFeature);
-    ASSERT_GT(queryLog.size(), 1);
+    ASSERT_GT(queryLog.size(), 1U);
 
     QueryLogEntry entry{queryLog.back()};
     ASSERT_EQ(entry.sql.find("SELECT", 0), 0);

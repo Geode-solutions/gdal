@@ -116,13 +116,15 @@ public:
   GDALDataType DataType;
 %mutable;
 
-  /* Interface method added for GDAL 1.12.0 */
+#if defined(SWIGJAVA)
+  GDALDatasetShadow* GetDatasetInternal()
+#else
   GDALDatasetShadow* GetDataset()
+#endif
   {
     return (GDALDatasetShadow*) GDALGetBandDataset(self);
   }
 
-  /* Interface method added for GDAL 1.7.0 */
   int GetBand()
   {
     return GDALGetBandNumber(self);
@@ -142,7 +144,6 @@ public:
 #endif
 
   // Preferred name to match C++ API
-  /* Interface method added for GDAL 1.7.0 */
   GDALColorInterp GetColorInterpretation() {
     return GDALGetRasterColorInterpretation(self);
   }
@@ -153,7 +154,6 @@ public:
   }
 
   // Preferred name to match C++ API
-  /* Interface method added for GDAL 1.7.0 */
   CPLErr SetColorInterpretation( GDALColorInterp val ) {
     return GDALSetRasterColorInterpretation( self, val );
   }
@@ -195,12 +195,10 @@ public:
     return GDALDeleteRasterNoDataValue(self);
   }
 
-  /* Interface method added for GDAL 1.7.0 */
   const char* GetUnitType() {
       return GDALGetRasterUnitType(self);
   }
 
-  /* Interface method added for GDAL 1.8.0 */
   CPLErr SetUnitType( const char* val ) {
     return GDALSetRasterUnitType( self, val );
   }
@@ -233,12 +231,10 @@ public:
     *val = GDALGetRasterScale( self, hasval );
   }
 
-  /* Interface method added for GDAL 1.8.0 */
   CPLErr SetOffset( double val ) {
     return GDALSetRasterOffset( self, val );
   }
 
-  /* Interface method added for GDAL 1.8.0 */
   CPLErr SetScale( double val ) {
     return GDALSetRasterScale( self, val );
   }
@@ -256,7 +252,6 @@ public:
   }
 %clear (CPLErr);
 
-  /* Interface method added for GDAL 1.7.0 */
 %apply (double *OUTPUT){double *min, double *max, double *mean, double *stddev};
 %apply (IF_ERROR_RETURN_NONE) { (CPLErr) };
 %feature ("kwargs") ComputeStatistics;
@@ -495,12 +490,10 @@ CPLErr SetDefaultHistogram( double min, double max,
 #endif
 #endif
 
-  /* Interface method added for GDAL 1.7.0 */
   bool HasArbitraryOverviews() {
       return (GDALHasArbitraryOverviews( self ) != 0) ? true : false;
   }
 
-  /* Interface method added for GDAL 1.9.0 */
 %apply (char **options) {char **};
   char **GetCategoryNames() {
     return GDALGetRasterCategoryNames( self );

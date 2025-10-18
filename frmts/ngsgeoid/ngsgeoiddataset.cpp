@@ -14,6 +14,10 @@
 #include "cpl_vsi_virtual.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "ogr_srs_api.h"
 
 #define HEADER_SIZE (4 * 8 + 3 * 4)
@@ -42,9 +46,9 @@ class NGSGEOIDDataset final : public GDALPamDataset
 
   public:
     NGSGEOIDDataset();
-    virtual ~NGSGEOIDDataset();
+    ~NGSGEOIDDataset() override;
 
-    virtual CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 
     static GDALDataset *Open(GDALOpenInfo *);
@@ -64,9 +68,9 @@ class NGSGEOIDRasterBand final : public GDALPamRasterBand
   public:
     explicit NGSGEOIDRasterBand(NGSGEOIDDataset *);
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IReadBlock(int, int, void *) override;
 
-    virtual const char *GetUnitType() override
+    const char *GetUnitType() override
     {
         return "m";
     }
@@ -96,7 +100,7 @@ CPLErr NGSGEOIDRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
                                       void *pImage)
 
 {
-    NGSGEOIDDataset *poGDS = reinterpret_cast<NGSGEOIDDataset *>(poDS);
+    NGSGEOIDDataset *poGDS = cpl::down_cast<NGSGEOIDDataset *>(poDS);
 
     /* First values in the file corresponds to the south-most line of the
      * imagery */

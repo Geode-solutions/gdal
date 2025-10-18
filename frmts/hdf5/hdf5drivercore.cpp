@@ -12,6 +12,10 @@
 
 #include "hdf5drivercore.h"
 
+#include "gdal_frmts.h"
+#include "gdalplugindriverproxy.h"
+#include "gdalsubdatasetinfo.h"
+
 #include <algorithm>
 #include <cctype>
 
@@ -148,7 +152,7 @@ int HDF5ImageDatasetIdentify(GDALOpenInfo *poOpenInfo)
 /*                    HDF5DriverGetSubdatasetInfo()                     */
 /************************************************************************/
 
-struct HDF5DriverSubdatasetInfo : public GDALSubdatasetInfo
+struct HDF5DriverSubdatasetInfo final : public GDALSubdatasetInfo
 {
   public:
     explicit HDF5DriverSubdatasetInfo(const std::string &fileName)

@@ -63,16 +63,16 @@ def get_src_ds(geom3D):
         (
             "invdist",
             False,
-            {"layer": "test"},
+            {"input-layer": "test"},
             0,
             "warning",
             "At least one geometry of layer 'test' lacks a Z component. You may need to set the 'zfield' argument",
         ),
-        ("invdist", True, {"layer": "test"}, 51948, "success", None),
+        ("invdist", True, {"input-layer": "test"}, 51948, "success", None),
         (
             "invdist",
             True,
-            {"layer": "invalid"},
+            {"input-layer": "invalid"},
             None,
             "exception",
             'Unable to find layer "invalid"',
@@ -410,7 +410,8 @@ def test_gdalalg_vector_grid_regular(subalg, geom3D, options, checksum, ret_valu
     else:
         assert False
     ds = alg["output"].GetDataset()
-    assert ds.GetRasterBand(1).Checksum() == pytest.approx(checksum, abs=1)
+    # abs=3 needed on FreeBSD 14.3 x86_64 / clang 19.1.7 -O2
+    assert ds.GetRasterBand(1).Checksum() == pytest.approx(checksum, abs=3)
     if "nodata" in options:
         assert ds.GetRasterBand(1).GetNoDataValue() == options["nodata"]
 
@@ -517,7 +518,7 @@ def test_gdalalg_vector_grid_overwrite(tmp_vsimem):
     alg["output"] = out_filename
     with pytest.raises(
         Exception,
-        match="already exists. Specify the --overwrite option to overwrite it",
+        match="already exists",
     ):
         alg.Run()
 

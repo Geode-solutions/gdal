@@ -1449,6 +1449,8 @@ def test_ogr_spatialite_2(sqlite_test_db):
     sqlite_test_db = reopen_sqlite_db(sqlite_test_db, update=False)
     lyr = sqlite_test_db.GetLayerByName("test_spatialfilter")
 
+    assert lyr.TestCapability(ogr.OLCStringsAsUTF8) is True
+
     extent = lyr.GetExtent()
     assert extent == (0.0, 9.0, 0.0, 9.0), "got bad extent"
 
@@ -2293,12 +2295,13 @@ def test_ogr_sqlite_34(sqlite_test_db):
     with sqlite_test_db.ExecuteSQL("SELECT NULL REGEXP 'a'") as sql_lyr:
         feat = sql_lyr.GetNextFeature()
         val = feat.GetField(0)
-        assert val == 0
+        assert val is None
 
     # NULL regexp
-    with gdal.quiet_errors():
-        sql_lyr = sqlite_test_db.ExecuteSQL("SELECT 'a' REGEXP NULL")
-    assert sql_lyr is None
+    with sqlite_test_db.ExecuteSQL("SELECT 'a' REGEXP NULL") as sql_lyr:
+        feat = sql_lyr.GetNextFeature()
+        val = feat.GetField(0)
+        assert val is None
 
     # Invalid regexp
     with gdal.quiet_errors():
@@ -4307,7 +4310,7 @@ def test_ogr_sqlite_run_deferred_actions_before_start_transaction():
         # Override full schema and JSON/UUID subtype
         (
             [
-                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "schemaType": "Full", "fields": [{ "name": "json_str", "subType": "JSON", "new_name": "json_str" }, {"name": "uuid_str", "subType": "UUID" }]}]}'
+                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "schemaType": "Full", "fields": [{ "name": "json_str", "subType": "JSON", "newName": "json_str" }, {"name": "uuid_str", "subType": "UUID" }]}]}'
             ],
             [
                 (ogr.OFTString, ogr.OFSTJSON),  # json subType
@@ -4382,7 +4385,7 @@ def test_ogr_sqlite_run_deferred_actions_before_start_transaction():
         # Test invalid field name
         (
             [
-                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "fields": [{ "name": "xxxxx", "type": "String", "new_name": "new_str" }]}]}'
+                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "fields": [{ "name": "xxxxx", "type": "String", "newName": "new_str" }]}]}'
             ],
             [],
             [],

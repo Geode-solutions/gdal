@@ -1777,7 +1777,6 @@ GBool OGRStyleTool::Parse(const OGRStyleParamId *pasStyle,
             CSLDestroy(papszToken);
             CSLDestroy(papszToken2);
             return FALSE;
-            break;
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -2110,6 +2109,46 @@ double OGRStyleTool::GetParamDbl(const OGRStyleParamId &sStyleParam,
                 return static_cast<double>(sStyleValue.nValue);
         case OGRSTypeBoolean:
             return static_cast<double>(sStyleValue.nValue != 0);
+        default:
+            bValueIsNull = TRUE;
+            return 0.0;
+    }
+}
+
+/****************************************************************************/
+/*                           GetRawParamDbl()                               */
+/****************************************************************************/
+
+/** Return the raw value of a parameter of type double.
+ *
+ * @param sStyleParam Identifier of the parameter.
+ * @param sStyleValue Value of the parameter.
+ * @param[out] eRawUnit Raw unit
+ * @param[out] bValueIsNull if the value is null
+ * @return the raw value.
+ */
+double OGRStyleTool::GetRawParamDbl(const OGRStyleParamId &sStyleParam,
+                                    const OGRStyleValue &sStyleValue,
+                                    OGRSTUnitId &eRawUnit, GBool &bValueIsNull)
+{
+    eRawUnit = OGRSTUGround;
+    if (!Parse())
+    {
+        bValueIsNull = TRUE;
+        return 0.0;
+    }
+
+    bValueIsNull = !sStyleValue.bValid;
+
+    if (bValueIsNull == TRUE)
+        return 0.0;
+
+    switch (sStyleParam.eType)
+    {
+        case OGRSTypeDouble:
+            eRawUnit = sStyleValue.eUnit;
+            return sStyleValue.dfValue;
+
         default:
             bValueIsNull = TRUE;
             return 0.0;
@@ -2679,6 +2718,16 @@ double OGRStylePen::GetParamDbl(OGRSTPenParam eParam, GBool &bValueIsNull)
 {
     return OGRStyleTool::GetParamDbl(asStylePen[eParam],
                                      m_pasStyleValue[eParam], bValueIsNull);
+}
+
+/************************************************************************/
+/*                           GetRawParamDbl()                           */
+/************************************************************************/
+double OGRStylePen::GetRawParamDbl(OGRSTPenParam eParam, OGRSTUnitId &eRawUnit,
+                                   GBool &bValueIsNull)
+{
+    return OGRStyleTool::GetRawParamDbl(
+        asStylePen[eParam], m_pasStyleValue[eParam], eRawUnit, bValueIsNull);
 }
 
 /************************************************************************/

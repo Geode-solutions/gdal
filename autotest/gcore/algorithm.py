@@ -110,8 +110,22 @@ def test_algorithm(tmp_path):
     assert arg.GetChoices() is None
     assert not arg.IsExplicitlySet()
     assert arg.HasDefaultValue()
+    assert arg.GetDefaultAsBoolean() is False
+    with pytest.raises(Exception, match="must only be called on arguments of type"):
+        arg.GetDefaultAsInteger()
+    with pytest.raises(Exception, match="must only be called on arguments of type"):
+        arg.GetDefaultAsDouble()
+    with pytest.raises(Exception, match="must only be called on arguments of type"):
+        arg.GetDefaultAsString()
+    with pytest.raises(Exception, match="must only be called on arguments of type"):
+        arg.GetDefaultAsIntegerList()
+    with pytest.raises(Exception, match="must only be called on arguments of type"):
+        arg.GetDefaultAsDoubleList()
+    with pytest.raises(Exception, match="must only be called on arguments of type"):
+        arg.GetDefaultAsStringList()
     assert not arg.IsHiddenForCLI()
-    assert not arg.IsOnlyForCLI()
+    assert not arg.IsHiddenForAPI()
+    assert not arg.IsHidden()
     assert arg.IsInput()
     assert not arg.IsOutput()
     assert arg.GetMutualExclusionGroup() == "overwrite-append"
@@ -152,20 +166,23 @@ def test_algorithm_dataset_value(tmp_path):
 
     reg = gdal.GetGlobalAlgorithmRegistry()
     raster = reg.InstantiateAlg("raster")
-    convert = raster.InstantiateSubAlgorithm("convert")
+    update = raster.InstantiateSubAlgorithm("update")
 
-    input_arg = convert.GetArg("input")
+    input_arg = update.GetArg("input")
     input_arg_value = input_arg.Get()
     input_arg_value.SetName("data/byte.tif")
     assert input_arg_value.GetName() == "data/byte.tif"
     assert input_arg_value.GetDataset() is None
 
-    output_arg = convert.GetArg("output")
     outfilename = str(tmp_path / "out.tif")
+
+    gdal.Run("raster", "create", input="data/byte.tif", output=outfilename)
+
+    output_arg = update.GetArg("output")
     output_arg_value = output_arg.Get()
     output_arg_value.SetName(outfilename)
 
-    assert convert.Run()
+    assert update.Run()
 
     in_ds = input_arg_value.GetDataset()
     assert in_ds is not None
@@ -173,13 +190,6 @@ def test_algorithm_dataset_value(tmp_path):
     out_ds = output_arg_value.GetDataset()
     assert out_ds is not None
     assert out_ds.GetRasterBand(1).Checksum() == 4672
-
-    output_arg_value.SetDataset(None)
-    with pytest.raises(
-        Exception,
-        match="Dataset object 'output' is created by algorithm and cannot be set as an input",
-    ):
-        output_arg.SetDataset(None)
 
 
 ###############################################################################
@@ -413,7 +423,7 @@ def test_algorithm_arg_set_double_list():
 
 def test_algorithm_arg_set_dataset(tmp_path):
     reg = gdal.GetGlobalAlgorithmRegistry()
-    alg = reg["raster"]["info"]
+    alg = reg["raster"]["update"]
 
     alg["input"] = tmp_path
     alg["input"] = "foo"
@@ -448,7 +458,10 @@ def test_algorithm_arg_set_dataset_list(tmp_path):
     alg["input"] = [tmp_path]
     alg["input"] = ["foo"]
     alg["input"] = [gdal.GetDriverByName("MEM").Create("", 1, 1)]
-    alg["input"] = []
+    with pytest.raises(
+        RuntimeError, match="Only 0 value has been specified for argument 'input'"
+    ):
+        alg["input"] = []
     alg["input"] = ["foo", "bar"]
 
     with pytest.raises(TypeError):

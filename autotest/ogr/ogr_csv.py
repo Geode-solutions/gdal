@@ -3245,12 +3245,12 @@ def test_ogr_csv_invalid_wkt(tmp_vsimem):
         # Override full schema and JSON subtype
         (
             [
-                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "schemaType": "Full", "fields": [{ "name": "json_str", "subType": "JSON", "new_name": "json_str" }]}]}'
+                r'OGR_SCHEMA={ "layers": [{"name": "test_point", "schemaType": "Full", "fields": [{ "name": "json_str", "subType": "JSON", "newName": "renamed_json_str" }]}]}'
             ],
             [
                 (ogr.OFTString, ogr.OFSTJSON),  # json subType
             ],
-            ["json_str"],
+            ["renamed_json_str"],
             None,
         ),
         # Test width and precision override
@@ -3285,6 +3285,24 @@ def test_ogr_csv_invalid_wkt(tmp_vsimem):
                 ogr.OFTString,  # real string
                 ogr.OFTString,  # json subType
                 ogr.OFTString,  # uuid subType
+            ],
+            [],
+            None,
+        ),
+        # Test srcType matching
+        (
+            [
+                r'OGR_SCHEMA={ "layers": [{"name": "*", "schemaType": "Patch", "fields": [{ "srcType": "String", "type": "DateTime"}]}]}'
+            ],
+            [
+                ogr.OFTDateTime,
+                ogr.OFTInteger,
+                ogr.OFTReal,
+                ogr.OFTInteger,
+                ogr.OFTDateTime,
+                ogr.OFTDateTime,
+                ogr.OFTDateTime,
+                ogr.OFTDateTime,
             ],
             [],
             None,
@@ -3408,7 +3426,13 @@ def test_ogr_csv_schema_override(
                         if int_sub_type == ogr.OFSTBoolean
                         else 2
                     )
-                if "str" in expected_field_names:
+                if (
+                    "str" in expected_field_names
+                    and feat.GetFieldDefnRef(
+                        lyr.GetLayerDefn().GetFieldIndex("str")
+                    ).GetType()
+                    == ogr.OFTString
+                ):
                     assert feat.GetFieldAsString("str") == "1"
                 if "new_str" in expected_field_names:
                     assert feat.GetFieldAsString("new_str") == "1"
@@ -3565,6 +3589,45 @@ def test_ogr_csv_do_not_write_header(tmp_vsimem):
         lyr = ds.GetLayer(0)
         assert lyr.GetLayerDefn().GetFieldDefn(0).GetName() == "field_1"
         assert lyr.GetFeatureCount() == 10
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_open_dir(tmp_vsimem):
+
+    dirname = tmp_vsimem / "my_dir"
+    gdal.Mkdir(dirname, 0o755)
+    gdal.VectorTranslate(
+        dirname / "test.csv", "data/poly.shp", layerCreationOptions=["CREATE_CSVT=YES"]
+    )
+
+    with ogr.Open(dirname) as ds:
+        assert ds.GetLayerCount() == 1
+
+    gdal.FileFromMemBuffer(dirname / "foo", "")
+    gdal.FileFromMemBuffer(dirname / "bar", "")
+
+    with pytest.raises(Exception):
+        ogr.Open(dirname)
+
+    with ogr.Open("CSV:" + str(dirname)) as ds:
+        assert ds.GetLayerCount() == 1
+
+    with gdal.OpenEx(dirname, allowed_drivers=["CSV"]) as ds:
+        assert ds.GetLayerCount() == 1
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_csv_creation_illegal_layer_name(tmp_vsimem):
+
+    ds = ogr.GetDriverByName("CSV").CreateDataSource(tmp_vsimem / "out")
+    with pytest.raises(Exception, match="Illegal character"):
+        ds.CreateLayer("illegal/with/slash")
 
 
 ###############################################################################

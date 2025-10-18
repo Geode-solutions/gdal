@@ -21,6 +21,8 @@
 #include "cpl_json_streaming_parser.h"
 #include "cpl_json_streaming_writer.h"
 #include "cpl_mem_cache.h"
+#include "cpl_multiproc.h"  // CPLSleep()
+#include "cpl_vsi_error.h"
 #include "cpl_vsi_virtual.h"
 
 #include "gdal_priv.h"
@@ -130,7 +132,7 @@ class VSIKerchunkJSONRefFileSystem final : public VSIFilesystemHandler
         IsFileSystemInstantiated() = true;
     }
 
-    ~VSIKerchunkJSONRefFileSystem()
+    ~VSIKerchunkJSONRefFileSystem() override
     {
         IsFileSystemInstantiated() = false;
     }
@@ -141,8 +143,9 @@ class VSIKerchunkJSONRefFileSystem final : public VSIFilesystemHandler
         return bIsFileSystemInstantiated;
     }
 
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError, CSLConstList papszOptions) override;
+    VSIVirtualHandleUniquePtr Open(const char *pszFilename,
+                                   const char *pszAccess, bool bSetError,
+                                   CSLConstList papszOptions) override;
 
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
@@ -277,7 +280,7 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
         m_oWriter.SetPrettyFormatting(false);
     }
 
-    ~VSIKerchunkJSONRefParser()
+    ~VSIKerchunkJSONRefParser() override
     {
         // In case the parsing would be stopped, the writer may be in
         // an inconsistent state. This avoids assertion in debug mode.
@@ -285,15 +288,16 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
     }
 
   protected:
-    void String(const char *pszValue, size_t nLength) override
+    void String(std::string_view sValue) override
     {
         if (m_nLevel == m_nKeyLevel && m_nArrayLevel == 0)
         {
-            if (nLength > 0 && pszValue[nLength - 1] == 0)
+            size_t nLength = sValue.size();
+            if (nLength > 0 && sValue[nLength - 1] == 0)
                 --nLength;
 
             if (!m_refFile->AddInlineContent(
-                    m_osCurKey, std::string_view(pszValue, nLength)))
+                    m_osCurKey, std::string_view(sValue.data(), nLength)))
             {
                 StopParsing();
             }
@@ -306,7 +310,7 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
         {
             if (m_iArrayMemberIdx == 0)
             {
-                m_osURI.assign(pszValue, nLength);
+                m_osURI = sValue;
             }
             else
             {
@@ -315,11 +319,11 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
         }
         else if (m_nLevel > m_nKeyLevel)
         {
-            m_oWriter.Add(std::string_view(pszValue, nLength));
+            m_oWriter.Add(sValue);
         }
     }
 
-    void Number(const char *pszValue, size_t nLength) override
+    void Number(std::string_view sValue) override
     {
         if (m_nLevel == m_nKeyLevel)
         {
@@ -327,7 +331,7 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
             {
                 if (m_iArrayMemberIdx == 1)
                 {
-                    m_osTmpForNumber.assign(pszValue, nLength);
+                    m_osTmpForNumber = sValue;
                     errno = 0;
                     m_nOffset =
                         std::strtoull(m_osTmpForNumber.c_str(), nullptr, 10);
@@ -345,7 +349,7 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
                 }
                 else if (m_iArrayMemberIdx == 2)
                 {
-                    m_osTmpForNumber.assign(pszValue, nLength);
+                    m_osTmpForNumber = sValue;
                     errno = 0;
                     const uint64_t nSize =
                         std::strtoull(m_osTmpForNumber.c_str(), nullptr, 10);
@@ -378,7 +382,7 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
         }
         else if (m_nLevel > m_nKeyLevel)
         {
-            m_oWriter.AddSerializedValue(std::string_view(pszValue, nLength));
+            m_oWriter.AddSerializedValue(sValue);
         }
     }
 
@@ -436,12 +440,11 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
         }
     }
 
-    void StartObjectMember(const char *pszKey, size_t nLength) override
+    void StartObjectMember(std::string_view sKey) override
     {
         if (m_nLevel == 1 && m_bFirstMember)
         {
-            if (nLength == strlen("version") &&
-                memcmp(pszKey, "version", nLength) == 0)
+            if (sKey == "version")
             {
                 m_nKeyLevel = 2;
             }
@@ -450,18 +453,14 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
                 m_nKeyLevel = 1;
             }
         }
-        else if (m_nLevel == 1 && m_nKeyLevel == 2 &&
-                 nLength == strlen("templates") &&
-                 memcmp(pszKey, "templates", nLength) == 0)
+        else if (m_nLevel == 1 && m_nKeyLevel == 2 && sKey == "templates")
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "VSIKerchunkJSONRefFileSystem: 'templates' key found, but "
                      "not supported");
             StopParsing();
         }
-        else if (m_nLevel == 1 && m_nKeyLevel == 2 &&
-                 nLength == strlen("gen") &&
-                 memcmp(pszKey, "gen", nLength) == 0)
+        else if (m_nLevel == 1 && m_nKeyLevel == 2 && sKey == "gen")
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "VSIKerchunkJSONRefFileSystem: 'gen' key found, but not "
@@ -472,11 +471,11 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
         if (m_nLevel == m_nKeyLevel)
         {
             FinishObjectValueProcessing();
-            m_osCurKey.assign(pszKey, nLength);
+            m_osCurKey = sKey;
         }
         else if (m_nLevel > m_nKeyLevel)
         {
-            m_oWriter.AddObjKey(std::string_view(pszKey, nLength));
+            m_oWriter.AddObjKey(sKey);
         }
         m_bFirstMember = false;
     }
@@ -633,7 +632,8 @@ VSIKerchunkJSONRefFileSystem::LoadStreaming(const std::string &osJSONFilename,
         const bool bFinished = nRead < sBuffer.size();
         try
         {
-            if (!parser.Parse(sBuffer.data(), nRead, bFinished))
+            if (!parser.Parse(std::string_view(sBuffer.data(), nRead),
+                              bFinished))
             {
                 // The parser will have emitted an error
                 return nullptr;
@@ -1345,6 +1345,13 @@ bool VSIKerchunkRefFile::ConvertToParquetRef(const std::string &osCacheDir,
                     }
                     poDS.reset();
                 }
+                if (CPLHasPathTraversal(osArrayName.c_str()))
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Path traversal detected in %s",
+                             osArrayName.c_str());
+                    return false;
+                }
                 const std::string osParqFilename = CPLFormFilenameSafe(
                     CPLFormFilenameSafe(osCacheDir.c_str(), osArrayName.c_str(),
                                         nullptr)
@@ -1521,7 +1528,7 @@ bool VSIKerchunkConvertJSONToParquet(const char *pszSrcJSONFilename,
 /*               VSIKerchunkJSONRefFileSystem::Open()                   */
 /************************************************************************/
 
-VSIVirtualHandle *
+VSIVirtualHandleUniquePtr
 VSIKerchunkJSONRefFileSystem::Open(const char *pszFilename,
                                    const char *pszAccess, bool /* bSetError */,
                                    CSLConstList /* papszOptions */)
@@ -1541,7 +1548,7 @@ VSIKerchunkJSONRefFileSystem::Open(const char *pszFilename,
         if (osParqFilename.empty())
             return nullptr;
 
-        return VSIFOpenL(
+        return VSIFilesystemHandler::OpenStatic(
             CPLFormFilenameSafe(CPLSPrintf("%s{%s}", PARQUET_REF_FS_PREFIX,
                                            osParqFilename.c_str()),
                                 osKey.c_str(), nullptr)
@@ -1556,9 +1563,9 @@ VSIKerchunkJSONRefFileSystem::Open(const char *pszFilename,
     const auto &keyInfo = oIter->second;
     if (!keyInfo.posURI)
     {
-        return VSIFileFromMemBuffer(
+        return VSIVirtualHandleUniquePtr(VSIFileFromMemBuffer(
             nullptr, const_cast<GByte *>(keyInfo.abyValue.data()),
-            keyInfo.abyValue.size(), /* bTakeOwnership = */ false);
+            keyInfo.abyValue.size(), /* bTakeOwnership = */ false));
     }
     else
     {
@@ -1575,7 +1582,14 @@ VSIKerchunkJSONRefFileSystem::Open(const char *pszFilename,
                      osPath.c_str());
         CPLConfigOptionSetter oSetter("GDAL_DISABLE_READDIR_ON_OPEN",
                                       "EMPTY_DIR", false);
-        return VSIFOpenL(osPath.c_str(), "rb");
+        auto fp = VSIFilesystemHandler::OpenStatic(osPath.c_str(), "rb", true);
+        if (!fp)
+        {
+            if (!VSIToCPLError(CE_Failure, CPLE_FileIO))
+                CPLError(CE_Failure, CPLE_FileIO, "Cannot open %s",
+                         osPath.c_str());
+        }
+        return fp;
     }
 }
 

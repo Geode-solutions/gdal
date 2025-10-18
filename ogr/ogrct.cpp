@@ -246,20 +246,30 @@ static char *GetTextRepresentation(const OGRSpatialReference *poSRS)
         CPLTestBool(
             CPLGetConfigOption("OGR_CT_PREFER_OFFICIAL_SRS_DEF", "YES")))
     {
+        CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+
         CPLString osAuthCode(pszAuth);
         osAuthCode += ':';
         osAuthCode += pszCode;
         OGRSpatialReference oTmpSRS;
-        oTmpSRS.SetFromUserInput(osAuthCode);
-        oTmpSRS.SetDataAxisToSRSAxisMapping(
-            poSRS->GetDataAxisToSRSAxisMapping());
-        const char *const apszOptionsIsSame[] = {"CRITERION=EQUIVALENT",
-                                                 nullptr};
-        if (oTmpSRS.IsSame(poSRS, apszOptionsIsSame))
+        if (oTmpSRS.SetFromUserInput(osAuthCode) == OGRERR_NONE)
         {
-            if (CanUseAuthorityDef(poSRS, &oTmpSRS, pszAuth))
+            const char *pszAuthAfter = oTmpSRS.GetAuthorityName(nullptr);
+            const char *pszCodeAfter = oTmpSRS.GetAuthorityCode(nullptr);
+            if (pszAuthAfter && pszCodeAfter && EQUAL(pszAuthAfter, pszAuth) &&
+                EQUAL(pszCodeAfter, pszCode))
             {
-                pszText = CPLStrdup(osAuthCode);
+                oTmpSRS.SetDataAxisToSRSAxisMapping(
+                    poSRS->GetDataAxisToSRSAxisMapping());
+                const char *const apszOptionsIsSame[] = {"CRITERION=EQUIVALENT",
+                                                         nullptr};
+                if (oTmpSRS.IsSame(poSRS, apszOptionsIsSame))
+                {
+                    if (CanUseAuthorityDef(poSRS, &oTmpSRS, pszAuth))
+                    {
+                        pszText = CPLStrdup(osAuthCode);
+                    }
+                }
             }
         }
     }
@@ -652,7 +662,7 @@ int OCTCoordinateTransformationOptionsSetOnlyBest(
 /************************************************************************/
 
 //! @cond Doxygen_Suppress
-class OGRProjCT : public OGRCoordinateTransformation
+class OGRProjCT final : public OGRCoordinateTransformation
 {
     friend void
     OGRProjCTDifferentOperationsStart(OGRCoordinateTransformation *poCT);
@@ -973,7 +983,6 @@ OCTDestroyCoordinateTransformation(OGRCoordinateTransformationH hCT)
  *
  * @param poCT the object to delete
  *
- * @since GDAL 1.7.0
  */
 
 void OGRCoordinateTransformation::DestroyCT(OGRCoordinateTransformation *poCT)
@@ -2807,7 +2816,7 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
                 bRet = FALSE;
                 err = proj_errno(pj);
                 // PROJ should normally emit an error, but in case it does not
-                // (e.g PROJ 6.3 with the +ortho projection), synthetize one
+                // (e.g PROJ 6.3 with the +ortho projection), synthesize one
                 if (err == 0)
                     err = PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN;
             }

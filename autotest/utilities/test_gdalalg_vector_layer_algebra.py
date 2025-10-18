@@ -246,7 +246,7 @@ def test_gdal_vector_layer_algebra_overwrite(tmp_vsimem):
     # Test missing overwrite
     with pytest.raises(
         Exception,
-        match="already exists. Specify the --overwrite option to overwrite it or the --append option to append to it",
+        match="already exists",
     ):
         gdal.Run(
             "vector",
@@ -387,7 +387,7 @@ def test_gdal_vector_layer_algebra_output_driver_not_existing(tmp_vsimem):
     drv = gdal.GetDriverByName("ESRI Shapefile")
     drv.Deregister()
     try:
-        with pytest.raises(Exception, match="Driver ESRI Shapefile does not exist"):
+        with pytest.raises(Exception, match="Driver 'ESRI Shapefile' does not exist"):
             alg.Run()
     finally:
         drv.Register()

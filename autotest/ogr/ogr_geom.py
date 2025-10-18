@@ -1174,6 +1174,28 @@ def test_ogr_geom_getpoints():
     assert points == [(0.0, 1.0)], "did not get expected points (8)"
 
 
+@pytest.mark.parametrize(
+    "wkt",
+    [
+        pytest.param(
+            "COMPOUNDCURVE(CIRCULARSTRING (0 0, 1 1, 2 0))", id="2d CompoundCurve"
+        ),
+        pytest.param(
+            "COMPOUNDCURVE(CIRCULARSTRINGZ (0 0 0, 1 1 0, 2 0 0))",
+            id="3d CompoundCurve",
+        ),
+    ],
+)
+def test_ogr_geom_getpoints_failure(wkt):
+
+    geom = ogr.CreateGeometryFromWkt(wkt)
+
+    with gdaltest.error_raised(gdal.CE_Failure, "Incompatible geometry"):
+        points = geom.GetPoints()
+
+        assert points is None
+
+
 ###############################################################################
 # Test OGRGeometry::empty()
 
@@ -4905,3 +4927,16 @@ def test_ogr_subgeom_use_after_parent_free():
     del g
 
     assert exterior_ring.GetPointCount() > 0  # does not crash
+
+
+def test_ogr_geom_create_from_envelope():
+
+    srs = osr.SpatialReference(epsg=32145)
+    g = ogr.CreateGeometryFromEnvelope(424788, 25211, 581555, 279799, srs)
+
+    assert g.GetSpatialReference().IsSame(srs)
+
+    assert (
+        g.ExportToWkt()
+        == "POLYGON ((424788 25211,424788 279799,581555 279799,581555 25211,424788 25211))"
+    )

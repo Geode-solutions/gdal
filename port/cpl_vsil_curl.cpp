@@ -240,7 +240,7 @@ static int GetMaxRegions()
 /************************************************************************/
 
 static int
-VSICurlFindStringSensitiveExceptEscapeSequences(char **papszList,
+VSICurlFindStringSensitiveExceptEscapeSequences(CSLConstList papszList,
                                                 const char *pszTarget)
 
 {
@@ -253,7 +253,7 @@ VSICurlFindStringSensitiveExceptEscapeSequences(char **papszList,
         const char *pszIter2 = pszTarget;
         char ch1 = '\0';
         char ch2 = '\0';
-        /* The comparison is case-sensitive, escape for escaped */
+        /* The comparison is case-sensitive, except for escaped */
         /* sequences where letters of the hexadecimal sequence */
         /* can be uppercase or lowercase depending on the quoting algorithm */
         while (true)
@@ -287,7 +287,7 @@ VSICurlFindStringSensitiveExceptEscapeSequences(char **papszList,
 /*                      VSICurlIsFileInList()                           */
 /************************************************************************/
 
-static int VSICurlIsFileInList(char **papszList, const char *pszTarget)
+static int VSICurlIsFileInList(CSLConstList papszList, const char *pszTarget)
 {
     int nRet =
         VSICurlFindStringSensitiveExceptEscapeSequences(papszList, pszTarget);
@@ -1210,7 +1210,7 @@ retry:
     szCurlErrBuf[0] = '\0';
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_ERRORBUFFER, szCurlErrBuf);
 
-    headers = VSICurlMergeHeaders(headers, GetCurlHeaders(osVerb, headers));
+    headers = GetCurlHeaders(osVerb, headers);
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_FILETIME, 1);
@@ -1254,9 +1254,9 @@ retry:
     }
 
     double dfSize = 0;
+    long response_code = -1;
     if (oFileProp.eExists != EXIST_YES)
     {
-        long response_code = 0;
         curl_easy_getinfo(hCurlHandle, CURLINFO_HTTP_CODE, &response_code);
 
         bool bAlreadyLogged = false;
@@ -1632,7 +1632,9 @@ retry:
     oFileProp.bHasComputedFileSize = true;
     if (mtime > 0)
         oFileProp.mTime = mtime;
-    poFS->SetCachedFileProp(m_pszURL, oFileProp);
+    // Do not update cached file properties if cURL returned a non-HTTP error
+    if (response_code != 0)
+        poFS->SetCachedFileProp(m_pszURL, oFileProp);
 
     return oFileProp.fileSize;
 }
@@ -1980,7 +1982,7 @@ retry:
     szCurlErrBuf[0] = '\0';
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_ERRORBUFFER, szCurlErrBuf);
 
-    headers = VSICurlMergeHeaders(headers, GetCurlHeaders("GET", headers));
+    headers = GetCurlHeaders("GET", headers);
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_FILETIME, 1);
@@ -2605,7 +2607,7 @@ int VSICurlHandle::ReadMultiRange(int const nRanges, void **const ppData,
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_ERRORBUFFER,
                                    &asCurlErrors[iRequest].szCurlErrBuf[0]);
 
-        headers = VSICurlMergeHeaders(headers, GetCurlHeaders("GET", headers));
+        headers = GetCurlHeaders("GET", headers);
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
         aHeaders.push_back(headers);
         curl_multi_add_handle(hMultiHandle, hCurlHandle);
@@ -2820,7 +2822,7 @@ int VSICurlHandle::ReadMultiRangeSingleGet(int const nRanges,
     char szCurlErrBuf[CURL_ERROR_SIZE + 1] = {};
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_ERRORBUFFER, szCurlErrBuf);
 
-    headers = VSICurlMergeHeaders(headers, GetCurlHeaders("GET", headers));
+    headers = GetCurlHeaders("GET", headers);
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
     VSICURLMultiPerform(hCurlMultiHandle, hCurlHandle);
@@ -3213,9 +3215,8 @@ size_t VSICurlHandle::PRead(void *pBuffer, size_t nSize,
 
     {
         std::lock_guard<std::mutex> oLock(m_oMutex);
-        auto newHeaders =
+        headers =
             const_cast<VSICurlHandle *>(this)->GetCurlHeaders("GET", headers);
-        headers = VSICurlMergeHeaders(headers, newHeaders);
     }
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
@@ -3533,8 +3534,7 @@ void VSICurlHandle::AdviseRead(int nRanges, const vsi_l_offset *panOffsets,
                 unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_ERRORBUFFER,
                                            &asCurlErrors[i].szCurlErrBuf[0]);
 
-                headers = VSICurlMergeHeaders(headers,
-                                              GetCurlHeaders("GET", headers));
+                headers = GetCurlHeaders("GET", headers);
                 unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER,
                                            headers);
                 aHeaders.push_back(headers);
@@ -4344,10 +4344,10 @@ bool VSICurlFilesystemHandlerBase::IsAllowedFilename(const char *pszFilename)
 /*                                Open()                                */
 /************************************************************************/
 
-VSIVirtualHandle *VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
-                                                     const char *pszAccess,
-                                                     bool bSetError,
-                                                     CSLConstList papszOptions)
+VSIVirtualHandleUniquePtr
+VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
+                                   const char *pszAccess, bool bSetError,
+                                   CSLConstList papszOptions)
 {
     if (!STARTS_WITH_CI(pszFilename, GetFSPrefix().c_str()) &&
         !STARTS_WITH_CI(pszFilename, "/vsicurl?"))
@@ -4380,28 +4380,34 @@ VSIVirtualHandle *VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
         papszOptions, "DISABLE_READDIR_ON_OPEN",
         VSIGetPathSpecificOption(pszFilename, "GDAL_DISABLE_READDIR_ON_OPEN",
                                  "NO"));
-    const bool bSkipReadDir =
-        !bListDir || bEmptyDir || EQUAL(pszOptionVal, "EMPTY_DIR") ||
-        CPLTestBool(pszOptionVal) || !AllowCachedDataFor(pszFilename);
+    const bool bCache = CPLTestBool(CSLFetchNameValueDef(
+        papszOptions, "CACHE", AllowCachedDataFor(pszFilename) ? "YES" : "NO"));
+    const bool bSkipReadDir = !bListDir || bEmptyDir ||
+                              EQUAL(pszOptionVal, "EMPTY_DIR") ||
+                              CPLTestBool(pszOptionVal) || !bCache;
 
     std::string osFilename(pszFilename);
     bool bGotFileList = !bSkipReadDir;
     bool bForceExistsCheck = false;
     FileProp cachedFileProp;
-    if (!(GetCachedFileProp(osFilename.c_str() + strlen(GetFSPrefix().c_str()),
+    if (!bSkipReadDir &&
+        !(GetCachedFileProp(osFilename.c_str() + strlen(GetFSPrefix().c_str()),
                             cachedFileProp) &&
           cachedFileProp.eExists == EXIST_YES) &&
         strchr(CPLGetFilename(osFilename.c_str()), '.') != nullptr &&
         !STARTS_WITH(CPLGetExtensionSafe(osFilename.c_str()).c_str(), "zip") &&
-        !bSkipReadDir)
+        // Likely a Kerchunk JSON reference file: no need to list siblings
+        !cpl::ends_with(osFilename, ".nc.zarr"))
     {
-        char **papszFileList = ReadDirInternal(
-            (CPLGetDirnameSafe(osFilename.c_str()) + '/').c_str(), 0,
-            &bGotFileList);
+        // 1000 corresponds to the default page size of S3.
+        constexpr int FILE_COUNT_LIMIT = 1000;
+        const CPLStringList aosFileList(ReadDirInternal(
+            (CPLGetDirnameSafe(osFilename.c_str()) + '/').c_str(),
+            FILE_COUNT_LIMIT, &bGotFileList));
         const bool bFound =
-            VSICurlIsFileInList(papszFileList,
+            VSICurlIsFileInList(aosFileList.List(),
                                 CPLGetFilename(osFilename.c_str())) != -1;
-        if (bGotFileList && !bFound)
+        if (bGotFileList && !bFound && aosFileList.size() < FILE_COUNT_LIMIT)
         {
             // Some file servers are case insensitive, so in case there is a
             // match with case difference, do a full check just in case.
@@ -4410,37 +4416,37 @@ VSIVirtualHandle *VSICurlFilesystemHandlerBase::Open(const char *pszFilename,
             // that is queried by
             // gdalinfo
             // /vsicurl/http://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg004/mega90n000cb.lbl
-            if (CSLFindString(papszFileList,
-                              CPLGetFilename(osFilename.c_str())) != -1)
+            if (aosFileList.FindString(CPLGetFilename(osFilename.c_str())) !=
+                -1)
             {
                 bForceExistsCheck = true;
             }
             else
             {
-                CSLDestroy(papszFileList);
                 return nullptr;
             }
         }
-        CSLDestroy(papszFileList);
     }
 
-    VSICurlHandle *poHandle = CreateFileHandle(osFilename.c_str());
+    auto poHandle =
+        std::unique_ptr<VSICurlHandle>(CreateFileHandle(osFilename.c_str()));
     if (poHandle == nullptr)
         return nullptr;
+    poHandle->SetCache(bCache);
     if (!bGotFileList || bForceExistsCheck)
     {
         // If we didn't get a filelist, check that the file really exists.
         if (!poHandle->Exists(bSetError))
         {
-            delete poHandle;
             return nullptr;
         }
     }
 
     if (CPLTestBool(CPLGetConfigOption("VSI_CACHE", "FALSE")))
-        return VSICreateCachedFile(poHandle);
+        return VSIVirtualHandleUniquePtr(
+            VSICreateCachedFile(poHandle.release()));
     else
-        return poHandle;
+        return VSIVirtualHandleUniquePtr(poHandle.release());
 }
 
 /************************************************************************/
@@ -5158,41 +5164,54 @@ char **VSICurlFilesystemHandlerBase::GetFileList(const char *pszDirname,
                     if (strcmp(pszFilename, ".") != 0 &&
                         strcmp(pszFilename, "..") != 0)
                     {
-                        std::string osCachedFilename =
-                            CPLSPrintf("%s/%s", osURL.c_str(), pszFilename);
-
-                        FileProp cachedFileProp;
-                        GetCachedFileProp(osCachedFilename.c_str(),
-                                          cachedFileProp);
-                        cachedFileProp.eExists = EXIST_YES;
-                        cachedFileProp.bIsDirectory = bIsDirectory;
-                        cachedFileProp.mTime = static_cast<time_t>(mUnixTime);
-                        cachedFileProp.bHasComputedFileSize = bSizeValid;
-                        cachedFileProp.fileSize = nFileSize;
-                        SetCachedFileProp(osCachedFilename.c_str(),
-                                          cachedFileProp);
-
-                        oFileList.AddString(pszFilename);
-                        if (ENABLE_DEBUG_VERBOSE)
+                        if (CPLHasUnbalancedPathTraversal(pszFilename))
                         {
-                            struct tm brokendowntime;
-                            CPLUnixTimeToYMDHMS(mUnixTime, &brokendowntime);
-                            CPLDebug(
-                                GetDebugKey(),
-                                "File[%d] = %s, is_dir = %d, size "
-                                "= " CPL_FRMT_GUIB
-                                ", time = %04d/%02d/%02d %02d:%02d:%02d",
-                                nCount, pszFilename, bIsDirectory ? 1 : 0,
-                                nFileSize, brokendowntime.tm_year + 1900,
-                                brokendowntime.tm_mon + 1,
-                                brokendowntime.tm_mday, brokendowntime.tm_hour,
-                                brokendowntime.tm_min, brokendowntime.tm_sec);
+                            CPLError(CE_Warning, CPLE_AppDefined,
+                                     "Ignoring '%s' that has a path traversal "
+                                     "pattern",
+                                     pszFilename);
                         }
+                        else
+                        {
+                            std::string osCachedFilename =
+                                CPLSPrintf("%s/%s", osURL.c_str(), pszFilename);
 
-                        nCount++;
+                            FileProp cachedFileProp;
+                            GetCachedFileProp(osCachedFilename.c_str(),
+                                              cachedFileProp);
+                            cachedFileProp.eExists = EXIST_YES;
+                            cachedFileProp.bIsDirectory = bIsDirectory;
+                            cachedFileProp.mTime =
+                                static_cast<time_t>(mUnixTime);
+                            cachedFileProp.bHasComputedFileSize = bSizeValid;
+                            cachedFileProp.fileSize = nFileSize;
+                            SetCachedFileProp(osCachedFilename.c_str(),
+                                              cachedFileProp);
 
-                        if (nMaxFiles > 0 && oFileList.Count() > nMaxFiles)
-                            break;
+                            oFileList.AddString(pszFilename);
+                            if (ENABLE_DEBUG_VERBOSE)
+                            {
+                                struct tm brokendowntime;
+                                CPLUnixTimeToYMDHMS(mUnixTime, &brokendowntime);
+                                CPLDebug(
+                                    GetDebugKey(),
+                                    "File[%d] = %s, is_dir = %d, size "
+                                    "= " CPL_FRMT_GUIB
+                                    ", time = %04d/%02d/%02d %02d:%02d:%02d",
+                                    nCount, pszFilename, bIsDirectory ? 1 : 0,
+                                    nFileSize, brokendowntime.tm_year + 1900,
+                                    brokendowntime.tm_mon + 1,
+                                    brokendowntime.tm_mday,
+                                    brokendowntime.tm_hour,
+                                    brokendowntime.tm_min,
+                                    brokendowntime.tm_sec);
+                            }
+
+                            nCount++;
+
+                            if (nMaxFiles > 0 && oFileList.Count() > nMaxFiles)
+                                break;
+                        }
                     }
 
                     pszLine = c + 1;
@@ -6231,24 +6250,6 @@ struct curl_slist *VSICurlSetOptions(CURL *hCurlHandle, const char *pszURL,
 }
 
 /************************************************************************/
-/*                     VSICurlMergeHeaders()                            */
-/************************************************************************/
-
-struct curl_slist *VSICurlMergeHeaders(struct curl_slist *poDest,
-                                       struct curl_slist *poSrcToDestroy)
-{
-    struct curl_slist *iter = poSrcToDestroy;
-    while (iter != nullptr)
-    {
-        poDest = curl_slist_append(poDest, iter->data);
-        iter = iter->next;
-    }
-    if (poSrcToDestroy)
-        curl_slist_free_all(poSrcToDestroy);
-    return poDest;
-}
-
-/************************************************************************/
 /*                    VSICurlSetContentTypeFromExt()                    */
 /************************************************************************/
 
@@ -6350,7 +6351,6 @@ struct curl_slist *VSICurlSetCreationHeadersFromOptions(
  See :ref:`/vsicurl/ documentation <vsicurl>`
  \endverbatim
 
- @since GDAL 1.8.0
  */
 void VSIInstallCurlFileHandler(void)
 {
@@ -6373,7 +6373,6 @@ void VSIInstallCurlFileHandler(void)
  * mechanisms can prevent opening new files, or give an outdated version of
  * them.
  *
- * @since GDAL 2.2.1
  */
 
 void VSICurlClearCache(void)
@@ -6419,7 +6418,6 @@ void VSICurlClearCache(void)
  * "/vsis3/basket/" or "/vsis3/basket/object".
  *
  * @param pszFilenamePrefix Filename prefix
- * @since GDAL 2.4.0
  */
 
 void VSICurlPartialClearCache(const char *pszFilenamePrefix)

@@ -13,6 +13,7 @@
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "rawdataset.h"
 
 #ifndef UTM_FORMAT_defined
@@ -64,7 +65,7 @@ class DOQ2Dataset final : public RawDataset
 
   public:
     DOQ2Dataset();
-    ~DOQ2Dataset();
+    ~DOQ2Dataset() override;
 
     CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 

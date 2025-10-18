@@ -57,54 +57,54 @@ class OGRPGTableFeatureDefn final : public OGRPGFeatureDefn
     {
     }
 
-    virtual void UnsetLayer() override;
+    void UnsetLayer() override;
 
-    virtual int GetFieldCount() const override
+    int GetFieldCount() const override
     {
         SolveFields();
         return OGRPGFeatureDefn::GetFieldCount();
     }
 
-    virtual OGRFieldDefn *GetFieldDefn(int i) override
+    OGRFieldDefn *GetFieldDefn(int i) override
     {
         SolveFields();
         return OGRPGFeatureDefn::GetFieldDefn(i);
     }
 
-    virtual const OGRFieldDefn *GetFieldDefn(int i) const override
+    const OGRFieldDefn *GetFieldDefn(int i) const override
     {
         SolveFields();
         return OGRPGFeatureDefn::GetFieldDefn(i);
     }
 
-    virtual int GetFieldIndex(const char *pszName) const override
+    int GetFieldIndex(const char *pszName) const override
     {
         SolveFields();
         return OGRPGFeatureDefn::GetFieldIndex(pszName);
     }
 
-    virtual int GetGeomFieldCount() const override
+    int GetGeomFieldCount() const override
     {
         if (poLayer != nullptr && !poLayer->HasGeometryInformation())
             SolveFields();
         return OGRPGFeatureDefn::GetGeomFieldCount();
     }
 
-    virtual OGRPGGeomFieldDefn *GetGeomFieldDefn(int i) override
+    OGRPGGeomFieldDefn *GetGeomFieldDefn(int i) override
     {
         if (poLayer != nullptr && !poLayer->HasGeometryInformation())
             SolveFields();
         return OGRPGFeatureDefn::GetGeomFieldDefn(i);
     }
 
-    virtual const OGRPGGeomFieldDefn *GetGeomFieldDefn(int i) const override
+    const OGRPGGeomFieldDefn *GetGeomFieldDefn(int i) const override
     {
         if (poLayer != nullptr && !poLayer->HasGeometryInformation())
             SolveFields();
         return OGRPGFeatureDefn::GetGeomFieldDefn(i);
     }
 
-    virtual int GetGeomFieldIndex(const char *pszName) const override
+    int GetGeomFieldIndex(const char *pszName) const override
     {
         if (poLayer != nullptr && !poLayer->HasGeometryInformation())
             SolveFields();
@@ -134,10 +134,10 @@ void OGRPGTableFeatureDefn::SolveFields() const
 /*                            GetFIDColumn()                            */
 /************************************************************************/
 
-const char *OGRPGTableLayer::GetFIDColumn()
+const char *OGRPGTableLayer::GetFIDColumn() const
 
 {
-    ReadTableDefinition();
+    const_cast<OGRPGTableLayer *>(this)->ReadTableDefinition();
 
     if (pszFIDColumn != nullptr)
         return pszFIDColumn;
@@ -1828,17 +1828,40 @@ CPLString OGRPGEscapeColumnName(const char *pszColumnName)
 /************************************************************************/
 
 CPLString OGRPGEscapeString(void *hPGConnIn, const char *pszStrValue,
-                            int /* nMaxWidth */, const char * /*pszTableName*/,
-                            const char * /*pszFieldName*/)
+                            int nMaxLength, const char *pszTableName,
+                            const char *pszFieldName)
 {
     PGconn *hPGConn = reinterpret_cast<PGconn *>(hPGConnIn);
+
+    size_t nSrcLen = strlen(pszStrValue);
+    const size_t nSrcLenUTF = CPLStrlenUTF8Ex(pszStrValue);
+
+    if (nMaxLength > 0 && nSrcLenUTF > static_cast<size_t>(nMaxLength))
+    {
+        CPLDebug("PG", "Truncated %s.%s field value '%s' to %d characters.",
+                 pszTableName, pszFieldName, pszStrValue, nMaxLength);
+
+        size_t iUTF8Char = 0;
+        for (size_t iChar = 0; iChar < nSrcLen; iChar++)
+        {
+            if ((static_cast<unsigned char>(pszStrValue[iChar]) & 0xc0) != 0x80)
+            {
+                if (iUTF8Char == static_cast<size_t>(nMaxLength))
+                {
+                    nSrcLen = iChar;
+                    break;
+                }
+                iUTF8Char++;
+            }
+        }
+    }
+
+    char *pszDestStr = static_cast<char *>(CPLMalloc(2 * nSrcLen + 1));
+
     CPLString osCommand;
 
     /* We need to quote and escape string fields. */
     osCommand += "'";
-
-    const size_t nSrcLen = strlen(pszStrValue);
-    char *pszDestStr = static_cast<char *>(CPLMalloc(2 * nSrcLen + 1));
 
     int nError = 0;
     PQescapeStringConn(hPGConn, pszDestStr, pszStrValue, nSrcLen, &nError);
@@ -2100,7 +2123,7 @@ OGRErr OGRPGTableLayer::CreateFeatureViaInsert(OGRFeature *poFeature)
                      "that's perhaps the reason for the failure. "
                      "If so, this can happen if you reuse the same feature "
                      "object for sequential insertions. "
-                     "Indeed, since GDAL 1.8.0, the FID of an inserted feature "
+                     "The FID of an inserted feature "
                      "is got from the server, so it is not a good idea"
                      "to reuse it afterwards... All in all, try unsetting the "
                      "FID with SetFID(-1) before calling CreateFeature()");
@@ -2246,7 +2269,7 @@ OGRErr OGRPGTableLayer::CreateFeatureViaCopy(OGRFeature *poFeature)
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRPGTableLayer::TestCapability(const char *pszCap)
+int OGRPGTableLayer::TestCapability(const char *pszCap) const
 
 {
     if (bUpdateAccess)

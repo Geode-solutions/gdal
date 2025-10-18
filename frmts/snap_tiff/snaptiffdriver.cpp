@@ -4,13 +4,19 @@
 #include "cpl_port.h"
 #include "cpl_minixml.h"
 #include "cpl_vsi_virtual.h"
+#include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "rawdataset.h"
 
 #define LIBERTIFF_NS GDAL_libertiff
 #include "libertiff.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 constexpr const char *SNAP_TIFF_PREFIX = "SNAP_TIFF:";
@@ -246,6 +252,7 @@ GDALDataset *SNAPTIFFDataset::Open(GDALOpenInfo *poOpenInfo)
 
         const auto *psTag =
             poDS->m_poImage->tag(LIBERTIFF_NS::TagCode::GeoTIFFTiePoints);
+        assert(psTag);
 
         for (int iBand = 1; iBand <= 2; ++iBand)
         {

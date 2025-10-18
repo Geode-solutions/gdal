@@ -124,9 +124,24 @@ def test_gdalalg_raster_pipeline_output_through_api(tmp_vsimem):
 def test_gdalalg_raster_pipeline_as_api_error():
 
     pipeline = get_pipeline_alg()
-    pipeline["pipeline"] = "read"
-    with pytest.raises(Exception, match="pipeline: At least 2 steps must be provided"):
-        pipeline.Run()
+    pipeline["pipeline"] = "read ../gcore/data/byte.tif"
+    pipeline.Run()
+    ds = pipeline.Output()
+    assert ds.GetRasterBand(1).Checksum() == 4672
+
+
+def test_gdalalg_raster_pipeline_mutually_exclusive_args():
+
+    with pytest.raises(
+        Exception, match="clip: Argument 'window' is mutually exclusive with 'bbox'"
+    ):
+        gdal.Run(
+            "raster pipeline",
+            input="../gcore/data/byte.tif",
+            output_format="MEM",
+            output="",
+            pipeline="read ! clip --bbox=1,2,3,4 --window=1,2,3,4 ! write",
+        )
 
 
 def test_gdalalg_raster_pipeline_usage_as_json():
@@ -148,10 +163,7 @@ def test_gdalalg_raster_pipeline_help_doc():
     out = gdaltest.runexternal(f"{gdal_path} raster pipeline --help-doc=main")
 
     assert "Usage: gdal raster pipeline [OPTIONS] <PIPELINE>" in out
-    assert (
-        "<PIPELINE> is of the form: read|mosaic|stack [READ-OPTIONS] ( ! <STEP-NAME> [STEP-OPTIONS] )* ! write [WRITE-OPTIONS]"
-        in out
-    )
+    assert "<PIPELINE> is of the form: " in out
 
     out = gdaltest.runexternal(f"{gdal_path} raster pipeline --help-doc=edit")
 
@@ -253,7 +265,9 @@ def test_gdalalg_raster_pipeline_missing_at_run():
 def test_gdalalg_raster_pipeline_empty_args():
 
     pipeline = get_pipeline_alg()
-    with pytest.raises(Exception, match="pipeline: At least 2 steps must be provided"):
+    with pytest.raises(
+        Exception, match="At least one step must be provided in a pipeline"
+    ):
         pipeline.ParseRunAndFinalize([])
 
 
@@ -277,7 +291,9 @@ def test_gdalalg_raster_pipeline_unknow_step():
 def test_gdalalg_raster_pipeline_read_read():
 
     pipeline = get_pipeline_alg()
-    with pytest.raises(Exception, match="pipeline: Last step should be 'write'"):
+    with pytest.raises(
+        Exception, match="pipeline: 'read' is only allowed as a first step"
+    ):
         pipeline.ParseRunAndFinalize(
             ["read", "../gcore/data/byte.tif", "!", "read", "../gcore/data/byte.tif"]
         )
@@ -286,7 +302,10 @@ def test_gdalalg_raster_pipeline_read_read():
 def test_gdalalg_raster_pipeline_write_write():
 
     pipeline = get_pipeline_alg()
-    with pytest.raises(Exception, match="pipeline: First step should be 'read'"):
+    with pytest.raises(
+        Exception,
+        match="pipeline: First step should be 'read', 'calc', 'mosaic' or 'stack'",
+    ):
         pipeline.ParseRunAndFinalize(
             ["write", "/vsimem/out.tif", "!", "write", "/vsimem/out.tif"]
         )
@@ -364,7 +383,7 @@ def test_gdalalg_raster_pipeline_write_options(tmp_vsimem):
     pipeline = get_pipeline_alg()
     with pytest.raises(
         Exception,
-        match="already exists. Specify the --overwrite option to overwrite it",
+        match="already exists",
     ):
         assert pipeline.ParseRunAndFinalize(
             ["read", "../gcore/data/byte.tif", "!", "write", out_filename]
@@ -701,3 +720,28 @@ def test_gdalalg_raster_pipeline_calc():
         pipeline="calc ../gcore/data/byte.tif --calc 255-X ! write",
     ) as alg:
         assert alg.Output().GetRasterBand(1).Checksum() == 4563
+
+
+def test_gdalalg_raster_pipeline_info():
+
+    with gdal.Run(
+        "raster",
+        "pipeline",
+        pipeline="read ../gcore/data/byte.tif ! info",
+    ) as alg:
+        assert "bands" in alg.Output()
+
+
+def test_gdalalg_raster_pipeline_info_executable():
+
+    import gdaltest
+    import test_cli_utilities
+
+    gdal_path = test_cli_utilities.get_gdal_path()
+    if gdal_path is None:
+        pytest.skip("gdal binary missing")
+
+    out = gdaltest.runexternal(
+        f"{gdal_path} raster pipeline read ../gcore/data/byte.tif ! info"
+    )
+    assert out.startswith("Driver: GTiff/GeoTIFF")

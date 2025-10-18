@@ -12,7 +12,12 @@
  * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
+#include "gdal_frmts.h"
+#include "gdalplugindriverproxy.h"
+
 #include "wmsdrivercore.h"
+
+#include "gdalsubdatasetinfo.h"
 
 /************************************************************************/
 /*                     WMSDriverIdentify()                              */
@@ -107,7 +112,7 @@ int WMSDriverIdentify(GDALOpenInfo *poOpenInfo)
 /*                    OGRWMSDriverGetSubdatasetInfo()                   */
 /************************************************************************/
 
-struct WMSDriverSubdatasetInfo : public GDALSubdatasetInfo
+struct WMSDriverSubdatasetInfo final : public GDALSubdatasetInfo
 {
   public:
     explicit WMSDriverSubdatasetInfo(const std::string &fileName)

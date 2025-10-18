@@ -2780,6 +2780,18 @@ def test_gdalwarp_lib_to_cog_reprojection_options(tmp_vsimem):
         options="-f COG -co TILING_SCHEME=GoogleMapsCompatible",
     )
     assert ds.RasterCount == 2
+    assert ds.RasterXSize == 256
+    assert ds.RasterYSize == 256
+    assert ds.GetGeoTransform() == pytest.approx(
+        (
+            -13110479.09147343,
+            76.43702828517416,
+            0.0,
+            4030983.1236470547,
+            0.0,
+            -76.43702828517416,
+        )
+    )
     assert ds.GetRasterBand(1).Checksum() in (
         4187,
         4300,
@@ -2805,6 +2817,58 @@ def test_gdalwarp_lib_to_cog_reprojection_options_and_te(tmp_vsimem):
     assert ds.GetRasterBand(1).Checksum() != 0
     ds = None
     gdal.Unlink(tmpfilename)
+
+
+###############################################################################
+
+
+@pytest.mark.require_driver("COG")
+def test_gdalwarp_to_cog_with_s_srs_and_t_srs(tmp_vsimem):
+
+    out_ds = gdal.Warp(
+        tmp_vsimem / "out.tif",
+        "../gcore/data/byte.tif",
+        options="-s_srs EPSG:32611 -t_srs EPSG:4326 -of COG",
+    )
+    assert out_ds.RasterXSize == 22
+    assert out_ds.RasterYSize == 18
+    assert out_ds.GetGeoTransform() == pytest.approx(
+        (
+            -117.64116991516866,
+            0.0005981056256842434,
+            0.0,
+            33.9006687039261,
+            0.0,
+            -0.0005981056256842434,
+        )
+    )
+    assert out_ds.GetRasterBand(1).Checksum() != 0
+
+
+###############################################################################
+
+
+@pytest.mark.require_driver("COG")
+def test_gdalwarp_to_cog_with_s_srs_and_tiling_scheme(tmp_vsimem):
+
+    out_ds = gdal.Warp(
+        tmp_vsimem / "out.tif",
+        "../gcore/data/byte.tif",
+        options="-s_srs EPSG:32611 -co TILING_SCHEME=GoogleMapsCompatible -of COG",
+    )
+    assert out_ds.RasterXSize == 256
+    assert out_ds.RasterYSize == 256
+    assert out_ds.GetGeoTransform() == pytest.approx(
+        (
+            -13110479.09147343,
+            76.43702828517416,
+            0.0,
+            4030983.1236470547,
+            0.0,
+            -76.43702828517416,
+        )
+    )
+    assert out_ds.GetRasterBand(1).Checksum() != 0
 
 
 ###############################################################################
@@ -4234,6 +4298,53 @@ def test_gdalwarp_lib_minus_180_plus_180_to_span_over_180(tmp_vsimem, extra_colu
 
 
 ###############################################################################
+# Test warping an image with [-180-something,180+something] longitude to
+# WebMercator
+
+
+@pytest.mark.parametrize("extra_column", [False, True])
+def test_gdalwarp_lib_minus_180_plus_180_to_span_over_180_to_webmercator(
+    tmp_path, extra_column
+):
+
+    dst_filename = tmp_path / "out.tif"
+    src_ds = gdal.Open("../gdrivers/data/small_world.tif")
+    if extra_column:
+        tmp_ds = gdal.GetDriverByName("MEM").Create(
+            "", src_ds.RasterXSize + 1, src_ds.RasterYSize
+        )
+        tmp_ds.SetGeoTransform(src_ds.GetGeoTransform())
+        tmp_ds.SetSpatialRef(src_ds.GetSpatialRef())
+        tmp_ds.WriteRaster(
+            0,
+            0,
+            src_ds.RasterXSize,
+            src_ds.RasterYSize,
+            src_ds.GetRasterBand(1).ReadRaster(),
+        )
+        tmp_ds.WriteRaster(
+            src_ds.RasterXSize,
+            0,
+            1,
+            src_ds.RasterYSize,
+            src_ds.GetRasterBand(1).ReadRaster(0, 0, 1, src_ds.RasterYSize),
+        )
+        src_ds = tmp_ds
+    else:
+        src_ds = gdal.Translate("", src_ds, format="MEM", bandList=[1])
+    gt = list(src_ds.GetGeoTransform())
+    gt[0] -= gt[1] / 2
+    src_ds.SetGeoTransform(gt)
+    out_ds = gdal.Warp(
+        dst_filename,
+        src_ds,
+        dstSRS="EPSG:3857",
+        outputBounds=[-20044030.997, -20037508.343, 20044201.984, 20037508.343],
+    )
+    assert out_ds.GetRasterBand(1).Checksum() == 47957
+
+
+###############################################################################
 # Test bugfix for https://lists.osgeo.org/pipermail/gdal-dev/2024-September/059512.html
 
 
@@ -4587,3 +4698,52 @@ def test_gdalwarp_te_srs_check_extent():
     assert out_ds.GetGeoTransform() == pytest.approx(
         (166021, 37108, 0.0, 0.0, 0.0, -36622), abs=1000
     )
+
+
+###############################################################################
+# Check fix for https://github.com/OSGeo/gdal/issues/12965
+
+
+def test_gdalwarplib_on_huge_raster():
+
+    src_ds = gdal.Open(
+        """<VRTDataset rasterXSize="1073741766" rasterYSize="1070224430">
+  <SRS dataAxisToSRSAxisMapping="1,2">PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs"],AUTHORITY["EPSG","3857"]]</SRS>
+  <GeoTransform> -2.0037507260426737e+07,  3.7322767705947384e-02,  0.0000000000000000e+00,  1.9971868903190855e+07,  0.0000000000000000e+00, -3.7322767705947384e-02</GeoTransform>
+  <VRTRasterBand dataType="Byte" band="1">
+    <SimpleSource>
+      <SourceFilename relativeToVRT="1">invalid</SourceFilename>
+      <SourceBand>1</SourceBand>
+    </SimpleSource>
+  </VRTRasterBand>
+</VRTDataset>"""
+    )
+
+    out_ds = gdal.Warp(
+        "",
+        src_ds,
+        options='-f VRT -t_srs "+proj=laea +lon_0=2.3 +lat_0=-40 +datum=WGS84" -ts 24 0 -te -4000 -4000 4000 4000',
+    )
+    assert out_ds.RasterXSize == 24
+    assert out_ds.RasterYSize == 24
+
+
+###############################################################################
+# Just reflect the current behavior. We might decide to adopt a new behavior
+
+
+def test_gdalwarp_lib_mask_band_and_src_nodata():
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src_ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
+    src_ds.CreateMaskBand(gdal.GMF_PER_DATASET)
+    src_ds.GetRasterBand(1).SetNoDataValue(2)
+    src_ds.GetRasterBand(1).Fill(2)
+    src_ds.GetRasterBand(1).GetMaskBand().Fill(255)
+
+    with gdaltest.error_raised(
+        gdal.CE_Warning,
+        match="Source dataset has both a per-dataset mask band and the warper has been also configured with a source nodata value. Only taking into account the latter",
+    ):
+        out_ds = gdal.Warp("", src_ds, options="-f MEM -dstnodata 5")
+        assert out_ds.GetRasterBand(1).ReadRaster() == b"\x05"

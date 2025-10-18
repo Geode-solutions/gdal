@@ -206,7 +206,7 @@ const char CPL_DLL *CPLExtractRelativePath(const char *, const char *, int *)
 char CPL_DLL **
 CPLCorrespondingPaths(const char *pszOldFilename, const char *pszNewFilename,
                       char **papszFileList) CPL_WARN_UNUSED_RESULT;
-int CPL_DLL CPLCheckForFile(char *pszFilename, char **papszSiblingList);
+int CPL_DLL CPLCheckForFile(char *pszFilename, CSLConstList papszSiblingList);
 
 const char CPL_DLL *CPLGetHomeDir(void) CPL_WARN_UNUSED_RESULT;
 
@@ -241,6 +241,9 @@ extern "C++"
 }
 
 #endif  // defined(__cplusplus) && !defined(CPL_SUPRESS_CPLUSPLUS)
+
+bool CPL_DLL CPLHasPathTraversal(const char *pszFilename);
+bool CPL_DLL CPLHasUnbalancedPathTraversal(const char *pszFilename);
 
 /* -------------------------------------------------------------------- */
 /*      Find File Function                                              */
@@ -307,6 +310,7 @@ int CPL_DLL CPLCopyTree(const char *pszNewPath, const char *pszOldPath);
 int CPL_DLL CPLMoveFile(const char *pszNewPath, const char *pszOldPath);
 int CPL_DLL CPLSymlink(const char *pszOldPath, const char *pszNewPath,
                        CSLConstList papszOptions);
+int CPL_DLL CPLGetRemainingFileDescriptorCount(void);
 
 /* -------------------------------------------------------------------- */
 /*      Lock related functions.                                         */

@@ -14,6 +14,7 @@
 #include "atlsci_spheroid.h"
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
@@ -181,14 +182,10 @@ CPLErr MFFTiledBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 /*                      MFF Spheroids                                   */
 /************************************************************************/
 
-class MFFSpheroidList : public SpheroidList
+class MFFSpheroidList final : public SpheroidList
 {
   public:
     MFFSpheroidList();
-
-    ~MFFSpheroidList()
-    {
-    }
 };
 
 MFFSpheroidList ::MFFSpheroidList()

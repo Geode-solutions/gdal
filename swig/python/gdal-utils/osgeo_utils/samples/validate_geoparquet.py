@@ -81,16 +81,11 @@ class GeoParquetValidator:
                 self._check_counterclockwise(subgeom, row)
 
     def _validate(self, schema, instance):
+        from importlib.metadata import version
+
         import jsonschema
 
-        if sys.version_info >= (3, 8):
-            from importlib.metadata import version
-
-            jsonschema_version = version("jsonschema")
-        else:
-            from pkg_resources import get_distribution
-
-            jsonschema_version = get_distribution("jsonschema").version
+        jsonschema_version = version("jsonschema")
 
         def versiontuple(v):
             return tuple(map(int, (v.split("."))))
@@ -104,11 +99,13 @@ class GeoParquetValidator:
             def retrieve_remote_file(uri: str):
                 if not uri.startswith("http://") and not uri.startswith("https://"):
                     raise Exception(f"Cannot retrieve {uri}")
-                import urllib
+                import urllib.request
 
                 global map_remote_resources
                 if uri not in map_remote_resources:
-                    response = urllib.request.urlopen(uri).read()
+                    response = urllib.request.urlopen(
+                        urllib.request.Request(uri, headers={"User-Agent": "GDAL"})
+                    ).read()
                     map_remote_resources[uri] = response
                 else:
                     response = map_remote_resources[uri]
@@ -130,9 +127,7 @@ class GeoParquetValidator:
             return self._error("Parquet driver not available")
 
         try:
-            import jsonschema
-
-            jsonschema.validate
+            import jsonschema  # noqa: F401
         except ImportError:
             return self._error(
                 "jsonschema Python module not available. Try 'pip install jsonschema'"
@@ -178,10 +173,14 @@ class GeoParquetValidator:
             schema_url = f"https://github.com/opengeospatial/geoparquet/releases/download/v{version}/schema.json"
 
             if schema_url not in geoparquet_schemas:
-                import urllib
+                import urllib.request
 
                 try:
-                    response = urllib.request.urlopen(schema_url).read()
+                    response = urllib.request.urlopen(
+                        urllib.request.Request(
+                            schema_url, headers={"User-Agent": "GDAL"}
+                        )
+                    ).read()
                 except Exception as e:
                     return self._error(
                         f"Cannot download GeoParquet JSON schema from {schema_url}. Exception = {repr(e)}"

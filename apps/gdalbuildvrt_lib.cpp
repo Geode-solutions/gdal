@@ -998,10 +998,13 @@ std::string VRTBuilder::AnalyseRaster(GDALDatasetH hDS,
         else if (we_res != gt[GEOTRSFRM_WE_RES] ||
                  ns_res != gt[GEOTRSFRM_NS_RES])
         {
-            return CPLSPrintf("Dataset %s has resolution %f x %f, whereas "
-                              "previous sources have resolution %f x %f",
-                              dsFileName, gt[GEOTRSFRM_WE_RES],
-                              gt[GEOTRSFRM_NS_RES], we_res, ns_res);
+            return CPLSPrintf(
+                "Dataset %s has resolution %.17g x %.17g, whereas "
+                "previous sources have resolution %.17g x %.17g. To mosaic "
+                "these data sources, a different resolution strategy should be "
+                "specified.",
+                dsFileName, gt[GEOTRSFRM_WE_RES], gt[GEOTRSFRM_NS_RES], we_res,
+                ns_res);
         }
     }
     else if (resolutionStrategy != USER_RESOLUTION)
@@ -1129,8 +1132,9 @@ void VRTBuilder::CreateVRTSeparate(VRTDataset *poVRTDS)
                 psDatasetProperties->nRasterYSize, GA_ReadOnly, TRUE,
                 pszProjectionRef, psDatasetProperties->gt.data());
             hSourceDS = static_cast<GDALDatasetH>(hProxyDS);
-            reinterpret_cast<GDALProxyPoolDataset *>(hProxyDS)->SetOpenOptions(
-                papszOpenOptions);
+            cpl::down_cast<GDALProxyPoolDataset *>(
+                GDALDataset::FromHandle(hProxyDS))
+                ->SetOpenOptions(papszOpenOptions);
 
             for (int jBand = 0;
                  jBand <
@@ -1380,8 +1384,9 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDataset *poVRTDS)
                 dsFileName, psDatasetProperties->nRasterXSize,
                 psDatasetProperties->nRasterYSize, GA_ReadOnly, TRUE,
                 pszProjectionRef, psDatasetProperties->gt.data());
-            reinterpret_cast<GDALProxyPoolDataset *>(hProxyDS)->SetOpenOptions(
-                papszOpenOptions);
+            cpl::down_cast<GDALProxyPoolDataset *>(
+                GDALDataset::FromHandle(hProxyDS))
+                ->SetOpenOptions(papszOpenOptions);
 
             for (int j = 0;
                  j < nMaxSelectedBandNo +
@@ -1401,7 +1406,8 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDataset *poVRTDS)
             if (bHasDatasetMask && !bAddAlpha)
             {
                 static_cast<GDALProxyPoolRasterBand *>(
-                    reinterpret_cast<GDALProxyPoolDataset *>(hProxyDS)
+                    cpl::down_cast<GDALProxyPoolDataset *>(
+                        GDALDataset::FromHandle(hProxyDS))
                         ->GetRasterBand(1))
                     ->AddSrcMaskBandDescription(
                         GDT_Byte, psDatasetProperties->nMaskBlockXSize,
@@ -1476,14 +1482,33 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDataset *poVRTDS)
             VRTSourcedRasterBand *poVRTBand =
                 static_cast<VRTSourcedRasterBand *>(
                     poVRTDS->GetRasterBand(nSelectedBands + 1));
-            /* Little trick : we use an offset of 255 and a scaling of 0, so
-             * that in areas covered */
-            /* by the source, the value of the alpha band will be 255, otherwise
-             * it will be 0 */
-            poVRTBand->AddComplexSource(
-                GDALRasterBand::FromHandle(GDALGetRasterBand(hSourceDS, 1)),
-                dfSrcXOff, dfSrcYOff, dfSrcXSize, dfSrcYSize, dfDstXOff,
-                dfDstYOff, dfDstXSize, dfDstYSize, 255, 0, VRT_NODATA_UNSET);
+            if (psDatasetProperties->bHasDatasetMask && bUseSrcMaskBand)
+            {
+                auto poComplexSource = new VRTComplexSource();
+                poComplexSource->SetUseMaskBand(true);
+                poVRTBand->ConfigureSource(
+                    poComplexSource,
+                    GDALRasterBand::FromHandle(GDALGetRasterBand(hSourceDS, 1)),
+                    TRUE, dfSrcXOff, dfSrcYOff, dfSrcXSize, dfSrcYSize,
+                    dfDstXOff, dfDstYOff, dfDstXSize, dfDstYSize);
+
+                if (bWriteAbsolutePath)
+                    WriteAbsolutePath(poComplexSource, dsFileName);
+
+                poVRTBand->AddSource(poComplexSource);
+            }
+            else
+            {
+                /* Little trick : we use an offset of 255 and a scaling of 0, so
+                 * that in areas covered */
+                /* by the source, the value of the alpha band will be 255, otherwise
+                 * it will be 0 */
+                poVRTBand->AddComplexSource(
+                    GDALRasterBand::FromHandle(GDALGetRasterBand(hSourceDS, 1)),
+                    dfSrcXOff, dfSrcYOff, dfSrcXSize, dfSrcYSize, dfDstXOff,
+                    dfDstYOff, dfDstXSize, dfDstYSize, 255, 0,
+                    VRT_NODATA_UNSET);
+            }
         }
         else if (bHasDatasetMask)
         {
@@ -1503,7 +1528,7 @@ void VRTBuilder::CreateVRTNonSeparate(VRTDataset *poVRTDS)
             assert(poMaskVRTBand);
             poMaskVRTBand->ConfigureSource(
                 poSource,
-                static_cast<GDALRasterBand *>(GDALGetRasterBand(hSourceDS, 1)),
+                GDALRasterBand::FromHandle(GDALGetRasterBand(hSourceDS, 1)),
                 TRUE, dfSrcXOff, dfSrcYOff, dfSrcXSize, dfSrcYSize, dfDstXOff,
                 dfDstYOff, dfDstXSize, dfDstYSize);
 

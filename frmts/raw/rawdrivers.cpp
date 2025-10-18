@@ -9,11 +9,11 @@ void GDALRegister_raw_no_sidecar()
     GDALRegister_PNM();
     GDALRegister_DOQ1();
     GDALRegister_DOQ2();
-    GDALRegister_PAux();
     GDALRegister_MFF();
     GDALRegister_HKV();
     GDALRegister_GSC();
     GDALRegister_FAST();
+    GDALRegister_BT();
     GDALRegister_LAN();
     GDALRegister_CPG();
     GDALRegister_NDF();
@@ -36,6 +36,7 @@ void GDALRegister_raw_with_sidecar()
 {
     // Drivers that that absolutely need to look for side car files in their
     // Identify()/Open() procedure.
+    GDALRegister_PAux();
     GDALRegister_GenBin();
     GDALRegister_ENVI();
     GDALRegister_EHdr();

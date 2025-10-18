@@ -14,6 +14,8 @@
 #include <limits>
 #include <map>
 
+#include "cpl_multiproc.h"
+#include "gdal_pam_multidim.h"
 #include "gdal_rat.h"
 #include "memdataset.h"
 
@@ -277,7 +279,7 @@ class netCDFGroup final : public GDALGroup, public netCDFAttributeHolder
                 int gid);
 
   public:
-    ~netCDFGroup();
+    ~netCDFGroup() override;
 
     static std::shared_ptr<netCDFGroup>
     Create(const std::shared_ptr<netCDFSharedResources> &poShared, int cdfid);
@@ -396,7 +398,7 @@ class netCDFDimension final : public GDALDimension
                     int cfid, int dimid, size_t nForcedSize,
                     const std::string &osType);
 
-    ~netCDFDimension();
+    ~netCDFDimension() override;
 
     static std::shared_ptr<netCDFDimension>
     Create(const std::shared_ptr<netCDFSharedResources> &poShared,

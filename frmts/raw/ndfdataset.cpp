@@ -13,6 +13,7 @@
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
@@ -281,6 +282,12 @@ GDALDataset *NDFDataset::Open(GDALOpenInfo *poOpenInfo)
         }
         else
         {
+            if (CPLHasPathTraversal(osFilename.c_str()))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s", osFilename.c_str());
+                return nullptr;
+            }
             CPLString osBasePath = CPLGetPathSafe(poOpenInfo->pszFilename);
             osFilename = CPLFormFilenameSafe(osBasePath, osFilename, nullptr);
         }

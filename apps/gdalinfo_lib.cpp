@@ -428,10 +428,6 @@ char *GDALInfo(GDALDatasetH hDataset, const GDALInfoOptions *psOptions)
     {
         json_object *poDescription =
             json_object_new_string(GDALGetDescription(hDataset));
-        json_object *poDriverShortName =
-            json_object_new_string(GDALGetDriverShortName(hDriver));
-        json_object *poDriverLongName =
-            json_object_new_string(GDALGetDriverLongName(hDriver));
         poJsonObject = json_object_new_object();
         poBands = json_object_new_array();
         poMetadata = json_object_new_object();
@@ -440,12 +436,19 @@ char *GDALInfo(GDALDatasetH hDataset, const GDALInfoOptions *psOptions)
         poStacEOBands = json_object_new_array();
 
         json_object_object_add(poJsonObject, "description", poDescription);
-        json_object_object_add(poJsonObject, "driverShortName",
-                               poDriverShortName);
-        json_object_object_add(poJsonObject, "driverLongName",
-                               poDriverLongName);
+        if (hDriver)
+        {
+            json_object *poDriverShortName =
+                json_object_new_string(GDALGetDriverShortName(hDriver));
+            json_object *poDriverLongName =
+                json_object_new_string(GDALGetDriverLongName(hDriver));
+            json_object_object_add(poJsonObject, "driverShortName",
+                                   poDriverShortName);
+            json_object_object_add(poJsonObject, "driverLongName",
+                                   poDriverLongName);
+        }
     }
-    else
+    else if (hDriver)
     {
         Concat(osStr, psOptions->bStdoutOutput, "Driver: %s/%s\n",
                GDALGetDriverShortName(hDriver), GDALGetDriverLongName(hDriver));
@@ -456,7 +459,8 @@ char *GDALInfo(GDALDatasetH hDataset, const GDALInfoOptions *psOptions)
         // The list of files of a raster FileGDB is not super useful and potentially
         // super long, so omit it, unless the -json mode is enabled
         char **papszFileList =
-            (!bJson && EQUAL(GDALGetDriverShortName(hDriver), "OpenFileGDB"))
+            (!bJson && hDriver &&
+             EQUAL(GDALGetDriverShortName(hDriver), "OpenFileGDB"))
                 ? nullptr
                 : GDALGetFileList(hDataset);
 
@@ -1463,7 +1467,8 @@ char *GDALInfo(GDALDatasetH hDataset, const GDALInfoOptions *psOptions)
             {
                 const bool bIsNoDataFloat =
                     eDT == GDT_Float32 &&
-                    static_cast<float>(dfNoData) == dfNoData;
+                    static_cast<double>(static_cast<float>(dfNoData)) ==
+                        dfNoData;
                 // Find the most compact decimal representation of the nodata
                 // value that can be used to exactly represent the binary value
                 int nSignificantDigits = bIsNoDataFloat ? 8 : 18;

@@ -13,6 +13,7 @@
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
@@ -1392,7 +1393,7 @@ CPLErr CPG_STOKESRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff,
 
     int m11, /* m12, */ m13, m14, /* m21, */ m22, m23, m24, step;
     int m31, m32, m33, m34, m41, m42, m43, m44;
-    CPGDataset *poGDS = reinterpret_cast<CPGDataset *>(poDS);
+    CPGDataset *poGDS = cpl::down_cast<CPGDataset *>(poDS);
 
     CPLErr eErr = poGDS->LoadStokesLine(nBlockYOff, bNativeOrder);
     if (eErr != CE_None)

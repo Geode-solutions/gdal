@@ -74,7 +74,7 @@ void removeTrailingZeros(std::string &s)
 void roundup(std::string &s)
 {
     // Remove a negative sign if it exists to make processing
-    // more straigtforward.
+    // more straightforward.
     bool negative(false);
     if (s[0] == '-')
     {
@@ -1261,11 +1261,29 @@ int OGRParseDate(const char *pszInput, OGRField *psField, int nOptions)
                 return FALSE;
             const double dfSeconds = CPLAtof(pszInput);
             // We accept second=60 for leap seconds
-            if (dfSeconds > 60.0)
+            if (dfSeconds >= 61.0)
                 return FALSE;
             psField->Date.Second = static_cast<float>(dfSeconds);
 
-            pszInput += 2;
+            // Avoid rounding 59.999xxx to 60.0f (or set second to zero and
+            // increment the minute value) where x is 9, but round to 59.999 as
+            // the maximum value representable on a float.
+            if (pszInput[0] == '5' && pszInput[1] == '9' &&
+                pszInput[2] == '.' && pszInput[3] == '9' &&
+                psField->Date.Second == 60.000f)
+            {
+                psField->Date.Second = 59.999f;
+            }
+
+            if ((nOptions & OGRPARSEDATE_OPTION_LAX) != 0 &&
+                !(pszInput[1] >= '0' && pszInput[1] <= '9'))
+            {
+                ++pszInput;
+            }
+            else
+            {
+                pszInput += 2;
+            }
             if (*pszInput == '.')
             {
                 ++pszInput;
@@ -2002,7 +2020,6 @@ double OGRFastAtof(const char *pszStr)
  * @param panPermutation an array of nSize elements.
  * @param nSize size of the array.
  * @return OGRERR_NONE if panPermutation is a permutation of [0, nSize - 1].
- * @since OGR 1.9.0
  */
 OGRErr OGRCheckPermutation(const int *panPermutation, int nSize)
 {
@@ -2283,7 +2300,8 @@ int OGRFormatFloat(char *pszBuffer, int nBufferLen, float fVal, int nPrecision,
 
     CPLsnprintf(szFormatting, sizeof(szFormatting), "%%.%d%c",
                 nInitialSignificantFigures, chConversionSpecifier);
-    nSize = CPLsnprintf(pszBuffer, nBufferLen, szFormatting, fVal);
+    nSize = CPLsnprintf(pszBuffer, nBufferLen, szFormatting,
+                        static_cast<double>(fVal));
     const char *pszDot = strchr(pszBuffer, '.');
 
     // Try to avoid 0.34999999 or 0.15000001 rounding issues by
@@ -2299,7 +2317,8 @@ int OGRFormatFloat(char *pszBuffer, int nBufferLen, float fVal, int nPrecision,
         {
             CPLsnprintf(szFormatting, sizeof(szFormatting), "%%.%d%c",
                         nInitialSignificantFigures - i, chConversionSpecifier);
-            nSize = CPLsnprintf(pszBuffer, nBufferLen, szFormatting, fVal);
+            nSize = CPLsnprintf(pszBuffer, nBufferLen, szFormatting,
+                                static_cast<double>(fVal));
             pszDot = strchr(pszBuffer, '.');
             if (pszDot != nullptr && strstr(pszDot, "99999") == nullptr &&
                 strstr(pszDot, "00000") == nullptr &&

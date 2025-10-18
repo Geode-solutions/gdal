@@ -125,6 +125,7 @@ void DeclareDeferredWCSPlugin(void);
 void CPL_DLL GDALRegister_WMS(void);
 void DeclareDeferredWMSPlugin(void);
 void CPL_DLL GDALRegister_HTTP(void);
+void CPL_DLL GDALRegister_GSAG(void);
 void CPL_DLL GDALRegister_GSBG(void);
 void CPL_DLL GDALRegister_GS7BG(void);
 void CPL_DLL GDALRegister_GRIB(void);
@@ -182,7 +183,7 @@ void CPL_DLL GDALRegister_WMTS(void);
 void DeclareDeferredWMTSPlugin(void);
 void CPL_DLL GDALRegister_SAFE(void);
 void CPL_DLL GDALRegister_SENTINEL2(void);
-void CPL_DLL GDALRegister_mrf(void);
+void CPL_DLL GDALRegister_MRF(void);
 void DeclareDeferredMRFPlugin(void);
 void CPL_DLL GDALRegister_RRASTER(void);
 void CPL_DLL GDALRegister_Derived(void);
@@ -219,6 +220,7 @@ void CPL_DLL GDALRegister_NOAA_B(void);
 void CPL_DLL GDALRegister_NSIDCbin(void);
 void CPL_DLL GDALRegister_SNAP_TIFF(void);
 void CPL_DLL GDALRegister_RCM(void);
+void CPL_DLL GDALRegister_MiraMon(void);
 void CPL_DLL GDALRegister_GDALG(void);
 CPL_C_END
 

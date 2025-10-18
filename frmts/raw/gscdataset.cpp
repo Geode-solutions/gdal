@@ -13,6 +13,7 @@
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "rawdataset.h"
 
 #include <algorithm>
@@ -35,7 +36,7 @@ class GSCDataset final : public RawDataset
 
   public:
     GSCDataset() = default;
-    ~GSCDataset();
+    ~GSCDataset() override;
 
     CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 

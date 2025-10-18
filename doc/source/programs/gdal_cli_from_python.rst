@@ -16,7 +16,7 @@ function.
 
    Run a GDAL algorithm and return it.
 
-   .. versionadded: 3.11
+   .. versionadded:: 3.11
 
    :param alg: Path to the algorithm or algorithm instance itself. For example "raster info", or ["raster", "info"] or "raster", "info".
    :type alg: str, list[str], tuple[str], Algorithm
@@ -153,3 +153,19 @@ Vector commands examples
 
         gdal.UseExceptions()
         gdal.Run("vector", "convert", input="in.shp", output="out.gpkg", overwrite=True)
+
+
+Pipeline examples
+-----------------
+
+.. example::
+   :title: Perform raster reprojection and gets the result as a streamed dataset.
+
+   .. code-block:: python
+
+        from osgeo import gdal
+
+        gdal.UseExceptions()
+        with gdal.Run("pipeline", pipeline="read byte.tif ! reproject --dst-crs EPSG:4326 --resampling cubic") as alg:
+            ds = alg.Output()
+            # do something with the dataset

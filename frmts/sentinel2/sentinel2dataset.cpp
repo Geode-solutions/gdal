@@ -13,6 +13,7 @@
 
 #include "cpl_minixml.h"
 #include "cpl_string.h"
+#include "gdal_frmts.h"
 #include "gdal_pam.h"
 #include "ogr_spatialref.h"
 #include "ogr_geometry.h"
@@ -197,9 +198,9 @@ class SENTINEL2Dataset final : public VRTDataset
 
   public:
     SENTINEL2Dataset(int nXSize, int nYSize);
-    virtual ~SENTINEL2Dataset();
+    ~SENTINEL2Dataset() override;
 
-    virtual char **GetFileList() override;
+    char **GetFileList() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static GDALDataset *OpenL1BUserProduct(GDALOpenInfo *);
@@ -238,10 +239,9 @@ class SENTINEL2AlphaBand final : public VRTSourcedRasterBand
                        int nXSize, int nYSize, int nSaturatedVal,
                        int nNodataVal);
 
-    virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, GSpacing nPixelSpace,
-                             GSpacing nLineSpace,
-                             GDALRasterIOExtraArg *psExtraArg) override;
+    CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
+                     GDALDataType, GSpacing nPixelSpace, GSpacing nLineSpace,
+                     GDALRasterIOExtraArg *psExtraArg) override;
 };
 
 /************************************************************************/
@@ -933,7 +933,7 @@ static bool SENTINEL2GetGranuleList(
     }
 
     CPLString osDirname(CPLGetDirnameSafe(pszFilename));
-#ifdef HAVE_READLINK
+#if !defined(_WIN32)
     char szPointerFilename[2048];
     int nBytes = static_cast<int>(
         readlink(pszFilename, szPointerFilename, sizeof(szPointerFilename)));
@@ -1082,6 +1082,13 @@ static bool SENTINEL2GetGranuleList(
             osGranuleMTDPath += pszGranuleId;
             osGranuleMTDPath += chSeparator;
             osGranuleMTDPath += osGranuleMTD;
+            if (CPLHasPathTraversal(osGranuleMTDPath.c_str()))
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "Path traversal detected in %s",
+                         osGranuleMTDPath.c_str());
+                return false;
+            }
             osList.push_back(std::move(osGranuleMTDPath));
         }
     }
@@ -2433,6 +2440,12 @@ SENTINEL2Dataset::OpenL1BSubdatasetWithGeoloc(GDALOpenInfo *poOpenInfo)
             .append(achSeparator)
             .append(CPLString(osDatastrip).replaceAll("_MSI_", "_MTD_"))
             .append(".xml");
+    if (CPLHasPathTraversal(osXMLDatastrip.c_str()))
+    {
+        CPLError(CE_Failure, CPLE_NotSupported, "Path traversal detected in %s",
+                 osXMLDatastrip.c_str());
+        return nullptr;
+    }
     CPLXMLTreeCloser poXML(CPLParseXMLFile(osXMLDatastrip.c_str()));
     if (!poXML)
     {
@@ -2700,7 +2713,7 @@ static bool SENTINEL2GetGranuleList_L1CSafeCompact(
     }
 
     CPLString osDirname(CPLGetDirnameSafe(pszFilename));
-#ifdef HAVE_READLINK
+#if !defined(_WIN32)
     char szPointerFilename[2048];
     int nBytes = static_cast<int>(
         readlink(pszFilename, szPointerFilename, sizeof(szPointerFilename)));
@@ -2740,6 +2753,13 @@ static bool SENTINEL2GetGranuleList_L1CSafeCompact(
             }
             L1CSafeCompatGranuleDescription oDesc;
             oDesc.osBandPrefixPath = osDirname + chSeparator + pszImageFile;
+            if (CPLHasPathTraversal(oDesc.osBandPrefixPath.c_str()))
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "Path traversal detected in %s",
+                         oDesc.osBandPrefixPath.c_str());
+                return false;
+            }
             oDesc.osBandPrefixPath.resize(oDesc.osBandPrefixPath.size() -
                                           3);  // strip B12
             // GRANULE/L1C_T30TXT_A007999_20170102T111441/IMG_DATA/T30TXT_20170102T111442_B12
@@ -2792,7 +2812,7 @@ static bool SENTINEL2GetGranuleList_L2ASafeCompact(
     }
 
     CPLString osDirname(CPLGetDirnameSafe(pszFilename));
-#ifdef HAVE_READLINK
+#if !defined(_WIN32)
     char szPointerFilename[2048];
     int nBytes = static_cast<int>(
         readlink(pszFilename, szPointerFilename, sizeof(szPointerFilename)));
@@ -2841,6 +2861,13 @@ static bool SENTINEL2GetGranuleList_L2ASafeCompact(
             {
                 CPLDebug("SENTINEL2", "Band prefix path too short");
                 continue;
+            }
+            if (CPLHasPathTraversal(oDesc.osBandPrefixPath.c_str()))
+            {
+                CPLError(CE_Failure, CPLE_NotSupported,
+                         "Path traversal detected in %s",
+                         oDesc.osBandPrefixPath.c_str());
+                return false;
             }
             oDesc.osBandPrefixPath.resize(oDesc.osBandPrefixPath.size() - 36);
             // GRANULE/L1C_T30TXT_A007999_20170102T111441/IMG_DATA/T30TXT_20170102T111442_B12_60m

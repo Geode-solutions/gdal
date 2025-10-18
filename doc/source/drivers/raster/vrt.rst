@@ -527,6 +527,11 @@ normalized (defaults to false=0).  The size must always be an odd number,
 and the Coefs must have Size * Size entries separated by spaces.  For now
 kernel is not applied to sub-sampled or over-sampled data.
 
+At the top edge, the values of the first row are replicated to virtually extend
+the source window by a number of rows equal to the radius of the kernel. And
+similarly for the bottom, left and right edges. This strategy may potentially
+lead to unexpected results depending on the applied kernel.
+
 .. code-block:: xml
 
     <KernelFilteredSource>
@@ -538,7 +543,7 @@ kernel is not applied to sub-sampled or over-sampled data.
       </Kernel>
     </KernelFilteredSource>
 
-Starting with GDAL 2.3, a separable kernel may also be used.  In this case the
+A separable kernel may also be used.  In this case the
 number of Coefs entries should correspond to the Size.  The Coefs specify a
 one-dimensional kernel which is applied along each axis in succession, resulting
 in far quicker execution. Many common image-processing filters are separable.
@@ -553,6 +558,26 @@ For example, a Gaussian blur:
         <Size>13</Size>
         <Coefs>0.01111 0.04394 0.13534 0.32465 0.60653 0.8825 1.0 0.8825 0.60653 0.32465 0.13534 0.04394 0.01111</Coefs>
       </Kernel>
+    </KernelFilteredSource>
+
+
+Starting with GDAL 3.12, a Function element can be set as a child of KernelFilteredSource
+and take values ``min``, ``max``, ``stddev``, ``median`` or ``mode``.
+
+For example to compute the median value in a 3x3 neighborhood around each pixel:
+
+.. code-block:: xml
+
+    <KernelFilteredSource>
+      <SourceFilename>/debian/home/warmerda/openev/utm.tif</SourceFilename>
+      <SourceBand>1</SourceBand>
+      <Kernel>
+        <Size>3</Size>
+        <Coefs>1 1 1
+               1 1 1
+               1 1 1</Coefs>
+      </Kernel>
+      <Function>median</Function>
     </KernelFilteredSource>
 
 NoDataFromMaskSource
@@ -795,12 +820,18 @@ Except if (from top priority to lesser priority) :
 - (starting with GDAL 3.2) explicit virtual overviews, if a **OverviewList** element
   is declared in the VRTDataset element (see above).
   Those virtual overviews will be hidden by external .vrt.ovr overviews that might be built later.
-- (starting with GDAL 2.1) implicit virtual overviews, if the VRTRasterBand are made of
+- Implicit virtual overviews, if the VRTRasterBand are made of
   a single SimpleSource or ComplexSource that has overviews.
   Those virtual overviews will be hidden by external .vrt.ovr overviews that might be built later.
 
+.. _vrtrawrasterband:
+
 .vrt Descriptions for Raw Files
 -------------------------------
+
+.. warning:: Consult the :ref:`vrtrawrasterband_restricted_access` below
+             section for potential security issues related to that functionality
+             and how to restrict it.
 
 So far we have described how to derive new virtual datasets from existing
 files supported by GDAL.  However, it is also common to need to utilize
@@ -852,8 +883,6 @@ A few other notes:
 
 - The VRTRawRasterBand supports in place update of the raster, whereas the source based VRTRasterBand is always read-only.
 
-- The OpenEV tool includes a File menu option to input parameters describing a raw raster file in a GUI and create the corresponding .vrt file.
-
 - Multiple bands in the one .vrt file can come from the same raw file. Just ensure that the ImageOffset, PixelOffset, and LineOffset definition for each band is appropriate for the pixels of that particular band.
 
 Another example, in this case a 400x300 RGB pixel interleaved image.
@@ -883,6 +912,59 @@ Another example, in this case a 400x300 RGB pixel interleaved image.
         <LineOffset>1200</LineOffset>
     </VRTRasterBand>
     </VRTDataset>
+
+.. _vrtrawrasterband_restricted_access:
+
+Restricting access to Raw Files
+-------------------------------
+
+Some usages of GDAL, for example its use on a server that allows users to upload
+a (VRT) file, convert it to another format, and get the result back,
+could be abused to read the content of local files. Starting with GDAL 3.12, it
+is possible to restrict the use of the VRTRawRasterBand capability in several
+ways:
+
+- at build time, the CMake ``GDAL_VRT_ENABLE_RAWRASTERBAND`` variable can be set
+  to ``OFF``, to complete disable VRTRawRasterBand.
+
+- at runtime, with the following configuration options:
+
+  * .. config:: GDAL_VRT_ENABLE_RAWRASTERBAND
+       :choices: YES, NO
+       :default: YES
+       :since: 3.12
+
+       Whether the VRTRawRasterBand capability is allowed at runtime.
+
+  * .. config:: GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE
+       :choices: SIBLING_OR_CHILD_OF_VRT_PATH, ONLY_REMOTE, ALL, <path>
+       :default: SIBLING_OR_CHILD_OF_VRT_PATH
+       :since: 3.12
+
+       Restricts which SourceFilename values are allowed:
+
+       - if set to ``SIBLING_OR_CHILD_OF_VRT_PATH`` (which is the default value of
+         that configuration option starting with GDAL 3.12), the ``relativeToVRT``
+         attribute of ``SourceFilename`` will need to set to ``1``, and the path
+         expressed by ``SourceFilename`` must not contain any `../` or `..\\` substring.
+         Note that GDAL does not try to detect if one of the files, in the file
+         hierarchy below the directory of the VRT, is a symbolic link pointing to
+         elsewhere in the file system.
+
+       - if set to ``ONLY_REMOTE``, only ``SourceFilename`` pointing to one of the
+         :ref:`VSI network based file systems <network_based_file_systems>` will be
+         allowed. Be careful though that this could still be used to access files
+         accessible on a local network, depending on the network configuration of the
+         machine on which GDAL is run.
+
+       - if set to ``ALL`` there is no restriction on the value of  ``SourceFilename``.
+
+       - if set to one absolute path (or several ones, separated by the ``;`` (semi-colon) character
+         on Windows, or ``:`` (colon) on other operating systems), only ``SourceFilename`` that
+         start with those allowed absolute paths will be accepted.
+
+In versions before GDAL 3.12, disabling entirely the VRT driver by setting the
+:config:`GDAL_SKIP` configuration option to ``VRT`` may be a workaround.
 
 Creation of VRT Datasets
 ------------------------
@@ -1131,6 +1213,14 @@ GDAL provides a set of default pixel functions that can be used without writing 
      - Number of input sources
      - PixelFunctionArguments
      - Description
+   * - **argmax**
+     - >= 1
+     - ``propagateNoData`` (optional, default=false)
+     - (GDAL >= 3.12) Index (1-based, contrary to ``numpy.argmax``) of band with the maximum value
+   * - **argmin**
+     - >= 1
+     - ``propagateNoData`` (optional, default=false)
+     - (GDAL >= 3.12) Index (1-based, contrary to ``numpy.argmin``) of band with the minimum value
    * - **cmul**
      - 2
      - -
@@ -1232,7 +1322,7 @@ GDAL provides a set of default pixel functions that can be used without writing 
 
        the output value. Otherwise, NoData pixels will be passed to the expression
 
-       as-is. The expression can then use the ``NODATA`` variable (or ``isnodata`` 
+       as-is. The expression can then use the ``NODATA`` variable (or ``isnodata``
 
        muparser function) to test for these pixels and handle them accordingly.
 
@@ -1254,6 +1344,8 @@ GDAL provides a set of default pixel functions that can be used without writing 
        can be included in the expression if the derived band has a NoData value.
 
        ExprTk and muparser support a number of built-in functions and control structures.
+
+       Since GDAL 3.12, the function standard C++ function ``fmod`` is added to muparser.
 
        Refer to the documentation of those libraries for details.
    * - **geometric_mean**
@@ -1942,9 +2034,9 @@ configuration option is not defined, it will look for a "python" binary in the
 directories of the PATH and will try to determine the related shared object
 (it will retry with "python3" if no "python" has been found). If the above
 was not successful, then a predefined list of shared objects names
-will be tried. At the time of writing, the order of versions searched is
-3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.7, 3.6, 3.5, 3.4, 3.3, 3.2. Enabling debug information (:config:`CPL_DEBUG=ON`) will
-show which Python version is used.
+will be tried. As of GDAL 3.12, the order of versions searched is
+3.8, 3.9, 3.10, 3.11, 3.12, 3.13, 3.14, 3.7, 3.6, 3.5.
+Enabling debug information (:config:`CPL_DEBUG=ON`) will show which Python version is used.
 
 Just-in-time compilation
 ++++++++++++++++++++++++
@@ -2090,8 +2182,6 @@ GDALWarpOptions element which describe the warping options.
 
 Pansharpened VRT
 ----------------
-
-.. versionadded:: 2.1
 
 A VRT can describe a dataset resulting from a
 `pansharpening operation <https://en.wikipedia.org/wiki/Pansharpened_image>`_
@@ -2501,39 +2591,6 @@ configuration option.
 
 Note that the number of threads actually used is also limited by the
 :config:`GDAL_MAX_DATASET_POOL_SIZE` configuration option.
-
-Multi-threading issues
-----------------------
-
-.. warning::
-
-    The below section applies to GDAL <= 2.2. Starting with GDAL 2.3, the use
-    of VRT datasets is subject to the standard GDAL dataset multi-threaded rules
-    (that is a VRT dataset handle may only be used by a same thread at a time,
-    but you may open several dataset handles on the same VRT file and use them
-    in different threads)
-
-When using VRT datasets in a multi-threading environment, you should be
-careful to open the VRT dataset by the thread that will use it afterwards. The
-reason for that is that the VRT dataset uses :cpp:func:`GDALOpenShared` when opening the
-underlying datasets. So, if you open twice the same VRT dataset by the same
-thread, both VRT datasets will share the same handles to the underlying
-datasets.
-
-The shared attribute, on the SourceFilename indicates whether the
-dataset should be shared (value is 1) or not (value is 0). The default is 1.
-If several VRT datasets referring to the same underlying sources are used in a multithreaded context,
-shared should be set to 0. Alternatively, the :config:`VRT_SHARED_SOURCE` configuration
-option can be set to ``NO`` to force non-shared mode:
-
--  .. config:: VRT_SHARED_SOURCE
-      :choices: YES, NO
-      :default: YES
-
-      Determines whether a VRT dataset should open its underlying sources in
-      shared mode, for ``SourceFilename`` elements that do not specify a
-      ``shared`` attribute. When the ``shared`` attribute is present this
-      configuration option is ignored.
 
 Performance considerations
 --------------------------

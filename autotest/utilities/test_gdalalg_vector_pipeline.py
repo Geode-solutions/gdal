@@ -200,12 +200,18 @@ def test_gdalalg_vector_pipeline_output_through_api(tmp_vsimem):
         assert ds.GetLayer(0).GetFeatureCount() == 10
 
 
-def test_gdalalg_vector_pipeline_as_api_error():
+def test_gdalalg_vector_pipeline_mutually_exclusive_args():
 
-    pipeline = get_pipeline_alg()
-    pipeline["pipeline"] = "read"
-    with pytest.raises(Exception, match="pipeline: At least 2 steps must be provided"):
-        pipeline.Run()
+    with pytest.raises(
+        Exception, match="clip: Argument 'like' is mutually exclusive with 'bbox'"
+    ):
+        gdal.Run(
+            "vector pipeline",
+            input="../ogr/data/poly.shp",
+            output_format="MEM",
+            output="",
+            pipeline="read ! clip --bbox=1,2,3,4 --like=../ogr/data/poly.shp ! write",
+        )
 
 
 def test_gdalalg_vector_pipeline_usage_as_json():
@@ -227,10 +233,7 @@ def test_gdalalg_vector_pipeline_help_doc():
     out = gdaltest.runexternal(f"{gdal_path} vector pipeline --help-doc=main")
 
     assert "Usage: gdal vector pipeline [OPTIONS] <PIPELINE>" in out
-    assert (
-        "<PIPELINE> is of the form: read|concat [READ-OPTIONS] ( ! <STEP-NAME> [STEP-OPTIONS] )* ! write [WRITE-OPTIONS]"
-        in out
-    )
+    assert "<PIPELINE> is of the form:" in out
 
     out = gdaltest.runexternal(f"{gdal_path} vector pipeline --help-doc=edit")
 
@@ -332,11 +335,13 @@ def test_gdalalg_vector_pipeline_missing_at_run():
 def test_gdalalg_vector_pipeline_empty_args():
 
     pipeline = get_pipeline_alg()
-    with pytest.raises(Exception, match="pipeline: At least 2 steps must be provided"):
+    with pytest.raises(
+        Exception, match="pipeline: At least one step must be provided in a pipeline"
+    ):
         pipeline.ParseRunAndFinalize([])
 
 
-def test_gdalalg_vector_pipeline_unknow_step():
+def test_gdalalg_vector_pipeline_unknown_step():
 
     pipeline = get_pipeline_alg()
     with pytest.raises(Exception, match="pipeline: unknown step name: unknown_step"):
@@ -356,7 +361,9 @@ def test_gdalalg_vector_pipeline_unknow_step():
 def test_gdalalg_vector_pipeline_read_read():
 
     pipeline = get_pipeline_alg()
-    with pytest.raises(Exception, match="pipeline: Last step should be 'write'"):
+    with pytest.raises(
+        Exception, match="pipeline: 'read' is only allowed as a first step"
+    ):
         pipeline.ParseRunAndFinalize(
             ["read", "../ogr/data/poly.shp", "!", "read", "../ogr/data/poly.shp"]
         )
@@ -504,7 +511,7 @@ def test_gdalalg_vector_pipeline_write_options(tmp_vsimem):
     pipeline = get_pipeline_alg()
     with pytest.raises(
         Exception,
-        match="already exists. Specify the --overwrite option to overwrite it",
+        match="already exists",
     ):
         assert pipeline.ParseRunAndFinalize(
             ["read", "../ogr/data/poly.shp", "!", "write", out_filename]
@@ -937,3 +944,77 @@ def test_gdalalg_vector_pipeline_help():
         f"{gdal_path} vector pipeline read foo.shp ! select --help"
     )
     assert out.startswith("Usage: select [OPTIONS] <FIELDS>")
+
+
+def test_gdalalg_vector_pipeline_skip_errors(tmp_vsimem):
+
+    src_ds = gdal.GetDriverByName("MEM").CreateVector("")
+    lyr = src_ds.CreateLayer("test")
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(1 2)"))
+    lyr.CreateFeature(f)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt("LINESTRING(1 2, 3 4)"))
+    lyr.CreateFeature(f)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(3 4)"))
+    lyr.CreateFeature(f)
+
+    alg = get_pipeline_alg()
+    alg["input"] = src_ds
+    alg["output"] = tmp_vsimem / "out.shp"
+
+    assert alg.ParseCommandLineArguments(["read", "!", "write", "--skip-errors"])
+    assert alg.Run()
+
+    out_ds = alg["output"].GetDataset()
+    assert out_ds.GetLayer(0).GetFeatureCount() == 2
+
+
+def test_gdalalg_vector_pipeline_info():
+
+    with gdal.Run(
+        "vector",
+        "pipeline",
+        pipeline="read ../ogr/data/poly.shp ! info",
+    ) as alg:
+        assert "layers" in alg.Output()
+
+
+def test_gdalalg_vector_pipeline_info_executable():
+
+    import gdaltest
+    import test_cli_utilities
+
+    gdal_path = test_cli_utilities.get_gdal_path()
+    if gdal_path is None:
+        pytest.skip("gdal binary missing")
+
+    out = gdaltest.runexternal(
+        f"{gdal_path} vector pipeline read ../ogr/data/poly.shp ! info"
+    )
+    assert out.startswith("INFO: Open of `../ogr/data/poly.shp'")
+
+
+@pytest.mark.require_driver("GPKG")
+def test_gdalalg_vector_pipeline_read_limit(tmp_vsimem):
+
+    src_filename = tmp_vsimem / "src.gpkg"
+    dst_filename = tmp_vsimem / "dst.gpkg"
+
+    src_ds = gdal.GetDriverByName("GPKG").CreateVector(src_filename)
+    layers = [src_ds.CreateLayer("layer1"), src_ds.CreateLayer("layer2")]
+
+    for lyr in layers:
+        for _ in range(5):
+            f = ogr.Feature(lyr.GetLayerDefn())
+            lyr.CreateFeature(f)
+
+    pipeline = get_pipeline_alg()
+    assert pipeline.ParseRunAndFinalize(
+        ["read", src_filename, "!", "limit", "3", "!", "write", dst_filename]
+    )
+
+    with gdal.OpenEx(dst_filename) as ds:
+        assert ds.GetLayer(0).GetFeatureCount() == 3
+        assert ds.GetLayer(1).GetFeatureCount() == 3

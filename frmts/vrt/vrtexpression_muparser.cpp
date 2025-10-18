@@ -24,6 +24,11 @@ namespace gdal
 
 /*! @cond Doxygen_Suppress */
 
+static mu::value_type fmod(mu::value_type x, mu::value_type y)
+{
+    return std::fmod(x, y);
+}
+
 static mu::value_type isnan(mu::value_type x)
 {
     return std::isnan(x);
@@ -75,6 +80,18 @@ template <typename T> void DefineIsNoDataFunction(T &parser)
 }
 
 }  // namespace
+
+bool MuParserHasDefineFunUserData()
+{
+    if constexpr (HasDefineFunUserData<mu::Parser>::value)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
 
 static std::optional<std::string> Sanitize(const std::string &osVariable)
 {
@@ -163,6 +180,7 @@ class MuParserExpression::Impl
         try
         {
             m_oParser.DefineFun(_T("isnan"), isnan);
+            m_oParser.DefineFun(_T("fmod"), fmod);
 
             // Check to see if a NODATA variable has been defined and, if so,
             // bind it to the isnodata() function

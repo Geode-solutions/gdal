@@ -8,7 +8,7 @@
 
 .. only:: html
 
-    Process a vector dataset.
+    Process a vector dataset applying several steps.
 
 .. Index:: gdal vector pipeline
 
@@ -20,14 +20,21 @@ perform various processing steps that accept vector and generate vector.
 
 For pipelines mixing raster and vector, consult :ref:`gdal_pipeline`.
 
+Most steps proceed in on-demand evaluation of features,
+unless otherwise stated in their documentation, without "materializing" the
+resulting dataset of the operation of each step. It may be desirable sometimes
+for performance purposes to proceed to materializing an intermediate dataset
+to disk using :ref:`gdal_vector_materialize`.
+
 Synopsis
 --------
 
 .. program-output:: gdal vector pipeline --help-doc=main
 
 A pipeline chains several steps, separated with the `!` (exclamation mark) character.
-The first step must be ``read`` or ``concat``, and the last one ``write``. Each step has its
-own positional or non-positional arguments. Apart from ``read``, ``concat`` and ``write``,
+The first step must be ``read`` or ``concat``, and the last one ``info``, ``partition`` or ``write``. Each step has its
+own positional or non-positional arguments.
+Apart from ``read``, ``concat``, ``info``, ``partition`` and ``write``,
 all other steps can potentially be used several times in a pipeline.
 
 Potential steps are:
@@ -72,11 +79,21 @@ Details for options can be found in :ref:`gdal_vector_explode_collections`.
 
 Details for options can be found in :ref:`gdal_vector_filter`.
 
+* limit
+
+.. program-output:: gdal vector pipeline --help-doc=limit
+
 * make-valid
 
 .. program-output:: gdal vector pipeline --help-doc=make-valid
 
 Details for options can be found in :ref:`gdal_vector_make_valid`.
+
+* materialize
+
+.. program-output:: gdal vector pipeline --help-doc=materialize
+
+Details for options can be found in :ref:`gdal_vector_materialize`.
 
 * reproject
 
@@ -95,6 +112,12 @@ Details for options can be found in :ref:`gdal_vector_segmentize`.
 .. program-output:: gdal vector pipeline --help-doc=select
 
 Details for options can be found in :ref:`gdal_vector_select`.
+
+* set-field-type
+
+.. program-output:: gdal vector pipeline --help-doc=set-field-type
+
+Details for options can be found in :ref:`gdal_vector_set_field_type`.
 
 * set-geom-type
 
@@ -125,6 +148,22 @@ Details for options can be found in :ref:`gdal_vector_sql`.
 .. program-output:: gdal vector pipeline --help-doc=swap-xy
 
 Details for options can be found in :ref:`gdal_vector_swap_xy`.
+
+* info
+
+.. versionadded:: 3.12
+
+.. program-output:: gdal vector pipeline --help-doc=info
+
+Details for options can be found in :ref:`gdal_vector_info`.
+
+* partition
+
+.. versionadded:: 3.12
+
+.. program-output:: gdal vector pipeline --help-doc=partition
+
+Details for options can be found in :ref:`gdal_vector_partition`.
 
 * write
 
@@ -160,6 +199,30 @@ The final ``write`` step can be added but if so it must explicitly specify the
     }
 
 
+
+Substitutions
+-------------
+
+.. versionadded:: 3.12
+
+It is possible to use :program:`gdal pipeline` to use a pipeline already
+serialized in a .gdal.json file, and customize its existing steps, typically
+changing an input filename, specifying an output filename, or adding/modifying arguments
+of steps.
+
+See :ref:`gdal_pipeline_substitutions`.
+
+
+Nested pipeline
+---------------
+
+.. versionadded:: 3.12
+
+.. include:: gdal_cli_include/gdal_nested_pipeline_intro.rst
+
+See :ref:`gdal_nested_pipeline`.
+
+
 Examples
 --------
 
@@ -168,14 +231,14 @@ Examples
 
    .. code-block:: bash
 
-        $ gdal vector pipeline --progress ! read in.gpkg ! reproject --dst-crs=EPSG:32632 ! write out.gpkg --overwrite
+        $ gdal vector pipeline ! read in.gpkg ! reproject --dst-crs=EPSG:32632 ! write out.gpkg --overwrite
 
 .. example::
    :title: Serialize the command of a reprojection of a GeoPackage file in a GDALG file, and later read it
 
    .. code-block:: bash
 
-        $ gdal vector pipeline --progress ! read in.gpkg ! reproject --dst-crs=EPSG:32632 ! write in_epsg_32632.gdalg.json --overwrite
+        $ gdal vector pipeline ! read in.gpkg ! reproject --dst-crs=EPSG:32632 ! write in_epsg_32632.gdalg.json --overwrite
         $ gdal vector info in_epsg_32632.gdalg.json
 
 .. example:: Union 2 source shapefiles (with similar structure), reproject them to EPSG:32632, keep only cities larger than 1 million inhabitants and write to a GeoPackage
@@ -183,4 +246,4 @@ Examples
 
    .. code-block:: bash
 
-        $ gdal vector pipeline --progress ! concat --single --dst-crs=EPSG:32632 france.shp belgium.shp ! filter --where "pop > 1e6" ! write out.gpkg --overwrite
+        $ gdal vector pipeline ! concat --single --dst-crs=EPSG:32632 france.shp belgium.shp ! filter --where "pop > 1e6" ! write out.gpkg --overwrite

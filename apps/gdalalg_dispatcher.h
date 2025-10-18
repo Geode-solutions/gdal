@@ -33,10 +33,11 @@ class GDALDispatcherAlgorithm : public GDALAlgorithm
                             const std::string &helpURL)
         : GDALAlgorithm(name, description, helpURL),
           m_rasterDispatcher(std::make_unique<RasterDispatcher>(
-              /* openForMixedRasterVector = */ true)),
-          m_vectorDispatcher(std::make_unique<VectorDispatcher>())
+              /* standalone = */ true, /* openForMixedRasterVector = */ true)),
+          m_vectorDispatcher(
+              std::make_unique<VectorDispatcher>(/* standalone = */ true))
     {
-        // A "info" dispacher command is a shortcut for something like
+        // A "info" dispatcher command is a shortcut for something like
         // "raster info", "vector info". Best to expose the latter.
         SetDisplayInJSONUsage(false);
     }
@@ -70,6 +71,9 @@ template <class RasterDispatcher, class VectorDispatcher>
 bool GDALDispatcherAlgorithm<RasterDispatcher, VectorDispatcher>::
     ParseCommandLineArguments(const std::vector<std::string> &args)
 {
+    if (args.size() == 1 && (args[0] == "-h" || args[0] == "--help"))
+        return GDALAlgorithm::ParseCommandLineArguments(args);
+
     // We first try to process with the raster specific algorithm (that has
     // been instantiated in a special way to accept both raster and vector
     // input datasets). If the raster specific algorithm can parse successfully
@@ -102,7 +106,7 @@ bool GDALDispatcherAlgorithm<RasterDispatcher, VectorDispatcher>::
 
     if (ok)
     {
-        auto poDS = m_rasterDispatcher->GetDatasetRef();
+        auto poDS = m_rasterDispatcher->GetInputDatasetRef();
         // cppcheck-suppress knownConditionTrueFalse
         if (poDS &&
             (poDS->GetRasterCount() > 0 || poDS->GetMetadata("SUBDATASETS")))
@@ -131,18 +135,21 @@ bool GDALDispatcherAlgorithm<RasterDispatcher, VectorDispatcher>::
         return false;
     }
 
-    auto poDSFromRaster = m_rasterDispatcher->GetDatasetRef();
+    auto poDSFromRaster = m_rasterDispatcher->GetInputDatasetRef();
     // cppcheck-suppress knownConditionTrueFalse
     if (poDSFromRaster)
     {
-        m_vectorDispatcher->SetDataset(poDSFromRaster);
+        m_vectorDispatcher->SetInputDataset(poDSFromRaster);
     }
 
     std::vector<std::string> argsWithoutInput;
     bool skipNext = false;
+    std::string osLikelyDatasetName;
+    size_t nCountLikelyDatasetName = 0;
     for (const auto &arg : args)
     {
-        if (arg == "-i" || arg == "--input")
+        if (arg == "-i" || arg == "--input" || arg == "-f" || arg == "--of" ||
+            arg == "--output-format" || arg == "--format")
         {
             skipNext = true;
         }
@@ -151,6 +158,11 @@ bool GDALDispatcherAlgorithm<RasterDispatcher, VectorDispatcher>::
             if (!STARTS_WITH(arg.c_str(), "--input=") &&
                 !(poDSFromRaster && arg == poDSFromRaster->GetDescription()))
             {
+                if (!arg.empty() && arg[0] != '-')
+                {
+                    ++nCountLikelyDatasetName;
+                    osLikelyDatasetName = arg;
+                }
                 argsWithoutInput.push_back(arg);
             }
         }
@@ -202,7 +214,7 @@ bool GDALDispatcherAlgorithm<RasterDispatcher, VectorDispatcher>::
                     }
                     m_rasterDispatcher = std::make_unique<RasterDispatcher>();
                     auto poDSRaw = poDS.get();
-                    m_rasterDispatcher->SetDataset(poDS.release());
+                    m_rasterDispatcher->SetInputDataset(poDS.release());
                     poDSRaw->Release();
                     m_selectedSubAlg = m_rasterDispatcher.get();
                     std::vector<std::string> callPath(m_callPath);
@@ -215,7 +227,7 @@ bool GDALDispatcherAlgorithm<RasterDispatcher, VectorDispatcher>::
                 {
                     m_vectorDispatcher = std::make_unique<VectorDispatcher>();
                     auto poDSRaw = poDS.get();
-                    m_vectorDispatcher->SetDataset(poDS.release());
+                    m_vectorDispatcher->SetInputDataset(poDS.release());
                     poDSRaw->Release();
                     m_selectedSubAlg = m_vectorDispatcher.get();
                     std::vector<std::string> callPath(m_callPath);
@@ -230,7 +242,9 @@ bool GDALDispatcherAlgorithm<RasterDispatcher, VectorDispatcher>::
     }
 
     if (!ret && !managedToOpenDS &&
-        osLastError.find("not recognized") != std::string::npos)
+        (osLastError.find("not recognized") != std::string::npos ||
+         (nCountLikelyDatasetName == 1 &&
+          cpl::starts_with(osLastError, osLikelyDatasetName))))
     {
         CPLError(CE_Failure, CPLE_AppDefined, "%s", osLastError.c_str());
     }

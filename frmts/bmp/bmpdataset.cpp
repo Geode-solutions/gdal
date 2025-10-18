@@ -15,6 +15,11 @@
 #include "cpl_string.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_colortable.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 
 #include <limits>
 
@@ -310,7 +315,7 @@ BMPRasterBand::BMPRasterBand(BMPDataset *poDSIn, int nBandIn)
              nBand, nBlockXSize, nBlockYSize, nScanSize);
 #endif
 
-    pabyScan = static_cast<GByte *>(VSIMalloc(nScanSize));
+    pabyScan = static_cast<GByte *>(VSI_MALLOC_VERBOSE(nScanSize));
 }
 
 /************************************************************************/
@@ -1633,7 +1638,15 @@ GDALDataset *BMPDataset::Create(const char *pszFilename, int nXSize, int nYSize,
     /* -------------------------------------------------------------------- */
     for (int iBand = 1; iBand <= poDS->nBands; iBand++)
     {
-        poDS->SetBand(iBand, new BMPRasterBand(poDS, iBand));
+        auto band = new BMPRasterBand(poDS, iBand);
+        poDS->SetBand(iBand, band);
+        if (band->pabyScan == nullptr)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined, "Image with (%d) too large.",
+                     poDS->nRasterXSize);
+            delete poDS;
+            return nullptr;
+        }
     }
 
     /* -------------------------------------------------------------------- */
@@ -1642,7 +1655,7 @@ GDALDataset *BMPDataset::Create(const char *pszFilename, int nXSize, int nYSize,
     if (CPLFetchBool(papszOptions, "WORLDFILE", false))
         poDS->bGeoTransformValid = TRUE;
 
-    return (GDALDataset *)poDS;
+    return poDS;
 }
 
 /************************************************************************/

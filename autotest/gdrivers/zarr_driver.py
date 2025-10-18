@@ -3516,9 +3516,7 @@ def test_zarr_create_append_subdataset(tmp_vsimem):
     check()
 
 
-@pytest.mark.parametrize(
-    "blocksize", ["1,2", "2,2,0", "4000000000,4000000000,4000000000"]
-)
+@pytest.mark.parametrize("blocksize", ["1,2", "4000000000,4000000000,4000000000"])
 def test_zarr_create_array_invalid_blocksize(tmp_vsimem, blocksize):
     def create():
         ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
@@ -4744,10 +4742,10 @@ def test_zarr_multidim_rename_group_after_reopening(
     "format,create_z_metadata",
     [("ZARR_V2", "YES"), ("ZARR_V2", "NO"), ("ZARR_V3", "NO")],
 )
-def test_zarr_multidim_rename_array_at_creation(tmp_vsimem, format, create_z_metadata):
+def test_zarr_multidim_rename_array_at_creation(tmp_path, format, create_z_metadata):
 
     drv = gdal.GetDriverByName("ZARR")
-    filename = str(tmp_vsimem / "test.zarr")
+    filename = str(tmp_path / "test.zarr")
 
     def test():
         ds = drv.CreateMultiDimensional(
@@ -5743,3 +5741,129 @@ def test_zarr_read_imagecodecs_tiff_errors(dirname):
     with pytest.raises(Exception):
         with gdal.Open(dirname) as ds:
             ds.ReadRaster()
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize("format", ["ZARR_V2", "ZARR_V3"])
+def test_zarr_write_error_at_close_on_group(tmp_path, format):
+    out_filename = tmp_path / "test.zarr"
+
+    ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+        out_filename, options=["FORMAT=" + format]
+    )
+    rg = ds.GetRootGroup()
+    subgroup = rg.CreateGroup("subgroup")
+    attr = subgroup.CreateAttribute(
+        "str_attr", [], gdal.ExtendedDataType.CreateString()
+    )
+    assert attr.Write("my_string") == gdal.CE_None
+    del attr
+    del subgroup
+    del rg
+
+    gdal.RmdirRecursive(out_filename)
+
+    with pytest.raises(Exception, match="cannot be opened for writing"):
+        ds.Close()
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize("format", ["ZARR_V2", "ZARR_V3"])
+def test_zarr_write_error_at_close_on_array(tmp_path, format):
+    out_filename = tmp_path / "test.zarr"
+
+    ds = gdal.GetDriverByName("ZARR").CreateMultiDimensional(
+        out_filename, options=["FORMAT=" + format]
+    )
+    rg = ds.GetRootGroup()
+    dim0 = rg.CreateDimension("dim0", None, None, 2)
+
+    ar = rg.CreateMDArray("my_ar", [dim0], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    attr = ar.CreateAttribute("str_attr", [], gdal.ExtendedDataType.CreateString())
+    assert attr.Write("my_string") == gdal.CE_None
+    del attr
+    del ar
+    del rg
+
+    gdal.RmdirRecursive(out_filename)
+
+    with pytest.raises(Exception, match="cannot be opened for writing"):
+        ds.Close()
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize("format", ["ZARR_V2", "ZARR_V3"])
+def test_zarr_write_vsizip(tmp_vsimem, format):
+    out_filename = "/vsizip/" + str(tmp_vsimem) + "test.zarr.zip/test.zarr"
+
+    gdal.GetDriverByName("Zarr").CreateCopy(
+        out_filename, gdal.Open("data/byte.tif"), options=["FORMAT=" + format]
+    )
+
+    ds = gdal.Open(out_filename)
+    assert ds.GetMetadata() == {"AREA_OR_POINT": "Area"}
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+def test_zarr_read_ossfuzz_444714656():
+
+    ds = gdal.OpenEx("/vsitar/data/zarr/ossfuzz_444714656.tar", gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+    assert rg.GetGroupNames() == ["x"]
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+def test_zarr_read_zarr_with_stac_proj_epsg():
+
+    ds = gdal.Open("data/zarr/zarr_with_stac_proj_epsg.zarr")
+    assert ds.GetSpatialRef().GetAuthorityCode(None) == "26711"
+
+
+###############################################################################
+#
+
+
+@gdaltest.enable_exceptions()
+def test_zarr_read_zarr_with_stac_proj_wkt2():
+
+    ds = gdal.Open("data/zarr/zarr_with_stac_proj_wkt2.zarr")
+    assert ds.GetSpatialRef().GetAuthorityCode(None) == "26711"
+
+
+###############################################################################
+#
+
+
+@pytest.mark.parametrize(
+    "file_path",
+    [
+        ("data/zarr/array_attrs.zarr/.zarray"),
+        ("data/zarr/group.zarr/.zgroup"),
+        ("data/zarr/group_with_zmetadata.zarr/.zmetadata"),
+        ("data/zarr/v3/test.zr3/zarr.json"),
+    ],
+)
+@gdaltest.enable_exceptions()
+def test_zarr_identify_file_extensions(file_path):
+    ds = gdal.Open(file_path)
+    ds.GetRasterBand(1).Checksum()

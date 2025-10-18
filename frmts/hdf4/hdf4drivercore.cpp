@@ -12,7 +12,12 @@
 
 #include "hdf4drivercore.h"
 
+#include "gdal_frmts.h"
+#include "gdalplugindriverproxy.h"
+
 #include <cctype>
+
+#include "gdalsubdatasetinfo.h"
 
 /************************************************************************/
 /*                              Identify()                              */
@@ -34,7 +39,7 @@ int HDF4DatasetIdentify(GDALOpenInfo *poOpenInfo)
 /*                    HDF4DriverGetSubdatasetInfo()                     */
 /************************************************************************/
 
-struct HDF4DriverSubdatasetInfo : public GDALSubdatasetInfo
+struct HDF4DriverSubdatasetInfo final : public GDALSubdatasetInfo
 {
   public:
     explicit HDF4DriverSubdatasetInfo(const std::string &fileName)

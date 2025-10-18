@@ -19,6 +19,10 @@
 
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "ogr_spatialref.h"
 
 #ifndef INT_MAX
@@ -58,7 +62,7 @@ class SAGADataset final : public GDALPamDataset
 
   public:
     SAGADataset();
-    virtual ~SAGADataset();
+    ~SAGADataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static GDALDataset *Create(const char *pszFilename, int nXSize, int nYSize,
@@ -73,7 +77,7 @@ class SAGADataset final : public GDALPamDataset
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
-    virtual char **GetFileList() override;
+    char **GetFileList() override;
 
     CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;

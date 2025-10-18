@@ -16,6 +16,8 @@
 
 #include "cpl_minixml.h"
 
+#include "gdal_frmts.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
@@ -30,7 +32,7 @@
 /*                            ZarrDataset()                             */
 /************************************************************************/
 
-ZarrDataset::ZarrDataset(const std::shared_ptr<GDALGroup> &poRootGroup)
+ZarrDataset::ZarrDataset(const std::shared_ptr<ZarrGroupBase> &poRootGroup)
     : m_poRootGroup(poRootGroup)
 {
 }
@@ -302,6 +304,10 @@ GDALDataset *ZarrDataset::Open(GDALOpenInfo *poOpenInfo)
     }
 
     CPLString osFilename(poOpenInfo->pszFilename);
+    if (!poOpenInfo->bIsDirectory)
+    {
+        osFilename = CPLGetPathSafe(osFilename);
+    }
     CPLString osArrayOfInterest;
     std::vector<uint64_t> anExtraDimIndices;
     if (STARTS_WITH(poOpenInfo->pszFilename, "ZARR:"))
@@ -750,7 +756,7 @@ static CPLErr ZarrDatasetCopyFiles(const char *pszNewName,
 
 class ZarrDriver final : public GDALDriver
 {
-    std::mutex m_oMutex{};
+    std::recursive_mutex m_oMutex{};
     bool m_bMetadataInitialized = false;
     void InitMetadata();
 
@@ -1407,6 +1413,11 @@ ZarrDataset::~ZarrDataset()
 CPLErr ZarrDataset::FlushCache(bool bAtClosing)
 {
     CPLErr eErr = GDALDataset::FlushCache(bAtClosing);
+    if (m_poRootGroup)
+    {
+        if (!m_poRootGroup->Close())
+            eErr = CE_Failure;
+    }
     if (m_poSingleArray)
     {
         bool bFound = false;
@@ -1443,6 +1454,15 @@ CPLErr ZarrDataset::FlushCache(bool bAtClosing)
         }
     }
     return eErr;
+}
+
+/************************************************************************/
+/*                          GetRootGroup()                              */
+/************************************************************************/
+
+std::shared_ptr<GDALGroup> ZarrDataset::GetRootGroup() const
+{
+    return m_poRootGroup;
 }
 
 /************************************************************************/

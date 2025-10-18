@@ -33,7 +33,7 @@ from threading import Thread
 
 import pytest
 
-from osgeo import gdal, osr
+from osgeo import gdal, ogr, osr
 
 jp2kak_drv = None
 jpeg2000_drv = None
@@ -1896,7 +1896,9 @@ def gdalurlopen(url, timeout=10):
     import http.client
 
     try:
-        handle = urllib.request.urlopen(url)
+        handle = urllib.request.urlopen(
+            urllib.request.Request(url, headers={"User-Agent": "GDAL"})
+        )
         socket.setdefaulttimeout(old_timeout)
         return handle
     except urllib.error.HTTPError as e:
@@ -2124,7 +2126,6 @@ def error_raised(type, match=""):
         gdal.CE_Debug: "CE_Debug",
         gdal.CE_Failure: "CE_Failure",
         gdal.CE_Fatal: "CE_Fatal",
-        gdal.CE_None: "CE_None",
         gdal.CE_Warning: "CE_Warning",
     }
 
@@ -2136,9 +2137,16 @@ def error_raised(type, match=""):
     with error_handler(handler):
         yield
 
-    assert any(
-        [err["level"] == type and match in err["message"] for err in errors]
-    ), f'Did not receive an error of type {err_levels[type]} matching "{match}". Received: {[(err["level"], err["message"]) for err in errors]}'
+    received = f'{[(err_levels[err["level"]], err["message"]) for err in errors]}'
+
+    if type == gdal.CE_None:
+        assert not any(
+            [err["level"] != gdal.CE_Debug for err in errors]
+        ), f"Received: {received}"
+    else:
+        assert any(
+            [err["level"] == type and match in err["message"] for err in errors]
+        ), f'Did not receive an error of type {err_levels[type]} matching "{match}. Received: {received}'
 
 
 ###############################################################################
@@ -2158,3 +2166,30 @@ def importorskip_gdal_array():
     if pytest_version >= [8, 2, 0]:
         return pytest.importorskip("osgeo.gdal_array", exc_type=ImportError)
     return pytest.importorskip("osgeo.gdal_array")
+
+
+###############################################################################
+
+
+def wkt_ds(wkts, *, geom_type=None, epsg=None):
+
+    ds = gdal.GetDriverByName("MEM").CreateVector("")
+
+    lyr = ds.CreateLayer(
+        "polys",
+        osr.SpatialReference(epsg=epsg) if epsg else None,
+        geom_type=geom_type if geom_type else ogr.wkbUnknown,
+    )
+
+    if type(wkts) is str:
+        wkts = [wkts]
+
+    for i, wkt in enumerate(wkts):
+        f = ogr.Feature(lyr.GetLayerDefn())
+        geom = ogr.CreateGeometryFromWkt(wkt)
+        assert geom
+        f.SetGeometry(geom)
+        f.SetFID(i + 1)
+        lyr.CreateFeature(f)
+
+    return ds

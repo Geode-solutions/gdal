@@ -35,6 +35,11 @@ GDALRasterContourAlgorithm::GDALRasterContourAlgorithm(bool standaloneStep)
           NAME, DESCRIPTION, HELP_URL,
           ConstructorOptions()
               .SetStandaloneStep(standaloneStep)
+              .SetAddAppendLayerArgument(false)
+              .SetAddOverwriteLayerArgument(false)
+              .SetAddUpdateArgument(false)
+              .SetAddUpsertArgument(false)
+              .SetAddSkipErrorsArgument(false)
               .SetOutputFormatCreateCapability(GDAL_DCAP_CREATE))
 {
     m_outputLayerName = "contour";
@@ -42,17 +47,8 @@ GDALRasterContourAlgorithm::GDALRasterContourAlgorithm(bool standaloneStep)
     AddProgressArg();
     if (standaloneStep)
     {
-        AddOutputFormatArg(&m_format).AddMetadataItem(
-            GAAMDI_REQUIRED_CAPABILITIES, {GDAL_DCAP_VECTOR, GDAL_DCAP_CREATE});
-        AddOpenOptionsArg(&m_openOptions);
-        AddInputFormatsArg(&m_inputFormats)
-            .AddMetadataItem(GAAMDI_REQUIRED_CAPABILITIES, {GDAL_DCAP_RASTER});
-        AddInputDatasetArg(&m_inputDataset, GDAL_OF_RASTER);
-        AddOutputDatasetArg(&m_outputDataset, GDAL_OF_VECTOR);
-        AddCreationOptionsArg(&m_creationOptions);
-        AddLayerCreationOptionsArg(&m_layerCreationOptions);
-        AddLayerNameArg(&m_outputLayerName).AddAlias("nln");
-        AddOverwriteArg(&m_overwrite);
+        AddRasterInputArgs(false, false);
+        AddVectorOutputArgs(false, false);
     }
 
     // gdal_contour specific options
@@ -141,7 +137,7 @@ bool GDALRasterContourAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
             aosOptions.AddString("-of");
             aosOptions.AddString("GPKG");
 
-            outputFilename = CPLGenerateTempFilenameSafe("_contour.gpkg");
+            outputFilename = CPLGenerateTempFilenameSafe("_contour") + ".gpkg";
         }
         else
         {

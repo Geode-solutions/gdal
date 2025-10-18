@@ -10,6 +10,8 @@
  * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
+#include "cpl_multiproc.h"  // CPLSleep()
+
 #include "ogr_amigocloud.h"
 #include "ogr_p.h"
 #include "ogr_pgdump.h"
@@ -974,7 +976,7 @@ OGRErr OGRAmigoCloudTableLayer::IGetExtent(int iGeomField,
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRAmigoCloudTableLayer::TestCapability(const char *pszCap)
+int OGRAmigoCloudTableLayer::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, OLCFastFeatureCount))

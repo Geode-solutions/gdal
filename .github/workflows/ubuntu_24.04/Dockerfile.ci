@@ -99,7 +99,7 @@ RUN apt-get update \
    && ACCEPT_EULA=Y apt-get install -y msodbcsql17 unixodbc-dev
 
 # Build mongo-c-driver
-ARG MONGO_C_DRIVER_VERSION=1.24.4
+ARG MONGO_C_DRIVER_VERSION=2.0.2
 RUN mkdir mongo-c-driver \
     && wget -q https://github.com/mongodb/mongo-c-driver/releases/download/${MONGO_C_DRIVER_VERSION}/mongo-c-driver-${MONGO_C_DRIVER_VERSION}.tar.gz -O - \
         | tar xz -C mongo-c-driver --strip-components=1 \
@@ -113,7 +113,7 @@ RUN mkdir mongo-c-driver \
     && rm -rf mongo-c-driver
 
 # Build mongocxx
-ARG MONGOCXX_VERSION=3.8.1
+ARG MONGOCXX_VERSION=4.1.1
 RUN mkdir mongocxx \
     && wget -q https://github.com/mongodb/mongo-cxx-driver/archive/r${MONGOCXX_VERSION}.tar.gz -O - \
         | tar xz -C mongocxx --strip-components=1 \
@@ -185,3 +185,34 @@ RUN curl -LO -fsS https://github.com/duckdb/duckdb/releases/download/v1.1.3/libd
     && unzip libduckdb-linux-amd64.zip libduckdb.so \
     && mv libduckdb.so /usr/lib/x86_64-linux-gnu \
     && rm -f libduckdb-linux-amd64.zip
+
+# Build Arrow git HEAD
+
+RUN curl -LO -fsS https://github.com/apache/arrow/archive/refs/heads/main.zip \
+    && unzip main.zip \
+    && cd arrow-main/cpp \
+    && mkdir build \
+    && cd build \
+    && cmake .. -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=/usr \
+                -DARROW_BUILD_STATIC=OFF \
+                -DARROW_ACERO=ON \
+                -DARROW_DATASET=ON \
+                -DARROW_PARQUET=ON \
+                -DARROW_WITH_BZ2=ON \
+                -DARROW_WITH_LZ4=ON \
+                -DARROW_WITH_SNAPPY=ON \
+                -DARROW_WITH_ZLIB=ON \
+                -DARROW_WITH_ZSTD=ON \
+    && make -j$(nproc) \
+    && make install \
+    && cd ../../.. \
+    && rm -rf arrow-main
+
+# Install pdfium
+RUN wget -q https://github.com/rouault/pdfium_build_gdal_3_12/releases/download/pdfium_7391_v1/install-ubuntu2004-rev7391.tar.gz \
+  && tar -xzf install-ubuntu2004-rev7391.tar.gz \
+  && chown -R root:root install \
+  && mv install/lib/* /usr/lib/ \
+  && mv install/include/* /usr/include/ \
+  && rm -rf install-ubuntu2004-rev7391.tar.gz install
