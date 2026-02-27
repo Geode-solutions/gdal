@@ -246,7 +246,7 @@ static int TWebPDecode(TIFF *tif, uint8_t *op, tmsize_t occ, uint16_t s)
                 sp->pBuffer = NULL;
             }
 
-            sp->pBuffer = _TIFFmallocExt(tif, buffer_size);
+            sp->pBuffer = (uint8_t *)_TIFFmallocExt(tif, buffer_size);
             if (!sp->pBuffer)
             {
                 TIFFErrorExtR(tif, module, "Cannot allocate buffer");
@@ -623,7 +623,7 @@ static int TWebPPreEncode(TIFF *tif, uint16_t s)
         sp->pBuffer = NULL;
     }
 
-    sp->pBuffer = _TIFFmallocExt(tif, sp->buffer_size);
+    sp->pBuffer = (uint8_t *)_TIFFmallocExt(tif, sp->buffer_size);
     if (!sp->pBuffer)
     {
         TIFFErrorExtR(tif, module, "Cannot allocate buffer");
@@ -708,9 +708,11 @@ static int TWebPPostEncode(TIFF *tif)
             case VP8_ENC_ERROR_USER_ABORT:
                 pszErrorMsg = "User interrupted";
                 break;
+            case VP8_ENC_OK:
+            case VP8_ENC_ERROR_LAST:
             default:
                 TIFFErrorExtR(tif, module,
-                              "WebPEncode returned an unknown error code: %d",
+                              "WebPEncode returned an unknown error code: %u",
                               sp->sPicture.error_code);
                 pszErrorMsg = "Unknown WebP error type.";
                 break;

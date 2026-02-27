@@ -232,6 +232,9 @@ static int _TIFFPrettyPrintField(TIFF *tif, const TIFFField *fip, FILE *fd,
                 return 1;
             }
             return 0;
+
+        default:
+            break;
     }
 
     return 0;
@@ -244,7 +247,7 @@ static int _TIFFPrettyPrintField(TIFF *tif, const TIFFField *fip, FILE *fd,
 void TIFFPrintDirectory(TIFF *tif, FILE *fd, long flags)
 {
     TIFFDirectory *td = &tif->tif_dir;
-    char *sep;
+    const char *sep;
     long l, n;
 
     fprintf(fd, "TIFF Directory at offset 0x%" PRIx64 " (%" PRIu64 ")\n",
@@ -744,7 +747,7 @@ static void _TIFFprintAsciiBounded(FILE *fd, const char *cp, size_t max_chars)
         if (*tp)
             fprintf(fd, "\\%c", *tp);
         else
-            fprintf(fd, "\\%03o", *cp & 0xff);
+            fprintf(fd, "\\%03o", (unsigned int)(*cp & 0xff));
     }
 }
 

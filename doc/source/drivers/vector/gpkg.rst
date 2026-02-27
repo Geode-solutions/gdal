@@ -60,15 +60,23 @@ The driver supports OGR attribute filters, and users are expected to
 provide filters in the SQLite dialect, as they will be executed directly
 against the database.
 
-SQL SELECT statements passed to ExecuteSQL() are
-also executed directly against the database. If Spatialite is used, a
-recent version (4.2.0) is needed and use of explicit cast operators
-AsGPB() is required to transform GeoPackage geometries to Spatialite
-geometries (the reverse conversion from Spatialite geometries is
-automatically done by the GPKG driver). It is also possible to use with
-any Spatialite version, but in a slower way, by specifying the
-"INDIRECT_SQLITE" dialect. In which case, GeoPackage geometries
-automatically appear as Spatialite geometries after translation by OGR.
+SQL SELECT statements passed to ExecuteSQL() are also executed directly against the database.
+
+.. warning::
+
+    Before GDAL 3.13, if the SQLite dialect is used with the SpatiaLite functions, an explicit cast
+    operator AsGPB() is required to transform SpatiaLite geometries into GeoPackage
+    geometries.
+
+    ::
+
+       ogrinfo -update points.gpkg -sql "INSERT INTO points (geom) values (AsGPB(ST_GeomFromText('POINT(3 54)', 4326)))"
+
+    Since GDAL 3.13, the use of AsGPB() is no longer needed
+    (GDAL will automatically remove it when detecting ``AsGPB(ST_`` patterns)
+
+    The reverse conversion from GPKG geometries into SpatiaLite geometries
+    is automatically done.
 
 The "DROP TABLE layer_name" and "ALTER TABLE
 layer_name RENAME TO new_layer" statements can be used. They will update
@@ -140,19 +148,54 @@ Spatialite, are also available :
 The raster SQL functions mentioned at :ref:`raster.gpkg.raster`
 are also available.
 
-Link with Spatialite
-~~~~~~~~~~~~~~~~~~~~
+Since GDAL 3.13, ``ST_Hilbert`` is available. It encodes a (x, y) pair as the
+Hilbert curve index (32-bit unsigned integer), for a curve covering the given
+bounding box.
 
-If it has been compiled against Spatialite 4.2
-or later, it is also possible to use Spatialite SQL functions. Explicit
-transformation from GPKG geometry binary encoding to Spatialite geometry
-binary encoding must be done.
+Four variants are available:
+
+- ``ST_Hilbert(x, y, min_x, min_y, max_x, max_y)``, where (x, y) is the point of
+  interest, and (min_x, min_y, max_x, max_y) a bounding box that contains the point.
+
+- ``ST_Hilbert(x, y, layer_name)``, where (x, y) is the point of
+  interest, and ``layer_name`` the name of a layer whose extent is used as the
+  bounding box for the computation.
+
+- ``ST_Hilbert(geometry, min_x, min_y, max_x, max_y)``, where geometry is a
+  geometry, and (min_x, min_y, max_x, max_y) a bounding box that contains the
+  geometry. The center of the bounding box of the geometry is used as the point
+  to encode.
+
+- ``ST_Hilbert(geometry, layer_name)``, where geometry is a
+  geometry, and ``layer_name`` the name of a layer whose extent is used as the
+  bounding box for the computation.
+  The center of the bounding box of the geometry is used as the point to encode.
+
+This is typically used to spatially sort a set of geometries. Note that the
+:ref:`gdal_vector_sort` program can also be used for that purpose.
 
 ::
 
-   ogrinfo poly.gpkg -sql "SELECT ST_Buffer(CastAutomagic(geom),5) FROM poly"
+    gdal vector sql --sql="SELECT * FROM cities ORDER BY ST_Hilbert(geometry, 'cities')" \
+                    --input=cities.gpkg --output=sorted_cities.parquet
 
-Starting with Spatialite 4.3, CastAutomagic is no longer needed.
+or
+
+::
+
+    gdal vector sort --method=hilbert --input=cities.gpkg --output=sorted_cities.parquet
+
+Link with Spatialite
+~~~~~~~~~~~~~~~~~~~~
+
+If GDAL has been compiled against Spatialite, it is also possible to use
+Spatialite SQL functions. Transformation from GPKG geometry binary to Spatialite geometry
+binary encoding is done implicitly
+
+::
+
+   ogrinfo poly.gpkg -sql "SELECT ST_Buffer(geom,5) FROM poly"
+
 
 Note that due to the loose typing mechanism of SQLite, if a geometry expression
 returns a NULL value for the first row, this will generally cause OGR not to
@@ -753,44 +796,57 @@ The same performance hints apply as those mentioned for the
 Examples
 --------
 
--  Simple translation of a single shapefile into GeoPackage. The table
+.. example::
+   :title: Simple translation of a single shapefile into GeoPackage 
+   
+   The table
    'abc' will be created with the features from abc.shp and attributes
    from abc.dbf. The file ``filename.gpkg`` must **not** already exist,
    as it will be created. For adding new layers into existing geopackage
    run ogr2ogr with **-update**.
 
-   ::
+   .. code-block:: bash
 
       ogr2ogr -f GPKG filename.gpkg abc.shp
 
--  Update of an existing GeoPackage file – e.g. a GeoPackage template –
+.. example:: 
+   :title: Updating an existing GeoPackage file
+
+   Updates an existing file – e.g. a GeoPackage template –
    by adding features to it from another GeoPackage file containing
    features according to the same or a backwards compatible database
    schema.
 
-   ::
+   .. code-block:: bash
 
       ogr2ogr -append output.gpkg input.gpkg
 
--  Translation of a directory of shapefiles into a GeoPackage. Each file
+.. example:: 
+   :title: Converting a directory of shapefiles into a GeoPackage
+
+   Each file
    will end up as a new table within the GPKG file. The file
    ``filename.gpkg`` must **not** already exist, as it will be created.
 
-   ::
+   .. code-block:: bash
 
       ogr2ogr -f GPKG filename.gpkg ./path/to/dir
 
--  Translation of a PostGIS database into a GeoPackage. Each table in
+.. example:: 
+   :title: Converting  a PostGIS database into a GeoPackage
+
+   Each table in
    the database will end up as a table in the GPKG file. The file
    ``filename.gpkg`` must **not** already exist, as it will be created.
 
-   ::
+   .. code-block:: bash
 
       ogr2ogr -f GPKG filename.gpkg PG:'dbname=mydatabase host=localhost'
 
-- Perform a join between 2 GeoPackage databases:
+.. example:: 
+   :title: Performing a join between two GeoPackage databases
 
-    ::
+    .. code-block:: bash
 
       ogrinfo my_spatial.gpkg \
         -sql "SELECT poly.id, other.foo FROM poly JOIN other_schema.other USING (id)" \

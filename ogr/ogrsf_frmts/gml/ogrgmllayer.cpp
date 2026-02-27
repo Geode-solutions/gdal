@@ -22,7 +22,7 @@
 #include <limits>
 
 /************************************************************************/
-/*                           OGRGMLLayer()                              */
+/*                            OGRGMLLayer()                             */
 /************************************************************************/
 
 OGRGMLLayer::OGRGMLLayer(const char *pszName, bool bWriterIn,
@@ -31,8 +31,6 @@ OGRGMLLayer::OGRGMLLayer(const char *pszName, bool bWriterIn,
           pszName + (STARTS_WITH_CI(pszName, "ogr:") ? 4 : 0))),
       bWriter(bWriterIn), poDS(poDSIn),
       poFClass(!bWriter ? poDS->GetReader()->GetClass(pszName) : nullptr),
-      // Reader's should get the corresponding GMLFeatureClass and cache it.
-      hCacheSRS(GML_BuildOGRGeometryFromList_CreateCache()),
       // Compatibility option. Not advertized, because hopefully won't be
       // needed. Just put here in case.
       bUseOldFIDFormat(
@@ -48,7 +46,7 @@ OGRGMLLayer::OGRGMLLayer(const char *pszName, bool bWriterIn,
 }
 
 /************************************************************************/
-/*                           ~OGRGMLLayer()                           */
+/*                            ~OGRGMLLayer()                            */
 /************************************************************************/
 
 OGRGMLLayer::~OGRGMLLayer()
@@ -58,8 +56,6 @@ OGRGMLLayer::~OGRGMLLayer()
 
     if (poFeatureDefn)
         poFeatureDefn->Release();
-
-    GML_BuildOGRGeometryFromList_DestroyCache(hCacheSRS);
 }
 
 /************************************************************************/
@@ -100,7 +96,7 @@ void OGRGMLLayer::ResetReading()
 }
 
 /************************************************************************/
-/*                              Increment()                             */
+/*                             Increment()                              */
 /************************************************************************/
 
 static GIntBig Increment(GIntBig nVal)
@@ -325,17 +321,21 @@ OGRFeature *OGRGMLLayer::GetNextFeature()
                         poDS->GetInvertAxisOrderIfLatLong(), pszSRSName,
                         poDS->GetConsiderEPSGAsURN(),
                         poDS->GetSwapCoordinates(),
-                        poDS->GetSecondaryGeometryOption(), hCacheSRS,
+                        poDS->GetSecondaryGeometryOption(), m_srsCache.get(),
                         bFaceHoleNegative);
 
                     // Do geometry type changes if needed to match layer
                     // geometry type.
                     if (poGeom != nullptr)
                     {
-                        papoGeometries[i] = OGRGeometryFactory::forceTo(
-                            poGeom,
-                            poFeatureDefn->GetGeomFieldDefn(i)->GetType());
+                        auto poGeomUniquePtr =
+                            std::unique_ptr<OGRGeometry>(poGeom);
                         poGeom = nullptr;
+                        papoGeometries[i] =
+                            OGRGeometryFactory::forceTo(
+                                std::move(poGeomUniquePtr),
+                                poFeatureDefn->GetGeomFieldDefn(i)->GetType())
+                                .release();
                     }
                     else
                     {
@@ -380,13 +380,16 @@ OGRFeature *OGRGMLLayer::GetNextFeature()
                 papsGeometry, true, poDS->GetInvertAxisOrderIfLatLong(),
                 pszSRSName, poDS->GetConsiderEPSGAsURN(),
                 poDS->GetSwapCoordinates(), poDS->GetSecondaryGeometryOption(),
-                hCacheSRS, bFaceHoleNegative);
+                m_srsCache.get(), bFaceHoleNegative);
             CPLPopErrorHandler();
 
             // Do geometry type changes if needed to match layer geometry type.
             if (poGeom != nullptr)
             {
-                poGeom = OGRGeometryFactory::forceTo(poGeom, GetGeomType());
+                poGeom =
+                    OGRGeometryFactory::forceTo(
+                        std::unique_ptr<OGRGeometry>(poGeom), GetGeomType())
+                        .release();
             }
             else
             {
@@ -635,7 +638,7 @@ GIntBig OGRGMLLayer::GetFeatureCount(int bForce)
 }
 
 /************************************************************************/
-/*                            IGetExtent()                              */
+/*                             IGetExtent()                             */
 /************************************************************************/
 
 OGRErr OGRGMLLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
@@ -689,7 +692,7 @@ static void GMLWriteField(OGRGMLDataSource *poDS, VSILFILE *fp,
 }
 
 /************************************************************************/
-/*                           ICreateFeature()                            */
+/*                           ICreateFeature()                           */
 /************************************************************************/
 
 OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
@@ -909,11 +912,10 @@ OGRErr OGRGMLLayer::ICreateFeature(OGRFeature *poFeature)
             char *pszGeometry = nullptr;
             if (!bIsGML3Output && OGR_GT_IsNonLinear(poGeom->getGeometryType()))
             {
-                OGRGeometry *poGeomTmp = OGRGeometryFactory::forceTo(
-                    poGeom->clone(),
+                auto poGeomTmp = OGRGeometryFactory::forceTo(
+                    std::unique_ptr<OGRGeometry>(poGeom->clone()),
                     OGR_GT_GetLinear(poGeom->getGeometryType()));
                 pszGeometry = poGeomTmp->exportToGML(papszOptions);
-                delete poGeomTmp;
             }
             else
             {

@@ -17,19 +17,19 @@
 #include "ogrwarpedlayer.h"
 
 /************************************************************************/
-/*                          OGRWarpedLayer()                            */
+/*                           OGRWarpedLayer()                           */
 /************************************************************************/
 
-OGRWarpedLayer::OGRWarpedLayer(OGRLayer *poDecoratedLayer, int iGeomField,
-                               int bTakeOwnership,
-                               OGRCoordinateTransformation *poCT,
-                               OGRCoordinateTransformation *poReversedCT)
-    : OGRLayerDecorator(poDecoratedLayer, bTakeOwnership),
+OGRWarpedLayer::OGRWarpedLayer(
+    OGRLayer *poDecoratedLayer, int iGeomField, int bTakeLayerOwnership,
+    std::unique_ptr<OGRCoordinateTransformation> poCT,
+    std::unique_ptr<OGRCoordinateTransformation> poReversedCT)
+    : OGRLayerDecorator(poDecoratedLayer, bTakeLayerOwnership),
       m_poFeatureDefn(poDecoratedLayer->GetLayerDefn()->Clone()),
-      m_iGeomField(iGeomField), m_poCT(poCT), m_poReversedCT(poReversedCT),
+      m_iGeomField(iGeomField), m_poCT(std::move(poCT)),
+      m_poReversedCT(std::move(poReversedCT)),
       m_poSRS(const_cast<OGRSpatialReference *>(m_poCT->GetTargetCS()))
 {
-    CPLAssert(poCT != nullptr);
     SetDescription(poDecoratedLayer->GetDescription());
 
     m_poFeatureDefn->Reference();
@@ -43,7 +43,7 @@ OGRWarpedLayer::OGRWarpedLayer(OGRLayer *poDecoratedLayer, int iGeomField,
 }
 
 /************************************************************************/
-/*                         ~OGRWarpedLayer()                            */
+/*                          ~OGRWarpedLayer()                           */
 /************************************************************************/
 
 OGRWarpedLayer::~OGRWarpedLayer()
@@ -52,8 +52,6 @@ OGRWarpedLayer::~OGRWarpedLayer()
         m_poFeatureDefn->Release();
     if (m_poSRS != nullptr)
         m_poSRS->Release();
-    delete m_poCT;
-    delete m_poReversedCT;
 }
 
 /************************************************************************/
@@ -86,7 +84,7 @@ OGRErr OGRWarpedLayer::ISetSpatialFilter(int iGeomField,
                     m_iGeomFieldFilter, sEnvelope.MinX, sEnvelope.MinY,
                     sEnvelope.MaxX, sEnvelope.MaxY);
             }
-            else if (ReprojectEnvelope(&sEnvelope, m_poReversedCT))
+            else if (ReprojectEnvelope(&sEnvelope, m_poReversedCT.get()))
             {
                 return m_poDecoratedLayer->SetSpatialFilterRect(
                     m_iGeomFieldFilter, sEnvelope.MinX, sEnvelope.MinY,
@@ -106,7 +104,7 @@ OGRErr OGRWarpedLayer::ISetSpatialFilter(int iGeomField,
 }
 
 /************************************************************************/
-/*                         TranslateFeature()                           */
+/*                          TranslateFeature()                          */
 /************************************************************************/
 
 void OGRWarpedLayer::TranslateFeature(
@@ -130,9 +128,11 @@ OGRWarpedLayer::SrcFeatureToWarpedFeature(std::unique_ptr<OGRFeature> poFeature)
     poFeature->SetFDefnUnsafe(poThisLayer->GetLayerDefn());
 
     OGRGeometry *poGeom = poFeature->GetGeomFieldRef(m_iGeomField);
-    if (poGeom && poGeom->transform(m_poCT) != OGRERR_NONE)
+    if (poGeom)
     {
-        delete poFeature->StealGeometry(m_iGeomField);
+        auto poNewGeom = OGRGeometryFactory::transformWithOptions(
+            poGeom, m_poCT.get(), nullptr, m_transformCacheForward);
+        poFeature->SetGeomFieldDirectly(m_iGeomField, poNewGeom);
     }
 
     return poFeature;
@@ -150,17 +150,22 @@ OGRWarpedLayer::WarpedFeatureToSrcFeature(std::unique_ptr<OGRFeature> poFeature)
     poFeature->SetFDefnUnsafe(m_poDecoratedLayer->GetLayerDefn());
 
     OGRGeometry *poGeom = poFeature->GetGeomFieldRef(m_iGeomField);
-    if (poGeom &&
-        (!m_poReversedCT || poGeom->transform(m_poReversedCT) != OGRERR_NONE))
+    if (poGeom)
     {
-        return nullptr;
+        if (!m_poReversedCT)
+            return nullptr;
+        auto poNewGeom = OGRGeometryFactory::transformWithOptions(
+            poGeom, m_poReversedCT.get(), nullptr, m_transformCacheReverse);
+        if (!poNewGeom)
+            return nullptr;
+        poFeature->SetGeomFieldDirectly(m_iGeomField, poNewGeom);
     }
 
     return poFeature;
 }
 
 /************************************************************************/
-/*                          GetNextFeature()                            */
+/*                           GetNextFeature()                           */
 /************************************************************************/
 
 OGRFeature *OGRWarpedLayer::GetNextFeature()
@@ -199,7 +204,7 @@ OGRFeature *OGRWarpedLayer::GetFeature(GIntBig nFID)
 }
 
 /************************************************************************/
-/*                             ISetFeature()                             */
+/*                            ISetFeature()                             */
 /************************************************************************/
 
 OGRErr OGRWarpedLayer::ISetFeature(OGRFeature *poFeature)
@@ -213,7 +218,20 @@ OGRErr OGRWarpedLayer::ISetFeature(OGRFeature *poFeature)
 }
 
 /************************************************************************/
-/*                            ICreateFeature()                           */
+/*                         ISetFeatureUniqPtr()                         */
+/************************************************************************/
+
+OGRErr OGRWarpedLayer::ISetFeatureUniqPtr(std::unique_ptr<OGRFeature> poFeature)
+{
+    auto poFeatureNew = WarpedFeatureToSrcFeature(std::move(poFeature));
+    if (!poFeatureNew)
+        return OGRERR_FAILURE;
+
+    return m_poDecoratedLayer->SetFeature(std::move(poFeatureNew));
+}
+
+/************************************************************************/
+/*                           ICreateFeature()                           */
 /************************************************************************/
 
 OGRErr OGRWarpedLayer::ICreateFeature(OGRFeature *poFeature)
@@ -227,7 +245,22 @@ OGRErr OGRWarpedLayer::ICreateFeature(OGRFeature *poFeature)
 }
 
 /************************************************************************/
-/*                            IUpsertFeature()                          */
+/*                       ICreateFeatureUniqPtr()                        */
+/************************************************************************/
+
+OGRErr
+OGRWarpedLayer::ICreateFeatureUniqPtr(std::unique_ptr<OGRFeature> poFeature,
+                                      GIntBig *pnFID)
+{
+    auto poFeatureNew = WarpedFeatureToSrcFeature(std::move(poFeature));
+    if (!poFeatureNew)
+        return OGRERR_FAILURE;
+
+    return m_poDecoratedLayer->CreateFeature(std::move(poFeatureNew), pnFID);
+}
+
+/************************************************************************/
+/*                           IUpsertFeature()                           */
 /************************************************************************/
 
 OGRErr OGRWarpedLayer::IUpsertFeature(OGRFeature *poFeature)
@@ -241,7 +274,7 @@ OGRErr OGRWarpedLayer::IUpsertFeature(OGRFeature *poFeature)
 }
 
 /************************************************************************/
-/*                            IUpdateFeature()                          */
+/*                           IUpdateFeature()                           */
 /************************************************************************/
 
 OGRErr OGRWarpedLayer::IUpdateFeature(OGRFeature *poFeature,
@@ -262,7 +295,7 @@ OGRErr OGRWarpedLayer::IUpdateFeature(OGRFeature *poFeature,
 }
 
 /************************************************************************/
-/*                            GetLayerDefn()                           */
+/*                            GetLayerDefn()                            */
 /************************************************************************/
 
 const OGRFeatureDefn *OGRWarpedLayer::GetLayerDefn() const
@@ -271,7 +304,7 @@ const OGRFeatureDefn *OGRWarpedLayer::GetLayerDefn() const
 }
 
 /************************************************************************/
-/*                            GetSpatialRef()                           */
+/*                           GetSpatialRef()                            */
 /************************************************************************/
 
 const OGRSpatialReference *OGRWarpedLayer::GetSpatialRef() const
@@ -283,7 +316,7 @@ const OGRSpatialReference *OGRWarpedLayer::GetSpatialRef() const
 }
 
 /************************************************************************/
-/*                           GetFeatureCount()                          */
+/*                          GetFeatureCount()                           */
 /************************************************************************/
 
 GIntBig OGRWarpedLayer::GetFeatureCount(int bForce)
@@ -315,7 +348,7 @@ OGRErr OGRWarpedLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
         if (eErr != OGRERR_NONE)
             return eErr;
 
-        if (ReprojectEnvelope(&sExtent, m_poCT))
+        if (ReprojectEnvelope(&sExtent, m_poCT.get()))
         {
             *psExtent = sExtent;
             return OGRERR_NONE;
@@ -328,7 +361,7 @@ OGRErr OGRWarpedLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
 }
 
 /************************************************************************/
-/*                    TransformAndUpdateBBAndReturnX()                  */
+/*                   TransformAndUpdateBBAndReturnX()                   */
 /************************************************************************/
 
 static double TransformAndUpdateBBAndReturnX(OGRCoordinateTransformation *poCT,
@@ -355,7 +388,7 @@ static double TransformAndUpdateBBAndReturnX(OGRCoordinateTransformation *poCT,
 }
 
 /************************************************************************/
-/*                            FindXDiscontinuity()                      */
+/*                         FindXDiscontinuity()                         */
 /************************************************************************/
 
 static void FindXDiscontinuity(OGRCoordinateTransformation *poCT, double dfX1,
@@ -385,7 +418,7 @@ static void FindXDiscontinuity(OGRCoordinateTransformation *poCT, double dfX1,
 }
 
 /************************************************************************/
-/*                            ReprojectEnvelope()                       */
+/*                         ReprojectEnvelope()                          */
 /************************************************************************/
 
 int OGRWarpedLayer::ReprojectEnvelope(OGREnvelope *psEnvelope,
@@ -499,7 +532,7 @@ int OGRWarpedLayer::ReprojectEnvelope(OGREnvelope *psEnvelope,
 }
 
 /************************************************************************/
-/*                             TestCapability()                         */
+/*                           TestCapability()                           */
 /************************************************************************/
 
 int OGRWarpedLayer::TestCapability(const char *pszCapability) const
@@ -529,7 +562,7 @@ int OGRWarpedLayer::TestCapability(const char *pszCapability) const
 }
 
 /************************************************************************/
-/*                              SetExtent()                             */
+/*                             SetExtent()                              */
 /************************************************************************/
 
 void OGRWarpedLayer::SetExtent(double dfXMin, double dfYMin, double dfXMax,
@@ -542,7 +575,7 @@ void OGRWarpedLayer::SetExtent(double dfXMin, double dfYMin, double dfXMax,
 }
 
 /************************************************************************/
-/*                            GetArrowStream()                          */
+/*                           GetArrowStream()                           */
 /************************************************************************/
 
 bool OGRWarpedLayer::GetArrowStream(struct ArrowArrayStream *out_stream,

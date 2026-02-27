@@ -307,6 +307,57 @@ struct Statistics
 } /* Statistics */ ;
 #endif
 
+#ifdef SWIGPYTHON
+
+%rename (RawBlockInfo) GDALMDArrayRawBlockInfo;
+
+struct GDALMDArrayRawBlockInfo
+{
+%extend {
+
+  ~GDALMDArrayRawBlockInfo() {
+    GDALMDArrayRawBlockInfoRelease(self);
+  }
+
+  GUIntBig GetOffset() {
+      return self->nOffset;
+  }
+
+  GUIntBig GetSize() {
+      return self->nSize;
+  }
+
+  const char* GetFilename() {
+    return self->pszFilename;
+  }
+
+  %apply (char **options) {char **};
+  char** GetInfo() {
+      return self->papszInfo;
+  }
+  %clear char**;
+
+  void GetInlineData( size_t *nLen, char **pBuf )
+  {
+      if (self->pabyInlineData )
+      {
+          *nLen = self->nSize;
+          *pBuf = reinterpret_cast<char*>(self->pabyInlineData);
+          self->pabyInlineData = NULL;
+      }
+      else
+      {
+          *nLen = 0;
+          *pBuf = NULL;
+      }
+  }
+
+
+} /* extend */
+} /* GDALMDArrayRawBlockInfo */ ;
+
+#endif
+
 //************************************************************************
 //
 // GDALMDArray
@@ -1123,6 +1174,27 @@ public:
     return (GDALDatasetShadow*)GDALMDArrayAsClassicDatasetEx(self, iXDim, iYDim, hRootGroup, options);
   }
 
+#ifdef SWIGPYTHON
+%apply (int nList, GUIntBig* pList) {(int nDims, GUIntBig *block_coordinates)};
+%newobject GetRawBlockInfo;
+  GDALMDArrayRawBlockInfo* GetRawBlockInfo( int nDims, GUIntBig* block_coordinates )
+  {
+      if (static_cast<size_t>(nDims) != GDALMDArrayGetDimensionCount(self) )
+      {
+          CPLError(CE_Failure, CPLE_AppDefined,
+                   "Invalid number of values in block_coordinates argument");
+          return NULL;
+      }
+      GDALMDArrayRawBlockInfo* blockInfo = GDALMDArrayRawBlockInfoCreate();
+      if( !GDALMDArrayGetRawBlockInfo(self, reinterpret_cast<const uint64_t*>(block_coordinates), blockInfo) )
+      {
+          GDALMDArrayRawBlockInfoRelease(blockInfo);
+          blockInfo = NULL;
+      }
+      return blockInfo;
+  }
+#endif
+
 #ifndef SWIGCSHARP
 %newobject Statistics;
 %feature ("kwargs") GetStatistics;
@@ -1208,6 +1280,26 @@ public:
   CPLErr Rename( const char* newName ) {
     return GDALMDArrayRename( self, newName ) ? CE_None : CE_Failure;
   }
+
+  int GetOverviewCount() {
+    return GDALMDArrayGetOverviewCount(self);
+  }
+
+%newobject GetOverview;
+  GDALMDArrayHS* GetOverview(int idx) {
+    return GDALMDArrayGetOverview(self, idx);
+  }
+
+%apply (int nList, int* pList) { (int overviewlist, int *pOverviews) };
+  CPLErr BuildOverviews( const char *resampling = "NEAREST",
+                         int overviewlist = 0, int *pOverviews = 0,
+                         GDALProgressFunc callback = NULL,
+                         void *callback_data = NULL,
+                         char **options = NULL ) {
+    return GDALMDArrayBuildOverviews( self, resampling,
+        overviewlist, pOverviews, callback, callback_data, options );
+  }
+%clear (int overviewlist, int *pOverviews);
 
 } /* extend */
 }; /* GDALMDArrayH */

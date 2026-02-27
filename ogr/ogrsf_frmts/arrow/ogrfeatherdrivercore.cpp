@@ -22,7 +22,7 @@
 #include "ogrfeatherdrivercore.h"
 
 /************************************************************************/
-/*              OGRFeatherDriverIsArrowIPCStreamBasic()                 */
+/*               OGRFeatherDriverIsArrowIPCStreamBasic()                */
 /************************************************************************/
 
 static int OGRFeatherDriverIsArrowIPCStreamBasic(GDALOpenInfo *poOpenInfo)
@@ -91,7 +91,7 @@ static int OGRFeatherDriverIsArrowIPCStreamBasic(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                    OGRFeatherDriverIsArrowFileFormat()               */
+/*                 OGRFeatherDriverIsArrowFileFormat()                  */
 /************************************************************************/
 
 template <size_t N> constexpr int constexpr_length(const char (&)[N])
@@ -132,7 +132,7 @@ bool OGRFeatherDriverIsArrowFileFormat(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                             Identify()                               */
+/*                              Identify()                              */
 /************************************************************************/
 
 int OGRFeatherDriverIdentify(GDALOpenInfo *poOpenInfo)
@@ -151,7 +151,7 @@ int OGRFeatherDriverIdentify(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                OGRFeatherDriverSetCommonMetadata()                   */
+/*                 OGRFeatherDriverSetCommonMetadata()                  */
 /************************************************************************/
 
 void OGRFeatherDriverSetCommonMetadata(GDALDriver *poDriver)
@@ -182,13 +182,23 @@ void OGRFeatherDriverSetCommonMetadata(GDALDriver *poDriver)
                               "WidthPrecision Nullable "
                               "Comment AlternativeName Domain");
 
+    poDriver->SetMetadataItem(
+        GDAL_DMD_OPENOPTIONLIST,
+        "<OpenOptionList>"
+        "  <Option name='LISTS_AS_STRING_JSON' type='boolean' description='"
+        "Whether lists of strings/integers/reals should be reported as "
+        "String(JSON) fields rather than String/Integer[64]/RealList. Useful "
+        "when null values in such lists must be exactly mapped as such.' "
+        "default='NO'/>"
+        "</OpenOptionList>");
+
     poDriver->pfnIdentify = OGRFeatherDriverIdentify;
     poDriver->SetMetadataItem(GDAL_DCAP_OPEN, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_CREATE, "YES");
 }
 
 /************************************************************************/
-/*                  DeclareDeferredOGRArrowPlugin()                     */
+/*                   DeclareDeferredOGRArrowPlugin()                    */
 /************************************************************************/
 
 #ifdef PLUGIN_FILENAME

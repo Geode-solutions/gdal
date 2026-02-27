@@ -159,6 +159,7 @@ if (BUILD_DOCS)
                                     ${CMAKE_CURRENT_SOURCE_DIR}/source
                                     ${CMAKE_CURRENT_BINARY_DIR}/build
                                     ${SPHINX_BUILD_OPTS}
+            COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_CURRENT_BINARY_DIR}/build/man/_static"
             COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_CURRENT_BINARY_DIR}/man.stamp"
     )
 
@@ -211,6 +212,13 @@ if (BUILD_DOCS)
                ${CMAKE_BINARY_DIR}/swig/python/osgeo/gdal_array.py
                ${CMAKE_BINARY_DIR}/swig/python/osgeo/ogr.py
                ${CMAKE_BINARY_DIR}/swig/python/osgeo/osr.py
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    # Check docstub annotations
+    add_test(NAME docstub-annotations
+             COMMAND ${CMAKE_COMMAND} -E env ${BUILD_RUN_ENV}
+             ${Python_EXECUTABLE} -m docstub run ${CMAKE_BINARY_DIR}/swig/python/osgeo
+             --config ${CMAKE_BINARY_DIR}/swig/python/pyproject.toml --quiet
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 endif ()

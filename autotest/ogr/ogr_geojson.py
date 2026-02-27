@@ -592,8 +592,7 @@ def test_ogr_geojson_21():
 
 def test_ogr_geojson_22():
 
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features":[
+    ds = ogr.Open("""{"type": "FeatureCollection", "features":[
 {"type": "Feature",
  "geometry": {"type":"Point","coordinates":[1,2]},
  "properties": {"_id":"aid", "_rev":"arev", "type":"Feature",
@@ -601,8 +600,7 @@ def test_ogr_geojson_22():
 {"type": "Feature",
  "geometry": {"type":"Point","coordinates":[3,4]},
  "properties": {"_id":"aid2", "_rev":"arev2", "type":"Feature",
-                "properties":{"intvalue" : 3.5, "str2value" : "bar"}}}]}"""
-    )
+                "properties":{"intvalue" : 3.5, "str2value" : "bar"}}}]}""")
     assert ds is not None, "Failed to open datasource"
 
     lyr = ds.GetLayerByName("OGRGeoJSON")
@@ -661,15 +659,11 @@ def test_ogr_geojson_23(tmp_vsimem):
     sr.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
     assert sr_got.IsSame(sr), "did not get expected SRS"
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_23.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_23.json", "rb") as f:
+        data = f.read()
 
-    assert data.find('"bbox": [ 1, 10, 2, 20 ]') != -1, "did not find global bbox"
-
-    assert (
-        data.find('"bbox": [ 1.0, 10.0, 1.0, 10.0 ]') != -1
-    ), "did not find first feature bbox"
+    assert b'"bbox": [ 1, 10, 2, 20 ]' in data, "did not find global bbox"
+    assert b'"bbox":[1.0,10.0,1.0,10.0]' in data, "did not find first feature bbox"
 
 
 ###############################################################################
@@ -730,16 +724,14 @@ def test_ogr_geojson_24(tmp_vsimem):
 
 def test_ogr_geojson_26(tmp_vsimem):
 
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features":[
+    ds = ogr.Open("""{"type": "FeatureCollection", "features":[
 {"type": "Feature", "id": 1,
  "geometry": {"type":"Point","coordinates":[1,2]},
  "properties": { "intvalue" : 1, "int64" : 1234567890123, "intlist" : [1] }},
 {"type": "Feature", "id": 1234567890123,
  "geometry": {"type":"Point","coordinates":[3,4]},
  "properties": { "intvalue" : 1234567890123, "intlist" : [1, 1234567890123] }},
- ]}"""
-    )
+ ]}""")
     assert ds is not None, "Failed to open datasource"
 
     lyr = ds.GetLayerByName("OGRGeoJSON")
@@ -784,12 +776,11 @@ def test_ogr_geojson_26(tmp_vsimem):
     f = None
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_26.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_26.json", "rb") as f:
+        data = f.read()
 
     assert (
-        '{ "type": "Feature", "id": 1234567890123, "properties": { "int64": 1234567890123, "int64list": [ 1234567890123 ] }, "geometry": null }'
+        b'{"type":"Feature","id":1234567890123,"properties":{"int64":1234567890123,"int64list":[1234567890123]},"geometry":null}'
         in data
     )
 
@@ -803,16 +794,14 @@ def test_ogr_geojson_27():
     with gdal.quiet_errors():
         # Warning 1: Integer values probably ranging out of 64bit integer range
         # have been found. Will be clamped to INT64_MIN/INT64_MAX
-        ds = ogr.Open(
-            """{"type": "FeatureCollection", "features":[
+        ds = ogr.Open("""{"type": "FeatureCollection", "features":[
     {"type": "Feature",
      "geometry": {"type":"Point","coordinates":[1,2]},
      "properties": { "intvalue" : 1 }},
     {"type": "Feature",
      "geometry": {"type":"Point","coordinates":[3,4]},
      "properties": { "intvalue" : 12345678901231234567890123 }},
-     ]}"""
-        )
+     ]}""")
     assert ds is not None, "Failed to open datasource"
 
     lyr = ds.GetLayerByName("OGRGeoJSON")
@@ -913,18 +902,14 @@ def test_ogr_geojson_35(tmp_vsimem):
 
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_35.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_35.json", "rb") as f:
+        data = f.read()
 
-    assert "-1.79" in data and "e+308" in data
+    assert b"-1.79" in data and b"e+308" in data
     for ident in range(2, 8):
         assert (
-            data.find(
-                '{ "type": "Feature", "id": %d, "properties": { }, "geometry": null }'
-                % ident
-            )
-            != -1
+            b'{"type":"Feature","id":%d,"properties":{},"geometry":null}' % ident
+            in data
         )
 
 
@@ -946,12 +931,10 @@ def test_ogr_geojson_36():
 def test_ogr_geojson_37(tmp_vsimem):
 
     # Test read support
-    ds = ogr.Open(
-        """{"type": "FeatureCollection","features": [
+    ds = ogr.Open("""{"type": "FeatureCollection","features": [
 { "type": "Feature", "properties": { "bool" : false, "not_bool": false, "bool_list" : [false, true], "notbool_list" : [false, 3]}, "geometry": null  },
 { "type": "Feature", "properties": { "bool" : true, "not_bool": 2, "bool_list" : [true] }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -992,12 +975,11 @@ def test_ogr_geojson_37(tmp_vsimem):
     out_lyr.CreateFeature(out_f)
     out_ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_37.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_37.json", "rb") as f:
+        data = f.read()
 
     assert (
-        '"bool": false, "not_bool": 0, "bool_list": [ false, true ], "notbool_list": [ false, 3 ]'
+        b'"bool":false,"not_bool":0,"bool_list":[false,true],"notbool_list":[false,3]'
         in data
     )
 
@@ -1009,12 +991,10 @@ def test_ogr_geojson_37(tmp_vsimem):
 def test_ogr_geojson_38(tmp_vsimem):
 
     # Test read support
-    ds = gdal.OpenEx(
-        """{"type": "FeatureCollection", "features": [
+    ds = gdal.OpenEx("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "properties": { "dt": "2014-11-20 12:34:56+0100", "dt2": "2014\\/11\\/20", "date":"2014\\/11\\/20", "time":"12:34:56", "no_dt": "2014-11-20 12:34:56+0100", "no_dt2": "2014-11-20 12:34:56+0100", "no_date": "2022/05/12 blah" }, "geometry": null },
 { "type": "Feature", "properties": { "dt": "2014\\/11\\/20", "dt2": "2014\\/11\\/20T12:34:56Z", "date":"2014-11-20", "time":"12:34:56", "no_dt": "foo", "no_dt2": 1 }, "geometry": null }
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1067,12 +1047,11 @@ def test_ogr_geojson_38(tmp_vsimem):
         tmpfilename, ds, options="-lco NATIVE_DATA=dummy -of GeoJSON"
     )  # dummy NATIVE_DATA so that input values are not copied directly
 
-    fp = gdal.VSIFOpenL(tmpfilename, "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmpfilename, "rb") as f:
+        data = f.read()
 
     assert (
-        '"dt": "2014-11-20T12:34:56+01:00", "dt2": "2014-11-20T00:00:00", "date": "2014-11-20", "time": "12:34:56"'
+        b'"dt":"2014-11-20T12:34:56+01:00","dt2":"2014-11-20T00:00:00","date":"2014-11-20","time":"12:34:56"'
         in data
     ), data
 
@@ -1095,11 +1074,9 @@ def test_ogr_geojson_38(tmp_vsimem):
 @gdaltest.disable_exceptions()
 def test_ogr_geojson_39():
 
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : "foo", "properties": { "bar" : "baz" }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1112,11 +1089,9 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # Crazy case: properties.id has the precedence because we arbitrarily decided that...
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : "foo", "properties": { "id" : 6 }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1129,12 +1104,10 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # Same with 2 features
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : "foo", "properties": { "id" : 6 }, "geometry": null },
 { "type": "Feature", "id" : "bar", "properties": { "id" : 7 }, "geometry": null }
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1147,11 +1120,9 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # Crazy case: properties.id has the precedence because we arbitrarily decided that...
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : "foo", "properties": { "id" : "baz" }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1164,11 +1135,9 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # id and properties.ID (#6538)
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : 1, "properties": { "ID": 2 }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1183,13 +1152,11 @@ def test_ogr_geojson_39():
     # Test handling of duplicated id
     gdal.ErrorReset()
     with gdal.quiet_errors():
-        ds = ogr.Open(
-            """{"type": "FeatureCollection", "features": [
+        ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : 1, "properties": { "foo": "bar" }, "geometry": null },
 { "type": "Feature", "id" : 1, "properties": { "foo": "baz" }, "geometry": null },
 { "type": "Feature", "id" : 2, "properties": { "foo": "baw" }, "geometry": null }
-] }"""
-        )
+] }""")
     assert gdal.GetLastErrorMsg() != "", "expected warning"
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
@@ -1207,11 +1174,9 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # negative id
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : -1, "properties": { "foo": "bar" }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1224,12 +1189,10 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # negative id 64bit
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : -1234567890123, "properties": { "foo": "bar" }, "geometry": null },
 { "type": "Feature", "id" : -2, "properties": { "foo": "baz" }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1242,12 +1205,10 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # negative id
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : -2, "properties": { "foo": "baz" }, "geometry": null },
 { "type": "Feature", "id" : -1234567890123, "properties": { "foo": "bar" }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1260,12 +1221,10 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # positive and then negative id
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : 1, "properties": { "foo": "baz" }, "geometry": null },
 { "type": "Feature", "id" : -1, "properties": { "foo": "bar" }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1278,13 +1237,11 @@ def test_ogr_geojson_39():
         pytest.fail()
 
     # mix of int and string id
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features": [
+    ds = ogr.Open("""{"type": "FeatureCollection", "features": [
 { "type": "Feature", "id" : -2, "properties": { "foo": "baz" }, "geometry": null },
 { "type": "Feature", "id" : "str", "properties": { "foo": "bar" }, "geometry": null },
 { "type": "Feature", "id" : -3, "properties": { "foo": "baz" }, "geometry": null },
-] }"""
-    )
+] }""")
     lyr = ds.GetLayer(0)
     feat_defn = lyr.GetLayerDefn()
     assert (
@@ -1388,10 +1345,8 @@ def test_ogr_geojson_41():
 
 def test_ogr_geojson_43():
 
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features":[
-{"type": "Feature", "properties": {"foo": "bar"}}]}"""
-    )
+    ds = ogr.Open("""{"type": "FeatureCollection", "features":[
+{"type": "Feature", "properties": {"foo": "bar"}}]}""")
     assert ds is not None, "Failed to open datasource"
 
     lyr = ds.GetLayerByName("OGRGeoJSON")
@@ -1486,30 +1441,29 @@ def test_ogr_geojson_45(tmp_vsimem):
     lyr.CreateFeature(f)
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_45.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_45.json", "rb") as f:
+        data = f.read()
 
     gdal.Unlink(tmp_vsimem / "ogr_geojson_45.json")
 
     assert (
-        '"bbox": [ 0, 1, 2, 0, 1, 2 ],' in data
-        and '"foo": "bar"' in data
-        and '"bar": "baz"' in data
-        and '"foo_feature": "bar_feature"' in data
-        and '"foo_gc": "bar_gc"' in data
-        and '"foo_point": "bar_point"' in data
-        and "3" in data
-        and '"foo_linestring": "bar_linestring"' in data
-        and "4" in data
-        and '"foo_multipoint": "bar_multipoint"' in data
-        and "5" in data
-        and '"foo_multilinestring": "bar_multilinestring"' in data
-        and "6" in data
-        and '"foo_polygon": "bar_polygon"' in data
-        and "7" in data
-        and '"foo_multipolygon": "bar_multipolygon"' in data
-        and "8" in data
+        b'"bbox": [ 0, 1, 2, 0, 1, 2 ],' in data
+        and b'"foo": "bar"' in data
+        and b'"bar": "baz"' in data
+        and b'"foo_feature":"bar_feature"' in data
+        and b'"foo_gc":"bar_gc"' in data
+        and b'"foo_point":"bar_point"' in data
+        and b"3" in data
+        and b'"foo_linestring":"bar_linestring"' in data
+        and b"4" in data
+        and b'"foo_multipoint":"bar_multipoint"' in data
+        and b"5" in data
+        and b'"foo_multilinestring":"bar_multilinestring"' in data
+        and b"6" in data
+        and b'"foo_polygon":"bar_polygon"' in data
+        and b"7" in data
+        and b'"foo_multipolygon":"bar_multipolygon"' in data
+        and b"8" in data
     )
 
     # Test native support with string id
@@ -1562,7 +1516,7 @@ def test_ogr_geojson_45(tmp_vsimem):
     expected = """{
 "type": "FeatureCollection",
 "features": [
-{ "type": "Feature", "id": 1234657890123, "properties": { }, "geometry": null }
+{"type":"Feature","id":1234657890123,"properties":{},"geometry":null}
 ]
 }
 """
@@ -1585,11 +1539,10 @@ def test_ogr_geojson_46(tmp_vsimem):
     lyr.CreateFeature(f)
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_46.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_46.json", "rb") as f:
+        data = f.read()
 
-    assert '{ "myprop": { "a": "b" } }' in data
+    assert b'{"myprop":{"a":"b"}}' in data
 
 
 ###############################################################################
@@ -1618,19 +1571,15 @@ def test_ogr_geojson_47(tmp_vsimem):
     lyr.SetFeature(f)
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_47.json", "rb")
-    if fp is not None:
-        data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-        gdal.VSIFCloseL(fp)
-    else:
-        data = None
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_47.json", "rb") as f:
+        data = f.read()
 
     # we don't want crs if there's no in the source
     assert (
-        '"foo": "bar"' in data
-        and '"bar": "baz"' in data
-        and "crs" not in data
-        and '"myprop": "another_value"' in data
+        b'"foo": "bar"' in data
+        and b'"bar":"baz"' in data
+        and b"crs" not in data
+        and b'"myprop":"another_value"' in data
     )
 
     # Test append support
@@ -1666,21 +1615,17 @@ def test_ogr_geojson_47(tmp_vsimem):
     assert lyr.GetFeatureCount() == 4
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_47.json", "rb")
-    if fp is not None:
-        data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-        gdal.VSIFCloseL(fp)
-    else:
-        data = None
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_47.json", "rb") as f:
+        data = f.read()
 
     # we don't want crs if there's no in the source
     assert (
-        '"foo": "bar"' in data
-        and '"bar": "baz"' in data
-        and "crs" not in data
-        and '"myprop": "another_value"' in data
-        and '"myprop": "value_of_point_4_5"' in data
-        and "id" not in data
+        b'"foo": "bar"' in data
+        and b'"bar":"baz"' in data
+        and b"crs" not in data
+        and b'"myprop":"another_value"' in data
+        and b'"myprop":"value_of_point_4_5"' in data
+        and b"id" not in data
     )
 
     gdal.Unlink(tmp_vsimem / "ogr_geojson_47.json")
@@ -1730,14 +1675,10 @@ def test_ogr_geojson_47(tmp_vsimem):
     assert lyr.GetFeatureCount() == 1
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_47.json", "rb")
-    if fp is not None:
-        data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-        gdal.VSIFCloseL(fp)
-    else:
-        data = None
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_47.json", "rb") as f:
+        data = f.read()
 
-    assert "something" in data
+    assert b"something" in data
 
     with gdaltest.config_option("OGR_GEOJSON_REWRITE_IN_PLACE", "YES"):
         # Test appending to feature collection with "bbox"
@@ -1755,14 +1696,10 @@ def test_ogr_geojson_47(tmp_vsimem):
         assert lyr.GetFeatureCount() == 2
         ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_47.json", "rb")
-    if fp is not None:
-        data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-        gdal.VSIFCloseL(fp)
-    else:
-        data = None
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_47.json", "rb") as f:
+        data = f.read()
 
-    assert "bbox" in data
+    assert b"bbox" in data
 
 
 ###############################################################################
@@ -1985,40 +1922,22 @@ def test_ogr_geojson_51(tmp_vsimem):
     f = ogr.Feature(lyr.GetLayerDefn())
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_51.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_51.json", "rb") as f:
+        data = f.read()
 
-    assert '{ "id": 1 }, "geometry": null' in data
+    assert b'{"id":1},"geometry":null' in data
 
-    assert (
-        '{ "id": 2 }, "geometry": { "type": "LineString", "coordinates": [ ] } }'
-        in data
-    )
+    assert b'{"id":2},"geometry":{"type":"LineString","coordinates":[]}}' in data
 
-    assert (
-        '{ "id": 3 }, "geometry": { "type": "Polygon", "coordinates": [ ] } }' in data
-    )
+    assert b'{"id":3},"geometry":{"type":"Polygon","coordinates":[]}}' in data
 
-    assert (
-        '{ "id": 4 }, "geometry": { "type": "MultiPoint", "coordinates": [ ] } }'
-        in data
-    )
+    assert b'{"id":4},"geometry":{"type":"MultiPoint","coordinates":[]}}' in data
 
-    assert (
-        '{ "id": 5 }, "geometry": { "type": "MultiLineString", "coordinates": [ ] } }'
-        in data
-    )
+    assert b'{"id":5},"geometry":{"type":"MultiLineString","coordinates":[]}}' in data
 
-    assert (
-        '{ "id": 6 }, "geometry": { "type": "MultiPolygon", "coordinates": [ ] } }'
-        in data
-    )
+    assert b'{"id":6},"geometry":{"type":"MultiPolygon","coordinates":[]}}' in data
 
-    assert (
-        '{ "id": 7 }, "geometry": { "type": "GeometryCollection", "geometries": [ ] } }'
-        in data
-    )
+    assert b'{"id":7},"geometry":{"type":"GeometryCollection","geometries":[]}}' in data
 
     ds = ogr.Open(tmp_vsimem / "ogr_geojson_51.json")
     lyr = ds.GetLayer(0)
@@ -2067,13 +1986,10 @@ def test_ogr_geojson_53(tmp_vsimem):
     lyr.CreateFeature(f)
     ds = None
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_53.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_53.json", "rb") as f:
+        data = f.read()
 
-    gdal.Unlink(tmp_vsimem / "ogr_geojson_53.json")
-
-    assert '{ "type": "Point", "coordinates": [ 1.0, 2.0, 3.0 ] }' in data
+    assert b'{"type":"Point","coordinates":[1.0,2.0,3.0]}' in data
 
 
 ###############################################################################
@@ -2082,8 +1998,7 @@ def test_ogr_geojson_53(tmp_vsimem):
 
 def test_ogr_geojson_54():
 
-    ds = ogr.Open(
-        """{
+    ds = ogr.Open("""{
    "type": "FeatureCollection",
 
   "features": [
@@ -2091,8 +2006,7 @@ def test_ogr_geojson_54():
       { "type": "Feature", "properties": { "int": 168, "string": "string", "double": 1.23, "dt" : "2016-05-18T12:34:56Z", "boolean": true }, "geometry": null }
   ]
 }
-"""
-    )
+""")
     lyr = ds.GetLayer(0)
 
     fld = lyr.GetLayerDefn().GetFieldDefn(0)
@@ -2960,12 +2874,10 @@ def test_ogr_geojson_59(tmp_vsimem):
 
 def test_ogr_geojson_60(tmp_vsimem):
 
-    ds = gdal.OpenEx(
-        """{ "type": "FeatureCollection", "features": [
+    ds = gdal.OpenEx("""{ "type": "FeatureCollection", "features": [
 { "type": "Feature", "properties" : { "foo" : "bar" } },
 { "type": "Feature", "properties" : { "foo": null } },
-{ "type": "Feature", "properties" : {  } } ] }"""
-    )
+{ "type": "Feature", "properties" : {  } } ] }""")
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     if f["foo"] != "bar":
@@ -2983,15 +2895,14 @@ def test_ogr_geojson_60(tmp_vsimem):
     # Test writing side
     gdal.VectorTranslate(tmp_vsimem / "ogr_geojson_60.json", ds, format="GeoJSON")
 
-    fp = gdal.VSIFOpenL(tmp_vsimem / "ogr_geojson_60.json", "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(tmp_vsimem / "ogr_geojson_60.json", "rb") as f:
+        data = f.read()
 
     gdal.Unlink(tmp_vsimem / "ogr_geojson_60.json")
     assert (
-        '"properties": { "foo": "bar" }' in data
-        and '"properties": { "foo": null }' in data
-        and '"properties": { }' in data
+        b'"properties":{"foo":"bar"}' in data
+        and b'"properties":{"foo":null}' in data
+        and b'"properties":{}' in data
     )
 
 
@@ -3222,8 +3133,7 @@ def test_ogr_geojson_64():
 
 def test_ogr_geojson_65():
 
-    ds = ogr.Open(
-        """{
+    ds = ogr.Open("""{
 "type": "FeatureCollection",
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::32631" } },
 "features": [{
@@ -3232,8 +3142,7 @@ def test_ogr_geojson_65():
 "type": "Point",
 "coordinates": [500000,4500000]},
 "properties": {
-}}]}"""
-    )
+}}]}""")
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
     srs = f.GetGeometryRef().GetSpatialReference()
@@ -3247,8 +3156,7 @@ def test_ogr_geojson_65():
 
 def test_ogr_geojson_66():
 
-    ds = ogr.Open(
-        """{
+    ds = ogr.Open("""{
 "type": "FeatureCollection",
 "features": [
 {
@@ -3261,8 +3169,7 @@ def test_ogr_geojson_66():
     "geometry": null,
     "properties": []
 }
-]}"""
-    )
+]}""")
     lyr = ds.GetLayer(0)
     assert lyr.GetLayerDefn().GetFieldCount() == 0
 
@@ -3292,7 +3199,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     )
     got = read_file(tmp_vsimem / "out.json")
     assert (
-        '"id": "2", "properties": { "AREA": 261752.781, "EAS_ID": 171, "PRFEDEA": "35043414" }'
+        '"id":"2","properties":{"AREA":261752.781,"EAS_ID":171,"PRFEDEA":"35043414"}'
         in got
     )
 
@@ -3303,7 +3210,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     )
     got = read_file(tmp_vsimem / "out.json")
     assert (
-        '"id": 2, "properties": { "AREA": 261752.781, "EAS_ID": 171, "PRFEDEA": "35043414" }'
+        '"id":2,"properties":{"AREA":261752.781,"EAS_ID":171,"PRFEDEA":"35043414"}'
         in got
     )
 
@@ -3315,18 +3222,14 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
         limit=1,
     )
     got = read_file(tmp_vsimem / "out.json")
-    assert (
-        '"id": 168, "properties": { "AREA": 215229.266, "PRFEDEA": "35043411" }' in got
-    )
+    assert '"id":168,"properties":{"AREA":215229.266,"PRFEDEA":"35043411"}' in got
 
     src_ds = gdal.OpenEx(tmp_vsimem / "out.json", open_options=["NATIVE_DATA=YES"])
     gdal.VectorTranslate(tmp_vsimem / "out2.json", src_ds, format="GeoJSON")
     src_ds = None
     got = read_file(tmp_vsimem / "out2.json")
     gdal.Unlink(tmp_vsimem / "out2.json")
-    assert (
-        '"id": 168, "properties": { "AREA": 215229.266, "PRFEDEA": "35043411" }' in got
-    )
+    assert '"id":168,"properties":{"AREA":215229.266,"PRFEDEA":"35043411"}' in got
 
     src_ds = gdal.OpenEx(tmp_vsimem / "out.json", open_options=["NATIVE_DATA=YES"])
     gdal.VectorTranslate(
@@ -3338,10 +3241,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     src_ds = None
     got = read_file(tmp_vsimem / "out2.json")
     gdal.Unlink(tmp_vsimem / "out2.json")
-    assert (
-        '"id": "168", "properties": { "AREA": 215229.266, "PRFEDEA": "35043411" }'
-        in got
-    )
+    assert '"id":"168","properties":{"AREA":215229.266,"PRFEDEA":"35043411"}' in got
 
     src_ds = gdal.OpenEx(tmp_vsimem / "out.json", open_options=["NATIVE_DATA=YES"])
     gdal.VectorTranslate(
@@ -3353,9 +3253,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     src_ds = None
     got = read_file(tmp_vsimem / "out2.json")
     gdal.Unlink(tmp_vsimem / "out2.json")
-    assert (
-        '"id": 168, "properties": { "AREA": 215229.266, "PRFEDEA": "35043411" }' in got
-    )
+    assert '"id":168,"properties":{"AREA":215229.266,"PRFEDEA":"35043411"}' in got
 
     gdal.Unlink(tmp_vsimem / "out.json")
 
@@ -3367,20 +3265,14 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
         limit=1,
     )
     got = read_file(tmp_vsimem / "out.json")
-    assert (
-        '"id": "168", "properties": { "AREA": 215229.266, "PRFEDEA": "35043411" }'
-        in got
-    )
+    assert '"id":"168","properties":{"AREA":215229.266,"PRFEDEA":"35043411"}' in got
 
     src_ds = gdal.OpenEx(tmp_vsimem / "out.json", open_options=["NATIVE_DATA=YES"])
     gdal.VectorTranslate(tmp_vsimem / "out2.json", src_ds, format="GeoJSON")
     src_ds = None
     got = read_file(tmp_vsimem / "out2.json")
     gdal.Unlink(tmp_vsimem / "out2.json")
-    assert (
-        '"id": "168", "properties": { "AREA": 215229.266, "PRFEDEA": "35043411" }'
-        in got
-    )
+    assert '"id":"168","properties":{"AREA":215229.266,"PRFEDEA":"35043411"}' in got
 
     src_ds = gdal.OpenEx(tmp_vsimem / "out.json", open_options=["NATIVE_DATA=YES"])
     gdal.VectorTranslate(
@@ -3392,10 +3284,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     src_ds = None
     got = read_file(tmp_vsimem / "out2.json")
     gdal.Unlink(tmp_vsimem / "out2.json")
-    assert (
-        '"id": "168", "properties": { "AREA": 215229.266, "PRFEDEA": "35043411" }'
-        in got
-    )
+    assert '"id":"168","properties":{"AREA":215229.266,"PRFEDEA":"35043411"}' in got
 
     src_ds = gdal.OpenEx(tmp_vsimem / "out.json", open_options=["NATIVE_DATA=YES"])
     gdal.VectorTranslate(
@@ -3407,9 +3296,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     src_ds = None
     got = read_file(tmp_vsimem / "out2.json")
     gdal.Unlink(tmp_vsimem / "out2.json")
-    assert (
-        '"id": 168, "properties": { "AREA": 215229.266, "PRFEDEA": "35043411" }' in got
-    )
+    assert '"id":168,"properties":{"AREA":215229.266,"PRFEDEA":"35043411"}' in got
 
     gdal.Unlink(tmp_vsimem / "out.json")
 
@@ -3422,9 +3309,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     )
     got = read_file(tmp_vsimem / "out.json")
     gdal.Unlink(tmp_vsimem / "out.json")
-    assert (
-        '"id": "35043411", "properties": { "AREA": 215229.266, "EAS_ID": 168 }' in got
-    )
+    assert '"id":"35043411","properties":{"AREA":215229.266,"EAS_ID":168}' in got
 
     gdal.VectorTranslate(
         tmp_vsimem / "out.json",
@@ -3435,7 +3320,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     )
     got = read_file(tmp_vsimem / "out.json")
     gdal.Unlink(tmp_vsimem / "out.json")
-    assert '"id": 35043411, "properties": { "AREA": 215229.266, "EAS_ID": 168 }' in got
+    assert '"id":35043411,"properties":{"AREA":215229.266,"EAS_ID":168}' in got
 
     gdal.VectorTranslate(
         tmp_vsimem / "out.json",
@@ -3446,7 +3331,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     )
     got = read_file(tmp_vsimem / "out.json")
     assert (
-        '"id": 0, "properties": { "AREA": 215229.266, "EAS_ID": 168, "PRFEDEA": "35043411" }'
+        '"id":0,"properties":{"AREA":215229.266,"EAS_ID":168,"PRFEDEA":"35043411"}'
         in got
     )
 
@@ -3459,7 +3344,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     )
     got = read_file(tmp_vsimem / "out.json")
     assert (
-        '"id": 0, "properties": { "AREA": 215229.266, "EAS_ID": 168, "PRFEDEA": "35043411" }'
+        '"id":0,"properties":{"AREA":215229.266,"EAS_ID":168,"PRFEDEA":"35043411"}'
         in got
     )
 
@@ -3472,7 +3357,7 @@ def test_ogr_geojson_id_field_and_id_type(tmp_vsimem):
     )
     got = read_file(tmp_vsimem / "out.json")
     assert (
-        '"id": "0", "properties": { "AREA": 215229.266, "EAS_ID": 168, "PRFEDEA": "35043411" }'
+        '"id":"0","properties":{"AREA":215229.266,"EAS_ID":168,"PRFEDEA":"35043411"}'
         in got
     )
 
@@ -3521,8 +3406,7 @@ def test_ogr_geojson_geom_export_failure():
 
 def test_ogr_geojson_starting_with_crs():
 
-    ds = ogr.Open(
-        """{
+    ds = ogr.Open("""{
 "crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::32631" } },
 "type": "FeatureCollection",
 "features": [{
@@ -3531,8 +3415,7 @@ def test_ogr_geojson_starting_with_crs():
 "type": "Point",
 "coordinates": [500000,4500000]},
 "properties": {
-}}]}"""
-    )
+}}]}""")
     assert ds is not None
 
 
@@ -3582,14 +3465,12 @@ def test_ogr_geojson_empty_geometrycollection():
 
 def test_ogr_geojson_read_fields_with_different_case():
 
-    ds = ogr.Open(
-        """{
+    ds = ogr.Open("""{
 "type": "FeatureCollection",
 "features": [
 { "type": "Feature", "id": "my_id", "geometry": null, "properties":
                                 { "ID": "MY_ID", "x": "foo", "X": "FOO"} }
-]}"""
-    )
+]}""")
 
     lyr = ds.GetLayer(0)
     f = lyr.GetNextFeature()
@@ -3831,30 +3712,24 @@ def test_ogr_geojson_single_feature_random_reading_with_id(tmp_vsimem):
 
 def test_ogr_geojson_3D_geom_type():
 
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features":[
+    ds = ogr.Open("""{"type": "FeatureCollection", "features":[
 {"type": "Feature", "geometry": {"type":"Point","coordinates":[1,2,3]}, "properties": null},
 {"type": "Feature", "geometry": {"type":"Point","coordinates":[1,2,4]}, "properties": null}
-]}"""
-    )
+]}""")
     lyr = ds.GetLayer(0)
     assert lyr.GetGeomType() == ogr.wkbPoint25D
 
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features":[
+    ds = ogr.Open("""{"type": "FeatureCollection", "features":[
 {"type": "Feature", "geometry": {"type":"Point","coordinates":[1,2,3]}, "properties": null},
 {"type": "Feature", "geometry": {"type":"Point","coordinates":[1,2]}, "properties": null}
-]}"""
-    )
+]}""")
     lyr = ds.GetLayer(0)
     assert lyr.GetGeomType() == ogr.wkbPoint25D
 
-    ds = ogr.Open(
-        """{"type": "FeatureCollection", "features":[
+    ds = ogr.Open("""{"type": "FeatureCollection", "features":[
 {"type": "Feature", "geometry": {"type":"Point","coordinates":[1,2]}, "properties": null},
 {"type": "Feature", "geometry": {"type":"Point","coordinates":[1,2,4]}, "properties": null}
-]}"""
-    )
+]}""")
     lyr = ds.GetLayer(0)
     assert lyr.GetGeomType() == ogr.wkbPoint25D
 
@@ -4007,17 +3882,16 @@ def test_ogr_geojson_write_float32(tmp_vsimem):
 
     ds = None
 
-    fp = gdal.VSIFOpenL(filename, "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(filename, "rb") as f:
+        data = f.read().decode("utf-8")
 
     gdal.Unlink(filename)
 
     data = data.replace("e+0", "e+").replace("e-0", "e-")
 
-    assert '"float32": 0.35,' in data
+    assert '"float32":0.35,' in data
     assert (
-        '"float32list": [ 123.0, 0.35, 0.15, 0.12345678, 1.2345678e-15, 1.2345678e+15, 0.12345679 ]'
+        '"float32list":[123.0,0.35,0.15,0.12345678,1.2345678e-15,1.2345678e+15,0.12345679]'
         in data
     )
 
@@ -4184,13 +4058,11 @@ def test_ogr_geojson_write_rfc7946_from_3D_crs(tmp_vsimem):
     lyr.CreateFeature(f)
     ds = None
 
-    fp = gdal.VSIFOpenL(filename, "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
-    gdal.Unlink(filename)
+    with gdal.VSIFile(filename, "rb") as f:
+        data = f.read()
 
     # Check that we get back the ellipsoidal height
-    assert '"coordinates": [ 2.0, 49.0, 100.0' in data
+    assert b'"coordinates":[2.0,49.0,100.0' in data
 
 
 ###############################################################################
@@ -4224,7 +4096,7 @@ def test_ogr_geojson_read_from_http():
 
     import webserver
 
-    (webserver_process, webserver_port) = webserver.launch(
+    webserver_process, webserver_port = webserver.launch(
         handler=webserver.DispatcherHttpHandler
     )
     if webserver_port == 0:
@@ -4262,7 +4134,7 @@ def test_ogr_geojson_read_from_http_with_GDAL_HTTP_HEADERS():
 
     import webserver
 
-    (webserver_process, webserver_port) = webserver.launch(
+    webserver_process, webserver_port = webserver.launch(
         handler=webserver.DispatcherHttpHandler
     )
     if webserver_port == 0:
@@ -4305,7 +4177,7 @@ def test_ogr_geojson_read_from_http_with_GDAL_HTTP_HEADERS_Accept():
 
     import webserver
 
-    (webserver_process, webserver_port) = webserver.launch(
+    webserver_process, webserver_port = webserver.launch(
         handler=webserver.DispatcherHttpHandler
     )
     if webserver_port == 0:
@@ -4346,7 +4218,7 @@ def test_ogr_geojson_read_from_http_with_GDAL_HTTP_HEADERS_overriding_Accept():
 
     import webserver
 
-    (webserver_process, webserver_port) = webserver.launch(
+    webserver_process, webserver_port = webserver.launch(
         handler=webserver.DispatcherHttpHandler
     )
     if webserver_port == 0:
@@ -4584,13 +4456,12 @@ def test_ogr_geojson_coordinate_precision(tmp_vsimem):
 
     ds = None
 
-    fp = gdal.VSIFOpenL(filename, "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(filename, "rb") as f:
+        data = f.read()
 
-    assert '"bbox": [ 1.2, 2.3, 1.2, 2.3 ]' in data
-    assert '"coordinates": [ 1.2, 2.3 ]' in data
-    assert "3456" not in data
+    assert b'"bbox":[1.2,2.3,1.2,2.3]' in data
+    assert b'"coordinates":[1.2,2.3]' in data
+    assert b"3456" not in data
 
     ds = ogr.Open(filename)
     lyr = ds.GetLayer(0)
@@ -4624,15 +4495,14 @@ def test_ogr_geojson_field_types(tmp_vsimem):
 
     gdal.VectorTranslate(filename, srcds, options="-f GeoJSON -lco NATIVE_DATA=TRUE")
 
-    fp = gdal.VSIFOpenL(filename, "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(filename, "rb") as f:
+        data = f.read()
 
-    assert '{ "prop0": "42" }' in data
-    assert '{ "prop0": "astring" }' in data
-    assert '{ "prop0": { "nested": 75 } }' in data
-    assert '{ "prop0": 42 }' in data
-    assert '{ "prop0": { "a": "b" } }' in data
+    assert b'{"prop0":"42"}' in data
+    assert b'{"prop0":"astring"}' in data
+    assert b'{"prop0":{"nested":75}}' in data
+    assert b'{"prop0":42}' in data
+    assert b'{"prop0":{"a":"b"}}' in data
 
     gdal.Unlink(filename)
 
@@ -4749,8 +4619,8 @@ def test_ogr_geojson_arrow_stream_pyarrow_mixed_timezone(tmp_vsimem):
     ds = ogr.Open(filename)
     lyr = ds.GetLayer(0)
 
-    stream = lyr.GetArrowStreamAsPyArrow()
-    assert stream.schema.field("datetime").type.tz == "UTC"
+    stream = lyr.GetArrowStreamAsPyArrow(["TIMEZONE=unknown"])
+    assert stream.schema.field("datetime").type.tz is None
     values = []
     for batch in stream:
         for x in batch.field("datetime"):
@@ -5003,12 +4873,11 @@ def test_ogr_geojson_foreign_members_feature(tmp_vsimem):
     lyr.CreateFeature(ogr.Feature(lyr.GetLayerDefn()))
     ds.Close()
 
-    fp = gdal.VSIFOpenL(filename, "rb")
-    data = gdal.VSIFReadL(1, 10000, fp).decode("ascii")
-    gdal.VSIFCloseL(fp)
+    with gdal.VSIFile(filename, "rb") as f:
+        data = f.read()
 
     assert (
-        """{\n"type": "FeatureCollection",\n"name": "test",\n"features": [\n{ "type": "Feature", "properties": { }, "geometry": null, "foo":"bar"}\n]\n}"""
+        b"""{\n"type": "FeatureCollection",\n"name": "test",\n"features": [\n{"type":"Feature","properties":{},"geometry":null,"foo":"bar"}\n]\n}"""
         in data
     )
 
@@ -5360,14 +5229,12 @@ def test_ogr_geojson_geom_coord_precision(tmp_vsimem):
     lyr.CreateFeature(f)
     ds.Close()
 
-    f = gdal.VSIFOpenL(filename, "rb")
-    assert f
-    data = gdal.VSIFReadL(1, 10000, f)
-    gdal.VSIFCloseL(f)
+    with gdal.VSIFile(filename, "rb") as f:
+        data = f.read()
 
     assert b'"xy_coordinate_resolution"' in data
     assert b'"z_coordinate_resolution"' in data
-    assert b'"coordinates": [ 1.23457, 2.34568, 9.877 ]' in data
+    assert b'"coordinates":[1.23457,2.34568,9.877]' in data
 
     # Test appending feature
     ds = ogr.Open(filename, update=1)
@@ -5381,13 +5248,11 @@ def test_ogr_geojson_geom_coord_precision(tmp_vsimem):
     lyr.CreateFeature(f)
     ds.Close()
 
-    f = gdal.VSIFOpenL(filename, "rb")
-    assert f
-    data = gdal.VSIFReadL(1, 10000, f)
-    gdal.VSIFCloseL(f)
+    with gdal.VSIFile(filename, "rb") as f:
+        data = f.read()
 
-    assert b'"coordinates": [ 1.23457, 2.34568, 9.877 ]' in data
-    assert b'"coordinates": [ 2.23457, 3.34568, 8.877 ]' in data
+    assert b'"coordinates":[1.23457,2.34568,9.877]' in data
+    assert b'"coordinates":[2.23457,3.34568,8.877]' in data
 
     # Test modifying existing feature
     ds = ogr.Open(filename, update=1)
@@ -5403,13 +5268,11 @@ def test_ogr_geojson_geom_coord_precision(tmp_vsimem):
     lyr.SetFeature(f)
     ds.Close()
 
-    f = gdal.VSIFOpenL(filename, "rb")
-    assert f
-    data = gdal.VSIFReadL(1, 10000, f)
-    gdal.VSIFCloseL(f)
+    with gdal.VSIFile(filename, "rb") as f:
+        data = f.read()
 
-    assert b'"coordinates": [ -2.23457, -3.34568, -8.877 ]' in data
-    assert b'"coordinates": [ 2.23457, 3.34568, 8.877 ]' in data
+    assert b'"coordinates":[-2.23457,-3.34568,-8.877]' in data
+    assert b'"coordinates":[2.23457,3.34568,8.877]' in data
 
     ds = ogr.Open(filename)
     lyr = ds.GetLayer(0)
@@ -5975,12 +5838,10 @@ def test_ogr_geojson_invalid_number(tmp_vsimem):
         ]
     }""",
     )
-    with ogr.Open(tmp_vsimem / "out.json") as ds:
-        lyr = ds.GetLayer(0)
-        with pytest.raises(
-            Exception, match="Unrecognized number: 123456781234567-81234567812345678"
-        ):
-            lyr.GetNextFeature()
+    with pytest.raises(
+        Exception, match="Unrecognized number: 123456781234567-81234567812345678"
+    ):
+        ogr.Open(tmp_vsimem / "out.json")
 
     gdal.FileFromMemBuffer(
         tmp_vsimem / "out.json",
@@ -5991,9 +5852,31 @@ def test_ogr_geojson_invalid_number(tmp_vsimem):
         ]
     }""",
     )
-    with ogr.Open(tmp_vsimem / "out.json") as ds:
-        lyr = ds.GetLayer(0)
-        with pytest.raises(
-            Exception, match="Unrecognized number: 12345678.1234567-81234567812345678"
-        ):
-            lyr.GetNextFeature()
+    with pytest.raises(
+        Exception, match="Unrecognized number: 12345678.1234567-81234567812345678"
+    ):
+        ogr.Open(tmp_vsimem / "out.json")
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "out.json", '{"":{"":"","features":[{"":4a},0]}}'
+    )
+
+    with pytest.raises(Exception, match="Unrecognized number: 4a"):
+        ogr.Open(tmp_vsimem / "out.json")
+
+
+def test_ogr_geojson_export_to_json_geom_collection_with_curve():
+
+    g = ogr.CreateGeometryFromWkt(
+        "GEOMETRYCOLLECTION(GEOMETRYCOLLECTION(CIRCULARSTRING EMPTY),POINT (0 0))"
+    )
+    assert json.loads(g.ExportToJson()) == {
+        "type": "GeometryCollection",
+        "geometries": [
+            {
+                "type": "GeometryCollection",
+                "geometries": [{"type": "LineString", "coordinates": []}],
+            },
+            {"type": "Point", "coordinates": [0.0, 0.0]},
+        ],
+    }

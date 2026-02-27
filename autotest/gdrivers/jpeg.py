@@ -56,6 +56,7 @@ def test_jpeg_2():
 
     ds = gdal.Open("data/jpeg/albania.jpg")
 
+    assert ds.GetMetadataDomainList() == ["IMAGE_STRUCTURE", "", "DERIVED_SUBDATASETS"]
     md = ds.GetMetadata()
 
     ds.GetFileList()
@@ -1472,24 +1473,30 @@ def test_jpeg_flir_error_flir_subds():
 # Open JPEG image with DJI raw thermal image as raw
 
 
-def test_jpeg_dji_thermal_metadata():
+def test_jpeg_dji_thermal_metadata(tmp_vsimem):
 
-    ds = gdal.Open("data/jpeg/dji/DJI_M3T.JPG")
-    assert sorted(ds.GetMetadataDomainList()) == [
-        "",
-        "DERIVED_SUBDATASETS",
-        "DJI",
-        "IMAGE_STRUCTURE",
-        "SUBDATASETS",
-        "xml:XMP",
-    ]
-    assert ds.GetMetadata("DJI") == {
-        "RawThermalImageHeight": "512",
-        "RawThermalImageWidth": "640",
-    }
-    assert ds.RasterCount == 3
-    subds = ds.GetSubDatasets()
-    assert len(subds) == 1
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.jpg", open("data/jpeg/dji/DJI_M3T.JPG", "rb").read()
+    )
+
+    with gdal.Open(tmp_vsimem / "test.jpg") as ds:
+        assert sorted(ds.GetMetadataDomainList()) == [
+            "",
+            "DERIVED_SUBDATASETS",
+            "DJI",
+            "IMAGE_STRUCTURE",
+            "SUBDATASETS",
+            "xml:XMP",
+        ]
+        assert ds.GetMetadata("DJI") == {
+            "RawThermalImageHeight": "512",
+            "RawThermalImageWidth": "640",
+        }
+        assert ds.RasterCount == 3
+        subds = ds.GetSubDatasets()
+        assert len(subds) == 1
+
+    assert gdal.VSIStatL(tmp_vsimem / "test.jpg.aux.xml") is None
 
     ds = gdal.Open(subds[0][0])
     assert ds is not None
@@ -1503,6 +1510,63 @@ def test_jpeg_dji_thermal_raw():
     ds = gdal.Open('JPEG:"data/jpeg/dji/DJI_M3T.JPG":DJI_RAW_THERMAL_IMAGE')
     assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt16
     assert ds.GetRasterBand(1).Checksum() == 50952
+
+
+###############################################################################
+# Open JPEG image with FLIR embedded jpeg image
+
+
+def test_jpeg_flir_embedded_image_metadata(tmp_vsimem):
+
+    # data/jpeg/flir/flir_embedded.jpg has been generated from autotest/gdrivers/data/jpeg/flir/FLIR.jpg
+    # by hacking record 2 of type 32 (FLIR_REC_CAMERA_INFO) with data at offset 0xC7E + 1352
+    # and replacing it by type 14 (FLIR_REC_EMBEDDEDIMAGE)
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.jpg", open("data/jpeg/flir/flir_embedded.jpg", "rb").read()
+    )
+
+    with gdal.Open(tmp_vsimem / "test.jpg") as ds:
+        assert sorted(ds.GetMetadataDomainList()) == [
+            "",
+            "DERIVED_SUBDATASETS",
+            "FLIR",
+            "IMAGE_STRUCTURE",
+            "SUBDATASETS",
+        ]
+        metadata = ds.GetMetadata("FLIR")
+        assert "EmbeddedImageHeight" in metadata
+        assert metadata.get("EmbeddedImageHeight") == "1"
+        assert metadata.get("EmbeddedImageWidth") == "2"
+
+        assert ds.RasterCount == 3
+        assert ds.GetRasterBand(1).Checksum() == 761
+        subds = ds.GetSubDatasets()
+        assert len(subds) == 2
+
+    assert gdal.VSIStatL(tmp_vsimem / "test.jpg.aux.xml") is None
+
+    assert "FLIR_EMBEDDED_IMAGE" in subds[0][0]
+    assert "FLIR embedded image" == subds[0][1]
+    ds = gdal.Open(subds[0][0])
+    assert ds is not None
+    assert ds.RasterCount == 1
+    assert ds.RasterXSize == 2
+    assert ds.RasterYSize == 1
+    assert ds.GetRasterBand(1).DataType == gdal.GDT_Byte
+    # this image is different than the "main" image
+    assert ds.GetRasterBand(1).Checksum() == 7
+
+
+def test_jpeg_flir_embedded_image():
+
+    ds = gdal.Open('JPEG:"data/jpeg/flir/flir_embedded.jpg":FLIR_EMBEDDED_IMAGE')
+    assert ds is not None
+    assert ds.RasterCount == 1
+    assert ds.RasterXSize == 2
+    assert ds.RasterYSize == 1
+    assert ds.GetRasterBand(1).DataType == gdal.GDT_Byte
+    assert ds.GetRasterBand(1).Checksum() == 7
 
 
 ###############################################################################
@@ -1686,7 +1750,9 @@ def test_jpeg_copy_mdd():
 
     gdal.GetDriverByName("JPEG").CreateCopy(filename, src_ds)
     ds = gdal.Open(filename)
-    assert set(ds.GetMetadataDomainList()) == set(["", "DERIVED_SUBDATASETS"])
+    assert set(ds.GetMetadataDomainList()) == set(
+        ["", "IMAGE_STRUCTURE", "DERIVED_SUBDATASETS"]
+    )
     assert ds.GetMetadata_Dict() == {"FOO": "BAR"}
     assert ds.GetMetadata_Dict("OTHER_DOMAIN") == {}
     ds = None
@@ -1704,7 +1770,7 @@ def test_jpeg_copy_mdd():
     )
     ds = gdal.Open(filename)
     assert set(ds.GetMetadataDomainList()) == set(
-        ["", "DERIVED_SUBDATASETS", "OTHER_DOMAIN"]
+        ["IMAGE_STRUCTURE", "", "DERIVED_SUBDATASETS", "OTHER_DOMAIN"]
     )
     assert ds.GetMetadata_Dict() == {"FOO": "BAR"}
     assert ds.GetMetadata_Dict("OTHER_DOMAIN") == {"BAR": "BAZ"}
@@ -1769,7 +1835,11 @@ def test_jpeg_read_pix4d_xmp_crs_vertcs_orthometric():
     # exiftool "-xmp<=pix4d_xmp_crs_vertcs_orthometric.xml"  pix4d_xmp_crs_vertcs_orthometric.jpg
     # where pix4d_xmp_crs_vertcs_orthometric.xml is the XMP content
     ds = gdal.Open("data/jpeg/pix4d_xmp_crs_vertcs_orthometric.jpg")
-    assert ds.GetMetadataDomainList() == ["xml:XMP", "DERIVED_SUBDATASETS"]
+    assert ds.GetMetadataDomainList() == [
+        "xml:XMP",
+        "IMAGE_STRUCTURE",
+        "DERIVED_SUBDATASETS",
+    ]
     srs = ds.GetSpatialRef()
     assert srs.GetAuthorityCode("GEOGCS") == "6318"
     assert srs.GetAuthorityCode("VERT_CS") == "6360"
@@ -1813,3 +1883,25 @@ def test_jpeg_create_copy_only_visible_at_close_time(tmp_path):
 
     with gdal.Open(out_filename) as ds:
         ds.GetRasterBand(1).Checksum()
+
+
+###############################################################################
+
+
+def test_jpeg_optimized_rasterio():
+
+    ds = gdal.Open("data/jpeg/rgbsmall_rgb.jpg")
+    assert ds.ReadRaster() == b"".join(
+        [ds.GetRasterBand(i + 1).ReadRaster() for i in range(3)]
+    )
+
+    assert ds.ReadRaster(
+        buf_obj=bytearray(b"\x00" * (50 * 50 * 3 * 2)), buf_pixel_space=2
+    ) == b"".join(
+        [
+            ds.GetRasterBand(i + 1).ReadRaster(
+                buf_obj=bytearray(b"\x00" * (50 * 50 * 2)), buf_pixel_space=2
+            )
+            for i in range(3)
+        ]
+    )

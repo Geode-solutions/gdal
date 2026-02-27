@@ -236,7 +236,7 @@ def test_misc_5():
                     # MBTiles only support some precise resolutions
                     continue
                 if "DCAP_CREATE" in md and "DCAP_RASTER" in md:
-                    datatype = gdal.GDT_Byte
+                    datatype = gdal.GDT_UInt8
                     for nBands in range(6):
                         _misc_5_internal(drv, datatype, nBands)
 
@@ -475,7 +475,7 @@ def test_misc_6():
         # w.r.t system/OS crashes, unless you know what you are doing.
         with gdal.config_option("OGR_SQLITE_SYNCHRONOUS", "OFF"):
 
-            datatype = gdal.GDT_Byte
+            datatype = gdal.GDT_UInt8
             setDriversDone = set()
             for nBands in range(6):
                 misc_6_internal(datatype, nBands, setDriversDone)
@@ -546,7 +546,7 @@ def test_update_metadata(tmp_path, tmp_vsimem, driver_name):
     if "RasterValues" in flags_str:
         assert (
             update_ds.GetRasterBand(1).WriteRaster(
-                0, 0, 1, 1, b"\x00", buf_type=gdal.GDT_Byte
+                0, 0, 1, 1, b"\x00", buf_type=gdal.GDT_UInt8
             )
             == gdal.CE_None
         )
@@ -693,6 +693,7 @@ def test_misc_11():
 ###############################################################################
 # Test CreateCopy() with a target filename in a non-existing dir
 
+
 # Started to fail suddenly on May 14th 2025 on this config
 @pytest.mark.skipif(
     gdaltest.is_travis_branch("build-windows-conda"), reason="fails for unknown reason"
@@ -712,7 +713,7 @@ def test_misc_12():
             if drv.ShortName == "WEBP" or drv.ShortName == "ADRG":
                 nbands = 3
 
-            datatype = gdal.GDT_Byte
+            datatype = gdal.GDT_UInt8
             if drv.ShortName == "BT" or drv.ShortName == "BLX":
                 datatype = gdal.GDT_Int16
             elif (
@@ -749,7 +750,7 @@ def test_misc_12():
             if gdal_translate_path is not None:
                 # Test to detect memleaks
                 ds = gdal.GetDriverByName("VRT").CreateCopy("tmp/misc_12.vrt", src_ds)
-                (out, _) = gdaltest.runexternal_out_and_err(
+                out, _ = gdaltest.runexternal_out_and_err(
                     gdal_translate_path
                     + " -of "
                     + drv.ShortName

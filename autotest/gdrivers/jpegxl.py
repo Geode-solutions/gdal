@@ -24,6 +24,7 @@ from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("JPEGXL")
 
+
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
 def module_disable_exceptions():
@@ -491,7 +492,7 @@ def test_jpegxl_write_jxl_to_jxl_data_type_change(tmp_vsimem):
     out_filename = tmp_vsimem / "out.jxl"
     gdal.Translate(out_filename, "data/jpegxl/float16.jxl", options="-ot Byte")
     with gdal.Open(out_filename) as ds:
-        assert ds.GetRasterBand(1).DataType == gdal.GDT_Byte
+        assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt8
 
 
 def test_jpegxl_write_five_bands_lossy(tmp_vsimem):
@@ -661,7 +662,7 @@ def test_jpegxl_band_combinations(tmp_vsimem):
     ]
 
     types = [
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         gdal.GDT_UInt16,
     ]
 

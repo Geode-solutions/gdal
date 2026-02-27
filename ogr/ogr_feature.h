@@ -25,6 +25,9 @@
 #include <exception>
 #include <memory>
 #include <string>
+#if __cplusplus >= 201703L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
+#include <string_view>
+#endif
 #include <vector>
 
 /**
@@ -305,7 +308,7 @@ inline OGRFieldDefn::TemporaryUnsealer whileUnsealing(OGRFieldDefn *object)
 #endif
 
 /************************************************************************/
-/*                          OGRGeomFieldDefn                            */
+/*                           OGRGeomFieldDefn                           */
 /************************************************************************/
 
 /**
@@ -353,8 +356,14 @@ class CPL_DLL OGRGeomFieldDefn
     // Copy constructor
     OGRGeomFieldDefn(const OGRGeomFieldDefn &oOther);
 
+    // Move constructor
+    OGRGeomFieldDefn(OGRGeomFieldDefn &&oOther);
+
     // Copy assignment operator
     OGRGeomFieldDefn &operator=(const OGRGeomFieldDefn &oOther);
+
+    // Move assignment operator
+    OGRGeomFieldDefn &operator=(OGRGeomFieldDefn &&oOther);
 
     void SetName(const char *);
 
@@ -810,6 +819,9 @@ class CPL_DLL OGRFeatureDefn
     }
 
     int Dereference()
+#if defined(GDAL_COMPILATION) && !defined(DOXYGEN_XML)
+        CPL_WARN_DEPRECATED("Use Release() instead")
+#endif
     {
         return CPLAtomicDec(&nRefCount);
     }
@@ -911,7 +923,7 @@ class CPL_DLL OGRFeatureDefn
  *
  * @param bSealFields Whether fields and geometry fields should be unsealed and
  *                    resealed.
- *                    This is generally desirabled, but in case of deferred
+ *                    This is generally desirable, but in case of deferred
  *                    resolution of them, this parameter should be set to false.
  * @since GDAL 3.9
  */
@@ -1421,6 +1433,18 @@ class CPL_DLL OGRFeature
     void SetField(int i, GIntBig nValue);
     void SetField(int i, double dfValue);
     void SetField(int i, const char *pszValue);
+#if defined(DOXYGEN_SKIP) || __cplusplus >= 201703L ||                         \
+    (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L)
+    void SetField(int i, std::string_view svValue);
+
+    //! @cond Doxygen_Suppress
+    inline void SetField(int i, const std::string &osValue)
+    {
+        SetField(i, osValue.c_str());
+    }
+
+    //! @endcond
+#endif
     void SetField(int i, int nCount, const int *panValues);
     void SetField(int i, int nCount, const GIntBig *panValues);
     void SetField(int i, int nCount, const double *padfValues);
@@ -1536,7 +1560,7 @@ class CPL_DLL OGRFeature
     //! @endcond
 
     int Validate(int nValidateFlags, int bEmitError) const;
-    void FillUnsetWithDefault(int bNotNullableOnly, char **papszOptions);
+    void FillUnsetWithDefault(int bNotNullableOnly, CSLConstList papszOptions);
 
     bool SerializeToBinary(std::vector<GByte> &abyBuffer) const;
     bool DeserializeFromBinary(const GByte *pabyBuffer, size_t nSize);
@@ -1632,7 +1656,7 @@ inline OGRFeature::ConstFieldIterator end(const OGRFeatureUniquePtr &poFeature)
 //! @endcond
 
 /************************************************************************/
-/*                           OGRFieldDomain                             */
+/*                            OGRFieldDomain                            */
 /************************************************************************/
 
 /* clang-format off */

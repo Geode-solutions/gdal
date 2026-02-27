@@ -775,7 +775,7 @@ static int LogLuvEncodeTile(TIFF *tif, uint8_t *bp, tmsize_t cc, uint16_t s)
 #define TIFF_RAND_MAX 32767
 
 // From POSIX.1-2001 as an example of an implementation of rand()
-static uint32_t _TIFFRand()
+static uint32_t _TIFFRand(void)
 {
     static uint32_t nCounter = 0;
     if (!nCounter)
@@ -785,7 +785,7 @@ static uint32_t _TIFFRand()
         (uint32_t)(((uint64_t)(nCounter)*1103515245U + 12345U) & UINT32_MAX);
     nCounter = nCounterLocal;
     return (nCounterLocal / 65536U) % (TIFF_RAND_MAX + 1);
-};
+}
 
 static int tiff_itrunc(double x, int m)
 {
@@ -909,7 +909,7 @@ static int oog_encode(double u, double v) /* encode out-of-gamut chroma */
 {
     static int oog_table[NANGLES];
     static int initialized = 0;
-    register int i;
+    int i;
 
     if (!initialized)
     { /* set up perimeter table */
@@ -1345,6 +1345,8 @@ static int LogL16GuessDataFmt(TIFFDirectory *td)
         case PACK(1, 8, SAMPLEFORMAT_VOID):
         case PACK(1, 8, SAMPLEFORMAT_UINT):
             return (SGILOGDATAFMT_8BIT);
+        default:
+            break;
     }
 #undef PACK
     return (SGILOGDATAFMT_UNKNOWN);
@@ -1546,6 +1548,8 @@ static int LogLuvSetupDecode(TIFF *tif)
                     case SGILOGDATAFMT_8BIT:
                         sp->tfunc = Luv24toRGB;
                         break;
+                    default:
+                        break;
                 }
             }
             else
@@ -1562,6 +1566,8 @@ static int LogLuvSetupDecode(TIFF *tif)
                     case SGILOGDATAFMT_8BIT:
                         sp->tfunc = Luv32toRGB;
                         break;
+                    default:
+                        break;
                 }
             }
             return (1);
@@ -1576,6 +1582,8 @@ static int LogLuvSetupDecode(TIFF *tif)
                     break;
                 case SGILOGDATAFMT_8BIT:
                     sp->tfunc = L16toGry;
+                    break;
+                default:
                     break;
             }
             return (1);

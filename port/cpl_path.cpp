@@ -84,7 +84,7 @@ static char *CPLGetStaticResult()
 }
 
 /************************************************************************/
-/*                        CPLPathReturnTLSString()                      */
+/*                       CPLPathReturnTLSString()                       */
 /************************************************************************/
 
 static const char *CPLPathReturnTLSString(const std::string &osRes,
@@ -123,7 +123,7 @@ static int CPLFindFilenameStart(const char *pszFilename, size_t nStart = 0)
 }
 
 /************************************************************************/
-/*                          CPLGetPathSafe()                            */
+/*                           CPLGetPathSafe()                           */
 /************************************************************************/
 
 /**
@@ -245,7 +245,7 @@ const char *CPLGetPath(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                             CPLGetDirname()                          */
+/*                           CPLGetDirname()                            */
 /************************************************************************/
 
 /**
@@ -333,7 +333,7 @@ std::string CPLGetDirnameSafe(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                             CPLGetDirname()                          */
+/*                           CPLGetDirname()                            */
 /************************************************************************/
 
 /**
@@ -396,7 +396,7 @@ const char *CPLGetFilename(const char *pszFullFilename)
 }
 
 /************************************************************************/
-/*                       CPLGetBasenameSafe()                           */
+/*                         CPLGetBasenameSafe()                         */
 /************************************************************************/
 
 /**
@@ -521,7 +521,7 @@ std::string CPLGetExtensionSafe(const char *pszFullFilename)
 }
 
 /************************************************************************/
-/*                           CPLGetExtension()                          */
+/*                          CPLGetExtension()                           */
 /************************************************************************/
 
 /**
@@ -553,7 +553,7 @@ const char *CPLGetExtension(const char *pszFullFilename)
 }
 
 /************************************************************************/
-/*                         CPLGetCurrentDir()                           */
+/*                          CPLGetCurrentDir()                          */
 /************************************************************************/
 
 /**
@@ -759,10 +759,7 @@ std::string CPLFormFilenameSafe(const char *pszPath, const char *pszBasename,
                     pszBasename = pszBasenameOri;
                     nLenPath = nLenPathOri;
                     if (pszAddedPathSep[0] == 0)
-                        pszAddedPathSep =
-                            pszPath[0] == '/'
-                                ? "/"
-                                : VSIGetDirectorySeparator(pszPath);
+                        pszAddedPathSep = "/";
                 }
                 break;
             }
@@ -965,7 +962,7 @@ std::string CPLFormCIFilenameSafe(const char *pszPath, const char *pszBasename,
 }
 
 /************************************************************************/
-/*                          CPLFormCIFilename()                         */
+/*                         CPLFormCIFilename()                          */
 /************************************************************************/
 
 /**
@@ -1220,7 +1217,7 @@ const char *CPLExtractRelativePath(const char *pszBaseDir,
 }
 
 /************************************************************************/
-/*                      CPLCleanTrailingSlashSafe()                     */
+/*                     CPLCleanTrailingSlashSafe()                      */
 /************************************************************************/
 
 /**
@@ -1255,7 +1252,7 @@ std::string CPLCleanTrailingSlashSafe(const char *pszPath)
 }
 
 /************************************************************************/
-/*                            CPLCleanTrailingSlash()                   */
+/*                       CPLCleanTrailingSlash()                        */
 /************************************************************************/
 
 /**
@@ -1356,8 +1353,9 @@ char **CPLCorrespondingPaths(const char *pszOldFilename,
                 !EQUAL(osFilePath.c_str(), osOldPath.c_str()) ||
                 osFileName[osOldBasename.size()] != '.')
             {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Unable to rename fileset due irregular basenames.");
+                CPLError(
+                    CE_Failure, CPLE_AppDefined,
+                    "Unable to copy/rename fileset due irregular basenames.");
                 return nullptr;
             }
         }
@@ -1377,7 +1375,7 @@ char **CPLCorrespondingPaths(const char *pszOldFilename,
         if (osOldExtra != osNewExtra)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
-                     "Unable to rename fileset due to irregular filename "
+                     "Unable to copy/rename fileset due to irregular filename "
                      "correspondence.");
             return nullptr;
         }
@@ -1408,7 +1406,7 @@ char **CPLCorrespondingPaths(const char *pszOldFilename,
 }
 
 /************************************************************************/
-/*                   CPLGenerateTempFilenameSafe()                      */
+/*                    CPLGenerateTempFilenameSafe()                     */
 /************************************************************************/
 
 /**
@@ -1476,7 +1474,7 @@ const char *CPLGenerateTempFilename(const char *pszStem)
 }
 
 /************************************************************************/
-/*                        CPLExpandTildeSafe()                          */
+/*                         CPLExpandTildeSafe()                         */
 /************************************************************************/
 
 /**
@@ -1505,7 +1503,7 @@ std::string CPLExpandTildeSafe(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                         CPLExpandTilde()                             */
+/*                           CPLExpandTilde()                           */
 /************************************************************************/
 
 /**
@@ -1529,7 +1527,7 @@ const char *CPLExpandTilde(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                         CPLGetHomeDir()                              */
+/*                           CPLGetHomeDir()                            */
 /************************************************************************/
 
 /**
@@ -1553,7 +1551,7 @@ const char *CPLGetHomeDir()
 }
 
 /************************************************************************/
-/*                      CPLLaunderForFilenameSafe()                     */
+/*                     CPLLaunderForFilenameSafe()                      */
 /************************************************************************/
 
 /**
@@ -1584,7 +1582,7 @@ std::string CPLLaunderForFilenameSafe(const char *pszName,
 }
 
 /************************************************************************/
-/*                        CPLLaunderForFilename()                       */
+/*                       CPLLaunderForFilename()                        */
 /************************************************************************/
 
 /**
@@ -1608,7 +1606,7 @@ const char *CPLLaunderForFilename(const char *pszName,
 }
 
 /************************************************************************/
-/*                        CPLHasPathTraversal()                        */
+/*                        CPLHasPathTraversal()                         */
 /************************************************************************/
 
 /**
@@ -1653,7 +1651,7 @@ bool CPLHasPathTraversal(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                    CPLHasUnbalancedPathTraversal()                   */
+/*                   CPLHasUnbalancedPathTraversal()                    */
 /************************************************************************/
 
 /**

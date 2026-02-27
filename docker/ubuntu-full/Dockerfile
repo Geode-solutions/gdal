@@ -19,7 +19,7 @@ ENV HOME="/root"
 
 ARG TARGET_ARCH=
 RUN echo ${TARGET_ARCH}
-COPY ./bh-set-envvars.sh /buildscripts/bh-set-envvars.sh
+COPY --link ./docker/ubuntu-full/bh-set-envvars.sh /buildscripts/bh-set-envvars.sh
 
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
@@ -54,7 +54,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
             git make ninja-build cmake unzip libtool automake \
             zlib1g-dev${APT_ARCH_SUFFIX} libsqlite3-dev${APT_ARCH_SUFFIX} pkg-config sqlite3 libcurl4-openssl-dev${APT_ARCH_SUFFIX} \
             libtiff-dev${APT_ARCH_SUFFIX} \
-            patchelf \
             rsync
 
 ARG JAVA_VERSION=17
@@ -88,7 +87,7 @@ ARG RSYNC_REMOTE
 ARG WITH_CCACHE
 
 # Build libkea
-ARG KEA_VERSION=1.5.2
+ARG KEA_VERSION=1.6.2
 RUN --mount=type=cache,id=ubuntu-full-kealib,target=$HOME/.cache \
     . /buildscripts/bh-set-envvars.sh \
     && curl -LO -fsS https://github.com/ubarsc/kealib/archive/kealib-${KEA_VERSION}.zip \
@@ -123,7 +122,7 @@ RUN --mount=type=cache,id=ubuntu-full-kealib,target=$HOME/.cache \
     && for i in /build_thirdparty/usr/bin/*; do strip -s $i 2>/dev/null || /bin/true; done
 
 # Build mongo-c-driver
-ARG MONGO_C_DRIVER_VERSION=1.24.4
+ARG MONGO_C_DRIVER_VERSION=2.1.2
 RUN --mount=type=cache,id=ubuntu-full-mongo-c-driver,target=$HOME/.cache \
     . /buildscripts/bh-set-envvars.sh \
     && mkdir mongo-c-driver \
@@ -159,7 +158,7 @@ RUN --mount=type=cache,id=ubuntu-full-mongo-c-driver,target=$HOME/.cache \
     && for i in /build_thirdparty/usr/bin/*; do strip -s $i 2>/dev/null || /bin/true; done
 
 # Build mongocxx
-ARG MONGOCXX_VERSION=3.8.1
+ARG MONGOCXX_VERSION=4.1.4
 RUN --mount=type=cache,id=ubuntu-full-mongo-cxx-driver,target=$HOME/.cache \
     . /buildscripts/bh-set-envvars.sh \
     && mkdir mongocxx \
@@ -202,10 +201,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y \
         libspdlog-dev${APT_ARCH_SUFFIX} libmagic-dev${APT_ARCH_SUFFIX}
 
-COPY ./tiledb-FindLZ4_EP.cmake.patch /buildscripts/tiledb-FindLZ4_EP.cmake.patch
-COPY ./tiledb-FindOpenSSL_EP.cmake.patch /buildscripts/tiledb-FindOpenSSL_EP.cmake.patch
+COPY --link ./docker/ubuntu-full/tiledb-FindLZ4_EP.cmake.patch /buildscripts/tiledb-FindLZ4_EP.cmake.patch
+COPY --link ./docker/ubuntu-full/tiledb-FindOpenSSL_EP.cmake.patch /buildscripts/tiledb-FindOpenSSL_EP.cmake.patch
 # Commit from TileDB 2.27.
-COPY ./tiledb-cmake-ccache.patch /buildscripts/tiledb-cmake-ccache.patch
+COPY --link ./docker/ubuntu-full/tiledb-cmake-ccache.patch /buildscripts/tiledb-cmake-ccache.patch
 RUN --mount=type=cache,id=ubuntu-full-tiledb,target=$HOME/.cache \
     . /buildscripts/bh-set-envvars.sh \
     && if [ -n "${RSYNC_REMOTE:-}" ]; then \
@@ -448,7 +447,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 
 # Manually build ADBC packages to have support for BigQuery
-ARG ARROW_ADBC_VERSION=19
+ARG ARROW_ADBC_VERSION=20
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     . /buildscripts/bh-set-envvars.sh \
@@ -479,12 +478,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && cd ../../.. \
     && rm -rf arrow-adbc-apache-arrow-adbc-${ARROW_ADBC_VERSION}
 
+RUN mkdir gdal
+
 ARG WITH_DEBUG_SYMBOLS=no
 
 # Refresh grids
 ARG PROJ_DATUMGRID_LATEST_LAST_MODIFIED
-ARG PROJ_INSTALL_PREFIX=/usr/local
-COPY ./bh-proj.sh /buildscripts/bh-proj.sh
+ARG PROJ_INSTALL_PREFIX=/usr/local/gdal-internal
+COPY --link ./docker/ubuntu-full/bh-proj.sh /buildscripts/bh-proj.sh
 # We build PROJ a first time, just to build the projsync utility if grids need
 # to be refreshed. We will rebuild just afterwards, but depending on the
 # PROJ_VERSION argument
@@ -499,7 +500,7 @@ RUN --mount=type=cache,id=ubuntu-full-proj,target=$HOME/.cache \
       . /buildscripts/bh-set-envvars.sh \
       && rm -f /tmp/proj_grids/proj_grids_not_included \
       && DESTDIR=/build_tmp_proj /buildscripts/bh-proj.sh \
-      && LD_LIBRARY_PATH=/build_tmp_proj/usr/local/lib /build_tmp_proj/usr/local/bin/projsync --target-dir /tmp/proj_grids --all \
+      && LD_LIBRARY_PATH=/build_tmp_proj/${PROJ_INSTALL_PREFIX}/lib /build_tmp_proj/${PROJ_INSTALL_PREFIX}/bin/projsync --target-dir /tmp/proj_grids --all \
       && rm -rf /build_tmp_proj \
     ); fi
 
@@ -519,9 +520,14 @@ ARG GDAL_RELEASE_DATE
 ARG GDAL_BUILD_IS_RELEASE
 ARG GDAL_REPOSITORY=OSGeo/gdal
 
-COPY ./bh-gdal.sh /buildscripts/bh-gdal.sh
+COPY --link ./docker/ubuntu-full/bh-gdal.sh /buildscripts/bh-gdal.sh
+COPY --link . gdal/
 RUN --mount=type=cache,id=ubuntu-full-gdal,target=$HOME/.cache \
     . /buildscripts/bh-set-envvars.sh \
+    # Forcefully remove the development files for libproj so GDAL cannot
+    # include the wrong header. This is the last step of the build container,
+    # so we can break things without anything else suffering.
+    && dpkg --force depends -r libproj-dev \
     && /buildscripts/bh-gdal.sh
 
 RUN mkdir -p /build_thirdparty/opt
@@ -544,7 +550,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     # PROJ dependencies
     && apt-get install -y \
         libsqlite3-0 libtiff6 libcurl4 \
-        curl unzip ca-certificates \
+        unzip ca-certificates \
     # GDAL dependencies
     && apt-get install -y \
         bash-completion libopenjp2-7 libcairo2 python3-numpy \
@@ -571,8 +577,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     # Install JRE with --no-install-recommends, otherwise it draws default-jre, which draws systemd, which fails to install when running the arm64v8/ubuntu:24.04 image on a 64bit host
     && apt-get install -y --no-install-recommends openjdk-"$JAVA_VERSION"-jre \
     # Install Arrow C++
-    && apt-get install -y -V ca-certificates lsb-release \
+    && apt-get install -y -V curl ca-certificates lsb-release \
     && curl -LO -fsS https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \
+    && apt-get purge -y curl \
     && apt-get install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb \
     && apt-get update \
     && apt-get install -y -V libarrow${ARROW_SOVERSION} \
@@ -581,8 +588,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && apt-get install -y -V libarrow-compute${ARROW_SOVERSION}
 
 # Install libduckdb
-ARG DUCKDB_VERSION=v1.4.1
-RUN if test "$(uname -p)" = "x86_64"; then \
+ARG DUCKDB_VERSION=v1.4.3
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    export DEBIAN_FRONTEND=noninteractive \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && if test "$(uname -p)" = "x86_64"; then \
     curl -LO -fsS https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/libduckdb-linux-amd64.zip \
     && unzip libduckdb-linux-amd64.zip libduckdb.so \
     && mv libduckdb.so /usr/lib/x86_64-linux-gnu \
@@ -592,14 +604,16 @@ RUN if test "$(uname -p)" = "x86_64"; then \
     && unzip libduckdb-linux-arm64.zip libduckdb.so \
     && mv libduckdb.so /usr/lib/aarch64-linux-gnu \
     && rm -f libduckdb-linux-arm64.zip; \
-    fi
+    fi \
+    && apt-get purge -y curl
 
 ARG WITH_ORACLE=
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
   if test "$(uname -p)" = "x86_64"; then \
   if echo "$WITH_ORACLE" | grep -Eiq "^(y(es)?|1|true)$" ; then ( \
-      apt-get update \
+      export DEBIAN_FRONTEND=noninteractive \
+      && apt-get update \
       && apt-get install -y -V libaio1t64 \
       && ln -s libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1 \
   ) ; fi \
@@ -607,23 +621,23 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # Attempt to order layers starting with less frequently varying ones
 
-COPY --from=builder  /build_thirdparty/usr/ /usr/
-COPY --from=builder  /build_thirdparty/opt/ /opt/
+COPY --from=builder --link  /build_thirdparty/usr/ /usr/
+COPY --from=builder --link  /build_thirdparty/opt/ /opt/
 
-ARG PROJ_INSTALL_PREFIX=/usr/local
-COPY --from=builder  /tmp/proj_grids/* ${PROJ_INSTALL_PREFIX}/share/proj/
+ARG PROJ_INSTALL_PREFIX=/usr/local/gdal-internal
+COPY --from=builder --link  /tmp/proj_grids/* ${PROJ_INSTALL_PREFIX}/share/proj/
 
-COPY --from=builder  /build${PROJ_INSTALL_PREFIX}/share/proj/ ${PROJ_INSTALL_PREFIX}/share/proj/
-COPY --from=builder  /build${PROJ_INSTALL_PREFIX}/include/ ${PROJ_INSTALL_PREFIX}/include/
-COPY --from=builder  /build${PROJ_INSTALL_PREFIX}/bin/ ${PROJ_INSTALL_PREFIX}/bin/
-COPY --from=builder  /build${PROJ_INSTALL_PREFIX}/lib/ ${PROJ_INSTALL_PREFIX}/lib/
+COPY --from=builder --link  /build${PROJ_INSTALL_PREFIX}/share/proj/ ${PROJ_INSTALL_PREFIX}/share/proj/
+COPY --from=builder --link  /build${PROJ_INSTALL_PREFIX}/include/ ${PROJ_INSTALL_PREFIX}/include/
+COPY --from=builder --link  /build${PROJ_INSTALL_PREFIX}/bin/ ${PROJ_INSTALL_PREFIX}/bin/
+COPY --from=builder --link  /build${PROJ_INSTALL_PREFIX}/lib/ ${PROJ_INSTALL_PREFIX}/lib/
 
-COPY --from=builder  /build/usr/share/bash-completion/ /usr/share/bash-completion/
-COPY --from=builder  /build/usr/share/java /usr/share/java
-COPY --from=builder  /build/usr/share/gdal/ /usr/share/gdal/
-COPY --from=builder  /build/usr/include/ /usr/include/
-COPY --from=builder  /build_gdal_python/usr/ /usr/
-COPY --from=builder  /build_gdal_version_changing/usr/ /usr/
+COPY --from=builder --link  /build/usr/share/bash-completion/ /usr/share/bash-completion/
+COPY --from=builder --link  /build/usr/share/java /usr/share/java
+COPY --from=builder --link  /build/usr/share/gdal/ /usr/share/gdal/
+COPY --from=builder --link  /build/usr/include/ /usr/include/
+COPY --from=builder --link  /build_gdal_python/usr/ /usr/
+COPY --from=builder --link  /build_gdal_version_changing/usr/ /usr/
 
 RUN ldconfig
 
@@ -633,6 +647,7 @@ RUN ogrinfo ADBC::memory: -oo ADBC_DRIVER=libduckdb.so -oo PRELUDE_STATEMENTS="I
 RUN echo "source /usr/share/bash-completion/bash_completion" >> /root/.bashrc
 
 # Set tcmalloc as the allocator to improve multi-threaded performance
-ENV LD_PRELOAD=libtcmalloc_minimal.so.4
+ENV LD_PRELOAD=libtcmalloc_minimal.so.4 \
+    PATH="${PATH}:/usr/local/gdal-internal/bin"
 
 CMD ["/bin/bash", "-l"]

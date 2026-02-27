@@ -96,7 +96,7 @@ typedef struct
 } PGGeomColumnDesc;
 
 /************************************************************************/
-/*                         OGRPGGeomFieldDefn                           */
+/*                          OGRPGGeomFieldDefn                          */
 /************************************************************************/
 
 class OGRPGGeomFieldDefn final : public OGRGeomFieldDefn
@@ -128,7 +128,7 @@ class OGRPGGeomFieldDefn final : public OGRGeomFieldDefn
 };
 
 /************************************************************************/
-/*                          OGRPGFeatureDefn                            */
+/*                           OGRPGFeatureDefn                           */
 /************************************************************************/
 
 class OGRPGFeatureDefn CPL_NON_FINAL : public OGRFeatureDefn
@@ -156,7 +156,7 @@ class OGRPGFeatureDefn CPL_NON_FINAL : public OGRFeatureDefn
 };
 
 /************************************************************************/
-/*                            OGRPGLayer                                */
+/*                              OGRPGLayer                              */
 /************************************************************************/
 
 class OGRPGLayer CPL_NON_FINAL : public OGRLayer
@@ -407,10 +407,10 @@ class OGRPGTableLayer final : public OGRPGLayer
     const char *GetFIDColumn() const override;
 
     char **GetMetadataDomainList() override;
-    char **GetMetadata(const char *pszDomain = "") override;
+    CSLConstList GetMetadata(const char *pszDomain = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
-    CPLErr SetMetadata(char **papszMD, const char *pszDomain = "") override;
+    CPLErr SetMetadata(CSLConstList, const char *pszDomain = "") override;
     CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
                            const char *pszDomain = "") override;
 
@@ -604,6 +604,8 @@ class OGRPGDataSource final : public GDALDataset
     bool m_bHasWritePermissionsOnMetadataTableRun = false;
     bool m_bHasWritePermissionsOnMetadataTableSuccess = false;
 
+    bool m_bSpatialFilterIntersectionIsLocal = true;
+
     void LoadTables();
 
     CPLString osDebugLastTransactionCommand{};
@@ -656,7 +658,8 @@ class OGRPGDataSource final : public GDALDataset
     const OGRSpatialReference *FetchSRS(int nSRSId);
     static OGRErr InitializeMetadataTables();
 
-    int Open(const char *, int bUpdate, int bTestOpen, char **papszOpenOptions);
+    int Open(const char *, int bUpdate, int bTestOpen,
+             CSLConstList papszOpenOptions);
     OGRPGTableLayer *
     OpenTable(CPLString &osCurrentSchema, const char *pszTableName,
               const char *pszSchemaName, const char *pszDescription,
@@ -713,6 +716,11 @@ class OGRPGDataSource final : public GDALDataset
     bool CreateMetadataTableIfNeeded();
     bool HasOgrSystemTablesMetadataTable();
     bool HasWritePermissionsOnMetadataTable();
+
+    bool IsSpatialFilterIntersectionLocal() const
+    {
+        return m_bSpatialFilterIntersectionIsLocal;
+    }
 };
 
 #endif /* ndef OGR_PG_H_INCLUDED */

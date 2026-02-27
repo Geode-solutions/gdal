@@ -48,6 +48,12 @@ def check_python_bindings():
             os.path.dirname(__file__), os.pardir, os.pardir, "VERSION"
         )
         doc_version = open(version_file).read().strip()
+        doc_version_stripped = doc_version
+        for suffix in ["dev", "beta"]:
+            pos_suffix = doc_version_stripped.find(suffix)
+            if pos_suffix > 0:
+                doc_version_stripped = doc_version_stripped[0:pos_suffix]
+
         gdal_version = gdal.__version__
         gdal_version_stripped = gdal_version
         for suffix in ["dev", "beta"]:
@@ -55,9 +61,9 @@ def check_python_bindings():
             if pos_suffix > 0:
                 gdal_version_stripped = gdal_version_stripped[0:pos_suffix]
 
-        if doc_version.strip() != gdal_version_stripped:
+        if doc_version_stripped != gdal_version_stripped:
             logger.warn(
-                f"Building documentation for GDAL {doc_version} but osgeo.gdal module has version {gdal_version}. Python API documentation may be incorrect."
+                f"Building documentation for GDAL {doc_version_stripped} but osgeo.gdal module has version {gdal_version_stripped}. Python API documentation may be incorrect."
             )
 
 
@@ -80,11 +86,13 @@ extensions = [
     "doctestplus_gdal",
     "source_file",
     "sphinx.ext.napoleon",
+    "sphinxcontrib.cairosvgconverter",
     "sphinxcontrib.jquery",
     "sphinxcontrib_programoutput_gdal",
     "sphinxcontrib.spelling",
     "myst_nb",
     "sphinx_tabs.tabs",
+    "sphinx_toolbox.collapse",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -150,6 +158,7 @@ nitpick_ignore = [
     ("cpp:identifier", "tm"),
     ("cpp:identifier", "TRUE"),
     ("cpp:identifier", "uint8_t"),
+    ("cpp:identifier", "uint32_t"),
     ("cpp:identifier", "uint64_t"),
     ("cpp:identifier", "va_list"),
     # ODBC specific
@@ -433,6 +442,13 @@ man_pages = [
         "programs/gdal_dataset_identify",
         "gdal-dataset-identify",
         "Identify driver opening dataset(s)",
+        [author_evenr],
+        1,
+    ),
+    (
+        "programs/gdal_dataset_check",
+        "gdal-dataset-check",
+        "Check whether there are errors when reading the content of a dataset",
         [author_evenr],
         1,
     ),
@@ -864,8 +880,15 @@ man_pages = [
         1,
     ),
     (
+        "programs/gdal_vector_combine",
+        "gdal-vector-combine",
+        "Combine geometries into geometry collections",
+        [author_dbaston],
+        1,
+    ),
+    (
         "programs/gdal_vector_concat",
-        "gdal-vector_concat",
+        "gdal-vector-concat",
         "Concatenate vector datasets",
         [author_evenr],
         1,
@@ -875,6 +898,13 @@ man_pages = [
         "gdal-vector-convert",
         "Convert a vector dataset",
         [author_evenr],
+        1,
+    ),
+    (
+        "programs/gdal_vector_dissolve",
+        "gdal-vector-dissolve",
+        "Unions the elements of each feature's geometry.",
+        [author_dbaston],
         1,
     ),
     (
@@ -927,6 +957,13 @@ man_pages = [
         1,
     ),
     (
+        "programs/gdal_vector_sort",
+        "gdal-vector-sort",
+        "Spatially sort a vector dataset",
+        [author_dbaston],
+        1,
+    ),
+    (
         "programs/gdal_vector_buffer",
         "gdal-vector-buffer",
         "Compute a buffer around geometries of a vector dataset",
@@ -936,7 +973,7 @@ man_pages = [
     (
         "programs/gdal_vector_swap_xy",
         "gdal-vector-swap-xy",
-        "Swap X and Y coordinates of geometries of a vector datasett",
+        "Swap X and Y coordinates of geometries of a vector dataset",
         [author_evenr],
         1,
     ),
@@ -948,9 +985,9 @@ man_pages = [
         1,
     ),
     (
-        "programs/gdal_index_index",
-        "gdal-index-index",
-        "Create a vector index of index datasets",
+        "programs/gdal_vector_index",
+        "gdal-vector-index",
+        "Create a vector index of vector datasets",
         [author_evenr],
         1,
     ),
@@ -1007,6 +1044,13 @@ man_pages = [
         "programs/gdal_vector_sql",
         "gdal-vector-sql",
         "Apply SQL statement(s) to a dataset",
+        [author_evenr],
+        1,
+    ),
+    (
+        "programs/gdal_vector_update",
+        "gdal-vector-update",
+        "Update an existing vector dataset with an input vector dataset",
         [author_evenr],
         1,
     ),
@@ -1407,7 +1451,7 @@ latex_elements = {
     + substitutefont_package
     + "}",
     "babel": "\\usepackage[russian,main=english]{babel}\n\\selectlanguage{english}",
-    "fontenc": "\\usepackage[LGR,X2,T1]{fontenc}"
+    "fontenc": "\\usepackage[LGR,X2,T1]{fontenc}",
     # Latex figure (float) alignment
     #'figure_align': 'htbp',
 }
@@ -1419,6 +1463,12 @@ latex_documents = [
 latex_toplevel_sectioning = "chapter"
 
 latex_logo = "../images/gdalicon_big.png"
+# Disable module and domain indices in PDF output.
+# Python API documentation is not included in the PDF, so keeping them
+# results in a dummy and confusing "Python Module Index" section.
+latex_use_modindex = False
+latex_domain_indices = False
+
 
 # If true, show URL addresses after external links.
 # man_show_urls = False

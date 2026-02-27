@@ -28,8 +28,7 @@ pytestmark = pytest.mark.require_driver("SAGA")
 def test_saga_1():
 
     tst = gdaltest.GDALTest("SAGA", "saga/4byteFloat.sdat", 1, 108)
-    tst.testOpen(
-        check_prj="""PROJCS["NAD_1927_UTM_Zone_11N",
+    tst.testOpen(check_prj="""PROJCS["NAD_1927_UTM_Zone_11N",
     GEOGCS["GCS_North_American_1927",
         DATUM["North_American_Datum_1927",
             SPHEROID["Clarke_1866",6378206.4,294.9786982]],
@@ -41,8 +40,7 @@ def test_saga_1():
     PARAMETER["scale_factor",0.9996],
     PARAMETER["false_easting",500000],
     PARAMETER["false_northing",0],
-    UNIT["Meter",1]]"""
-    )
+    UNIT["Meter",1]]""")
 
 
 ###############################################################################
@@ -124,7 +122,7 @@ def test_saga_5():
 def test_saga_6():
 
     gdal_types = [
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         gdal.GDT_Int16,
         gdal.GDT_UInt16,
         gdal.GDT_Int32,
@@ -178,8 +176,7 @@ def test_saga_7():
 
 def test_saga_8():
     tst = gdaltest.GDALTest("SAGA", "saga/4byteFloat.sg-grd-z", 1, 108)
-    tst.testOpen(
-        check_prj="""PROJCS["NAD_1927_UTM_Zone_11N",
+    tst.testOpen(check_prj="""PROJCS["NAD_1927_UTM_Zone_11N",
     GEOGCS["GCS_North_American_1927",
         DATUM["North_American_Datum_1927",
             SPHEROID["Clarke_1866",6378206.4,294.9786982]],
@@ -191,8 +188,7 @@ def test_saga_8():
     PARAMETER["scale_factor",0.9996],
     PARAMETER["false_easting",500000],
     PARAMETER["false_northing",0],
-    UNIT["Meter",1]]"""
-    )
+    UNIT["Meter",1]]""")
 
 
 ##############################################################################

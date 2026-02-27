@@ -174,6 +174,20 @@ def test_gml_posList_line3d_2():
 
 
 ###############################################################################
+# Test GML 3.x "posList" element for a 3D linestring, without explicit srsDimension
+# but with srsName
+
+
+def test_gml_posList_line3d_srsName_only():
+
+    gml = '<LineString srsName="http://www.opengis.net/def/crs/EPSG/0/4979"><posList xmlns:foo="http://bar">49 2 10 50 3 11</posList></LineString>'
+
+    geom = ogr.CreateGeometryFromGML(gml)
+
+    assert geom.ExportToWkt() == "LINESTRING (49 2 10,50 3 11)"
+
+
+###############################################################################
 # Test GML 3.x "polygon" element for a point.
 
 
@@ -1726,7 +1740,7 @@ def test_gml_invalid_geoms():
         ),
     ]
 
-    for (gml, expected_wkt) in gml_expected_wkt_list:
+    for gml, expected_wkt in gml_expected_wkt_list:
         with gdal.quiet_errors():
             # print gml
             geom = ogr.CreateGeometryFromGML(gml)
@@ -2148,7 +2162,7 @@ def test_gml_Coordinates_ts_cs_decimal():
         ),
     ]
 
-    for (gml, expected_wkt) in gml_expected_wkt_list:
+    for gml, expected_wkt in gml_expected_wkt_list:
         geom = ogr.CreateGeometryFromGML(gml)
         wkt = geom.ExportToWkt()
         if expected_wkt is None:
@@ -2203,7 +2217,7 @@ def test_gml_with_xml_header_and_comments():
         ),
     ]
 
-    for (gml, expected_wkt) in gml_expected_wkt_list:
+    for gml, expected_wkt in gml_expected_wkt_list:
         geom = ogr.CreateGeometryFromGML(gml)
         wkt = geom.ExportToWkt()
         if expected_wkt is None:
@@ -2448,8 +2462,7 @@ def test_gml_CircleByCenterPoint_srs_geog_unnhandled_uom():
 
 def test_gml_CompoundCurve_of_ArcByCenterPoint_curve_in_same_segments():
 
-    geom = ogr.CreateGeometryFromGML(
-        """
+    geom = ogr.CreateGeometryFromGML("""
         <aixm:Surface srsName="urn:ogc:def:crs:EPSG::4326" gml:id="ID_249">
             <gml:patches>
                 <gml:PolygonPatch>
@@ -2483,8 +2496,7 @@ def test_gml_CompoundCurve_of_ArcByCenterPoint_curve_in_same_segments():
                 </gml:PolygonPatch>
             </gml:patches>
             <aixm:horizontalAccuracy uom="KM">2.0</aixm:horizontalAccuracy>
-        </aixm:Surface>"""
-    )
+        </aixm:Surface>""")
 
     ogrtest.check_feature_geometry(
         geom,
@@ -3035,7 +3047,7 @@ def test_gml_write_gml_ns():
 def test_gml_read_gml_ArcByCenterPoint_projected_crs_northing_easting():
 
     g = ogr.CreateGeometryFromGML(
-        """<gml:Surface srsName="EPSG:2326" srsDimension="2">
+        """<gml:Surface srsName="urn:ogc:def:crs:EPSG::2326" srsDimension="2">
     <gml:patches>
     <gml:PolygonPatch>
     <gml:exterior>

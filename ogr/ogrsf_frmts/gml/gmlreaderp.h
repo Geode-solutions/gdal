@@ -41,7 +41,7 @@ typedef struct _GeometryNamesStruct GeometryNamesStruct;
 bool OGRGMLIsGeometryElement(const char *pszElement);
 
 /************************************************************************/
-/*                        GFSTemplateList                               */
+/*                           GFSTemplateList                            */
 /************************************************************************/
 
 class GFSTemplateItem;
@@ -126,6 +126,7 @@ class GMLHandler /* non final */
     int m_nGeometryDepth = 0;
     bool m_bAlreadyFoundGeometry = false;
     int m_nGeometryPropertyIndex = 0;
+    std::string m_osLastGeomPathInCurFeature{};
     std::map<std::string, CPLXMLNode *> m_oMapElementToSubstitute{};
 
     int m_nDepth = 0;
@@ -225,7 +226,7 @@ class GMLHandler /* non final */
 #if defined(HAVE_XERCES)
 
 /************************************************************************/
-/*                         GMLXercesHandler                             */
+/*                           GMLXercesHandler                           */
 /************************************************************************/
 class GMLXercesHandler final : public DefaultHandler, public GMLHandler
 {

@@ -176,7 +176,7 @@ static void Concat(CPLString &osRet, bool bStdoutOutput, const char *pszFormat,
 #endif
 
 /************************************************************************/
-/*           gdal_json_object_new_double_or_str_for_non_finite()        */
+/*         gdal_json_object_new_double_or_str_for_non_finite()          */
 /************************************************************************/
 
 static json_object *
@@ -208,7 +208,7 @@ gdal_json_object_new_double_significant_digits(double dfVal,
 }
 
 /************************************************************************/
-/*                     GDALWarpAppOptionsGetParser()                    */
+/*                    GDALWarpAppOptionsGetParser()                     */
 /************************************************************************/
 
 static std::unique_ptr<GDALArgumentParser>
@@ -298,8 +298,9 @@ GDALInfoAppOptionsGetParser(GDALInfoOptions *psOptions,
                 "system."));
 
     argParser->add_argument("-wkt_format")
-        .metavar("<WKT1|WKT2|WKT2_2015|WKT2_2018|WKT2_2019>")
-        .choices("WKT1", "WKT2", "WKT2_2015", "WKT2_2018", "WKT2_2019")
+        .metavar("<WKT1|WKT1_ESRI|WKT2|WKT2_2015|WKT2_2018|WKT2_2019>")
+        .choices("WKT1", "WKT1_ESRI", "WKT2", "WKT2_2015", "WKT2_2018",
+                 "WKT2_2019")
         .store_into(psOptions->osWKTFormat)
         .help(_("WKT format used for SRS."));
 
@@ -355,7 +356,7 @@ GDALInfoAppOptionsGetParser(GDALInfoOptions *psOptions,
 }
 
 /************************************************************************/
-/*                       GDALInfoAppGetParserUsage()                    */
+/*                     GDALInfoAppGetParserUsage()                      */
 /************************************************************************/
 
 std::string GDALInfoAppGetParserUsage()
@@ -377,7 +378,7 @@ std::string GDALInfoAppGetParserUsage()
 }
 
 /************************************************************************/
-/*                             GDALInfo()                               */
+/*                              GDALInfo()                              */
 /************************************************************************/
 
 /**
@@ -688,27 +689,38 @@ char *GDALInfo(GDALDatasetH hDataset, const GDALInfoOptions *psOptions)
         if (bJson)
         {
             json_object *poGeoTransform = json_object_new_array();
-            // Deep copy wasn't working on the array, for some reason, so we
-            // build the geotransform STAC array at the same time.
-            json_object *poStacGeoTransform = json_object_new_array();
 
             for (int i = 0; i < 6; i++)
             {
                 json_object *poGeoTransformCoefficient =
                     json_object_new_double_with_precision(adfGeoTransform[i],
                                                           16);
-                json_object *poStacGeoTransformCoefficient =
-                    json_object_new_double_with_precision(adfGeoTransform[i],
-                                                          16);
-
                 json_object_array_add(poGeoTransform,
                                       poGeoTransformCoefficient);
-                json_object_array_add(poStacGeoTransform,
-                                      poStacGeoTransformCoefficient);
             }
 
             json_object_object_add(poJsonObject, "geoTransform",
                                    poGeoTransform);
+
+            json_object *poStacGeoTransform = json_object_new_array();
+            json_object_array_add(
+                poStacGeoTransform,
+                json_object_new_double_with_precision(adfGeoTransform[1], 16));
+            json_object_array_add(
+                poStacGeoTransform,
+                json_object_new_double_with_precision(adfGeoTransform[2], 16));
+            json_object_array_add(
+                poStacGeoTransform,
+                json_object_new_double_with_precision(adfGeoTransform[0], 16));
+            json_object_array_add(
+                poStacGeoTransform,
+                json_object_new_double_with_precision(adfGeoTransform[4], 16));
+            json_object_array_add(
+                poStacGeoTransform,
+                json_object_new_double_with_precision(adfGeoTransform[5], 16));
+            json_object_array_add(
+                poStacGeoTransform,
+                json_object_new_double_with_precision(adfGeoTransform[3], 16));
             json_object_object_add(poStac, "proj:transform",
                                    poStacGeoTransform);
         }
@@ -1062,7 +1074,7 @@ char *GDALInfo(GDALDatasetH hDataset, const GDALInfoOptions *psOptions)
             const char *stacDataType = nullptr;
             switch (eDT)
             {
-                case GDT_Byte:
+                case GDT_UInt8:
                     stacDataType = "uint8";
                     break;
                 case GDT_Int8:
@@ -1507,9 +1519,13 @@ char *GDALInfo(GDALDatasetH hDataset, const GDALInfoOptions *psOptions)
                             ? json_object_new_int(static_cast<int>(dfNoData))
                             : gdal_json_object_new_double_significant_digits(
                                   dfNoData, nSignificantDigits);
-                    json_object *poStacNoDataValue = nullptr;
-                    json_object_deep_copy(poNoDataValue, &poStacNoDataValue,
-                                          nullptr);
+                    json_object *poStacNoDataValue =
+                        (GDALDataTypeIsInteger(eDT) && dfNoData >= INT_MIN &&
+                         dfNoData <= INT_MAX &&
+                         static_cast<int>(dfNoData) == dfNoData)
+                            ? json_object_new_int(static_cast<int>(dfNoData))
+                            : gdal_json_object_new_double_significant_digits(
+                                  dfNoData, nSignificantDigits);
                     json_object_object_add(poStacRasterBand, "nodata",
                                            poStacNoDataValue);
                     json_object_object_add(poBand, "noDataValue",
@@ -2092,7 +2108,7 @@ static void GDALInfoPrintMetadata(const GDALInfoOptions *psOptions,
     const bool bMDIsJson =
         pszDomain != nullptr && STARTS_WITH_CI(pszDomain, "json:");
 
-    char **papszMetadata = GDALGetMetadata(hObject, pszDomain);
+    CSLConstList papszMetadata = GDALGetMetadata(hObject, pszDomain);
     if (papszMetadata != nullptr && *papszMetadata != nullptr)
     {
         json_object *poDomain = (bJsonOutput && !bIsxml && !bMDIsJson)
@@ -2293,7 +2309,7 @@ static void GDALInfoReportMetadata(const GDALInfoOptions *psOptions,
 }
 
 /************************************************************************/
-/*                             GDALInfoOptionsNew()                     */
+/*                         GDALInfoOptionsNew()                         */
 /************************************************************************/
 
 /**
@@ -2357,7 +2373,7 @@ GDALInfoOptionsNew(char **papszArgv,
 }
 
 /************************************************************************/
-/*                             GDALInfoOptionsFree()                    */
+/*                        GDALInfoOptionsFree()                         */
 /************************************************************************/
 
 /**

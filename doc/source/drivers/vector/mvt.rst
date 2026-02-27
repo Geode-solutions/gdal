@@ -224,6 +224,15 @@ The following open options are available:
       without metadata file, maximum number of tiles to use to establish
       the layer schemas.
 
+   .. oo:: ADD_TILE_FIELDS
+      :choices: YES, NO
+      :default: NO
+      :since: 3.13
+
+      Whether to add fields 'tile_z', 'tile_x', 'tile_y' to each layer,
+      containing the Z/X/Y coordinates of the tile from which the feature
+      originates.
+
 Creation issues
 ---------------
 
@@ -446,13 +455,17 @@ The following layer creation options are supported:
 Examples
 --------
 
-::
+.. example::
 
-   ogrinfo MVT:https://free.tilehosting.com/data/v3/1 -oo tile_extension="pbf.pict?key=${YOUR_KEY}" --debug on -oo metadata_file="https://free.tilehosting.com/data/v3.json?key=${YOUR_KEY}"
+   .. code-block:: bash
 
-::
+      ogrinfo MVT:https://free.tilehosting.com/data/v3/1 -oo tile_extension="pbf.pict?key=${YOUR_KEY}" --debug on -oo metadata_file="https://free.tilehosting.com/data/v3.json?key=${YOUR_KEY}"
 
-   ogr2ogr -f MVT mytileset source.gpkg -dsco MAXZOOM=10
+.. example::
+
+  .. code-block:: bash
+
+      ogr2ogr -f MVT mytileset source.gpkg -dsco MAXZOOM=10
 
 See Also:
 

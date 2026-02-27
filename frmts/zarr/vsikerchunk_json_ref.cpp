@@ -36,7 +36,7 @@
 #include <utility>
 
 /************************************************************************/
-/*                         VSIKerchunkKeyInfo                           */
+/*                          VSIKerchunkKeyInfo                          */
 /************************************************************************/
 
 struct VSIKerchunkKeyInfo
@@ -50,7 +50,7 @@ struct VSIKerchunkKeyInfo
 };
 
 /************************************************************************/
-/*                         VSIKerchunkRefFile                           */
+/*                          VSIKerchunkRefFile                          */
 /************************************************************************/
 
 class VSIKerchunkRefFile
@@ -121,7 +121,7 @@ class VSIKerchunkRefFile
 };
 
 /************************************************************************/
-/*                    VSIKerchunkJSONRefFileSystem                      */
+/*                     VSIKerchunkJSONRefFileSystem                     */
 /************************************************************************/
 
 class VSIKerchunkJSONRefFileSystem final : public VSIFilesystemHandler
@@ -129,12 +129,14 @@ class VSIKerchunkJSONRefFileSystem final : public VSIFilesystemHandler
   public:
     VSIKerchunkJSONRefFileSystem()
     {
-        IsFileSystemInstantiated() = true;
+        bool *pbInstantiated = &IsFileSystemInstantiated();
+        *pbInstantiated = true;
     }
 
     ~VSIKerchunkJSONRefFileSystem() override
     {
-        IsFileSystemInstantiated() = false;
+        bool *pbInstantiated = &IsFileSystemInstantiated();
+        *pbInstantiated = false;
     }
 
     static bool &IsFileSystemInstantiated()
@@ -151,6 +153,9 @@ class VSIKerchunkJSONRefFileSystem final : public VSIFilesystemHandler
              int nFlags) override;
 
     char **ReadDirEx(const char *pszDirname, int nMaxFiles) override;
+
+    char **GetFileMetadata(const char *pszFilename, const char *pszDomain,
+                           CSLConstList papszOptions) override;
 
   private:
     friend bool VSIKerchunkConvertJSONToParquet(const char *pszSrcJSONFilename,
@@ -265,7 +270,7 @@ VSIKerchunkJSONRefFileSystem::SplitFilename(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                  class VSIKerchunkJSONRefParser                      */
+/*                    class VSIKerchunkJSONRefParser                    */
 /************************************************************************/
 
 namespace
@@ -589,7 +594,7 @@ class VSIKerchunkJSONRefParser final : public CPLJSonStreamingParser
 }  // namespace
 
 /************************************************************************/
-/*           VSIKerchunkJSONRefFileSystem::LoadStreaming()              */
+/*            VSIKerchunkJSONRefFileSystem::LoadStreaming()             */
 /************************************************************************/
 
 std::shared_ptr<VSIKerchunkRefFile>
@@ -904,7 +909,7 @@ VSIKerchunkJSONRefFileSystem::LoadInternal(const std::string &osJSONFilename,
 }
 
 /************************************************************************/
-/*               VSIKerchunkJSONRefFileSystem::Load()                   */
+/*                 VSIKerchunkJSONRefFileSystem::Load()                 */
 /************************************************************************/
 
 std::pair<std::shared_ptr<VSIKerchunkRefFile>, std::string>
@@ -1100,7 +1105,7 @@ VSIKerchunkJSONRefFileSystem::Load(const std::string &osJSONFilename,
 }
 
 /************************************************************************/
-/*          VSIKerchunkRefFile::ConvertToParquetRef()                   */
+/*              VSIKerchunkRefFile::ConvertToParquetRef()               */
 /************************************************************************/
 
 bool VSIKerchunkRefFile::ConvertToParquetRef(const std::string &osCacheDir,
@@ -1332,6 +1337,7 @@ bool VSIKerchunkRefFile::ConvertToParquetRef(const std::string &osCacheDir,
 
         for (uint64_t i = 0; i < nChunkCount; ++i)
         {
+            bOK = poLayer != nullptr;
             if ((i % nRecordSize) == 0)
             {
                 if (poDS)
@@ -1369,27 +1375,31 @@ bool VSIKerchunkRefFile::ConvertToParquetRef(const std::string &osCacheDir,
                 poLayer = poDS->CreateLayer(
                     CPLGetBasenameSafe(osParqFilename.c_str()).c_str(), nullptr,
                     wkbNone, aosLayerCreationOptions.List());
+                bOK = false;
                 if (poLayer)
                 {
                     {
                         OGRFieldDefn oFieldDefn("path", OFTString);
-                        poLayer->CreateField(&oFieldDefn);
+                        bOK = poLayer->CreateField(&oFieldDefn) == OGRERR_NONE;
                     }
                     {
                         OGRFieldDefn oFieldDefn("offset", OFTInteger64);
-                        poLayer->CreateField(&oFieldDefn);
+                        bOK = bOK &&
+                              poLayer->CreateField(&oFieldDefn) == OGRERR_NONE;
                     }
                     {
                         OGRFieldDefn oFieldDefn("size", OFTInteger64);
-                        poLayer->CreateField(&oFieldDefn);
+                        bOK = bOK &&
+                              poLayer->CreateField(&oFieldDefn) == OGRERR_NONE;
                     }
                     {
                         OGRFieldDefn oFieldDefn("raw", OFTBinary);
-                        poLayer->CreateField(&oFieldDefn);
+                        bOK = bOK &&
+                              poLayer->CreateField(&oFieldDefn) == OGRERR_NONE;
                     }
                 }
             }
-            if (!poLayer)
+            if (!bOK)
                 return false;
 
             auto poFeature =
@@ -1465,7 +1475,7 @@ bool VSIKerchunkRefFile::ConvertToParquetRef(const std::string &osCacheDir,
 }
 
 /************************************************************************/
-/*                   VSIKerchunkConvertJSONToParquet()                  */
+/*                  VSIKerchunkConvertJSONToParquet()                   */
 /************************************************************************/
 
 bool VSIKerchunkConvertJSONToParquet(const char *pszSrcJSONFilename,
@@ -1525,7 +1535,7 @@ bool VSIKerchunkConvertJSONToParquet(const char *pszSrcJSONFilename,
 }
 
 /************************************************************************/
-/*               VSIKerchunkJSONRefFileSystem::Open()                   */
+/*                 VSIKerchunkJSONRefFileSystem::Open()                 */
 /************************************************************************/
 
 VSIVirtualHandleUniquePtr
@@ -1594,7 +1604,7 @@ VSIKerchunkJSONRefFileSystem::Open(const char *pszFilename,
 }
 
 /************************************************************************/
-/*               VSIKerchunkJSONRefFileSystem::Stat()                   */
+/*                 VSIKerchunkJSONRefFileSystem::Stat()                 */
 /************************************************************************/
 
 int VSIKerchunkJSONRefFileSystem::Stat(const char *pszFilename,
@@ -1667,7 +1677,77 @@ int VSIKerchunkJSONRefFileSystem::Stat(const char *pszFilename,
 }
 
 /************************************************************************/
-/*             VSIKerchunkJSONRefFileSystem::ReadDirEx()                */
+/*           VSIKerchunkJSONRefFileSystem::GetFileMetadata()            */
+/************************************************************************/
+
+char **
+VSIKerchunkJSONRefFileSystem::GetFileMetadata(const char *pszFilename,
+                                              const char *pszDomain,
+                                              CSLConstList /* papszOptions */)
+{
+    if (!pszDomain || !EQUAL(pszDomain, "CHUNK_INFO"))
+        return nullptr;
+
+    const auto [osJSONFilename, osKey] = SplitFilename(pszFilename);
+    if (osJSONFilename.empty() || osKey.empty())
+        return nullptr;
+
+    const auto [refFile, osParqFilename] = Load(
+        osJSONFilename, STARTS_WITH(pszFilename, JSON_REF_CACHED_FS_PREFIX));
+    if (!refFile)
+        return nullptr;
+
+    const auto oIter = refFile->GetMapKeys().find(osKey);
+    if (oIter == refFile->GetMapKeys().end())
+        return nullptr;
+
+    const auto &keyInfo = oIter->second;
+    CPLStringList aosMetadata;
+    if (!(keyInfo.posURI))
+    {
+        aosMetadata.SetNameValue(
+            "SIZE", CPLSPrintf(CPL_FRMT_GUIB,
+                               static_cast<GUIntBig>(keyInfo.abyValue.size())));
+        if (keyInfo.abyValue.size() <
+            static_cast<size_t>(std::numeric_limits<int>::max() - 1))
+        {
+            char *pszBase64 =
+                CPLBase64Encode(static_cast<int>(keyInfo.abyValue.size()),
+                                keyInfo.abyValue.data());
+            aosMetadata.SetNameValue("BASE64", pszBase64);
+            CPLFree(pszBase64);
+        }
+    }
+    else
+    {
+        const std::string osVSIPath = VSIKerchunkMorphURIToVSIPath(
+            *(keyInfo.posURI), CPLGetPathSafe(osJSONFilename.c_str()));
+        if (osVSIPath.empty())
+            return nullptr;
+        if (keyInfo.nSize)
+        {
+            aosMetadata.SetNameValue("SIZE", CPLSPrintf("%u", keyInfo.nSize));
+        }
+        else
+        {
+            VSIStatBufL sStatBuf;
+            if (VSIStatL(osVSIPath.c_str(), &sStatBuf) != 0)
+                return nullptr;
+            aosMetadata.SetNameValue(
+                "SIZE", CPLSPrintf(CPL_FRMT_GUIB,
+                                   static_cast<GUIntBig>(sStatBuf.st_size)));
+        }
+        aosMetadata.SetNameValue(
+            "OFFSET",
+            CPLSPrintf(CPL_FRMT_GUIB, static_cast<GUIntBig>(keyInfo.nOffset)));
+        aosMetadata.SetNameValue("FILENAME", osVSIPath.c_str());
+    }
+
+    return aosMetadata.StealList();
+}
+
+/************************************************************************/
+/*              VSIKerchunkJSONRefFileSystem::ReadDirEx()               */
 /************************************************************************/
 
 char **VSIKerchunkJSONRefFileSystem::ReadDirEx(const char *pszDirname,
@@ -1738,7 +1818,7 @@ void VSIInstallKerchunkJSONRefFileSystem()
     // cppcheck-suppress knownConditionTrueFalse
     if (!VSIKerchunkJSONRefFileSystem::IsFileSystemInstantiated())
     {
-        auto fs = std::make_unique<VSIKerchunkJSONRefFileSystem>().release();
+        auto fs = std::make_shared<VSIKerchunkJSONRefFileSystem>();
         VSIFileManager::InstallHandler(JSON_REF_FS_PREFIX, fs);
         VSIFileManager::InstallHandler(JSON_REF_CACHED_FS_PREFIX, fs);
     }

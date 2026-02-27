@@ -180,6 +180,11 @@ class GDALTest:
                 # Copy all files in /vsimem/
                 mainfile_dirname = os.path.dirname(fl[0])
                 for filename in fl:
+
+                    # Avoid the ENVI driver to trigger when copying a unrelated .hdr file
+                    if self.drivername.lower() == "gtiff" and filename.endswith(".hdr"):
+                        continue
+
                     target_filename = (
                         "/vsimem/tmp_testOpen/" + filename[len(mainfile_dirname) + 1 :]
                     )
@@ -1314,7 +1319,7 @@ def deregister_all_jpeg2000_drivers_but(name_of_driver_to_keep):
 
 
 def reregister_all_jpeg2000_drivers():
-    global jp2kak_drv, jpeg2000_drv, jp2ecw_drv, jp2mrsid_drv, jp2openjpeg_drv
+
     global jp2kak_drv_unregistered, jpeg2000_drv_unregistered, jp2ecw_drv_unregistered, jp2mrsid_drv_unregistered, jp2openjpeg_drv_unregistered
 
     if jp2kak_drv_unregistered:
@@ -1357,7 +1362,7 @@ def filesystem_supports_sparse_files(path):
         return False
 
     try:
-        (ret, err) = runexternal_out_and_err(f'stat -f -c "%T" {path}')
+        ret, err = runexternal_out_and_err(f'stat -f -c "%T" {path}')
     except OSError:
         return False
 
@@ -1834,7 +1839,7 @@ credential_keys = set()
 
 @contextlib.contextmanager
 def credentials(prefix, options):
-    global credential_keys
+
     # Special processing for nested with credentials() call on the same key
     clear_credentials = prefix not in credential_keys
     credential_keys.add(prefix)
@@ -2175,9 +2180,13 @@ def wkt_ds(wkts, *, geom_type=None, epsg=None):
 
     ds = gdal.GetDriverByName("MEM").CreateVector("")
 
+    srs = osr.SpatialReference(epsg=epsg) if epsg else None
+    if srs:
+        srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
     lyr = ds.CreateLayer(
         "polys",
-        osr.SpatialReference(epsg=epsg) if epsg else None,
+        srs=srs,
         geom_type=geom_type if geom_type else ogr.wkbUnknown,
     )
 

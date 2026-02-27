@@ -25,6 +25,7 @@ from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("Sentinel2")
 
+
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
 def module_disable_exceptions():
@@ -309,7 +310,7 @@ def test_sentinel2_l1c_4():
     band = ds.GetRasterBand(1)
     assert band.GetColorInterpretation() == gdal.GCI_RedBand
 
-    assert band.DataType == gdal.GDT_Byte
+    assert band.DataType == gdal.GDT_UInt8
 
 
 ###############################################################################
@@ -2648,7 +2649,7 @@ def test_sentinel2_l1c_safe_compact_3():
     band = ds.GetRasterBand(1)
     assert band.GetColorInterpretation() == gdal.GCI_RedBand
 
-    assert band.DataType == gdal.GDT_Byte
+    assert band.DataType == gdal.GDT_UInt8
 
 
 ###############################################################################
@@ -3311,7 +3312,7 @@ def test_sentinel2_l1b_geolocation_arrays():
     with pytest.raises(Exception, match="Invalid subdataset component name"):
         gdal.Open("SENTINEL2_L1B_WITH_GEOLOC:foo:bar")
 
-    with pytest.raises(Exception, match="Cannot find a file in"):
+    with pytest.raises(Exception, match="Cannot open file 'foo'"):
         gdal.Open("SENTINEL2_L1B_WITH_GEOLOC:foo:S2B_OPER_MSI_L1B_DATASTRIP_D01_B02")
 
     with pytest.raises(Exception, match="Cannot find granules for detector XY"):

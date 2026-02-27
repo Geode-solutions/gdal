@@ -28,7 +28,7 @@
 #endif
 
 /************************************************************************/
-/*            GDALMdimMosaicAlgorithm::GDALMdimMosaicAlgorithm()        */
+/*          GDALMdimMosaicAlgorithm::GDALMdimMosaicAlgorithm()          */
 /************************************************************************/
 
 GDALMdimMosaicAlgorithm::GDALMdimMosaicAlgorithm()
@@ -54,7 +54,7 @@ GDALMdimMosaicAlgorithm::GDALMdimMosaicAlgorithm()
 }
 
 /************************************************************************/
-/*                           GetDimensionDesc()                         */
+/*                          GetDimensionDesc()                          */
 /************************************************************************/
 
 std::optional<GDALMdimMosaicAlgorithm::DimensionDesc>
@@ -171,7 +171,7 @@ GDALMdimMosaicAlgorithm::GetDimensionDesc(
 }
 
 /************************************************************************/
-/*            GDALMdimMosaicAlgorithm::BuildArrayParameters()           */
+/*           GDALMdimMosaicAlgorithm::BuildArrayParameters()            */
 /************************************************************************/
 
 bool GDALMdimMosaicAlgorithm::BuildArrayParameters(
@@ -206,7 +206,7 @@ bool GDALMdimMosaicAlgorithm::BuildArrayParameters(
                                 array.c_str(), pszDatasetName);
                     return false;
                 }
-                apoArrays.push_back(poArray);
+                apoArrays.push_back(std::move(poArray));
             }
         }
         else
@@ -225,7 +225,7 @@ bool GDALMdimMosaicAlgorithm::BuildArrayParameters(
                 if (poArray->GetDimensionCount() < 2)
                     continue;
                 m_array.push_back(arrayName);
-                apoArrays.push_back(poArray);
+                apoArrays.push_back(std::move(poArray));
             }
             if (apoArrays.empty())
             {
@@ -321,7 +321,8 @@ bool GDALMdimMosaicAlgorithm::BuildArrayParameters(
                                 poArray->GetName().c_str(), pszDatasetName);
                     return false;
                 }
-                const auto apoDims = poArray->GetDimensions();
+                const std::vector<std::shared_ptr<GDALDimension>> apoDims =
+                    poArray->GetDimensions();
                 for (size_t iDim = 0;
                      iDim < arrayParameters.mosaicDimensions.size(); ++iDim)
                 {
@@ -390,14 +391,14 @@ bool GDALMdimMosaicAlgorithm::BuildArrayParameters(
                                         pszDatasetName);
                             return false;
                         }
-                        desc.dfStart =
-                            std::min(desc.dfStart, descThisDataset.dfStart);
                         const double dfEnd = std::max(
                             desc.dfStart + static_cast<double>(desc.nSize) *
                                                desc.dfIncrement,
                             descThisDataset.dfStart +
                                 static_cast<double>(descThisDataset.nSize) *
                                     descThisDataset.dfIncrement);
+                        desc.dfStart =
+                            std::min(desc.dfStart, descThisDataset.dfStart);
                         const double dfSize =
                             (dfEnd - desc.dfStart) / desc.dfIncrement;
                         constexpr double MAX_INTEGER_REPRESENTABLE =
@@ -549,7 +550,7 @@ bool GDALMdimMosaicAlgorithm::BuildArrayParameters(
 }
 
 /************************************************************************/
-/*             GDALMdimMosaicAlgorithm::GetInputDatasetNames()          */
+/*           GDALMdimMosaicAlgorithm::GetInputDatasetNames()            */
 /************************************************************************/
 
 bool GDALMdimMosaicAlgorithm::GetInputDatasetNames(
@@ -598,7 +599,7 @@ bool GDALMdimMosaicAlgorithm::GetInputDatasetNames(
 }
 
 /************************************************************************/
-/*                   GDALMdimMosaicAlgorithm::RunImpl()                 */
+/*                  GDALMdimMosaicAlgorithm::RunImpl()                  */
 /************************************************************************/
 
 bool GDALMdimMosaicAlgorithm::RunImpl(GDALProgressFunc pfnProgress,

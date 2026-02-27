@@ -64,7 +64,7 @@ def CreateAndWriteRAT(fname):
     """
     # create
     driver = gdal.GetDriverByName("HFA")
-    ds = driver.Create(fname, 10, 10, 1, gdal.GDT_Byte)
+    ds = driver.Create(fname, 10, 10, 1, gdal.GDT_UInt8)
 
     ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
 
@@ -365,7 +365,7 @@ def CheckLinearBinning(fname):
     band = ds.GetRasterBand(1)
     rat = band.GetDefaultRAT()
 
-    (state, mini, size) = rat.GetLinearBinning()
+    state, mini, size = rat.GetLinearBinning()
     if not state:
         raise HFATestError("GetLinearBinning failed")
 

@@ -770,8 +770,8 @@ CPLErr MRFDataset::LevelInit(const int l)
     bGeoTransformValid = (CE_None == cds->GetGeoTransform(m_gt));
     for (int i = 0; i < l + 1; i++)
     {
-        m_gt[1] *= scale;
-        m_gt[5] *= scale;
+        m_gt.xscale *= scale;
+        m_gt.yscale *= scale;
     }
 
     nRasterXSize = current.size.x;
@@ -1306,7 +1306,7 @@ CPLXMLNode *MRFDataset::BuildConfig()
         CPLCreateXMLElementAndValue(raster, "Compression", CompName(full.comp));
     }
 
-    if (full.dt != GDT_Byte)
+    if (full.dt != GDT_UInt8)
         CPLCreateXMLElementAndValue(raster, "DataType",
                                     GDALGetDataTypeName(full.dt));
 
@@ -1366,13 +1366,13 @@ CPLXMLNode *MRFDataset::BuildConfig()
     // Do we have an affine transform different from identity?
     GDALGeoTransform gt;
     if ((MRFDataset::GetGeoTransform(gt) == CE_None) &&
-        (gt[0] != 0 || gt[1] != 1 || gt[2] != 0 || gt[3] != 0 || gt[4] != 0 ||
-         gt[5] != 1))
+        (gt.xorig != 0 || gt.xscale != 1 || gt.xrot != 0 || gt.yorig != 0 ||
+         gt.yrot != 0 || gt.yscale != 1))
     {
-        double minx = gt[0];
-        double maxx = gt[1] * full.size.x + minx;
-        double maxy = gt[3];
-        double miny = gt[5] * full.size.y + maxy;
+        double minx = gt.xorig;
+        double maxx = gt.xscale * full.size.x + minx;
+        double maxy = gt.yorig;
+        double miny = gt.yscale * full.size.y + maxy;
         CPLXMLNode *bbox = CPLCreateXMLNode(gtags, CXT_Element, "BoundingBox");
         XMLSetAttributeVal(bbox, "minx", minx);
         XMLSetAttributeVal(bbox, "miny", miny);
@@ -1408,7 +1408,7 @@ CPLErr MRFDataset::Initialize(CPLXMLNode *config)
 {
     // We only need a basic initialization here, usually gets overwritten by the
     // image params
-    full.dt = GDT_Byte;
+    full.dt = GDT_UInt8;
     full.hasNoData = false;
     full.NoDataValue = 0;
     Quality = 85;
@@ -1438,12 +1438,12 @@ CPLErr MRFDataset::Initialize(CPLXMLNode *config)
         y1 = atof(CPLGetXMLValue(bbox, "maxy", "1"));
         y0 = atof(CPLGetXMLValue(bbox, "miny", "0"));
 
-        m_gt[0] = x0;
-        m_gt[1] = (x1 - x0) / full.size.x;
-        m_gt[2] = 0;
-        m_gt[3] = y1;
-        m_gt[4] = 0;
-        m_gt[5] = (y0 - y1) / full.size.y;
+        m_gt.xorig = x0;
+        m_gt.xscale = (x1 - x0) / full.size.x;
+        m_gt.xrot = 0;
+        m_gt.yorig = y1;
+        m_gt.yrot = 0;
+        m_gt.yscale = (y0 - y1) / full.size.y;
         bGeoTransformValid = TRUE;
     }
 
@@ -1731,7 +1731,7 @@ static char **CSLAddIfMissing(char **papszList, const char *pszName,
 // CreateCopy implemented based on Create
 GDALDataset *MRFDataset::CreateCopy(const char *pszFilename,
                                     GDALDataset *poSrcDS, int /*bStrict*/,
-                                    char **papszOptions,
+                                    CSLConstList papszOptions,
                                     GDALProgressFunc pfnProgress,
                                     void *pProgressData)
 {
@@ -1800,7 +1800,7 @@ GDALDataset *MRFDataset::CreateCopy(const char *pszFilename,
                 poDS->vMax.push_back(dfData);
 
             // Copy the band metadata, PAM will handle it
-            char **meta = srcBand->GetMetadata("IMAGE_STRUCTURE");
+            CSLConstList meta = srcBand->GetMetadata("IMAGE_STRUCTURE");
             if (CSLCount(meta))
                 mBand->SetMetadata(meta, "IMAGE_STRUCTURE");
 
@@ -2034,7 +2034,7 @@ CPLErr MRFDataset::ZenCopy(GDALDataset *poSrc, GDALProgressFunc pfnProgress,
 
             // Get the data mask as byte
             eErr = poSrcMask->RasterIO(GF_Read, col, row, nCols, nRows,
-                                       buffer_mask, nCols, nRows, GDT_Byte, 0,
+                                       buffer_mask, nCols, nRows, GDT_UInt8, 0,
                                        0, nullptr);
 
             if (eErr != CE_None)
@@ -2058,7 +2058,7 @@ CPLErr MRFDataset::ZenCopy(GDALDataset *poSrc, GDALProgressFunc pfnProgress,
             // valid
             switch (eDT)
             {
-                case GDT_Byte:
+                case GDT_UInt8:
                     ZenFilter(reinterpret_cast<GByte *>(buffer), buffer_mask,
                               nPixelCount, nBandCount, bFirstBandOnly);
                     break;
@@ -2103,20 +2103,19 @@ CPLErr MRFDataset::ZenCopy(GDALDataset *poSrc, GDALProgressFunc pfnProgress,
 
 // Apply open options to the current dataset
 // Called before the configuration is read
-void MRFDataset::ProcessOpenOptions(char **papszOptions)
+void MRFDataset::ProcessOpenOptions(CSLConstList papszOptions)
 {
-    CPLStringList opt(papszOptions, FALSE);
-    no_errors = opt.FetchBoolean("NOERRORS", FALSE);
-    const char *val = opt.FetchNameValue("ZSLICE");
+    no_errors = CSLFetchBoolean(papszOptions, "NOERRORS", FALSE);
+    const char *val = CSLFetchNameValue(papszOptions, "ZSLICE");
     if (val)
         zslice = atoi(val);
 }
 
 // Apply create options to the current dataset, only valid during creation
-void MRFDataset::ProcessCreateOptions(char **papszOptions)
+void MRFDataset::ProcessCreateOptions(CSLConstList papszOptions)
 {
     assert(!bCrystalized);
-    CPLStringList opt(papszOptions, FALSE);
+    const CPLStringList opt(papszOptions);
     ILImage &img(full);
 
     const char *val = opt.FetchNameValue("COMPRESS");
@@ -2196,7 +2195,7 @@ void MRFDataset::ProcessCreateOptions(char **papszOptions)
 
 GDALDataset *MRFDataset::Create(const char *pszName, int nXSize, int nYSize,
                                 int nBandsIn, GDALDataType eType,
-                                char **papszOptions)
+                                CSLConstList papszOptions)
 {
     if (nBandsIn == 0)
     {
@@ -2348,7 +2347,7 @@ CPLErr MRFDataset::AddVersion()
     VSIFSeekL(l_ifp, 0, SEEK_SET);
     VSIFReadL(tbuff, 1, static_cast<size_t>(idxSize), l_ifp);
     verCount++;  // The one we write
-    VSIFSeekL(l_ifp, idxSize * verCount,
+    VSIFSeekL(l_ifp, static_cast<vsi_l_offset>(idxSize) * verCount,
               SEEK_SET);  // At the end, this can mess things up royally
     VSIFWriteL(tbuff, 1, static_cast<size_t>(idxSize), l_ifp);
     CPLFree(tbuff);
@@ -2588,7 +2587,7 @@ CPLErr MRFDataset::ReadTileIdx(ILIdx &tinfo, const ILSize &pos,
         return CE_Failure;
     }
 
-    VSIFSeekL(l_ifp, offset, SEEK_SET);
+    VSIFSeekL(l_ifp, static_cast<vsi_l_offset>(offset), SEEK_SET);
     if (1 != VSIFReadL(&tinfo, sizeof(ILIdx), 1, l_ifp))
         return CE_Failure;
     // Convert them to native form
@@ -2632,7 +2631,7 @@ CPLErr MRFDataset::ReadTileIdx(ILIdx &tinfo, const ILSize &pos,
         return CE_Failure;  // Source reported the error
     }
 
-    VSIFSeekL(srcidx, offset, SEEK_SET);
+    VSIFSeekL(srcidx, static_cast<vsi_l_offset>(offset), SEEK_SET);
     size = VSIFReadL(buffer, sizeof(ILIdx), static_cast<size_t>(size), srcidx);
     if (size != GIntBig(buf.size()))
     {
@@ -2648,7 +2647,7 @@ CPLErr MRFDataset::ReadTileIdx(ILIdx &tinfo, const ILSize &pos,
     }
 
     // Write it in the right place in the local index file
-    VSIFSeekL(l_ifp, bias + offset, SEEK_SET);
+    VSIFSeekL(l_ifp, static_cast<vsi_l_offset>(bias + offset), SEEK_SET);
     size = VSIFWriteL(&buf[0], sizeof(ILIdx), static_cast<size_t>(size), l_ifp);
     if (size != GIntBig(buf.size()))
     {

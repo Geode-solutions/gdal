@@ -577,7 +577,7 @@ def test_ogr_shape_21(f):
 
     # Test fix for #3665
     lyr.ResetReading()
-    (minx, maxx, miny, maxy) = lyr.GetExtent()
+    minx, maxx, miny, maxy = lyr.GetExtent()
     with ogrtest.spatial_filter(
         lyr, minx + 1e-9, miny + 1e-9, maxx - 1e-9, maxy - 1e-9
     ), gdaltest.error_handler():
@@ -1978,7 +1978,7 @@ def test_ogr_shape_49():
     name = feat.GetField("NAME")
 
     # Setup the utf-8 string.
-    gdaltest.exp_name = "OSEBERG S\u00D8R"
+    gdaltest.exp_name = "OSEBERG S\u00d8R"
 
     assert name == gdaltest.exp_name, "Did not get expected name, encoding problems?"
 
@@ -2352,9 +2352,14 @@ def ogr_shape_54_test_layer(ds, layer_index):
         "failed for layer %d" % layer_index
     )
     if (layer_index % 2) == 0:
-        assert feat.GetGeometryRef() is not None and feat.GetGeometryRef().ExportToWkt() == "POINT (%d %d)" % (
-            layer_index,
-            layer_index + 1,
+        assert (
+            feat.GetGeometryRef() is not None
+            and feat.GetGeometryRef().ExportToWkt()
+            == "POINT (%d %d)"
+            % (
+                layer_index,
+                layer_index + 1,
+            )
         ), (
             "failed for layer %d" % layer_index
         )
@@ -4517,7 +4522,7 @@ def check_EOF(filename, expected=True):
     size = gdal.VSIStatL(filename).size
     content = gdal.VSIFReadL(1, size, f)
     gdal.VSIFCloseL(f)
-    pos = content.find("\x1A".encode("LATIN1"))
+    pos = content.find("\x1a".encode("LATIN1"))
     if expected:
         if pos < 0:
             print("Did not find EOF char")
@@ -5821,7 +5826,7 @@ def test_ogr_shape_write_arrow_fallback_types(tmp_vsimem):
     f["date"] = "2023/10/06"
     f["time"] = "12:34:56"
     f["datetime"] = "2023/10/06 19:43:00"
-    f.SetField("binary", b"\x01\x23\x46\x57\x89\xAB\xCD\xEF")
+    f.SetField("binary", b"\x01\x23\x46\x57\x89\xab\xcd\xef")
     f["stringlist"] = ["foo", "bar"]
     f["intlist"] = [1, 2]
     f["int64list"] = [12345678901234, 2]
@@ -6222,3 +6227,110 @@ def test_ogr_shape_write_check_golden_file(tmp_path, src_directory):
         assert (
             open(src_filename, "rb").read() == open(out_filename, "rb").read()
         ), filename
+
+
+###############################################################################
+# Test reading a huge multipolygon with lots of rings
+# https://github.com/qgis/QGIS/issues/63826
+
+
+@pytest.mark.require_curl
+@gdaltest.enable_exceptions()
+@pytest.mark.skipif(
+    "debug" in gdal.VersionInfo(""), reason="test too slow for debug builds"
+)
+def test_ogr_shape_read_huge_multipolygon():
+
+    gdaltest.download_or_skip(
+        "https://sistemas.anatel.gov.br/se/public/file/b/smp/pred_4G_TIM_dbm-90.zip",
+        "pred_4G_TIM_dbm-90.zip",
+    )
+
+    ds = ogr.Open("/vsizip/tmp/cache/pred_4G_TIM_dbm-90.zip/4G_TIM_dbm.shp")
+    lyr = ds.GetLayer(0)
+    start = time.time()
+    f = lyr.GetNextFeature()
+    end = time.time()
+    # This takes ~ 3 seconds on a release build on my machine.
+    assert end - start < 20
+    g = f.GetGeometryRef()
+    assert g.GetGeometryCount() == 161782
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_shape_read_shp_xml(tmp_vsimem):
+
+    with gdal.GetDriverByName("ESRI Shapefile").CreateVector(
+        tmp_vsimem / "test.shp"
+    ) as ds:
+        lyr = ds.CreateLayer("test")
+        lyr.CreateField(ogr.FieldDefn("id", ogr.OFTInteger))
+        lyr.CreateField(ogr.FieldDefn("0123456789", ogr.OFTString))
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.shp.xml",
+        """<metadata>
+<eainfo>
+    <detailed Name="test">
+      <enttyp>
+        <enttypl Sync="TRUE">test</enttypl>
+        <enttypt Sync="TRUE">Feature Class</enttypt>
+        <enttypc Sync="TRUE">0</enttypc>
+      </enttyp>
+      <attr>
+        <attrlabl Sync="TRUE">OBJECTID</attrlabl>
+        <attalias Sync="TRUE">OBJECTID</attalias>
+        <attrtype Sync="TRUE">OID</attrtype>
+        <attwidth Sync="TRUE">4</attwidth>
+        <atprecis Sync="TRUE">0</atprecis>
+        <attscale Sync="TRUE">0</attscale>
+      </attr>
+      <attr>
+        <attrlabl Sync="TRUE">Shape</attrlabl>
+        <attalias Sync="TRUE">Shape</attalias>
+        <attrtype Sync="TRUE">Geometry</attrtype>
+        <attwidth Sync="TRUE">0</attwidth>
+        <atprecis Sync="TRUE">0</atprecis>
+        <attscale Sync="TRUE">0</attscale>
+      </attr>
+      <attr>
+        <attrlabl Sync="TRUE">id</attrlabl>
+        <attalias Sync="TRUE">id</attalias>
+        <attrtype Sync="TRUE">Integer</attrtype>
+        <attwidth Sync="TRUE">4</attwidth>
+        <atprecis Sync="TRUE">0</atprecis>
+        <attscale Sync="TRUE">0</attscale>
+      </attr>
+      <attr>
+        <attrlabl Sync="TRUE">0123456789abcdef</attrlabl>
+        <attalias Sync="TRUE">my_alias</attalias>
+        <attrtype Sync="TRUE">String</attrtype>
+        <attwidth Sync="TRUE">8000</attwidth>
+        <atprecis Sync="TRUE">0</atprecis>
+        <attscale Sync="TRUE">0</attscale>
+      </attr>
+    </detailed>
+</eainfo>
+</metadata>""",
+    )
+
+    ds = ogr.Open(tmp_vsimem / "test.shp")
+    lyr = ds.GetLayer(0)
+    lyr_defn = lyr.GetLayerDefn()
+    assert lyr_defn.GetFieldCount() == 2
+    assert lyr_defn.GetFieldDefn(0).GetName() == "id"
+    assert lyr_defn.GetFieldDefn(0).GetAlternativeName() == ""
+    assert lyr_defn.GetFieldDefn(0).GetType() == ogr.OFTInteger
+    assert lyr_defn.GetFieldDefn(1).GetName() == "0123456789abcdef"
+    assert lyr_defn.GetFieldDefn(1).GetAlternativeName() == "my_alias"
+    assert lyr_defn.GetFieldDefn(1).GetType() == ogr.OFTString
+
+    assert ds.GetFileList() == [
+        "/vsimem/test_ogr_shape_read_shp_xml/test.shp",
+        "/vsimem/test_ogr_shape_read_shp_xml/test.shx",
+        "/vsimem/test_ogr_shape_read_shp_xml/test.dbf",
+        "/vsimem/test_ogr_shape_read_shp_xml/test.shp.xml",
+    ]

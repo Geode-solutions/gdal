@@ -20,6 +20,7 @@ from osgeo import gdal, osr
 
 pytestmark = pytest.mark.require_driver("MRF")
 
+
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
 def module_disable_exceptions():
@@ -254,7 +255,7 @@ def test_mrf_overview_nnb_fact_2():
 
     expected_cs = 1087
     for dt in (
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         gdal.GDT_Int16,
         gdal.GDT_UInt16,
         gdal.GDT_Int32,
@@ -284,7 +285,7 @@ def test_mrf_overview_nnb_with_nodata_fact_2():
 
     expected_cs = 1117
     for dt in [
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         gdal.GDT_Int16,
         gdal.GDT_UInt16,
         gdal.GDT_Int32,
@@ -314,7 +315,7 @@ def test_mrf_overview_nnb_with_nodata_fact_2():
 def test_mrf_overview_avg_fact_2():
 
     for dt in [
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         gdal.GDT_Int16,
         gdal.GDT_UInt16,
         gdal.GDT_Int32,
@@ -354,7 +355,7 @@ def test_mrf_overview_avg_fact_2():
 def test_mrf_overview_avg_with_nodata_fact_2():
 
     for dt in (
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         gdal.GDT_Int16,
         gdal.GDT_UInt16,
         gdal.GDT_Int32,
@@ -555,8 +556,7 @@ def test_mrf_cached_source():
 
     # Caching MRF in mp_safe mode
     open("tmp/byte.tif", "wb").write(open("data/byte.tif", "rb").read())
-    open("tmp/out.mrf", "wt").write(
-        """<MRF_META>
+    open("tmp/out.mrf", "wt").write("""<MRF_META>
   <CachedSource>
     <Source>byte.tif</Source>
   </CachedSource>
@@ -564,8 +564,7 @@ def test_mrf_cached_source():
     <Size x="20" y="20" c="1" />
     <PageSize x="512" y="512" c="1" />
   </Raster>
-</MRF_META>"""
-    )
+</MRF_META>""")
     ds = gdal.Open("tmp/out.mrf")
     cs = ds.GetRasterBand(1).Checksum()
     expected_cs = 4672
@@ -582,8 +581,7 @@ def test_mrf_cached_source():
     # No cleanup, will test cloning next
 
     # Cloning MRF
-    open("tmp/cloning.mrf", "wt").write(
-        """<MRF_META>
+    open("tmp/cloning.mrf", "wt").write("""<MRF_META>
   <CachedSource>
     <Source clone="true">out.mrf</Source>
   </CachedSource>
@@ -591,8 +589,7 @@ def test_mrf_cached_source():
     <Size x="20" y="20" c="1" />
     <PageSize x="512" y="512" c="1" />
   </Raster>
-</MRF_META>"""
-    )
+</MRF_META>""")
     ds = gdal.Open("tmp/cloning.mrf")
     cs = ds.GetRasterBand(1).Checksum()
     expected_cs = 4672

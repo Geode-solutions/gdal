@@ -337,6 +337,9 @@ suffix to the option name, but this is now considered a legacy behavior.
       :default: OFF
 
       When set to ON, blocks whose pixels are all at nodata (or 0 if no nodata is defined)
+      are not written in the file. Sparse files have 0 tile/strip offsets for
+      blocks never written and save space; however, most non-GDAL packages
+      cannot read such files.
 
 
 Overviews and nodata masks
@@ -449,6 +452,15 @@ profile information cannot be used.
 All these metadata tags can be overridden and/or used as creation
 options.
 
+json:ISIS3 Metadata
+-------------------
+
+.. versionadded:: 3.13
+
+It is possible to use :cpp:func:`GDALDataset::GetMetadataItem` to request one
+particular key in the ``json:ISIS3`` metadata domain among all the top-level
+keys that would be returned by ``GDALDataset::GetMetadata("json:ISIS3")``.
+
 Nodata value
 ------------
 
@@ -461,9 +473,14 @@ PAM .aux.xml file.
 Raster Attribute Table
 ----------------------
 
-Starting with GDAL 3.11, Raster attribute tables stored in auxiliary
+Starting with GDAL 3.11, raster attribute tables stored in auxiliary
 .tif.vat.dbf files, as written by ArcGIS, can be read as GDAL Raster Attribute
 Table.
+
+Starting with GDAL 3.12, raster attribute tables can be written into and
+read from the ``GDAL_METADATA`` TIFF tag.
+If the :config:`GTIFF_WRITE_RAT_TO_PAM` configuration option is set,
+raster attribute tables will be written instead into the ``.aux.xml`` side car file.
 
 Sparse files
 ------------
@@ -1297,6 +1314,9 @@ the default behavior of the GTiff driver.
       :since: 3.4.1
 
       When set to ON, blocks whose pixels are all at nodata (or 0 if no nodata is defined)
+      are not written in the file. Sparse files have 0 tile/strip offsets for
+      blocks never written and save space; however, most non-GDAL packages
+      cannot read such files.
 
 -  .. config:: GDAL_TIFF_INTERNAL_MASK
       :choices: TRUE, FALSE
@@ -1401,6 +1421,17 @@ the default behavior of the GTiff driver.
    GDAL (warping, gridding, ...).
    Starting with GDAL 3.6, this option also enables multi-threaded decoding
    when RasterIO() requests intersect several tiles/strips.
+
+-  .. config:: GTIFF_WRITE_RAT_TO_PAM
+      :choices: YES, NO
+      :since: 3.12.0
+      :default: YES
+
+      Whether raster attribute tables attached to bands of a GeoTIFF dataset
+      must be serialized in the ``.aux.xml`` side-car file, instead of the
+      ``GDAL_METADATA`` TIFF tag.
+      In versions prior to 3.12, raster attribute tables were always written
+      and read in the ``.aux.xml`` side-car file.
 
 -  .. config:: GTIFF_WRITE_TOWGS84
       :choices: AUTO, YES, NO

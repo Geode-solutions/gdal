@@ -169,7 +169,7 @@ field with the XML definition of the GML geometry.
 Performance issues with large multi-layer GML files.
 ----------------------------------------------------
 
-Traditionnaly to read a OGR datasource, one iterate over layers with
+Traditionally to read a OGR datasource, one iterate over layers with
 GDALDataset::GetLayer(), and for each layer one iterate over features
 with OGRLayer::GetNextFeature(). While this approach still works for the
 GMLAS driver, it may result in very poor performance on big documents or
@@ -197,7 +197,7 @@ The following open options are supported:
 -  .. oo:: CONFIG_FILE
       :choices: <filename>, <xml>
 
-      finition: filename of a
+      filename of a
       XML configuration file conforming to the
       :source_file:`ogr/ogrsf_frmts/gmlas/data/gmlasconf.xsd`
       schema. It is also possible to provide the XML content directly
@@ -446,24 +446,27 @@ The supported dataset creation options are:
 Examples
 --------
 
-Listing content of a data file:
+.. example::
+   :title: Listing content of a data file
 
-::
+   .. code-block:: bash
 
-   ogrinfo -ro GMLAS:my.gml
+      ogrinfo -ro GMLAS:my.gml
 
-Converting to PostGIS:
+.. example::
+   :title: Converting to PostGIS
 
-::
+   .. code-block:: bash
 
-   ogr2ogr -f PostgreSQL PG:'host=myserver dbname=warmerda' GMLAS:my.gml -nlt CONVERT_TO_LINEAR
+      ogr2ogr -f PostgreSQL PG:'host=myserver dbname=warmerda' GMLAS:my.gml -nlt CONVERT_TO_LINEAR
 
-Converting to Spatialite and back to GML
+.. example::
+   :title: Converting to Spatialite and back to GML
 
-::
+   .. code-block:: bash
 
-   ogr2ogr -f SQLite tmp.sqlite GMLAS:in.gml -dsco SPATIALITE=YES -nlt CONVERT_TO_LINEAR -oo EXPOSE_METADATA_LAYERS=YES
-   ogr2ogr -f GMLAS out.gml tmp.sqlite
+      ogr2ogr -f SQLite tmp.sqlite GMLAS:in.gml -dsco SPATIALITE=YES -nlt CONVERT_TO_LINEAR -oo EXPOSE_METADATA_LAYERS=YES
+      ogr2ogr -f GMLAS out.gml tmp.sqlite
 
 See Also
 --------

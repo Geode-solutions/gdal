@@ -27,16 +27,24 @@
 #endif
 
 /************************************************************************/
-/*      GDALRasterReprojectAlgorithm::GDALRasterReprojectAlgorithm()    */
+/*     GDALRasterReprojectAlgorithm::GDALRasterReprojectAlgorithm()     */
 /************************************************************************/
 
 GDALRasterReprojectAlgorithm::GDALRasterReprojectAlgorithm(bool standaloneStep)
     : GDALRasterPipelineStepAlgorithm(NAME, DESCRIPTION, HELP_URL,
                                       standaloneStep)
 {
+
     AddArg("src-crs", 's', _("Source CRS"), &m_srsCrs)
         .SetIsCRSArg()
         .AddHiddenAlias("s_srs");
+
+    AddArg("like", 0,
+           _("Dataset to use as a template for target bounds, CRS, size and "
+             "nodata"),
+           &m_likeDataset, GDAL_OF_RASTER)
+        .SetMetaVar("DATASET");
+
     AddArg("dst-crs", 'd', _("Destination CRS"), &m_dstCrs)
         .SetIsCRSArg()
         .AddHiddenAlias("t_srs");
@@ -62,7 +70,26 @@ GDALRasterReprojectAlgorithm::GDALRasterReprojectAlgorithm(bool standaloneStep)
         .SetMetaVar("<width>,<height>")
         .SetMutualExclusionGroup("resolution-size");
 
-    AddBBOXArg(&m_bbox, _("Target bounding box (in destination CRS units)"));
+    auto &arg = AddBBOXArg(&m_bbox,
+                           _("Target bounding box (in destination CRS units)"));
+
+    arg.AddValidationAction(
+        [this, &arg]()
+        {
+            // Validate it's not empty
+            const std::vector<double> &bbox = arg.Get<std::vector<double>>();
+            if ((bbox[0] >= bbox[2]) || (bbox[1] >= bbox[3]))
+            {
+                ReportError(CE_Failure, CPLE_AppDefined,
+                            "Invalid bounding box specified");
+                return false;
+            }
+            else
+            {
+                return true;
+            }
+        });
+
     AddArg("bbox-crs", 0, _("CRS of target bounding box"), &m_bboxCrs)
         .SetIsCRSArg()
         .AddHiddenAlias("bbox_srs");
@@ -97,7 +124,7 @@ GDALRasterReprojectAlgorithm::GDALRasterReprojectAlgorithm(bool standaloneStep)
 }
 
 /************************************************************************/
-/*           GDALRasterReprojectUtils::AddResamplingArg()               */
+/*             GDALRasterReprojectUtils::AddResamplingArg()             */
 /************************************************************************/
 
 /*static */ void
@@ -113,7 +140,7 @@ GDALRasterReprojectUtils::AddResamplingArg(GDALAlgorithm *alg,
 }
 
 /************************************************************************/
-/*            AddWarpOptTransformOptErrorThresholdArg()                 */
+/*              AddWarpOptTransformOptErrorThresholdArg()               */
 /************************************************************************/
 
 /* static */
@@ -176,7 +203,7 @@ bool GDALRasterReprojectAlgorithm::CanHandleNextStep(
 }
 
 /************************************************************************/
-/*            GDALRasterReprojectAlgorithm::RunStep()                   */
+/*               GDALRasterReprojectAlgorithm::RunStep()                */
 /************************************************************************/
 
 bool GDALRasterReprojectAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
@@ -188,6 +215,57 @@ bool GDALRasterReprojectAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
 
     CPLStringList aosOptions;
     std::string outputFilename;
+
+    // --like provide defaults: override if not explicitly set
+    if (auto poLikeDS = m_likeDataset.GetDatasetRef())
+    {
+        const auto poSpatialRef = poLikeDS->GetSpatialRef();
+        if (poSpatialRef)
+        {
+            char *pszWKT = nullptr;
+            poSpatialRef->exportToWkt(&pszWKT);
+            m_dstCrs = pszWKT;
+            CPLFree(pszWKT);
+            GDALGeoTransform gt;
+            if (poLikeDS->GetGeoTransform(gt) == CE_None)
+            {
+                if (gt.IsAxisAligned())
+                {
+                    if (m_resolution.empty())
+                    {
+                        m_resolution = {std::abs(gt[1]), std::abs(gt[5])};
+                    }
+                    const int nXSize = poLikeDS->GetRasterXSize();
+                    const int nYSize = poLikeDS->GetRasterYSize();
+                    if (m_size.empty())
+                    {
+                        m_size = {nXSize, nYSize};
+                    }
+                    if (m_bbox.empty())
+                    {
+                        double minX = gt.xorig;
+                        double maxY = gt.yorig;
+                        double maxX =
+                            gt.xorig + nXSize * gt.xscale + nYSize * gt.xrot;
+                        double minY =
+                            gt.yorig + nXSize * gt.yrot + nYSize * gt.yscale;
+                        if (minY > maxY)
+                            std::swap(minY, maxY);
+                        m_bbox = {minX, minY, maxX, maxY};
+                        m_bboxCrs = m_dstCrs;
+                    }
+                }
+                else
+                {
+                    ReportError(
+                        CE_Warning, CPLE_AppDefined,
+                        "Dataset provided with --like has a geotransform "
+                        "with rotation. Ignoring it");
+                }
+            }
+        }
+    }
+
     if (ctxt.m_poNextUsableStep)
     {
         CPLAssert(CanHandleNextStep(ctxt.m_poNextUsableStep));

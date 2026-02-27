@@ -35,7 +35,7 @@ GDALRasterBandH CPL_DLL MEMCreateRasterBandEx(GDALDataset *, int, GByte *,
 CPL_C_END
 
 /************************************************************************/
-/*                            MEMDataset                                */
+/*                              MEMDataset                              */
 /************************************************************************/
 
 class MEMRasterBand;
@@ -76,7 +76,7 @@ class CPL_DLL MEMDataset CPL_NON_FINAL : public GDALDataset
     // cppcheck-suppress unusedPrivateFunction
     static GDALDataset *CreateBase(const char *pszFilename, int nXSize,
                                    int nYSize, int nBands, GDALDataType eType,
-                                   char **papszParamList);
+                                   CSLConstList papszParamList);
 
   protected:
     bool CanBeCloned(int nScopeFlags, bool bCanShareState) const override;
@@ -88,7 +88,7 @@ class CPL_DLL MEMDataset CPL_NON_FINAL : public GDALDataset
     MEMDataset();
     ~MEMDataset() override;
 
-    CPLErr Close() override;
+    CPLErr Close(GDALProgressFunc = nullptr, void * = nullptr) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     const OGRSpatialReference *GetSpatialRefRasterOnly() const override;
@@ -105,7 +105,7 @@ class CPL_DLL MEMDataset CPL_NON_FINAL : public GDALDataset
     CPLErr SetGCPs(int nGCPCount, const GDAL_GCP *pasGCPList,
                    const OGRSpatialReference *poSRS) override;
     virtual CPLErr AddBand(GDALDataType eType,
-                           char **papszOptions = nullptr) override;
+                           CSLConstList papszOptions = nullptr) override;
     CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
                      int nYSize, void *pData, int nBufXSize, int nBufYSize,
                      GDALDataType eBufType, int nBandCount,
@@ -127,7 +127,7 @@ class CPL_DLL MEMDataset CPL_NON_FINAL : public GDALDataset
     static GDALDataset *Open(GDALOpenInfo *);
     static MEMDataset *Create(const char *pszFilename, int nXSize, int nYSize,
                               int nBands, GDALDataType eType,
-                              char **papszParamList);
+                              CSLConstList papszParamList);
     static GDALDataset *
     CreateMultiDimensional(const char *pszFilename,
                            CSLConstList papszRootGroupOptions,
@@ -256,6 +256,9 @@ class CPL_DLL OGRMemLayer CPL_NON_FINAL : public OGRLayer
     // Only use it in the lifetime of a function where the list of features
     // doesn't change.
     IOGRMemLayerFeatureIterator *GetIterator();
+    void PrepareCreateFeature(OGRFeature *poFeature);
+    OGRErr SetFeatureInternal(std::unique_ptr<OGRFeature> poFeature,
+                              GIntBig *pnFID = nullptr);
 
   protected:
     OGRFeature *GetFeatureRef(GIntBig nFeatureId);
@@ -272,8 +275,14 @@ class CPL_DLL OGRMemLayer CPL_NON_FINAL : public OGRLayer
     OGRErr SetNextByIndex(GIntBig nIndex) override;
 
     OGRFeature *GetFeature(GIntBig nFeatureId) override;
+
+    OGRErr ISetFeatureUniqPtr(std::unique_ptr<OGRFeature> poFeature) override;
     OGRErr ISetFeature(OGRFeature *poFeature) override;
+
+    OGRErr ICreateFeatureUniqPtr(std::unique_ptr<OGRFeature> poFeature,
+                                 GIntBig *pnFID = nullptr) override;
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
+
     OGRErr IUpsertFeature(OGRFeature *poFeature) override;
     OGRErr IUpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
                           const int *panUpdatedFieldsIdx,
@@ -289,7 +298,7 @@ class CPL_DLL OGRMemLayer CPL_NON_FINAL : public OGRLayer
         return m_poFeatureDefn;
     }
 
-    GIntBig GetFeatureCount(int) override;
+    GIntBig GetFeatureCount(int = true) override;
 
     virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;

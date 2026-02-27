@@ -35,8 +35,6 @@ GDALVectorSQLAlgorithm::GetConstructorOptions(bool standaloneStep)
     ConstructorOptions opts;
     opts.SetStandaloneStep(standaloneStep);
     opts.SetOutputDatasetRequired(false);
-    opts.SetUpdateMutualExclusionGroup("output-update");
-    opts.SetOutputDatasetMutualExclusionGroup("output-update");
     opts.SetAddInputLayerNameArgument(false);
     opts.SetAddOutputLayerNameArgument(false);
     return opts;
@@ -64,7 +62,7 @@ GDALVectorSQLAlgorithm::GDALVectorSQLAlgorithm(bool standaloneStep)
 }
 
 /************************************************************************/
-/*                   GDALVectorSQLAlgorithmDataset                      */
+/*                    GDALVectorSQLAlgorithmDataset                     */
 /************************************************************************/
 
 namespace
@@ -238,7 +236,7 @@ class GDALVectorSQLAlgorithmDatasetMultiLayer final : public GDALDataset
 }  // namespace
 
 /************************************************************************/
-/*                 GDALVectorSQLAlgorithm::RunStep()                    */
+/*                  GDALVectorSQLAlgorithm::RunStep()                   */
 /************************************************************************/
 
 bool GDALVectorSQLAlgorithm::RunStep(GDALPipelineStepRunContext &)

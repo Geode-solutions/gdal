@@ -1172,7 +1172,7 @@ def test_tiff_ovr_32(tmp_path, both_endian):
     )
     src_data = src_ds.ReadRaster(0, 0, src_ds.RasterXSize, src_ds.RasterYSize)
     tmp_ds.WriteRaster(
-        0, 0, src_ds.RasterXSize, src_ds.RasterYSize, src_data, buf_type=gdal.GDT_Byte
+        0, 0, src_ds.RasterXSize, src_ds.RasterYSize, src_data, buf_type=gdal.GDT_UInt8
     )
     tmp_ds.BuildOverviews("cubic", overviewlist=[2])
 
@@ -1186,7 +1186,7 @@ def test_tiff_ovr_32(tmp_path, both_endian):
     tmp2_ovr_ds = tmp2_ds.GetRasterBand(1).GetOverview(0).GetDataset()
     tmp_ovr_ds = tmp_ds.GetRasterBand(1).GetOverview(0).GetDataset()
     src_data = tmp_ovr_ds.ReadRaster(
-        0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, buf_type=gdal.GDT_Byte
+        0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, buf_type=gdal.GDT_UInt8
     )
     tmp2_ovr_ds.WriteRaster(
         0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, src_data
@@ -1268,7 +1268,7 @@ def test_tiff_ovr_32(tmp_path, both_endian):
     )
     src_data = src_ds.ReadRaster(0, 0, src_ds.RasterXSize, src_ds.RasterYSize)
     tmp_ds.WriteRaster(
-        0, 0, src_ds.RasterXSize, src_ds.RasterYSize, src_data, buf_type=gdal.GDT_Byte
+        0, 0, src_ds.RasterXSize, src_ds.RasterYSize, src_data, buf_type=gdal.GDT_UInt8
     )
     tmp_ds.BuildOverviews("cubic", overviewlist=[2])
 
@@ -1282,7 +1282,7 @@ def test_tiff_ovr_32(tmp_path, both_endian):
     tmp2_ovr_ds = tmp2_ds.GetRasterBand(1).GetOverview(0).GetDataset()
     tmp_ovr_ds = tmp_ds.GetRasterBand(1).GetOverview(0).GetDataset()
     src_data = tmp_ovr_ds.ReadRaster(
-        0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, buf_type=gdal.GDT_Byte
+        0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, buf_type=gdal.GDT_UInt8
     )
     tmp2_ovr_ds.WriteRaster(
         0, 0, tmp_ovr_ds.RasterXSize, tmp_ovr_ds.RasterYSize, src_data
@@ -1457,7 +1457,7 @@ def test_tiff_ovr_38(tmp_path, both_endian):
 @pytest.mark.parametrize(
     "datatype",
     (
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         gdal.GDT_Int16,
         gdal.GDT_UInt16,
         gdal.GDT_Int32,
@@ -1738,7 +1738,7 @@ def test_tiff_ovr_44(tmp_path, both_endian):
     ds = gdal.Open(tif_fname)
     ovr_band = ds.GetRasterBand(1).GetOverview(0)
     if "GetBlockSize" in dir(gdal.Band):
-        (blockx, blocky) = ovr_band.GetBlockSize()
+        blockx, blocky = ovr_band.GetBlockSize()
         assert blockx == 256 and blocky == 256, "did not get expected block size"
     cs = ovr_band.Checksum()
     ds = None
@@ -1763,7 +1763,7 @@ def test_tiff_ovr_45(tmp_path, both_endian):
     ds = gdal.Open(f"{tif_fname}.ovr")
     ovr_band = ds.GetRasterBand(1)
     if "GetBlockSize" in dir(gdal.Band):
-        (blockx, blocky) = ovr_band.GetBlockSize()
+        blockx, blocky = ovr_band.GetBlockSize()
         assert blockx == 256 and blocky == 256, "did not get expected block size"
     cs = ovr_band.Checksum()
     ds = None
@@ -2073,7 +2073,7 @@ def test_tiff_ovr_49(both_endian):
 
     ds = gdal.GetDriverByName("GTiff").Create("/vsimem/tiff_ovr_49.tif", 1023, 1023, 1)
     ds.GetRasterBand(1).Fill(0)
-    c = "\xFF"
+    c = "\xff"
     # Fails on 1.11.1 with col = 255 or col = 1019
     col = 1019
     ds.GetRasterBand(1).WriteRaster(col, 0, 1, 1023, c, 1, 1)
@@ -2778,7 +2778,7 @@ def test_tiff_ovr_internal_overview_different_method():
 
     temp_path = "/vsimem/test.tif"
     gdal.GetDriverByName("GTiff").Create(
-        temp_path, 2, 1, 1, gdal.GDT_Byte, options=["COMPRESS=LZW"]
+        temp_path, 2, 1, 1, gdal.GDT_UInt8, options=["COMPRESS=LZW"]
     )
     ds = gdal.OpenEx(temp_path, gdal.GA_Update)
     with gdaltest.config_options(
@@ -2802,7 +2802,7 @@ def test_tiff_ovr_internal_overview_different_method_propagate_predictor():
 
     temp_path = "/vsimem/test.tif"
     gdal.GetDriverByName("GTiff").Create(
-        temp_path, 2, 1, 1, gdal.GDT_Byte, options=["COMPRESS=LZW", "PREDICTOR=2"]
+        temp_path, 2, 1, 1, gdal.GDT_UInt8, options=["COMPRESS=LZW", "PREDICTOR=2"]
     )
     ds = gdal.OpenEx(temp_path, gdal.GA_Update)
     with gdaltest.config_options({"COMPRESS_OVERVIEW": "DEFLATE"}):
@@ -2824,7 +2824,7 @@ def test_tiff_ovr_internal_overview_different_method_do_not_propagate_predictor(
 
     temp_path = "/vsimem/test.tif"
     gdal.GetDriverByName("GTiff").Create(
-        temp_path, 2, 1, 1, gdal.GDT_Byte, options=["COMPRESS=LZW", "PREDICTOR=2"]
+        temp_path, 2, 1, 1, gdal.GDT_UInt8, options=["COMPRESS=LZW", "PREDICTOR=2"]
     )
     ds = gdal.OpenEx(temp_path, gdal.GA_Update)
     with gdaltest.config_options({"COMPRESS_OVERVIEW": "PACKBITS"}):
@@ -2846,7 +2846,7 @@ def test_tiff_ovr_internal_overview_different_planar_config_to_pixel():
 
     temp_path = "/vsimem/test.tif"
     gdal.GetDriverByName("GTiff").Create(
-        temp_path, 2, 1, 3, gdal.GDT_Byte, options=["INTERLEAVE=BAND"]
+        temp_path, 2, 1, 3, gdal.GDT_UInt8, options=["INTERLEAVE=BAND"]
     )
     ds = gdal.OpenEx(temp_path, gdal.GA_Update)
     with gdaltest.config_options({"INTERLEAVE_OVERVIEW": "PIXEL"}):
@@ -2867,7 +2867,7 @@ def test_tiff_ovr_internal_overview_different_planar_config_to_band():
 
     temp_path = "/vsimem/test.tif"
     gdal.GetDriverByName("GTiff").Create(
-        temp_path, 2, 1, 3, gdal.GDT_Byte, options=["INTERLEAVE=PIXEL"]
+        temp_path, 2, 1, 3, gdal.GDT_UInt8, options=["INTERLEAVE=PIXEL"]
     )
     ds = gdal.OpenEx(temp_path, gdal.GA_Update)
     with gdaltest.config_options({"INTERLEAVE_OVERVIEW": "BAND"}):
@@ -3039,11 +3039,11 @@ def test_tiff_ovr_internal_mask_issue_11555(tmp_vsimem):
     ds = gdal.Open(tmpfilename)
 
     # Check that we have non-zero data when mask = 255
-    assert ds.GetRasterBand(1).GetOverview(0).ReadRaster(0, 5270, 1, 1) == b"\x7F"
-    assert ds.GetRasterBand(2).GetOverview(0).ReadRaster(0, 5270, 1, 1) == b"\x7F"
+    assert ds.GetRasterBand(1).GetOverview(0).ReadRaster(0, 5270, 1, 1) == b"\x7f"
+    assert ds.GetRasterBand(2).GetOverview(0).ReadRaster(0, 5270, 1, 1) == b"\x7f"
     assert (
         ds.GetRasterBand(1).GetMaskBand().GetOverview(0).ReadRaster(0, 5270, 1, 1)
-        == b"\xFF"
+        == b"\xff"
     )
 
     # Check that we have zero data when mask = 0
@@ -3087,7 +3087,7 @@ def test_tiff_ovr_huge_reduction_factor_nodata(tmp_vsimem):
     ds.GetRasterBand(1).SetNoDataValue(0)
     ds.GetRasterBand(2).SetNoDataValue(0)
     ds.GetRasterBand(3).SetNoDataValue(0)
-    ds.WriteRaster(511, 511, 1, 1, b"\xFF" * 3)
+    ds.WriteRaster(511, 511, 1, 1, b"\xff" * 3)
     with gdaltest.config_options(
         {
             "GDAL_OVR_CHUNK_MAX_SIZE": "1000",
@@ -3095,7 +3095,7 @@ def test_tiff_ovr_huge_reduction_factor_nodata(tmp_vsimem):
         }
     ):
         ds.BuildOverviews("AVERAGE", [1024])
-    assert ds.GetRasterBand(1).GetOverview(0).ReadRaster() == b"\xFF"
+    assert ds.GetRasterBand(1).GetOverview(0).ReadRaster() == b"\xff"
 
 
 ###############################################################################
@@ -3111,9 +3111,9 @@ def test_tiff_ovr_huge_reduction_factor_mask(tmp_vsimem):
         3,
         options=["BLOCKYSIZE=1024", "COMPRESS=LZW"],
     )
-    ds.WriteRaster(511, 511, 1, 1, b"\xFF" * 3)
+    ds.WriteRaster(511, 511, 1, 1, b"\xff" * 3)
     ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-    ds.GetRasterBand(1).GetMaskBand().WriteRaster(511, 511, 1, 1, b"\xFF")
+    ds.GetRasterBand(1).GetMaskBand().WriteRaster(511, 511, 1, 1, b"\xff")
     with gdaltest.config_options(
         {
             "GDAL_OVR_CHUNK_MAX_SIZE": "1000",
@@ -3121,7 +3121,7 @@ def test_tiff_ovr_huge_reduction_factor_mask(tmp_vsimem):
         }
     ):
         ds.BuildOverviews("AVERAGE", [1024])
-    assert ds.GetRasterBand(1).GetOverview(0).ReadRaster() == b"\xFF"
+    assert ds.GetRasterBand(1).GetOverview(0).ReadRaster() == b"\xff"
 
 
 ###############################################################################

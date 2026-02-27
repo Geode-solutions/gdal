@@ -57,7 +57,7 @@
 #include "ogrsqlitebase.h"
 
 /************************************************************************/
-/*      SpatiaLite's own Geometry type IDs.                             */
+/*                 SpatiaLite's own Geometry type IDs.                  */
 /************************************************************************/
 
 enum OGRSpatialiteGeomType
@@ -400,7 +400,7 @@ class OGRSQLiteTableLayer final : public OGRSQLiteLayer
 
     int TestCapability(const char *) const override;
 
-    char **GetMetadata(const char *pszDomain = "") override;
+    CSLConstList GetMetadata(const char *pszDomain = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
 
@@ -453,7 +453,7 @@ class OGRSQLiteTableLayer final : public OGRSQLiteLayer
 };
 
 /************************************************************************/
-/*                         OGRSQLiteViewLayer                           */
+/*                          OGRSQLiteViewLayer                          */
 /************************************************************************/
 
 class OGRSQLiteViewLayer final : public OGRSQLiteLayer
@@ -722,7 +722,7 @@ class OGRSQLiteDataSource final : public OGRSQLiteBaseDataSource
 
     bool OpenOrCreateDB(int flags, bool bRegisterOGR2SQLiteExtensions);
 
-    CPLErr Close() override;
+    CPLErr Close(GDALProgressFunc = nullptr, void * = nullptr) override;
 
     void PostInitSpatialite();
 
@@ -733,7 +733,7 @@ class OGRSQLiteDataSource final : public OGRSQLiteBaseDataSource
     ~OGRSQLiteDataSource() override;
 
     bool Open(GDALOpenInfo *poOpenInfo);
-    bool Create(const char *, char **papszOptions);
+    bool Create(const char *, CSLConstList papszOptions);
 
     bool OpenTable(const char *pszTableName, bool IsTable, bool bIsVirtualShape,
                    bool bMayEmitError);
@@ -772,7 +772,7 @@ class OGRSQLiteDataSource final : public OGRSQLiteBaseDataSource
     OGRErr CommitTransaction() override;
     OGRErr RollbackTransaction() override;
 
-    char **GetMetadata(const char *pszDomain = "") override;
+    CSLConstList GetMetadata(const char *pszDomain = "") override;
 
     CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
@@ -874,7 +874,7 @@ class OGRSQLiteDataSource final : public OGRSQLiteBaseDataSource
 
 #ifdef HAVE_RASTERLITE2
 /************************************************************************/
-/*                           RL2RasterBand                              */
+/*                            RL2RasterBand                             */
 /************************************************************************/
 
 class RL2RasterBand final : public GDALPamRasterBand
@@ -919,7 +919,8 @@ void OGRSQLiteDriverUnload(GDALDriver *);
 
 #ifdef HAVE_RASTERLITE2
 GDALDataset *OGRSQLiteDriverCreateCopy(const char *, GDALDataset *, int,
-                                       char **, GDALProgressFunc pfnProgress,
+                                       CSLConstList,
+                                       GDALProgressFunc pfnProgress,
                                        void *pProgressData);
 #endif
 

@@ -34,9 +34,9 @@ GDALRasterZonalStatsAlgorithm::GDALRasterZonalStatsAlgorithm(bool bStandalone)
               .SetStandaloneStep(bStandalone)
               .SetOutputFormatCreateCapability(GDAL_DCAP_CREATE))
 {
+    AddRasterInputArgs(false, false);
     if (bStandalone)
     {
-        AddRasterInputArgs(false, false);
         AddVectorOutputArgs(false, false);
     }
 
@@ -84,7 +84,7 @@ GDALRasterZonalStatsAlgorithm::GDALRasterZonalStatsAlgorithm(bool bStandalone)
 }
 
 /************************************************************************/
-/*                 GDALRasterZonalStatsAlgorithm::RunStep()             */
+/*               GDALRasterZonalStatsAlgorithm::RunStep()               */
 /************************************************************************/
 
 bool GDALRasterZonalStatsAlgorithm::RunImpl(GDALProgressFunc pfnProgress,
@@ -208,6 +208,10 @@ bool GDALRasterZonalStatsAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
     if (!m_zonesLayer.empty())
     {
         aosOptions.AddNameValue("ZONES_LAYER", m_zonesLayer.c_str());
+    }
+    for (const std::string &lco : m_layerCreationOptions)
+    {
+        aosOptions.AddString(std::string("LCO_").append(lco));
     }
 
     if (poRetDS)

@@ -45,7 +45,7 @@
 #define XSTRINGIFY(x) STRINGIFY(x)
 
 /************************************************************************/
-/*                       LIBERTIFFDatasetFileReader                     */
+/*                      LIBERTIFFDatasetFileReader                      */
 /************************************************************************/
 
 struct LIBERTIFFDatasetFileReader final : public LIBERTIFF_NS::FileReader
@@ -98,7 +98,7 @@ size_t LIBERTIFFDatasetFileReader::read(uint64_t offset, size_t count,
 }
 
 /************************************************************************/
-/*                         LIBERTIFFDataset                             */
+/*                           LIBERTIFFDataset                           */
 /************************************************************************/
 
 class LIBERTIFFDataset final : public GDALPamDataset
@@ -134,6 +134,8 @@ class LIBERTIFFDataset final : public GDALPamDataset
     {
         return gdal::GCP::c_ptr(m_aoGCPs);
     }
+
+    static GDALDataType ComputeGDALDataType(const LIBERTIFF_NS::Image &image);
 
   protected:
     CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
@@ -243,7 +245,7 @@ class LIBERTIFFDataset final : public GDALPamDataset
 };
 
 /************************************************************************/
-/*                          LIBERTIFFBand                               */
+/*                            LIBERTIFFBand                             */
 /************************************************************************/
 
 class LIBERTIFFBand final : public GDALPamRasterBand
@@ -363,6 +365,12 @@ class LIBERTIFFBand final : public GDALPamRasterBand
                                           bWriteDirtyBlock);
     }
 
+    bool MayMultiBlockReadingBeMultiThreaded() const override
+    {
+        return cpl::down_cast<LIBERTIFFDataset *>(poDS)->m_poThreadPool !=
+               nullptr;
+    }
+
   protected:
     CPLErr IReadBlock(int nBlockXOff, int nBlockYOff, void *pData) override;
 
@@ -421,7 +429,7 @@ class LIBERTIFFBand final : public GDALPamRasterBand
 };
 
 /************************************************************************/
-/*                           IReadBlock()                               */
+/*                             IReadBlock()                             */
 /************************************************************************/
 
 CPLErr LIBERTIFFBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pData)
@@ -439,7 +447,7 @@ CPLErr LIBERTIFFBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pData)
 }
 
 /************************************************************************/
-/*                           ReadColorMap()                             */
+/*                            ReadColorMap()                            */
 /************************************************************************/
 
 void LIBERTIFFBand::ReadColorMap()
@@ -473,7 +481,7 @@ void LIBERTIFFBand::ReadColorMap()
 }
 
 /************************************************************************/
-/*                          GetTLSState()                               */
+/*                            GetTLSState()                             */
 /************************************************************************/
 
 LIBERTIFFBand::ThreadLocalState &LIBERTIFFBand::GetTLSState() const
@@ -493,7 +501,7 @@ LIBERTIFFBand::ThreadLocalState &LIBERTIFFBand::GetTLSState() const
 }
 
 /************************************************************************/
-/*                        InterpolateAtPoint()                          */
+/*                         InterpolateAtPoint()                         */
 /************************************************************************/
 
 CPLErr LIBERTIFFBand::InterpolateAtPoint(double dfPixel, double dfLine,
@@ -523,7 +531,7 @@ CPLErr LIBERTIFFBand::InterpolateAtPoint(double dfPixel, double dfLine,
 }
 
 /************************************************************************/
-/*                           InitMaskBand()                             */
+/*                            InitMaskBand()                            */
 /************************************************************************/
 
 void LIBERTIFFBand::InitMaskBand()
@@ -654,7 +662,7 @@ const char *LIBERTIFFBand::GetMetadataItem(const char *pszName,
 }
 
 /************************************************************************/
-/*                          GetTLSState()                               */
+/*                            GetTLSState()                             */
 /************************************************************************/
 
 LIBERTIFFDataset::ThreadLocalState &LIBERTIFFDataset::GetTLSState() const
@@ -675,7 +683,7 @@ LIBERTIFFDataset::ThreadLocalState &LIBERTIFFDataset::GetTLSState() const
 }
 
 /************************************************************************/
-/*                           IRasterIO()                                */
+/*                             IRasterIO()                              */
 /************************************************************************/
 
 CPLErr LIBERTIFFDataset::IRasterIO(
@@ -957,7 +965,7 @@ CPLErr LIBERTIFFDataset::IRasterIO(
 }
 
 /************************************************************************/
-/*                       HorizPredictorDecode()                         */
+/*                        HorizPredictorDecode()                        */
 /************************************************************************/
 
 template <class T, class U>
@@ -1120,7 +1128,7 @@ HorizPredictorDecode(void *bufferIn, size_t nPixelCount,
 }
 
 /************************************************************************/
-/*                FloatingPointHorizPredictorDecode()                   */
+/*                 FloatingPointHorizPredictorDecode()                  */
 /************************************************************************/
 
 template <class T>
@@ -1215,7 +1223,7 @@ FloatingPointHorizPredictorDecode(std::vector<uint8_t> &tmpBuffer,
 }
 
 /************************************************************************/
-/*                           ReadBlock()                                */
+/*                             ReadBlock()                              */
 /************************************************************************/
 
 bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
@@ -1327,9 +1335,19 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
         return true;
     }
 
-    std::vector<GByte> &abyDecompressedStrile = tlsState.m_decompressedBuffer;
+    GByte *pabyDecompressedStrile = nullptr;
     const size_t nNativeDTSize =
         static_cast<size_t>(GDALGetDataTypeSizeBytes(eNativeDT));
+
+    const auto IsContiguousBandMap = [nBandCount, panBandMap]()
+    {
+        for (int i = 0; i < nBandCount; ++i)
+        {
+            if (panBandMap[i] != i + 1)
+                return false;
+        }
+        return true;
+    };
 
     if (curStrileIdx != tlsState.m_curStrileIdx)
     {
@@ -1338,35 +1356,60 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
 
         // Overflow in multiplication checked in Open() method
         const int nComponentsPerPixel = bSeparate ? 1 : nBands;
+        const int nActualLineCount =
+            m_image->isTiled() ? nBlockYSize : nBlockActualYSize;
         const size_t nActualPixelCount =
-            static_cast<size_t>(m_image->isTiled() ? nBlockYSize
-                                                   : nBlockActualYSize) *
-            nBlockXSize;
-        const int nLineSizeBytes =
-            m_image->bitsPerSample() == 1 ? (nBlockXSize + 7) / 8 : nBlockXSize;
+            static_cast<size_t>(nActualLineCount) * nBlockXSize;
+        const int nLineSizeBytes = m_image->bitsPerSample() == 1
+                                       ? cpl::div_round_up(nBlockXSize, 8)
+                                       : nBlockXSize;
         const size_t nActualUncompressedSize =
-            nNativeDTSize *
-            static_cast<size_t>(m_image->isTiled() ? nBlockYSize
-                                                   : nBlockActualYSize) *
+            nNativeDTSize * static_cast<size_t>(nActualLineCount) *
             nLineSizeBytes * nComponentsPerPixel;
 
-        // Allocate buffer for decompressed strile
-        if (abyDecompressedStrile.empty())
+        const bool bCanDecompressDirectlyIntoOutputBuffer =
+            pabyBlockData != nullptr && m_image->bitsPerSample() != 1 &&
+            eBufType == eNativeDT &&
+            nPixelSpace ==
+                static_cast<GSpacing>(nNativeDTSize) * nComponentsPerPixel &&
+            ((nActualLineCount == 1 && !m_image->isTiled()) ||
+             nLineSpace == nPixelSpace * nBlockXSize) &&
+            (!m_image->isTiled() || nBlockYOff + nBlockYSize <= nRasterYSize) &&
+            ((bSeparate && nBandCount == 1) ||
+             (!bSeparate && nBandCount == nBands &&
+              (nBands == 1 ||
+               (nBandSpace == static_cast<GSpacing>(nNativeDTSize) &&
+                IsContiguousBandMap()))));
+
+        if (bCanDecompressDirectlyIntoOutputBuffer)
         {
-            const size_t nMaxUncompressedSize =
-                nNativeDTSize * nBlockXSize * nBlockYSize * nComponentsPerPixel;
-            try
+            // Use directly output buffer to decompress strile
+            pabyDecompressedStrile = pabyBlockData;
+        }
+        else
+        {
+            // Allocate buffer for decompressed strile
+            std::vector<GByte> &abyDecompressedStrile =
+                tlsState.m_decompressedBuffer;
+            if (abyDecompressedStrile.empty())
             {
-                abyDecompressedStrile.resize(nMaxUncompressedSize);
-                if (m_image->bitsPerSample() == 1)
-                    bufferForOneBitExpansion.resize(nMaxUncompressedSize);
+                const size_t nMaxUncompressedSize = nNativeDTSize *
+                                                    nBlockXSize * nBlockYSize *
+                                                    nComponentsPerPixel;
+                try
+                {
+                    abyDecompressedStrile.resize(nMaxUncompressedSize);
+                    if (m_image->bitsPerSample() == 1)
+                        bufferForOneBitExpansion.resize(nMaxUncompressedSize);
+                }
+                catch (const std::exception &)
+                {
+                    CPLError(CE_Failure, CPLE_OutOfMemory,
+                             "Out of memory allocating temporary buffer");
+                    return false;
+                }
             }
-            catch (const std::exception &)
-            {
-                CPLError(CE_Failure, CPLE_OutOfMemory,
-                         "Out of memory allocating temporary buffer");
-                return false;
-            }
+            pabyDecompressedStrile = abyDecompressedStrile.data();
         }
 
         if (m_image->compression() != LIBERTIFF_NS::Compression::None)
@@ -1475,7 +1518,7 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
                 if ((tlsState.m_tiff.tif_predecode &&
                      tlsState.m_tiff.tif_predecode(&tlsState.m_tiff, 0) == 0) ||
                     tlsState.m_tiff.tif_decodestrip(
-                        &tlsState.m_tiff, abyDecompressedStrile.data(),
+                        &tlsState.m_tiff, pabyDecompressedStrile,
                         nActualUncompressedSize, 0) == 0)
                 {
                     CPLError(CE_Failure, CPLE_AppDefined,
@@ -1545,8 +1588,7 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
                 }
                 if (poTmpDS->GetRasterCount() != nComponentsPerPixel ||
                     poTmpDS->GetRasterXSize() != nBlockXSize ||
-                    poTmpDS->GetRasterYSize() !=
-                        (m_image->isTiled() ? nBlockYSize : nBlockActualYSize))
+                    poTmpDS->GetRasterYSize() != nActualLineCount)
                 {
                     CPLError(CE_Failure, CPLE_AppDefined,
                              "%s blob has no expected dimensions (%dx%d "
@@ -1554,16 +1596,15 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
                              "whereas %d expected)",
                              drvName, poTmpDS->GetRasterXSize(),
                              poTmpDS->GetRasterYSize(), nBlockXSize,
-                             m_image->isTiled() ? nBlockYSize
-                                                : nBlockActualYSize,
-                             poTmpDS->GetRasterCount(), nComponentsPerPixel);
+                             nActualLineCount, poTmpDS->GetRasterCount(),
+                             nComponentsPerPixel);
                     return false;
                 }
                 GDALRasterIOExtraArg sExtraArg;
                 INIT_RASTERIO_EXTRA_ARG(sExtraArg);
                 if (poTmpDS->RasterIO(
                         GF_Read, 0, 0, poTmpDS->GetRasterXSize(),
-                        poTmpDS->GetRasterYSize(), abyDecompressedStrile.data(),
+                        poTmpDS->GetRasterYSize(), pabyDecompressedStrile,
                         poTmpDS->GetRasterXSize(), poTmpDS->GetRasterYSize(),
                         eNativeDT, poTmpDS->GetRasterCount(), nullptr,
                         nNativeDTSize * nComponentsPerPixel,
@@ -1578,7 +1619,7 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
             else
             {
                 CPLAssert(m_decompressor);
-                void *output_data = abyDecompressedStrile.data();
+                void *output_data = pabyDecompressedStrile;
                 size_t output_size = nActualUncompressedSize;
                 if (!m_decompressor->pfnFunc(
                         abyCompressedStrile.data(), size, &output_data,
@@ -1589,7 +1630,7 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
                              "Decompression failed");
                     return false;
                 }
-                CPLAssert(output_data == abyDecompressedStrile.data());
+                CPLAssert(output_data == pabyDecompressedStrile);
             }
         }
         else
@@ -1602,8 +1643,8 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
             }
 
             bool ok = true;
-            m_image->readContext()->read(offset, size,
-                                         abyDecompressedStrile.data(), ok);
+            m_image->readContext()->read(offset, size, pabyDecompressedStrile,
+                                         ok);
             if (!ok)
             {
                 CPLError(CE_Failure, CPLE_FileIO,
@@ -1614,8 +1655,11 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
 
         if (m_image->bitsPerSample() == 1)
         {
+            std::vector<GByte> &abyDecompressedStrile =
+                tlsState.m_decompressedBuffer;
             const GByte *CPL_RESTRICT pabySrc = abyDecompressedStrile.data();
             GByte *CPL_RESTRICT pabyDst = bufferForOneBitExpansion.data();
+            const int nSrcInc = cpl::div_round_up(nBlockXSize, 8);
             for (int iY = 0; iY < nBlockActualYSize; ++iY)
             {
                 if (m_bExpand1To255)
@@ -1628,11 +1672,12 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
                     GDALExpandPackedBitsToByteAt0Or1(pabySrc, pabyDst,
                                                      nBlockXSize);
                 }
-                pabySrc += (nBlockXSize + 7) / 8;
+                pabySrc += nSrcInc;
                 pabyDst += nBlockXSize;
             }
 
             std::swap(abyDecompressedStrile, bufferForOneBitExpansion);
+            pabyDecompressedStrile = abyDecompressedStrile.data();
         }
         else if (m_image->compression() == LIBERTIFF_NS::Compression::None ||
                  m_image->compression() == LIBERTIFF_NS::Compression::LZW ||
@@ -1643,14 +1688,14 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
             {
                 if (GDALDataTypeIsComplex(eNativeDT))
                 {
-                    GDALSwapWordsEx(abyDecompressedStrile.data(),
+                    GDALSwapWordsEx(pabyDecompressedStrile,
                                     static_cast<int>(nNativeDTSize) / 2,
                                     nActualPixelCount * nComponentsPerPixel * 2,
                                     static_cast<int>(nNativeDTSize) / 2);
                 }
                 else
                 {
-                    GDALSwapWordsEx(abyDecompressedStrile.data(),
+                    GDALSwapWordsEx(pabyDecompressedStrile,
                                     static_cast<int>(nNativeDTSize),
                                     nActualPixelCount * nComponentsPerPixel,
                                     static_cast<int>(nNativeDTSize));
@@ -1661,9 +1706,9 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
             {
                 for (int iY = 0; iY < nBlockActualYSize; ++iY)
                 {
-                    auto ptr =
-                        abyDecompressedStrile.data() +
-                        nNativeDTSize * iY * nBlockXSize * nComponentsPerPixel;
+                    auto ptr = pabyDecompressedStrile + nNativeDTSize * iY *
+                                                            nBlockXSize *
+                                                            nComponentsPerPixel;
                     if (nNativeDTSize == sizeof(uint8_t))
                     {
                         HorizPredictorDecode<uint8_t>(ptr, nBlockXSize,
@@ -1694,9 +1739,9 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
             {
                 for (int iY = 0; iY < nBlockActualYSize; ++iY)
                 {
-                    auto ptr =
-                        abyDecompressedStrile.data() +
-                        nNativeDTSize * iY * nBlockXSize * nComponentsPerPixel;
+                    auto ptr = pabyDecompressedStrile + nNativeDTSize * iY *
+                                                            nBlockXSize *
+                                                            nComponentsPerPixel;
                     bool ok = true;
                     if (nNativeDTSize == sizeof(uint32_t))
                     {
@@ -1721,21 +1766,18 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
                 }
             }
         }
+
+        if (bCanDecompressDirectlyIntoOutputBuffer)
+            return true;
+    }
+    else
+    {
+        pabyDecompressedStrile = tlsState.m_decompressedBuffer.data();
     }
 
     // Copy decompress strile into user buffer
     if (pabyBlockData)
     {
-        const auto IsContiguousBandMap = [nBandCount, panBandMap]()
-        {
-            for (int i = 0; i < nBandCount; ++i)
-            {
-                if (panBandMap[i] != i + 1)
-                    return false;
-            }
-            return true;
-        };
-
         const int nBufTypeSize = GDALGetDataTypeSizeBytes(eBufType);
         if (!bSeparate && nBands > 1 && nBands == nBandCount &&
             nBufTypeSize == nPixelSpace && IsContiguousBandMap())
@@ -1757,7 +1799,7 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
                             static_cast<GByte *>(apabyDest[iBand]) + nLineSpace;
                     }
                 }
-                GDALDeinterleave(abyDecompressedStrile.data() +
+                GDALDeinterleave(pabyDecompressedStrile +
                                      nNativeDTSize * iY * nBlockXSize * nBands,
                                  eNativeDT, nBands, apabyDest.data(), eBufType,
                                  nBlockActualXSize);
@@ -1772,7 +1814,7 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
             for (int iY = 0; iY < nBlockActualYSize; ++iY)
             {
                 GDALCopyWords64(
-                    abyDecompressedStrile.data() +
+                    pabyDecompressedStrile +
                         nNativeDTSize * iY * nBlockXSize * nBands,
                     eNativeDT, static_cast<int>(nNativeDTSize),
                     pabyBlockData + iY * nLineSpace, eBufType, nBufTypeSize,
@@ -1793,18 +1835,20 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
             {
                 GByte *const pabyDst = pabyBlockData + iY * nLineSpace;
                 const GByte *const pabySrc =
-                    abyDecompressedStrile.data() +
+                    pabyDecompressedStrile +
                     nNativeDTSize * iY * nBlockXSize * nBands;
                 if (nBands == 3 && nPixelSpace == 4 && nBufTypeSize == 1)
                 {
-                    for (int iX = 0; iX < nBlockActualXSize; ++iX)
+                    for (size_t iX = 0;
+                         iX < static_cast<size_t>(nBlockActualXSize); ++iX)
                     {
                         memcpy(pabyDst + iX * 4, pabySrc + iX * 3, 3);
                     }
                 }
                 else
                 {
-                    for (int iX = 0; iX < nBlockActualXSize; ++iX)
+                    for (size_t iX = 0;
+                         iX < static_cast<size_t>(nBlockActualXSize); ++iX)
                     {
                         memcpy(pabyDst + iX * nPixelSpace,
                                pabySrc + iX * nBands, nBands * nBufTypeSize);
@@ -1822,9 +1866,10 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
                 for (int iY = 0; iY < nBlockActualYSize; ++iY)
                 {
                     GDALCopyWords64(
-                        abyDecompressedStrile.data() +
-                            nNativeDTSize *
-                                (iY * nBlockXSize * nSrcPixels + iSrcBand),
+                        pabyDecompressedStrile +
+                            nNativeDTSize * (static_cast<size_t>(iY) *
+                                                 nBlockXSize * nSrcPixels +
+                                             iSrcBand),
                         eNativeDT, static_cast<int>(nSrcPixels * nNativeDTSize),
                         pabyBlockData + iBand * nBandSpace + iY * nLineSpace,
                         eBufType, static_cast<int>(nPixelSpace),
@@ -1841,7 +1886,7 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
 }
 
 /************************************************************************/
-/*                            Identify()                                */
+/*                              Identify()                              */
 /************************************************************************/
 
 /* static */ int LIBERTIFFDataset::Identify(GDALOpenInfo *poOpenInfo)
@@ -1867,69 +1912,69 @@ bool LIBERTIFFDataset::ReadBlock(GByte *pabyBlockData, int nBlockXOff,
 /*                        ComputeGDALDataType()                         */
 /************************************************************************/
 
-GDALDataType LIBERTIFFDataset::ComputeGDALDataType() const
+/* static */ GDALDataType
+LIBERTIFFDataset::ComputeGDALDataType(const LIBERTIFF_NS::Image &image)
 {
-
     GDALDataType eDT = GDT_Unknown;
 
-    switch (m_image->sampleFormat())
+    switch (image.sampleFormat())
     {
         case LIBERTIFF_NS::SampleFormat::UnsignedInt:
         {
-            if (m_image->bitsPerSample() == 1 &&
-                (m_image->samplesPerPixel() == 1 ||
-                 m_image->planarConfiguration() ==
+            if (image.bitsPerSample() == 1 &&
+                (image.samplesPerPixel() == 1 ||
+                 image.planarConfiguration() ==
                      LIBERTIFF_NS::PlanarConfiguration::Separate))
             {
-                eDT = GDT_Byte;
+                eDT = GDT_UInt8;
             }
-            else if (m_image->bitsPerSample() == 8)
-                eDT = GDT_Byte;
-            else if (m_image->bitsPerSample() == 16)
+            else if (image.bitsPerSample() == 8)
+                eDT = GDT_UInt8;
+            else if (image.bitsPerSample() == 16)
                 eDT = GDT_UInt16;
-            else if (m_image->bitsPerSample() == 32)
+            else if (image.bitsPerSample() == 32)
                 eDT = GDT_UInt32;
-            else if (m_image->bitsPerSample() == 64)
+            else if (image.bitsPerSample() == 64)
                 eDT = GDT_UInt64;
             break;
         }
 
         case LIBERTIFF_NS::SampleFormat::SignedInt:
         {
-            if (m_image->bitsPerSample() == 8)
+            if (image.bitsPerSample() == 8)
                 eDT = GDT_Int8;
-            else if (m_image->bitsPerSample() == 16)
+            else if (image.bitsPerSample() == 16)
                 eDT = GDT_Int16;
-            else if (m_image->bitsPerSample() == 32)
+            else if (image.bitsPerSample() == 32)
                 eDT = GDT_Int32;
-            else if (m_image->bitsPerSample() == 64)
+            else if (image.bitsPerSample() == 64)
                 eDT = GDT_Int64;
             break;
         }
 
         case LIBERTIFF_NS::SampleFormat::IEEEFP:
         {
-            if (m_image->bitsPerSample() == 32)
+            if (image.bitsPerSample() == 32)
                 eDT = GDT_Float32;
-            else if (m_image->bitsPerSample() == 64)
+            else if (image.bitsPerSample() == 64)
                 eDT = GDT_Float64;
             break;
         }
 
         case LIBERTIFF_NS::SampleFormat::ComplexInt:
         {
-            if (m_image->bitsPerSample() == 32)
+            if (image.bitsPerSample() == 32)
                 eDT = GDT_CInt16;
-            else if (m_image->bitsPerSample() == 64)
+            else if (image.bitsPerSample() == 64)
                 eDT = GDT_CInt32;
             break;
         }
 
         case LIBERTIFF_NS::SampleFormat::ComplexIEEEFP:
         {
-            if (m_image->bitsPerSample() == 64)
+            if (image.bitsPerSample() == 64)
                 eDT = GDT_CFloat32;
-            else if (m_image->bitsPerSample() == 128)
+            else if (image.bitsPerSample() == 128)
                 eDT = GDT_CFloat64;
             break;
         }
@@ -1938,8 +1983,8 @@ GDALDataType LIBERTIFFDataset::ComputeGDALDataType() const
             break;
     }
 
-    if (m_image->bitsPerSample() == 12 &&
-        m_image->compression() == LIBERTIFF_NS::Compression::JPEG)
+    if (image.bitsPerSample() == 12 &&
+        image.compression() == LIBERTIFF_NS::Compression::JPEG)
     {
         auto poJPEGDrv = GetGDALDriverManager()->GetDriverByName("JPEG");
         if (poJPEGDrv)
@@ -1954,8 +1999,13 @@ GDALDataType LIBERTIFFDataset::ComputeGDALDataType() const
     return eDT;
 }
 
+GDALDataType LIBERTIFFDataset::ComputeGDALDataType() const
+{
+    return ComputeGDALDataType(*(m_image.get()));
+}
+
 /************************************************************************/
-/*                       ProcessCompressionMethod()                     */
+/*                      ProcessCompressionMethod()                      */
 /************************************************************************/
 
 bool LIBERTIFFDataset::ProcessCompressionMethod()
@@ -2155,7 +2205,7 @@ bool LIBERTIFFDataset::ProcessCompressionMethod()
 }
 
 /************************************************************************/
-/*                               Open()                                 */
+/*                                Open()                                */
 /************************************************************************/
 
 bool LIBERTIFFDataset::Open(std::unique_ptr<const LIBERTIFF_NS::Image> image)
@@ -2168,9 +2218,18 @@ bool LIBERTIFFDataset::Open(std::unique_ptr<const LIBERTIFF_NS::Image> image)
         m_image->height() == 0 ||
         m_image->height() > static_cast<uint32_t>(INT_MAX) ||
         m_image->samplesPerPixel() == 0 ||
-        m_image->samplesPerPixel() > static_cast<uint32_t>(INT_MAX))
+        m_image->samplesPerPixel() > static_cast<uint32_t>(INT_MAX) ||
+        // Consistency check to avoid issues in code that assume that the 2
+        // valid values are the only possibles ones and misbehave otherwise
+        // (e.g. Lerc codec)
+        (m_image->planarConfiguration() !=
+             LIBERTIFF_NS::PlanarConfiguration::Separate &&
+         m_image->planarConfiguration() !=
+             LIBERTIFF_NS::PlanarConfiguration::Contiguous))
     {
-        CPLDebug("LIBERTIFF", "Invalid width, height, or samplesPerPixel");
+        CPLDebug(
+            "LIBERTIFF",
+            "Invalid width, height, samplesPerPixel or planarConfiguration");
         return false;
     }
 
@@ -2388,7 +2447,7 @@ bool LIBERTIFFDataset::Open(std::unique_ptr<const LIBERTIFF_NS::Image> image)
                 "IMAGE_STRUCTURE");
         }
 
-        if (l_nBands == 1 && eDT == GDT_Byte)
+        if (l_nBands == 1 && eDT == GDT_UInt8)
         {
             poBand->ReadColorMap();
         }
@@ -2428,7 +2487,7 @@ bool LIBERTIFFDataset::Open(std::unique_ptr<const LIBERTIFF_NS::Image> image)
 }
 
 /************************************************************************/
-/*                               Open()                                 */
+/*                                Open()                                */
 /************************************************************************/
 
 bool LIBERTIFFDataset::Open(GDALOpenInfo *poOpenInfo)
@@ -2592,19 +2651,21 @@ bool LIBERTIFFDataset::Open(GDALOpenInfo *poOpenInfo)
             if (curImage->subFileType() ==
                 LIBERTIFF_NS::SubFileTypeFlags::ReducedImage)
             {
-                // Overview IFD
-                auto poOvrDS = std::make_unique<LIBERTIFFDataset>();
-                if (poOvrDS->Open(std::move(curImage)) &&
-                    poOvrDS->GetRasterCount() == nBands &&
-                    poOvrDS->GetRasterXSize() <= nRasterXSize &&
-                    poOvrDS->GetRasterYSize() <= nRasterYSize &&
-                    poOvrDS->GetRasterBand(1)->GetRasterDataType() ==
+                if (curImage->samplesPerPixel() ==
+                        static_cast<unsigned>(nBands) &&
+                    curImage->width() <= static_cast<unsigned>(nRasterXSize) &&
+                    curImage->height() <= static_cast<unsigned>(nRasterYSize) &&
+                    LIBERTIFFDataset::ComputeGDALDataType(*(curImage.get())) ==
                         GetRasterBand(1)->GetRasterDataType())
                 {
-                    m_apoOvrDSOwned.push_back(std::move(poOvrDS));
-                    auto poOvrDSRaw = m_apoOvrDSOwned.back().get();
-                    m_apoOvrDS.push_back(poOvrDSRaw);
-                    poLastNonMaskDS = poOvrDSRaw;
+                    auto poOvrDS = std::make_unique<LIBERTIFFDataset>();
+                    if (poOvrDS->Open(std::move(curImage)))
+                    {
+                        m_apoOvrDSOwned.push_back(std::move(poOvrDS));
+                        auto poOvrDSRaw = m_apoOvrDSOwned.back().get();
+                        m_apoOvrDS.push_back(poOvrDSRaw);
+                        poLastNonMaskDS = poOvrDSRaw;
+                    }
                 }
             }
             else if ((curImage->subFileType() &
@@ -2613,24 +2674,26 @@ bool LIBERTIFFDataset::Open(GDALOpenInfo *poOpenInfo)
                 // Mask IFD
                 if (!poLastNonMaskDS->m_poMaskDS)
                 {
-                    auto poMaskDS = std::make_unique<LIBERTIFFDataset>();
-                    if (poMaskDS->Open(std::move(curImage)) &&
-                        poMaskDS->GetRasterCount() == 1 &&
-                        poMaskDS->GetRasterXSize() ==
-                            poLastNonMaskDS->nRasterXSize &&
-                        poMaskDS->GetRasterYSize() ==
-                            poLastNonMaskDS->nRasterYSize &&
-                        poMaskDS->GetRasterBand(1)->GetRasterDataType() ==
-                            GDT_Byte)
+                    if (curImage->samplesPerPixel() == 1 &&
+                        curImage->width() ==
+                            static_cast<unsigned>(nRasterXSize) &&
+                        curImage->height() ==
+                            static_cast<unsigned>(nRasterYSize) &&
+                        LIBERTIFFDataset::ComputeGDALDataType(
+                            *(curImage.get())) == GDT_UInt8)
                     {
-                        poMaskDS->m_bExpand1To255 = true;
-                        poLastNonMaskDS->m_poMaskDS = std::move(poMaskDS);
-                        if (poLastNonMaskDS != this && m_poMaskDS)
+                        auto poMaskDS = std::make_unique<LIBERTIFFDataset>();
+                        if (poMaskDS->Open(std::move(curImage)))
                         {
-                            // Also register the mask as the overview of the main
-                            // mask
-                            m_poMaskDS->m_apoOvrDS.push_back(
-                                poLastNonMaskDS->m_poMaskDS.get());
+                            poMaskDS->m_bExpand1To255 = true;
+                            poLastNonMaskDS->m_poMaskDS = std::move(poMaskDS);
+                            if (poLastNonMaskDS != this && m_poMaskDS)
+                            {
+                                // Also register the mask as the overview of the main
+                                // mask
+                                m_poMaskDS->m_apoOvrDS.push_back(
+                                    poLastNonMaskDS->m_poMaskDS.get());
+                            }
                         }
                     }
                 }
@@ -2955,27 +3018,20 @@ bool LIBERTIFFDataset::Open(GDALOpenInfo *poOpenInfo)
         poOpenInfo->fpL = nullptr;
     }
 
-    const char *pszValue =
-        CSLFetchNameValue(poOpenInfo->papszOpenOptions, "NUM_THREADS");
-    if (pszValue == nullptr)
-        pszValue = CPLGetConfigOption("GDAL_NUM_THREADS", nullptr);
-    if (pszValue)
+    const int nThreads =
+        GDALGetNumThreads(poOpenInfo->papszOpenOptions, "NUM_THREADS",
+                          GDAL_DEFAULT_MAX_THREAD_COUNT,
+                          /* bDefaultAllCPUs = */ false);
+    if (nThreads > 1)
     {
-        int nThreads =
-            EQUAL(pszValue, "ALL_CPUS") ? CPLGetNumCPUs() : atoi(pszValue);
-        if (nThreads > 1024)
-            nThreads = 1024;  // to please Coverity
-        if (nThreads > 1)
-        {
-            m_poThreadPool = GDALGetGlobalThreadPool(nThreads);
-        }
+        m_poThreadPool = GDALGetGlobalThreadPool(nThreads);
     }
 
     return true;
 }
 
 /************************************************************************/
-/*                             ReadSRS()                                */
+/*                              ReadSRS()                               */
 /************************************************************************/
 
 // Simplified GeoTIFF SRS reader, assuming the SRS is encoded as a EPSG code
@@ -3142,7 +3198,7 @@ void LIBERTIFFDataset::ReadSRS()
 }
 
 /************************************************************************/
-/*                       ReadGeoTransform()                             */
+/*                          ReadGeoTransform()                          */
 /************************************************************************/
 
 void LIBERTIFFDataset::ReadGeoTransform()
@@ -3179,10 +3235,10 @@ void LIBERTIFFDataset::ReadGeoTransform()
             return;
 
         m_geotransformValid = true;
-        m_gt[1] = pixelScale[GCP_PIXEL];
-        m_gt[5] = -pixelScale[GCP_LINE];
-        m_gt[0] = tiepoints[GCP_X] - tiepoints[GCP_PIXEL] * m_gt[1];
-        m_gt[3] = tiepoints[GCP_Y] - tiepoints[GCP_LINE] * m_gt[5];
+        m_gt.xscale = pixelScale[GCP_PIXEL];
+        m_gt.yscale = -pixelScale[GCP_LINE];
+        m_gt.xorig = tiepoints[GCP_X] - tiepoints[GCP_PIXEL] * m_gt.xscale;
+        m_gt.yorig = tiepoints[GCP_Y] - tiepoints[GCP_LINE] * m_gt.yscale;
     }
     else if (psTagGeoTransMatrix &&
              psTagGeoTransMatrix->type == LIBERTIFF_NS::TagType::Double &&
@@ -3195,12 +3251,12 @@ void LIBERTIFFDataset::ReadGeoTransform()
         if (ok)
         {
             m_geotransformValid = true;
-            m_gt[0] = matrix[3];
-            m_gt[1] = matrix[0];
-            m_gt[2] = matrix[1];
-            m_gt[3] = matrix[7];
-            m_gt[4] = matrix[4];
-            m_gt[5] = matrix[5];
+            m_gt.xorig = matrix[3];
+            m_gt.xscale = matrix[0];
+            m_gt.xrot = matrix[1];
+            m_gt.yorig = matrix[7];
+            m_gt.yrot = matrix[4];
+            m_gt.yscale = matrix[5];
         }
     }
     else if (psTagTiePoints &&
@@ -3248,8 +3304,8 @@ void LIBERTIFFDataset::ReadGeoTransform()
         {
             if (EQUAL(pszAreaOrPoint, GDALMD_AOP_POINT))
             {
-                m_gt[0] -= (m_gt[1] * 0.5 + m_gt[2] * 0.5);
-                m_gt[3] -= (m_gt[4] * 0.5 + m_gt[5] * 0.5);
+                m_gt.xorig -= (m_gt.xscale * 0.5 + m_gt.xrot * 0.5);
+                m_gt.yorig -= (m_gt.yrot * 0.5 + m_gt.yscale * 0.5);
             }
         }
     }
@@ -3287,7 +3343,7 @@ void LIBERTIFFDataset::ReadRPCTag()
 }
 
 /************************************************************************/
-/*                           OpenStatic()                               */
+/*                             OpenStatic()                             */
 /************************************************************************/
 
 /* static */ GDALDataset *LIBERTIFFDataset::OpenStatic(GDALOpenInfo *poOpenInfo)

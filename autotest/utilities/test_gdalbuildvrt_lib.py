@@ -19,7 +19,7 @@ import struct
 import gdaltest
 import pytest
 
-from osgeo import gdal
+from osgeo import gdal, osr
 
 ###############################################################################
 # Simple test
@@ -755,7 +755,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgba(tmp_vsimem):
     ds.GetRasterBand(1).WriteRaster(0, 0, 2, 1, b"\x01\x00")
     ds.GetRasterBand(2).WriteRaster(0, 0, 2, 1, b"\x02\x02")
     ds.GetRasterBand(3).WriteRaster(0, 0, 2, 1, b"\x03\x03")
-    ds.GetRasterBand(4).WriteRaster(0, 0, 2, 1, b"\x00\xFF")
+    ds.GetRasterBand(4).WriteRaster(0, 0, 2, 1, b"\x00\xff")
     ds.GetRasterBand(4).SetColorInterpretation(gdal.GCI_AlphaBand)
 
     vrt_ds = gdal.BuildVRT("", [ds], nodataMaxMaskThreshold=128, VRTNodata=0)
@@ -777,12 +777,12 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgba(tmp_vsimem):
     # VRTNodata=255, test remapping of 255 to 254
     ds = gdal.GetDriverByName("MEM").Create("", 2, 1, 2)
     ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
-    ds.GetRasterBand(1).WriteRaster(0, 0, 2, 1, b"\x01\xFF")
-    ds.GetRasterBand(2).WriteRaster(0, 0, 2, 1, b"\x00\xFF")
+    ds.GetRasterBand(1).WriteRaster(0, 0, 2, 1, b"\x01\xff")
+    ds.GetRasterBand(2).WriteRaster(0, 0, 2, 1, b"\x00\xff")
     ds.GetRasterBand(2).SetColorInterpretation(gdal.GCI_AlphaBand)
 
     vrt_ds = gdal.BuildVRT("", [ds], nodataMaxMaskThreshold=128, VRTNodata=255)
-    assert vrt_ds.GetRasterBand(1).ReadRaster() == b"\xFF\xFE"
+    assert vrt_ds.GetRasterBand(1).ReadRaster() == b"\xff\xfe"
 
 
 ###############################################################################
@@ -802,7 +802,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgb_mask(tmp_vsimem):
     ds.GetRasterBand(2).WriteRaster(0, 0, 2, 1, struct.pack("H" * 2, 2, 2))
     ds.GetRasterBand(3).WriteRaster(0, 0, 2, 1, struct.pack("H" * 2, 3, 2))
     ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
-    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xFF")
+    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xff")
     ds.Close()
 
     vrt_filename = str(tmp_vsimem / "test.vrt")
@@ -813,7 +813,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgb_mask(tmp_vsimem):
     ) == (0, 1)
 
     assert struct.unpack(
-        "B" * 2, vrt_ds.GetRasterBand(1).ReadRaster(buf_type=gdal.GDT_Byte)
+        "B" * 2, vrt_ds.GetRasterBand(1).ReadRaster(buf_type=gdal.GDT_UInt8)
     ) == (0, 1)
 
     # UInt16, VRTNodata=65535
@@ -822,7 +822,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgb_mask(tmp_vsimem):
     ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
     ds.GetRasterBand(1).WriteRaster(0, 0, 2, 1, struct.pack("H" * 2, 1, 65535))
     ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
-    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xFF")
+    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xff")
     ds.Close()
 
     vrt_filename = str(tmp_vsimem / "test.vrt")
@@ -840,7 +840,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgb_mask(tmp_vsimem):
     ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
     ds.GetRasterBand(1).WriteRaster(0, 0, 2, 1, struct.pack("h" * 2, 1, -32768))
     ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
-    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xFF")
+    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xff")
     ds.Close()
 
     vrt_filename = str(tmp_vsimem / "test.vrt")
@@ -858,7 +858,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgb_mask(tmp_vsimem):
     ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
     ds.GetRasterBand(1).WriteRaster(0, 0, 2, 1, struct.pack("h" * 2, 1, 32767))
     ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
-    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xFF")
+    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xff")
     ds.Close()
 
     vrt_filename = str(tmp_vsimem / "test.vrt")
@@ -876,7 +876,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgb_mask(tmp_vsimem):
     ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
     ds.GetRasterBand(1).WriteRaster(0, 0, 2, 1, struct.pack("f" * 2, 1, 0))
     ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
-    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xFF")
+    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 2, 1, b"\x00\xff")
     ds.Close()
 
     vrt_filename = str(tmp_vsimem / "test.vrt")
@@ -892,7 +892,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgb_mask(tmp_vsimem):
     ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
     ds.GetRasterBand(1).WriteRaster(0, 0, 3, 1, struct.pack("f" * 3, 0, 1, 2))
     ds.GetRasterBand(1).CreateMaskBand(gdal.GMF_PER_DATASET)
-    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 3, 1, b"\x00\xFF\xFF")
+    ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 3, 1, b"\x00\xff\xff")
     ds.Close()
 
     vrt_filename = str(tmp_vsimem / "test.vrt")
@@ -909,7 +909,7 @@ def test_gdalbuildvrt_lib_nodataMaxMaskThreshold_rgb_mask(tmp_vsimem):
 @pytest.mark.parametrize(
     "dtype,nodata",
     [
-        (gdal.GDT_Byte, float("nan")),
+        (gdal.GDT_UInt8, float("nan")),
         (gdal.GDT_UInt16, -1),
     ],
 )
@@ -1093,7 +1093,7 @@ def test_gdalbuildvrt_lib_source_had_ds_mask_band_and_addalpha():
     src_ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
     src_ds.GetRasterBand(1).Fill(255)
     src_ds.CreateMaskBand(gdal.GMF_PER_DATASET)
-    src_ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 1, 1, b"\xFF")
+    src_ds.GetRasterBand(1).GetMaskBand().WriteRaster(0, 0, 1, 1, b"\xff")
 
     vrt_ds = gdal.BuildVRT("", src_ds, addAlpha=True)
     assert vrt_ds.GetRasterBand(1).ReadRaster() == src_ds.GetRasterBand(1).ReadRaster()
@@ -1102,3 +1102,218 @@ def test_gdalbuildvrt_lib_source_had_ds_mask_band_and_addalpha():
         vrt_ds.GetRasterBand(2).ReadRaster()
         == src_ds.GetRasterBand(1).GetMaskBand().ReadRaster()
     )
+
+
+@pytest.mark.parametrize(
+    "desc1,desc2,metadata1,metadata2,expected_desc,expected_metadata",
+    [
+        (
+            "",
+            "",
+            {},
+            {},
+            "",
+            {},
+        ),
+        (
+            "desc1",
+            "desc1",
+            {},
+            {},
+            "desc1",
+            {},
+        ),
+        (
+            "desc1",
+            "desc2",
+            {},
+            {},
+            "",
+            {},
+        ),
+        # Metadata tests
+        (
+            "",
+            "",
+            {"KEY1": "VALUE1"},
+            {"KEY1": "VALUE1"},
+            "",
+            {"KEY1": "VALUE1"},
+        ),
+        (
+            "",
+            "",
+            {"KEY1": "VALUE1"},
+            {"KEY1": "DIFFERENT_VALUE"},
+            "",
+            {},
+        ),
+        (
+            "",
+            "",
+            {"KEY1": "VALUE1", "KEY2": "VALUE2"},
+            {"KEY2": "VALUE2", "KEY3": "VALUE3"},
+            "",
+            {"KEY2": "VALUE2"},
+        ),
+        (
+            "",
+            "",
+            {"KEY1": "VALUE1"},
+            {"KEY2": "VALUE2", "KEY3": "VALUE3"},
+            "",
+            {},
+        ),
+    ],
+)
+def test_gdalbuildvrt_preserve_band_metadata_normal_mode(
+    tmp_vsimem, desc1, desc2, metadata1, metadata2, expected_desc, expected_metadata
+):
+
+    output_vrt = str(tmp_vsimem / "test_gdalbuildvrt_17.vrt")
+
+    # Create a 10x10 sample tif with band description
+    drv = gdal.GetDriverByName("GTiff")
+    srs = osr.SpatialReference()
+    srs.SetWellKnownGeogCS("WGS84")
+    wkt = srs.ExportToWkt()
+    sample_tif = str(tmp_vsimem / "test_gdalbuildvrt_17.tif")
+    with drv.Create(sample_tif, 10, 10, 1) as ds:
+        ds.SetProjection(wkt)
+        ds.SetGeoTransform([2, 0.1, 0, 49, 0, -0.1])
+        ds.GetRasterBand(1).SetDescription(desc1)
+        for mdkey, mdval in metadata1.items():
+            ds.GetRasterBand(1).SetMetadataItem(mdkey, mdval)
+        ds.GetRasterBand(1).Fill(255)
+
+    # Create a second raster without band description
+    sample_tif2 = str(tmp_vsimem / "test_gdalbuildvrt_17_2.tif")
+    with drv.Create(sample_tif2, 10, 10, 1) as ds:
+        ds.SetProjection(wkt)
+        ds.SetGeoTransform([3, 0.1, 0, 49, 0, -0.1])
+        ds.GetRasterBand(1).SetDescription(desc2)
+        for mdkey, mdval in metadata2.items():
+            ds.GetRasterBand(1).SetMetadataItem(mdkey, mdval)
+        ds.GetRasterBand(1).Fill(127)
+
+    # Build VRT
+    rt_ds = gdal.BuildVRT(output_vrt, [sample_tif, sample_tif2])
+
+    desc = rt_ds.GetRasterBand(1).GetDescription()
+
+    assert desc == expected_desc
+    assert rt_ds.GetRasterBand(1).GetMetadata_Dict() == expected_metadata
+
+
+@pytest.mark.parametrize(
+    "desc1,desc2,metadata1,metadata2,expected_desc,expected_metadata",
+    [
+        (
+            "",
+            "",
+            {},
+            {},
+            ["", ""],
+            {},
+        ),
+        (
+            "desc1",
+            "desc1",
+            {},
+            {},
+            ["desc1", "desc1"],
+            {},
+        ),
+        (
+            "desc1",
+            "desc2",
+            {},
+            {},
+            ["desc1", "desc2"],
+            {},
+        ),
+        # Metadata tests
+        (
+            "",
+            "",
+            {"KEY1": "VALUE1"},
+            {"KEY2": "VALUE2"},
+            ["", ""],
+            {"KEY1": "VALUE1", "KEY2": "VALUE2"},
+        ),
+    ],
+)
+def test_gdalbuildvrt_preserve_band_metadata_separate_mode(
+    tmp_vsimem, desc1, desc2, metadata1, metadata2, expected_desc, expected_metadata
+):
+
+    output_vrt = str(tmp_vsimem / "test_gdalbuildvrt_18.vrt")
+
+    # Create a 10x10 sample tif with band description
+    drv = gdal.GetDriverByName("GTiff")
+    srs = osr.SpatialReference()
+    srs.SetWellKnownGeogCS("WGS84")
+    wkt = srs.ExportToWkt()
+    sample_tif = str(tmp_vsimem / "test_gdalbuildvrt_18.tif")
+    with drv.Create(sample_tif, 10, 10, 1) as ds:
+        ds.SetProjection(wkt)
+        ds.SetGeoTransform([2, 0.1, 0, 49, 0, -0.1])
+        ds.GetRasterBand(1).SetDescription(desc1)
+        for mdkey, mdval in metadata1.items():
+            ds.GetRasterBand(1).SetMetadataItem(mdkey, mdval)
+        ds.GetRasterBand(1).Fill(255)
+
+    # Create a second raster without band description
+    sample_tif2 = str(tmp_vsimem / "test_gdalbuildvrt_18_2.tif")
+    with drv.Create(sample_tif2, 10, 10, 1) as ds:
+        ds.SetProjection(wkt)
+        ds.SetGeoTransform([3, 0.1, 0, 49, 0, -0.1])
+        ds.GetRasterBand(1).SetDescription(desc2)
+        for mdkey, mdval in metadata2.items():
+            ds.GetRasterBand(1).SetMetadataItem(mdkey, mdval)
+        ds.GetRasterBand(1).Fill(127)
+
+    # Build VRT
+    rt_ds = gdal.BuildVRT(output_vrt, [sample_tif, sample_tif2], separate=True)
+
+    for i in range(2):
+        desc = rt_ds.GetRasterBand(i + 1).GetDescription()
+
+        if i == 0:
+            expected_desc_i = desc1
+            expected_metadata_i = metadata1
+        else:
+            expected_desc_i = desc2
+            expected_metadata_i = metadata2
+
+        assert desc == expected_desc_i
+        assert rt_ds.GetRasterBand(i + 1).GetMetadata_Dict() == expected_metadata_i
+
+
+def test_gdalbuildvrt_cadrg_frames_mixing_transparent_and_not():
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src_ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
+    src_ds.GetRasterBand(1).SetNoDataValue(216)
+    ct = gdal.ColorTable()
+    ct.SetColorEntry(215, (255, 255, 255, 255))
+    ct.SetColorEntry(216, (0, 0, 0, 0))
+    src_ds.GetRasterBand(1).SetColorTable(ct)
+
+    src2_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src2_ds.SetGeoTransform([1, 1, 0, 0, 0, -1])
+    ct = gdal.ColorTable()
+    ct.SetColorEntry(215, (255, 255, 255, 255))
+    src2_ds.GetRasterBand(1).SetColorTable(ct)
+
+    vrt_ds = gdal.BuildVRT("", [src_ds])
+    assert vrt_ds.GetRasterBand(1).GetNoDataValue() == 216
+    assert vrt_ds.GetRasterBand(1).GetColorTable().GetCount() == 217
+
+    vrt_ds = gdal.BuildVRT("", [src_ds, src2_ds])
+    assert vrt_ds.GetRasterBand(1).GetNoDataValue() == 216
+    assert vrt_ds.GetRasterBand(1).GetColorTable().GetCount() == 217
+
+    vrt_ds = gdal.BuildVRT("", [src2_ds, src_ds])
+    assert vrt_ds.GetRasterBand(1).GetNoDataValue() == 216
+    assert vrt_ds.GetRasterBand(1).GetColorTable().GetCount() == 217

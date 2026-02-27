@@ -260,16 +260,14 @@ dataset has a file hierarchy, with the following structure:
     /{z}/{x}/: Directory with tiles for zoom level z and x
     /{z}/{x}/{y}.{ext}: Tile data
 
-The :source_file:`swig/python/gdal-utils/osgeo_utils/samples/gdal_ls.py`
-and :source_file:`swig/python/gdal-utils/osgeo_utils/samples/gdal_cp.py`
-sample utilities can be used to explore and extract data from a PMTiles
-dataset
+:ref:`gdal_vsi_list` and :ref:`gdal_vsi_copy` utilities can be used to explore
+and extract data from a PMTiles dataset
 
 Listing the content of a dataset:
 
 .. code-block:: shell
 
-    python gdal_ls.py -lr "/vsipmtiles//vsicurl/https://protomaps.github.io/PMTiles/protomaps(vector)ODbL_firenze.pmtiles"
+    gdal vsi list -lR "/vsipmtiles//vsicurl/https://protomaps.github.io/PMTiles/protomaps(vector)ODbL_firenze.pmtiles"
 
 outputs:
 
@@ -291,7 +289,7 @@ Displaying the metadata JSON file:
 
 .. code-block:: shell
 
-    python swig/python/gdal-utils/osgeo_utils/samples/gdal_cp.py "/vsipmtiles//vsicurl/https://protomaps.github.io/PMTiles/protomaps(vector)ODbL_firenze.pmtiles/metadata.json" /vsistdout/ | jq .
+    gdal vsi copy "/vsipmtiles//vsicurl/https://protomaps.github.io/PMTiles/protomaps(vector)ODbL_firenze.pmtiles/metadata.json" /vsistdout/ | jq .
 
 outputs:
 
@@ -335,17 +333,26 @@ Extracting all content in a local directory:
 
 .. code-block:: shell
 
-    python swig/python/gdal-utils/osgeo_utils/samples/gdal_cp.py -r "/vsipmtiles//vsicurl/https://protomaps.github.io/PMTiles/protomaps(vector)ODbL_firenze.pmtiles" out_pmtiles
+    gdal vsi copy -r "/vsipmtiles//vsicurl/https://protomaps.github.io/PMTiles/protomaps(vector)ODbL_firenze.pmtiles" out_pmtiles
 
 Examples
 --------
--  Simple translation of a single shapefile into PMTiles. Dataset creation options (dsco) MINZOOM and MAXZOOM specifies tile zoom levels.
-   ::
+
+.. example::
+   :title: Simple translation of a single shapefile into PMTiles
+   
+   Dataset creation options (dsco) MINZOOM and MAXZOOM specifies tile zoom levels.
+
+   .. code-block:: bash
 
       ogr2ogr -dsco MINZOOM=10 -dsco MAXZOOM=20 -f "PMTiles" filename.pmtiles my_shapes.shp
 
--  Merge all PostgreSQL/PostGIS tables in a schema into a single PMTiles file. PostgreSQL table names are used as layer names. Dataset creation options (dsco) MINZOOM and MAXZOOM specifies tile zoom levels.
-   ::
+.. example::
+   :title: Merge all PostgreSQL/PostGIS tables in a schema into a single PMTiles file
+  
+   PostgreSQL table names are used as layer names. Dataset creation options (dsco) MINZOOM and MAXZOOM specifies tile zoom levels.
+
+   .. code-block:: bash
 
       ogr2ogr -dsco MINZOOM=0 -dsco MAXZOOM=22 -f "PMTiles" filename.pmtiles "PG:host=my_host port=my_port dbname=my_database user=my_user password=my_password schemas=my_schema"
 

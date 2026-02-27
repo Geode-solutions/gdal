@@ -83,7 +83,7 @@ class STACITDataset final : public VRTDataset
 };
 
 /************************************************************************/
-/*                          STACITDataset()                             */
+/*                           STACITDataset()                            */
 /************************************************************************/
 
 STACITDataset::STACITDataset() : VRTDataset(0, 0)
@@ -95,7 +95,7 @@ STACITDataset::STACITDataset() : VRTDataset(0, 0)
 STACITDataset::~STACITDataset() = default;
 
 /************************************************************************/
-/*                             Identify()                               */
+/*                              Identify()                              */
 /************************************************************************/
 
 int STACITDataset::Identify(GDALOpenInfo *poOpenInfo)
@@ -160,7 +160,7 @@ int STACITDataset::Identify(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                        SanitizeCRSValue()                            */
+/*                          SanitizeCRSValue()                          */
 /************************************************************************/
 
 static std::string SanitizeCRSValue(const std::string &v)
@@ -187,7 +187,7 @@ static std::string SanitizeCRSValue(const std::string &v)
 }
 
 /************************************************************************/
-/*                            ParseAsset()                              */
+/*                             ParseAsset()                             */
 /************************************************************************/
 
 static void ParseAsset(const CPLJSONObject &jAsset,
@@ -432,7 +432,7 @@ static void ParseAsset(const CPLJSONObject &jAsset,
 }
 
 /************************************************************************/
-/*                           SetupDataset()                             */
+/*                            SetupDataset()                            */
 /************************************************************************/
 
 bool STACITDataset::SetupDataset(
@@ -676,7 +676,7 @@ bool STACITDataset::SetupDataset(
 }
 
 /************************************************************************/
-/*                         SetSubdatasets()                             */
+/*                           SetSubdatasets()                           */
 /************************************************************************/
 
 void STACITDataset::SetSubdatasets(
@@ -732,7 +732,7 @@ void STACITDataset::SetSubdatasets(
 }
 
 /************************************************************************/
-/*                               Open()                                 */
+/*                                Open()                                */
 /************************************************************************/
 
 bool STACITDataset::Open(GDALOpenInfo *poOpenInfo)
@@ -790,6 +790,7 @@ bool STACITDataset::Open(GDALOpenInfo *poOpenInfo)
     CPLJSONObject oBody;
     bool bMerge = false;
     int nLoops = 0;
+    oBody.Deinit();
     do
     {
         ++nLoops;
@@ -803,7 +804,7 @@ bool STACITDataset::Open(GDALOpenInfo *poOpenInfo)
         if (STARTS_WITH(osCurFilename, "http://") ||
             STARTS_WITH(osCurFilename, "https://"))
         {
-            // Cf // Cf https://github.com/radiantearth/stac-api-spec/tree/release/v1.0.0/item-search#pagination
+            // Cf https://github.com/radiantearth/stac-api-spec/tree/release/v1.0.0/item-search#pagination
             CPLStringList aosOptions;
             if (oBody.IsValid() &&
                 oBody.GetType() == CPLJSONObject::Type::Object)
@@ -1013,7 +1014,7 @@ bool STACITDataset::Open(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                            OpenStatic()                              */
+/*                             OpenStatic()                             */
 /************************************************************************/
 
 GDALDataset *STACITDataset::OpenStatic(GDALOpenInfo *poOpenInfo)
@@ -1027,7 +1028,7 @@ GDALDataset *STACITDataset::OpenStatic(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                       GDALRegister_STACIT()                          */
+/*                        GDALRegister_STACIT()                         */
 /************************************************************************/
 
 void GDALRegister_STACIT()

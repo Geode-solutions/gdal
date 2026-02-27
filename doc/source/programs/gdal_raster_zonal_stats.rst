@@ -52,65 +52,97 @@ Supported stats
       - Description
 
     * - center_x
-      - Array with cell center x-coordinate for each cell that intersects the polygon. Each cell center 
+      - Array with cell center x-coordinate for each cell that intersects the polygon. Each cell center
         may or may not be inside the polygon.
-    * - center_y       
-      - Array with cell center y-coordinate for each cell that intersects the polygon. Each cell center may or may not be inside the polygon. 
-    * - count          
-      - Sum of all cell coverage fractions. 
-    * - coverage       
-      - Array with coverage fraction of each cell that intersects the polygon 
-    * - frac           
+    * - center_y
+      - Array with cell center y-coordinate for each cell that intersects the polygon. Each cell center may or may not be inside the polygon.
+    * - count
+      - Sum of all cell coverage fractions.
+    * - coverage
+      - Array with coverage fraction of each cell that intersects the polygon
+    * - frac
       - Fraction of covered cells that are occupied by each distinct raster value, as provided by ``unique``.
-    * - majority       
-      - The raster value occupying the greatest number of cells, taking into account cell coverage fractions but not weighting raster values. 
-    * - max            
-      - Maximum value of cells that intersect the polygon, not taking coverage fractions or weighting raster values into account.  
-    * - max_center_x   
-      - Cell center x-coordinate for the cell containing the maximum value intersected by the polygon. The center of this cell may or may not be inside the polygon. 
-    * - max_center_y   
-      - Cell center y-coordinate for the cell containing the maximum value intersected by the polygon. The center of this cell may or may not be inside the polygon. 
-    * - mean           
-      - Mean value of cells that intersect the polygon, weighted by the percent of each cell that is covered. 
-    * - min            
-      - Minimum value of cells that intersect the polygon, not taking coverage fractions or weighting raster values into account. 
-    * - min_center_x   
-      - Cell center x-coordinate for the cell containing the minimum value intersected by the polygon. The center of this cell may or may not be inside the polygon. 
-    * - min_center_y   
-      - Cell center y-coordinate for the cell containing the minimum value intersected by the polygon. The center of this cell may or may not be inside the polygon. 
-    * - minority       
-      - The raster value occupying the least number of cells, taking into account cell coverage fractions but not weighting raster values. 
-    * - stdev          
-      - Population standard deviation of cell values that intersect the polygon, taking into account coverage fraction. 
-    * - sum            
-      - Sum of values of raster cells that intersect the polygon, with each raster value weighted by its coverage fraction. 
-    * - unique         
-      - Array of unique raster values for cells that intersect the polygon 
-    * - values         
-      - Array of raster values for each cell that intersects the polygon 
-    * - variance       
-      - Population variance of cell values that intersect the polygon, taking into account coverage fraction. 
-    * - variety        
-      - The number of distinct raster values in cells wholly or partially covered by the polygon. 
-    * - weighted_frac  
+    * - majority
+      - The raster value occupying the greatest number of cells, taking into account cell coverage fractions but not weighting raster values.
+    * - max
+      - Maximum value of cells that intersect the polygon, not taking coverage fractions or weighting raster values into account.
+    * - max_center_x
+      - Cell center x-coordinate for the cell containing the maximum value intersected by the polygon. The center of this cell may or may not be inside the polygon.
+    * - max_center_y
+      - Cell center y-coordinate for the cell containing the maximum value intersected by the polygon. The center of this cell may or may not be inside the polygon.
+    * - mean
+      - Mean value of cells that intersect the polygon, weighted by the percent of each cell that is covered.
+    * - min
+      - Minimum value of cells that intersect the polygon, not taking coverage fractions or weighting raster values into account.
+    * - min_center_x
+      - Cell center x-coordinate for the cell containing the minimum value intersected by the polygon. The center of this cell may or may not be inside the polygon.
+    * - min_center_y
+      - Cell center y-coordinate for the cell containing the minimum value intersected by the polygon. The center of this cell may or may not be inside the polygon.
+    * - minority
+      - The raster value occupying the least number of cells, taking into account cell coverage fractions but not weighting raster values.
+    * - stdev
+      - Population standard deviation of cell values that intersect the polygon, taking into account coverage fraction.
+    * - sum
+      - Sum of values of raster cells that intersect the polygon, with each raster value weighted by its coverage fraction.
+    * - unique
+      - Array of unique raster values for cells that intersect the polygon
+    * - values
+      - Array of raster values for each cell that intersects the polygon
+    * - variance
+      - Population variance of cell values that intersect the polygon, taking into account coverage fraction.
+    * - variety
+      - The number of distinct raster values in cells wholly or partially covered by the polygon.
+    * - weighted_frac
       - Fraction of covered cells that are occupied by each distinct raster value, weighted by the value of a second weighting raster. Order corresponds to
         values returned by ``unique``.
-    * - weighted_mean  
-      - Mean value of cells that intersect the polygon, weighted by the product over the coverage fraction and the weighting raster. 
-    * - weighted_stdev 
-      - Weighted version of ``stdev``. 
-    * - weighted_variance 
-      - Weighted version of ``variance`` 
-    * - weights        
-      - Array of weight values for each cell that intersects the polygon 
+    * - weighted_mean
+      - Mean value of cells that intersect the polygon, weighted by the product over the coverage fraction and the weighting raster.
+    * - weighted_stdev
+      - Weighted version of ``stdev``.
+    * - weighted_variance
+      - Weighted version of ``variance``
+    * - weights
+      - Array of weight values for each cell that intersects the polygon
 
 This algorithm can be part of a :ref:`gdal_pipeline`.
 
-The following options are available:
+Program-Specific Options
+------------------------
+
+.. option:: --band, -b <BAND>
+
+   Input band(s) to be processed.
+
+.. option:: --chunk-size <MEMORY>
+
+   Defines the maximum size of raster chunks to read. May be expressed as either an amount of memory (500 MB, 2 GB, etc.) or as a percentage of
+   available RAM (e.g. 10%).
+
+.. option:: --include-field <INCLUDE-FIELD>
+
+   Specifies one or more fields from the zones to be copied to the output. Only
+   available when vector zones are used.
+
+.. option:: --pixels <PIXELS>
+
+   Method to determine which pixels should be included in the calculation: ``default``, ``all-touched``, or ``fractional``.
 
 .. option:: --stat <STAT>
 
    Specifies one or more of the :ref:`zonal-supported-stats` to compute for each zone.
+
+.. option:: --strategy <STRATEGY>
+
+   Specifies the the processing strategy (``raster`` or ``feature``), when vector zones are used.
+   In the default strategy (``--strategy feature``), GDAL will iterate over the features in the zone dataset, read the corresponding pixels from the raster, and write the statistics for that feature. This avoids the need to read the entire feature dataset into memory at once, but may cause the same pixels to be read multiple times if the polygon features are large or not ordered spatially. If ``--strategy raster`` is used, GDAL will iterate over chunks of the raster dataset, find corresponding polygon zones, and update the statistics for those features. (The size of the raster chunks can be controlled using :option:``--chunk-size``.) This ensures that raster pixels are only read once, but may cause the same features to be processed multiple times.
+
+.. option:: --weights <WEIGHTS>
+
+   Optional path to a dataset to use for weighting.
+
+.. option:: --weights-band <WEIGHTS-BAND>
+
+   Specifies the raster band from which weights can be read.
 
 .. option:: --zones <ZONES>
 
@@ -124,32 +156,36 @@ The following options are available:
 
    Specifies the feature layer from which zones can be read.
 
-.. option:: --weights <WEIGHTS>
+Standard Options
+----------------
 
-   Optional path to a dataset to use for weighting.
+.. collapse:: Details
 
-.. option:: --weights-band <WEIGHTS-BAND>
+    .. include:: gdal_options/append_vector.rst
 
-   Specifies the raster band from which weights can be read.
+    .. include:: gdal_options/co_vector.rst
 
-.. option:: --pixels <PIXELS>
+    .. include:: gdal_options/if.rst
 
-   Method to determine which pixels should be included in the calculation: ``default``, ``all-touched``, or ``fractional``.
-  
-.. option:: --chunk-size <MEMORY>
+    .. include:: gdal_options/lco.rst
 
-   Defines the maximum size of raster chunks to read. May be expressed as either an amount of memory (500 MB, 2 GB, etc.) or as a percentage of
-   available RAM (e.g. 10%).
+    .. include:: gdal_options/oo.rst
 
-.. option:: --strategy <STRATEGY>
+    .. include:: gdal_options/of_vector.rst
 
-   Specifies the the processing strategy (``raster`` or ``feature``), when vector zones are used.
-   In the default strategy (``--strategy feature``), GDAL will iterate over the features in the zone dataset, read the corresponding pixels from the raster, and write the statistics for that feature. This avoids the need to read the entire feature dataset into memory at once, but may cause the same pixels to be read multiple times if the polygon features are large or not ordered spatially. If ``--strategy raster`` is used, GDAL will iterate over chunks of the raster dataset, find corresponding polygon zones, and update the statistics for those features. (The size of the raster chunks can be controlled using :opt:``memory``.) This ensures that raster pixels are only read once, but may cause the same features to be processed multiple times.
-   
-.. option:: --include-field <INCLUDE-FIELD>
+    .. include:: gdal_options/output_layer.rst
 
-   Specifies one or more fields from the zones to be copied to the output. Only
-   available when vector zones are used.
+    .. include:: gdal_options/output_oo.rst
+
+    .. include:: gdal_options/overwrite.rst
+
+    .. include:: gdal_options/overwrite_layer.rst
+
+    .. include:: gdal_options/skip_errors.rst
+
+    .. include:: gdal_options/update.rst
+
+    .. include:: gdal_options/upsert.rst
 
 Examples
 --------
@@ -157,11 +193,26 @@ Examples
 .. example::
    :title: Summarize mean elevation within 200m of points of interest
 
+   Using a nested pipeline for the zone dataset
+
    .. code-block:: bash
 
       gdal pipeline read dem.tif ! \
           zonal-stats \
-            --zones [ read points.geojson ! buffer 20 ] \
+            --zones [ read points.geojson ! buffer 200 ] \
+            --stat mean ! \
+          write \
+            --output-format CSV \
+            --output /vsistdout/
+
+    or, using the zone vector dataset as the piped dataset using the ``_`` placeholder dataset name:
+
+   .. code-block:: bash
+
+      gdal pipeline read points.geojson ! buffer 200 ! \
+          zonal-stats \
+            --input dem.tif
+            --zones _ \
             --stat mean ! \
           write \
             --output-format CSV \

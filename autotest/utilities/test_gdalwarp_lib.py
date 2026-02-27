@@ -13,6 +13,7 @@
 # SPDX-License-Identifier: MIT
 ###############################################################################
 
+import array
 import collections
 import json
 import shutil
@@ -133,6 +134,31 @@ def test_gdalwarp_lib_6(testgdalwarp_gcp_tif):
 
     ds1 = gdal.Open(testgdalwarp_gcp_tif)
     dstDS = gdal.Warp("", ds1, format="MEM", tps=True)
+
+    assert dstDS.GetRasterBand(1).Checksum() == 4672, "Bad checksum"
+
+    gdaltest.check_geotransform(
+        gdal.Open("../gcore/data/byte.tif").GetGeoTransform(),
+        dstDS.GetGeoTransform(),
+        1e-9,
+    )
+
+    dstDS = None
+
+
+###############################################################################
+# Test warping from GCPs with SRC_METHOD=GCP_POLYNOMIAL and MAX_GCP_ORDER=-1
+
+
+def test_gdalwarp_lib_6_bis(testgdalwarp_gcp_tif):
+
+    ds1 = gdal.Open(testgdalwarp_gcp_tif)
+    dstDS = gdal.Warp(
+        "",
+        ds1,
+        format="MEM",
+        transformerOptions=["SRC_METHOD=GCP_POLYNOMIAL", "MAX_GCP_ORDER=-1"],
+    )
 
     assert dstDS.GetRasterBand(1).Checksum() == 4672, "Bad checksum"
 
@@ -1736,7 +1762,7 @@ def test_gdalwarp_lib_131(tmp_vsimem):
 # with alpha > 0 and < 255
 
 
-@pytest.mark.parametrize("dt", [gdal.GDT_Byte, gdal.GDT_Float32])
+@pytest.mark.parametrize("dt", [gdal.GDT_UInt8, gdal.GDT_Float32])
 def test_gdalwarp_lib_132(tmp_vsimem, dt):
 
     src_ds = gdal.GetDriverByName("GTiff").Create(
@@ -1767,7 +1793,7 @@ def test_gdalwarp_lib_132(tmp_vsimem, dt):
         for x in range(33):
             data = struct.unpack(
                 "B" * 1,
-                ds.GetRasterBand(i + 1).ReadRaster(i, 0, 1, 1, buf_type=gdal.GDT_Byte),
+                ds.GetRasterBand(i + 1).ReadRaster(i, 0, 1, 1, buf_type=gdal.GDT_UInt8),
             )[0]
             if data != pytest.approx(expected_val[i], abs=1):
                 print(dt)
@@ -1945,6 +1971,19 @@ def test_gdalwarp_lib_135(gdalwarp_135_src_ds, gdalwarp_135_grid_gtx):
     )
     data = struct.unpack("B" * 1, ds.GetRasterBand(1).ReadRaster())[0]
     assert data == 120, "Bad value"
+
+
+@pytest.mark.require_driver("GTX")
+def test_gdalwarp_lib_novshift(gdalwarp_135_src_ds, gdalwarp_135_grid_gtx):
+
+    with gdaltest.error_raised(gdal.CE_None):
+        ds = gdal.Warp(
+            "",
+            gdalwarp_135_src_ds,
+            options=f'-f MEM -s_srs "+proj=utm +zone=31 +datum=WGS84 +units=m +geoidgrids={gdalwarp_135_grid_gtx} +vunits=m +no_defs" -t_srs EPSG:4979 -novshift',
+        )
+    data = struct.unpack("B" * 1, ds.GetRasterBand(1).ReadRaster())[0]
+    assert data == 100, "Bad value"
 
 
 @pytest.mark.require_driver("GTX")
@@ -2158,7 +2197,7 @@ def test_gdalwarp_lib_135n(gdalwarp_135_grid_gtx):
     src_ds.GetRasterBand(1).SetUnitType("ft")
 
     ds = gdal.Warp(
-        "", src_ds, format="MEM", dstSRS="EPSG:4979", outputType=gdal.GDT_Byte
+        "", src_ds, format="MEM", dstSRS="EPSG:4979", outputType=gdal.GDT_UInt8
     )
     data = struct.unpack("B" * 1, ds.GetRasterBand(1).ReadRaster())[0]
     assert data == 120, "Bad value"
@@ -2178,7 +2217,7 @@ def test_gdalwarp_lib_135o(gdalwarp_135_grid_gtx):
     src_ds.GetRasterBand(1).SetUnitType("US survey foot")
 
     ds = gdal.Warp(
-        "", src_ds, format="MEM", dstSRS="EPSG:4979", outputType=gdal.GDT_Byte
+        "", src_ds, format="MEM", dstSRS="EPSG:4979", outputType=gdal.GDT_UInt8
     )
     data = struct.unpack("B" * 1, ds.GetRasterBand(1).ReadRaster())[0]
     assert data == 120, "Bad value"
@@ -2458,7 +2497,7 @@ def test_gdalwarp_lib_ct():
         options='-r cubic -f MEM -t_srs EPSG:4326 -ct "proj=pipeline step inv proj=utm zone=11 ellps=clrk66 step proj=unitconvert xy_in=rad xy_out=deg step proj=axisswap order=2,1"',
     )
 
-    assert dstDS.GetRasterBand(1).Checksum() == 4705, "Bad checksum"
+    assert dstDS.GetRasterBand(1).Checksum() == 4772
 
 
 def test_gdalwarp_lib_ct_wkt():
@@ -2607,7 +2646,7 @@ def test_gdalwarp_lib_ct_wkt():
         coordinateOperation=wkt,
     )
 
-    assert dstDS.GetRasterBand(1).Checksum() == 4705, "Bad checksum"
+    assert dstDS.GetRasterBand(1).Checksum() == 4772
 
 
 ###############################################################################
@@ -4021,6 +4060,17 @@ def test_gdalwarp_lib_dict_arguments():
     assert opt == ["-wo", "SKIP_NOSOURCE=YES", "-wo", "NUM_THREADS=2"]
 
 
+def test_gdalwarp_lib_str_arguments():
+
+    opt = gdal.WarpOptions(
+        "__RETURN_OPTION_LIST__",
+        creationOptions="COMPRESS=DEFLATE",
+        warpOptions="SKIP_NOSOURCE=YES",
+    )
+
+    assert opt == ["-wo", "SKIP_NOSOURCE=YES", "-co", "COMPRESS=DEFLATE"]
+
+
 ###############################################################################
 # Test warping from long/lat to ortho
 
@@ -4170,7 +4220,8 @@ def test_gdalwarp_lib_conflicting_source_metadata(tmp_vsimem):
 
 def test_target_extent_consistent_size():
     """Test issue GH #9467 where the output size is not consistent when using target extent
-    with different input datasets having the same resolution and CRS but different extent."""
+    with different input datasets having the same resolution and CRS but different extent.
+    """
 
     # Create a source dataset with CRS 32613
     src_ds_1 = gdal.GetDriverByName("MEM").Create("", 10980, 10980)
@@ -4706,8 +4757,7 @@ def test_gdalwarp_te_srs_check_extent():
 
 def test_gdalwarplib_on_huge_raster():
 
-    src_ds = gdal.Open(
-        """<VRTDataset rasterXSize="1073741766" rasterYSize="1070224430">
+    src_ds = gdal.Open("""<VRTDataset rasterXSize="1073741766" rasterYSize="1070224430">
   <SRS dataAxisToSRSAxisMapping="1,2">PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs"],AUTHORITY["EPSG","3857"]]</SRS>
   <GeoTransform> -2.0037507260426737e+07,  3.7322767705947384e-02,  0.0000000000000000e+00,  1.9971868903190855e+07,  0.0000000000000000e+00, -3.7322767705947384e-02</GeoTransform>
   <VRTRasterBand dataType="Byte" band="1">
@@ -4716,8 +4766,7 @@ def test_gdalwarplib_on_huge_raster():
       <SourceBand>1</SourceBand>
     </SimpleSource>
   </VRTRasterBand>
-</VRTDataset>"""
-    )
+</VRTDataset>""")
 
     out_ds = gdal.Warp(
         "",
@@ -4747,3 +4796,69 @@ def test_gdalwarp_lib_mask_band_and_src_nodata():
     ):
         out_ds = gdal.Warp("", src_ds, options="-f MEM -dstnodata 5")
         assert out_ds.GetRasterBand(1).ReadRaster() == b"\x05"
+
+
+###############################################################################
+# Test bugfix for https://github.com/OSGeo/gdal/issues/13539
+
+
+def test_gdalwarp_lib_sum_preserving_non_discontinuity(tmp_vsimem):
+
+    src_ds = gdal.GetDriverByName("GTiff").Create(
+        tmp_vsimem / "in.tif", 17857, 8472, 1, gdal.GDT_Float64
+    )
+    src_ds.GetRasterBand(1).SetNoDataValue(float("nan"))
+    src_ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
+
+    dstX = 2231
+    dstY = 2208
+    srcX = dstX * 2
+    srcY = dstY * 2
+    src_val = 1.5
+    src_ds.WriteRaster(srcX, srcY, 2, 2, struct.pack("d", src_val) * (2 * 2))
+
+    # When the bug occurred, this pixel (among others) was erroneously taken
+    # into account
+    src_ds.WriteRaster(4461, 4236, 1, 1, struct.pack("d", 1e300))
+
+    out_ds = gdal.Warp("", src_ds, options="-of VRT -tr 2 2 -r sum -wm 60")
+    out_xoff = 1116
+    out_yoff = 2118
+    out_xsize = 1116
+    out_ysize = 1059
+    got_data = out_ds.ReadRaster(out_xoff, out_yoff, out_xsize, out_ysize)
+    assert (
+        array.array("d", got_data)[(dstY - out_yoff) * out_xsize + (dstX - out_xoff)]
+        == 4 * src_val
+    )
+
+
+###############################################################################
+# Test RESET_DEST_PIXELS warping option
+
+
+@pytest.mark.parametrize("dstNodata", [255, None])
+def test_gdalwarp_lib_RESET_DEST_PIXELS(dstNodata):
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 3, 3)
+    src_ds.SetGeoTransform([0, 1, 0, 0, 0, -1])
+    src_ds.GetRasterBand(1).Fill(1)
+
+    out_ds = gdal.Warp("", src_ds, format="MEM", dstNodata=dstNodata)
+
+    assert out_ds.ReadRaster() == b"\x01" * (3 * 3)
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src_ds.SetGeoTransform([1, 1, 0, -1, 0, -1])
+    src_ds.GetRasterBand(1).Fill(2)
+
+    src2_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    src2_ds.SetGeoTransform([2, 1, 0, -1, 0, -1])
+    src2_ds.GetRasterBand(1).Fill(3)
+
+    gdal.Warp(out_ds, [src_ds, src2_ds], warpOptions={"RESET_DEST_PIXELS": "YES"})
+
+    if dstNodata is None:
+        assert out_ds.ReadRaster() == b"\x00\x00\x00\x00\x02\x03\x00\x00\x00"
+    else:
+        assert out_ds.ReadRaster() == b"\xff\xff\xff\xff\x02\x03\xff\xff\xff"

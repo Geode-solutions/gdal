@@ -81,7 +81,7 @@ def test_ogr2ogr_lib_2b(tmp_vsimem):
 
     # Test @filename syntax with a UTF-8 BOM
     gdal.FileFromMemBuffer(
-        tmp_vsimem / "sql.txt", "\xEF\xBB\xBFselect * from poly".encode("LATIN1")
+        tmp_vsimem / "sql.txt", "\xef\xbb\xbfselect * from poly".encode("LATIN1")
     )
     ds = gdal.VectorTranslate(
         "", srcDS, format="MEM", SQLStatement=f"@{tmp_vsimem}/sql.txt"
@@ -167,6 +167,25 @@ def test_ogr2ogr_lib_6():
 
 
 ###############################################################################
+# Test selectFields with arrow optimization
+
+
+@pytest.mark.require_driver("GPKG")
+def test_ogr2ogr_lib_selectFields_gpkg(tmp_vsimem):
+
+    srcDS = gdal.VectorTranslate(tmp_vsimem / "in.gpkg", "../ogr/data/poly.shp")
+    gdal.VectorTranslate(
+        tmp_vsimem / "out.gpkg", srcDS, selectFields=["eas_id", "prfedea"]
+    )
+    ds = ogr.Open(tmp_vsimem / "out.gpkg")
+    lyr = ds.GetLayer(0)
+    assert lyr.GetLayerDefn().GetFieldCount() == 2
+    feat = lyr.GetNextFeature()
+    assert feat.GetFieldAsDouble("EAS_ID") == 168
+    assert feat.GetFieldAsString("PRFEDEA") == "35043411"
+
+
+###############################################################################
 # Test selectFields to []
 
 
@@ -176,6 +195,24 @@ def test_ogr2ogr_lib_sel_fields_empty():
     ds = gdal.VectorTranslate("", srcDS, format="MEM", selectFields=[])
     lyr = ds.GetLayer(0)
     assert lyr.GetLayerDefn().GetFieldCount() == 0
+    feat = lyr.GetNextFeature()
+    assert feat.GetGeometryRef() is not None
+
+
+###############################################################################
+# Test selectFields to []
+
+
+@pytest.mark.require_driver("GPKG")
+def test_ogr2ogr_lib_sel_fields_empty_with_arow_optimization(tmp_vsimem):
+
+    srcDS = gdal.VectorTranslate(tmp_vsimem / "in.gpkg", "../ogr/data/poly.shp")
+    gdal.VectorTranslate(tmp_vsimem / "out.gpkg", srcDS, selectFields=[])
+    ds = ogr.Open(tmp_vsimem / "out.gpkg")
+    lyr = ds.GetLayer(0)
+    assert lyr.GetLayerDefn().GetFieldCount() == 0
+    feat = lyr.GetNextFeature()
+    assert feat.GetGeometryRef() is not None
 
 
 ###############################################################################
@@ -378,7 +415,7 @@ def test_ogr2ogr_lib_16():
         ["POINT ZM (1 2 3 4)", "XYZM", "POINT ZM (1 2 3 4)"],
         ["POINT ZM (1 2 3 4)", "layer_dim", "POINT ZM (1 2 3 4)"],
     ]
-    for (wkt_before, dim, wkt_after) in tests:
+    for wkt_before, dim, wkt_after in tests:
         srcDS = gdal.GetDriverByName("MEM").Create("", 0, 0, 0)
         geom = ogr.CreateGeometryFromWkt(wkt_before)
         lyr = srcDS.CreateLayer("test", geom_type=geom.GetGeometryType())
@@ -3360,3 +3397,26 @@ def test_ogr2ogr_lib_clip_promote_poly_to_geometry_collection_bis():
     f = out_lyr.GetNextFeature()
     assert f.GetGeometryRef().GetGeometryType() == ogr.wkbGeometryCollection
     assert f.GetGeometryRef().GetGeometryCount() == 2
+
+
+###############################################################################
+
+
+@pytest.mark.require_geos
+def test_ogr2ogr_lib_wrapdateline_useless():
+
+    src_ds = gdaltest.wkt_ds(
+        "POLYGON ((-83.0556348903452 8.26039022660911,-83.0556348903452 8.25855541870704,-83.0536624718505 8.25852920716559,-83.0536821305066 8.26037712083838,-83.0556348903452 8.26039022660911))",
+        geom_type=ogr.wkbPolygon,
+        epsg=4326,
+    )
+    with gdaltest.error_raised(gdal.CE_None):
+        out_ds = gdal.VectorTranslate(
+            "", src_ds, options="-of MEM -t_srs EPSG:32617 -wrapdateline"
+        )
+    lyr = out_ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    ogrtest.check_feature_geometry(
+        f,
+        "POLYGON ((273569.876923437 913668.344183491,273568.830352505 913465.374678854,273786.170063323 913461.355034812,273785.056779618 913665.785238482,273569.876923437 913668.344183491))",
+    )

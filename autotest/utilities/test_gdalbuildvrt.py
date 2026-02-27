@@ -106,7 +106,7 @@ def test_gdalbuildvrt_1(gdalbuildvrt_path, tmp_path, sample_tifs):
 
     mosaic_vrt = str(tmp_path / "mosaic.vrt")
 
-    (_, err) = gdaltest.runexternal_out_and_err(
+    _, err = gdaltest.runexternal_out_and_err(
         gdalbuildvrt_path + f" {mosaic_vrt} {' '.join(sample_tifs)}"
     )
     assert err is None or err == "", "got error/warning"
@@ -273,13 +273,13 @@ def test_gdalbuildvrt_7(gdalbuildvrt_path, tmp_path):
             ff = "\xff"
 
         out_ds.GetRasterBand(1).WriteRaster(
-            0, 0, 10, 10, ff, buf_type=gdal.GDT_Byte, buf_xsize=1, buf_ysize=1
+            0, 0, 10, 10, ff, buf_type=gdal.GDT_UInt8, buf_xsize=1, buf_ysize=1
         )
         out_ds.GetRasterBand(2).WriteRaster(
-            0, 0, 10, 10, "\x00", buf_type=gdal.GDT_Byte, buf_xsize=1, buf_ysize=1
+            0, 0, 10, 10, "\x00", buf_type=gdal.GDT_UInt8, buf_xsize=1, buf_ysize=1
         )
         out_ds.GetRasterBand(3).WriteRaster(
-            0, 0, 10, 10, "\x00", buf_type=gdal.GDT_Byte, buf_xsize=1, buf_ysize=1
+            0, 0, 10, 10, "\x00", buf_type=gdal.GDT_UInt8, buf_xsize=1, buf_ysize=1
         )
 
     with gdal.GetDriverByName("GTiff").Create(
@@ -295,13 +295,13 @@ def test_gdalbuildvrt_7(gdalbuildvrt_path, tmp_path):
         out_ds.GetRasterBand(1).SetNoDataValue(256)
 
         out_ds.GetRasterBand(1).WriteRaster(
-            10, 0, 10, 10, "\x00", buf_type=gdal.GDT_Byte, buf_xsize=1, buf_ysize=1
+            10, 0, 10, 10, "\x00", buf_type=gdal.GDT_UInt8, buf_xsize=1, buf_ysize=1
         )
         out_ds.GetRasterBand(2).WriteRaster(
-            10, 0, 10, 10, ff, buf_type=gdal.GDT_Byte, buf_xsize=1, buf_ysize=1
+            10, 0, 10, 10, ff, buf_type=gdal.GDT_UInt8, buf_xsize=1, buf_ysize=1
         )
         out_ds.GetRasterBand(3).WriteRaster(
-            10, 0, 10, 10, "\x00", buf_type=gdal.GDT_Byte, buf_xsize=1, buf_ysize=1
+            10, 0, 10, 10, "\x00", buf_type=gdal.GDT_UInt8, buf_xsize=1, buf_ysize=1
         )
 
     gdaltest.runexternal(gdalbuildvrt_path + f" {output_vrt} {input1_tif} {input2_tif}")
@@ -396,7 +396,7 @@ def test_gdalbuildvrt_10(gdalbuildvrt_path, tmp_path):
         10,
         10,
         1,
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         options=["NBITS=1", "PHOTOMETRIC=MINISWHITE"],
     ) as out_ds:
         out_ds.SetGeoTransform([2, 0.1, 0, 49, 0, -0.1])
@@ -405,7 +405,7 @@ def test_gdalbuildvrt_10(gdalbuildvrt_path, tmp_path):
         out_ds.SetProjection(srs.ExportToWkt())
 
         out_ds.GetRasterBand(1).WriteRaster(
-            1, 1, 3, 3, "\x01", buf_type=gdal.GDT_Byte, buf_xsize=1, buf_ysize=1
+            1, 1, 3, 3, "\x01", buf_type=gdal.GDT_UInt8, buf_xsize=1, buf_ysize=1
         )
 
     with gdal.GetDriverByName("GTiff").Create(
@@ -413,7 +413,7 @@ def test_gdalbuildvrt_10(gdalbuildvrt_path, tmp_path):
         10,
         10,
         1,
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         options=["NBITS=1", "PHOTOMETRIC=MINISWHITE"],
     ) as out_ds:
         out_ds.SetGeoTransform([2, 0.1, 0, 49, 0, -0.1])
@@ -422,7 +422,7 @@ def test_gdalbuildvrt_10(gdalbuildvrt_path, tmp_path):
         out_ds.SetProjection(srs.ExportToWkt())
 
         out_ds.GetRasterBand(1).WriteRaster(
-            6, 6, 3, 3, "\x01", buf_type=gdal.GDT_Byte, buf_xsize=1, buf_ysize=1
+            6, 6, 3, 3, "\x01", buf_type=gdal.GDT_UInt8, buf_xsize=1, buf_ysize=1
         )
 
     gdaltest.runexternal(
@@ -474,7 +474,7 @@ def test_gdalbuildvrt_12(gdalbuildvrt_path, tmp_path):
 
     output_vrt = str(tmp_path / "gdalbuildvrt12.vrt")
 
-    (_, err) = gdaltest.runexternal_out_and_err(
+    _, err = gdaltest.runexternal_out_and_err(
         gdalbuildvrt_path + f" -tap {output_vrt} ../gcore/data/byte.tif",
         check_memleak=False,
     )
@@ -569,7 +569,7 @@ def test_gdalbuildvrt_15(gdalbuildvrt_path, tmp_path):
 
 def test_gdalbuildvrt_16(gdalbuildvrt_path):
 
-    (out, err) = gdaltest.runexternal_out_and_err(
+    out, err = gdaltest.runexternal_out_and_err(
         gdalbuildvrt_path
         + " /non_existing_dir/non_existing_subdir/out.vrt ../gcore/data/byte.tif"
     )

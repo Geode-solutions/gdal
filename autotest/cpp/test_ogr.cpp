@@ -2239,81 +2239,81 @@ TEST_F(test_ogr, OGR_L_GetArrowStream)
     auto poLayer = poDS->CreateLayer("test");
     {
         OGRFieldDefn oFieldDefn("str", OFTString);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("bool", OFTInteger);
         oFieldDefn.SetSubType(OFSTBoolean);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("int16", OFTInteger);
         oFieldDefn.SetSubType(OFSTInt16);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("int32", OFTInteger);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("int64", OFTInteger64);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("float32", OFTReal);
         oFieldDefn.SetSubType(OFSTFloat32);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("float64", OFTReal);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("date", OFTDate);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("time", OFTTime);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("datetime", OFTDateTime);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("binary", OFTBinary);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("strlist", OFTStringList);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("boollist", OFTIntegerList);
         oFieldDefn.SetSubType(OFSTBoolean);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("int16list", OFTIntegerList);
         oFieldDefn.SetSubType(OFSTInt16);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("int32list", OFTIntegerList);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("int64list", OFTInteger64List);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("float32list", OFTRealList);
         oFieldDefn.SetSubType(OFSTFloat32);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     {
         OGRFieldDefn oFieldDefn("float64list", OFTRealList);
-        poLayer->CreateField(&oFieldDefn);
+        EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     }
     auto poFDefn = poLayer->GetLayerDefn();
     struct ArrowArrayStream stream;
@@ -2731,8 +2731,7 @@ TEST_F(test_ogr, GDALDatasetSetQueryLoggerFunc)
     ASSERT_EQ(OGRERR_NONE, err);
 
     auto insertEntry = std::find_if(
-        queryLog.cbegin(), queryLog.cend(),
-        [](const QueryLogEntry &e)
+        queryLog.cbegin(), queryLog.cend(), [](const QueryLogEntry &e)
         { return e.sql.find(R"sql(INSERT INTO "poly")sql", 0) == 0; });
 
     ASSERT_TRUE(insertEntry != queryLog.end());
@@ -4633,7 +4632,7 @@ TEST_F(test_ogr, GetArrowStream_DateTime_As_String)
             "", 0, 0, 0, GDT_Unknown, nullptr));
     auto poLayer = poDS->CreateLayer("test", nullptr, wkbNone);
     OGRFieldDefn oFieldDefn("dt", OFTDateTime);
-    poLayer->CreateField(&oFieldDefn);
+    EXPECT_EQ(poLayer->CreateField(&oFieldDefn), OGRERR_NONE);
     struct ArrowArrayStream stream;
     CPLStringList aosOptions;
     aosOptions.SetNameValue("INCLUDE_FID", "NO");
@@ -4732,6 +4731,44 @@ TEST_F(test_ogr, OGRPolygon_two_vertex_constructor)
     p.exportToWkt(&outWKT, wkbVariantIso);
     EXPECT_STREQ(outWKT, "POLYGON ((1 2,1 4,3 4,3 2,1 2))");
     CPLFree(outWKT);
+}
+
+// Test OGRGeometryCollection::addComponents()
+TEST_F(test_ogr, OGRGeometryCollection_addComponents)
+{
+    auto gc1 = std::make_unique<OGRGeometryCollection>();
+    auto gc2 = std::make_unique<OGRGeometryCollection>();
+
+    for (const auto &wkt : {"POINT (3 7)", "LINESTRING M (9 3 2, 4 1 9)"})
+    {
+        auto [poGeom, err] = OGRGeometryFactory::createFromWkt(wkt);
+        ASSERT_EQ(err, OGRERR_NONE);
+        gc1->addGeometry(std::move(poGeom));
+    }
+
+    for (const auto &wkt :
+         {"POINT Z (6 4 8)", "POLYGON ((0 0, 1 1, 0 1, 0 0))"})
+    {
+        auto [poGeom, err] = OGRGeometryFactory::createFromWkt(wkt);
+        ASSERT_EQ(err, OGRERR_NONE);
+        gc2->addGeometry(std::move(poGeom));
+    }
+
+    ASSERT_EQ(gc1->addGeometryComponents(std::move(gc2)), OGRERR_NONE);
+
+    OGRWktOptions wktOptions;
+    wktOptions.variant = wkbVariantIso;
+
+    EXPECT_EQ(gc1->getNumGeometries(), 4);
+    EXPECT_EQ(gc1->getGeometryType(), wkbGeometryCollectionZM);
+    EXPECT_EQ(gc1->getGeometryRef(0)->exportToWkt(wktOptions),
+              "POINT ZM (3 7 0 0)");
+    EXPECT_EQ(gc1->getGeometryRef(1)->exportToWkt(wktOptions),
+              "LINESTRING ZM (9 3 0 2,4 1 0 9)");
+    EXPECT_EQ(gc1->getGeometryRef(2)->exportToWkt(wktOptions),
+              "POINT ZM (6 4 8 0)");
+    EXPECT_EQ(gc1->getGeometryRef(3)->exportToWkt(wktOptions),
+              "POLYGON ZM ((0 0 0 0,1 1 0 0,0 1 0 0,0 0 0 0))");
 }
 
 }  // namespace

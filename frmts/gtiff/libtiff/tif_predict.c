@@ -151,6 +151,8 @@ static int PredictorSetupDecode(TIFF *tif)
             case 64:
                 sp->decodepfunc = horAcc64;
                 break;
+            default:
+                break;
         }
         /*
          * Override default decoding method with one that does the
@@ -246,6 +248,8 @@ static int PredictorSetupEncode(TIFF *tif)
                 break;
             case 64:
                 sp->encodepfunc = horDiff64;
+                break;
+            default:
                 break;
         }
         /*
@@ -1098,8 +1102,10 @@ static void PredictorPrintDir(TIFF *tif, FILE *fd, long flags)
             case 3:
                 fprintf(fd, "floating point predictor ");
                 break;
+            default:
+                break;
         }
-        fprintf(fd, "%d (0x%x)\n", sp->predictor, sp->predictor);
+        fprintf(fd, "%d (0x%x)\n", sp->predictor, (unsigned)sp->predictor);
     }
     if (sp->printdir)
         (*sp->printdir)(tif, fd, flags);

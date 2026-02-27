@@ -21,6 +21,7 @@ from osgeo import gdal
 numpy = pytest.importorskip("numpy")
 gdal_array = gdaltest.importorskip_gdal_array()
 
+
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
 def module_disable_exceptions():
@@ -260,7 +261,7 @@ def test_numpy_rw_10_bis(options):
 @pytest.mark.parametrize(
     "name,in_dt,np_dt,val",
     [
-        ("uint8", gdal.GDT_Byte, numpy.uint8, 255),
+        ("uint8", gdal.GDT_UInt8, numpy.uint8, 255),
         ("uint16", gdal.GDT_UInt16, numpy.uint16, 65535),
         ("int16", gdal.GDT_Int16, numpy.int16, -32767),
         ("uint32", gdal.GDT_UInt32, numpy.uint32, 4294967295),
@@ -343,7 +344,7 @@ def test_numpy_rw_12():
     ar[1][1] = 3
 
     drv = gdal.GetDriverByName("MEM")
-    ds = drv.Create("", 1, 2, 1, gdal.GDT_Byte)
+    ds = drv.Create("", 1, 2, 1, gdal.GDT_UInt8)
 
     ds.GetRasterBand(1).WriteArray(ar[:, 1:])
 
@@ -362,7 +363,7 @@ def test_numpy_rw_12():
 def test_numpy_rw_13():
 
     drv = gdal.GetDriverByName("MEM")
-    ds = drv.Create("", 2, 1, 1, gdal.GDT_Byte)
+    ds = drv.Create("", 2, 1, 1, gdal.GDT_UInt8)
     ar = numpy.empty([1, 2], dtype=numpy.uint8)
     ar[0][0] = 100
     ar[0][1] = 200
@@ -426,7 +427,7 @@ def test_numpy_rw_13():
 
     # With a multiband file
     drv = gdal.GetDriverByName("MEM")
-    ds = drv.Create("", 2, 1, 3, gdal.GDT_Byte)
+    ds = drv.Create("", 2, 1, 3, gdal.GDT_UInt8)
     ar = numpy.empty([3, 1, 2], dtype=numpy.uint8)
     ar[0][0][0] = 100
     ar[0][0][1] = 200
@@ -491,7 +492,7 @@ def test_numpy_rw_13():
 
     # This one should be OK !
     ar = numpy.zeros([3, 1, 2], dtype=numpy.uint8)
-    ds.ReadAsArray(buf_obj=ar, buf_xsize=2, buf_ysize=1, buf_type=gdal.GDT_Byte)
+    ds.ReadAsArray(buf_obj=ar, buf_xsize=2, buf_ysize=1, buf_type=gdal.GDT_UInt8)
     assert (
         ar[0][0][0] == 100
         and ar[0][0][1] == 200
@@ -960,8 +961,7 @@ def test_numpy_rw_band_read_as_array_error_cases():
 )
 def test_numpy_rw_band_read_as_array_getlasterrormsg():
 
-    ds = gdal.Open(
-        """<VRTDataset rasterXSize="20" rasterYSize="20">
+    ds = gdal.Open("""<VRTDataset rasterXSize="20" rasterYSize="20">
   <VRTRasterBand dataType="Float64" band="1" subClass="VRTDerivedRasterBand">
     <Description>Scaling</Description>
     <PixelFunctionType>invalid</PixelFunctionType>
@@ -971,8 +971,7 @@ def test_numpy_rw_band_read_as_array_getlasterrormsg():
       <SourceBand>1</SourceBand>
     </SimpleSource>
   </VRTRasterBand>
-</VRTDataset>"""
-    )
+</VRTDataset>""")
     gdal.ErrorReset()
     with gdal.quiet_errors():
         assert ds.GetRasterBand(1).ReadAsArray() is None

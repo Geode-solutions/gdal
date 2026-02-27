@@ -28,7 +28,7 @@ static inline bool ENDS_WITH_CI(const char *a, const char *b)
 }
 
 /************************************************************************/
-/*                       OGRGeoPackageDriverIdentify()                  */
+/*                    OGRGeoPackageDriverIdentify()                     */
 /************************************************************************/
 
 static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo,
@@ -248,7 +248,7 @@ static int OGRGeoPackageDriverIdentify(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                    OGRGeoPackageDriverGetSubdatasetInfo()            */
+/*                OGRGeoPackageDriverGetSubdatasetInfo()                */
 /************************************************************************/
 
 struct OGRGeoPackageDriverSubdatasetInfo final : public GDALSubdatasetInfo
@@ -355,7 +355,7 @@ static GDALDataset *OGRGeoPackageDriverOpen(GDALOpenInfo *poOpenInfo)
 static GDALDataset *OGRGeoPackageDriverCreate(const char *pszFilename,
                                               int nXSize, int nYSize,
                                               int nBands, GDALDataType eDT,
-                                              char **papszOptions)
+                                              CSLConstList papszOptions)
 {
     if (strcmp(pszFilename, ":memory:") != 0)
     {
@@ -414,7 +414,7 @@ static CPLErr OGRGeoPackageDriverDelete(const char *pszFilename)
 }
 
 /************************************************************************/
-/*                          GDALGPKGDriver                              */
+/*                            GDALGPKGDriver                            */
 /************************************************************************/
 
 class GDALGPKGDriver final : public GDALDriver
@@ -430,7 +430,7 @@ class GDALGPKGDriver final : public GDALDriver
     const char *GetMetadataItem(const char *pszName,
                                 const char *pszDomain) override;
 
-    char **GetMetadata(const char *pszDomain) override
+    CSLConstList GetMetadata(const char *pszDomain) override
     {
         std::lock_guard oLock(m_oMutex);
         InitializeCreationOptionList();
@@ -589,7 +589,7 @@ void GDALGPKGDriver::InitializeCreationOptionList()
 }
 
 /************************************************************************/
-/*                    OGRGeoPackageRepackAlgorithm                      */
+/*                     OGRGeoPackageRepackAlgorithm                     */
 /************************************************************************/
 
 #ifndef _
@@ -634,7 +634,7 @@ bool OGRGeoPackageRepackAlgorithm::RunImpl(GDALProgressFunc, void *)
 }
 
 /************************************************************************/
-/*               OGRGeoPackageDriverInstantiateAlgorithm()              */
+/*              OGRGeoPackageDriverInstantiateAlgorithm()               */
 /************************************************************************/
 
 static GDALAlgorithm *
@@ -651,7 +651,7 @@ OGRGeoPackageDriverInstantiateAlgorithm(const std::vector<std::string> &aosPath)
 }
 
 /************************************************************************/
-/*                         RegisterOGRGeoPackage()                       */
+/*                       RegisterOGRGeoPackage()                        */
 /************************************************************************/
 
 void RegisterOGRGeoPackage()

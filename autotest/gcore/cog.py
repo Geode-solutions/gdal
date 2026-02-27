@@ -97,6 +97,7 @@ def test_cog_basic():
     ds = gdal.GetDriverByName("COG").CreateCopy(
         filename, src_ds, callback=my_cbk, callback_data=tab
     )
+    assert not ds.GetCloseReportsProgress()
     src_ds = None
     assert tab[0] == 1.0
     assert ds
@@ -362,7 +363,7 @@ def test_cog_creation_of_overviews_with_mask():
     src_ds = gdal.Translate("", "data/byte.tif", options="-of MEM -outsize 2048 300")
     src_ds.CreateMaskBand(gdal.GMF_PER_DATASET)
     src_ds.GetRasterBand(1).GetMaskBand().WriteRaster(
-        0, 0, 1024, 300, b"\xFF", buf_xsize=1, buf_ysize=1
+        0, 0, 1024, 300, b"\xff", buf_xsize=1, buf_ysize=1
     )
 
     check_filename = "/vsimem/tmp.tif"
@@ -484,11 +485,7 @@ def test_cog_small_world_to_web_mercator():
         if gt[i] != pytest.approx(expected_gt[i], abs=1e-10 * abs(expected_gt[i])):
             assert False, gt
     got_cs = [ds.GetRasterBand(i + 1).Checksum() for i in range(3)]
-    assert got_cs in (
-        [26293, 23439, 14955],
-        [26228, 22085, 12992],
-        [25088, 23140, 13265],  # libjpeg 9e
-    )
+    assert got_cs == pytest.approx([20968, 23493, 14665], abs=100)
     assert ds.GetRasterBand(1).GetMaskBand().Checksum() == 17849
     assert ds.GetRasterBand(1).GetOverviewCount() == 0
     ds = None
@@ -1917,7 +1914,6 @@ def test_cog_stats(tmp_vsimem, nbands, co, src_has_stats, expected_val):
 
 
 def test_cog_mask_band_overviews(tmp_vsimem):
-
     """Test bugfix for https://github.com/OSGeo/gdal/issues/10536"""
 
     filename = str(tmp_vsimem / "out.tif")
@@ -2143,7 +2139,7 @@ def test_cog_interleave_tile_or_band_vsicurl(tmp_vsimem, INTERLEAVE):
     webserver_process = None
     webserver_port = 0
 
-    (webserver_process, webserver_port) = webserver.launch(
+    webserver_process, webserver_port = webserver.launch(
         handler=webserver.DispatcherHttpHandler
     )
     if webserver_port == 0:
@@ -2282,3 +2278,42 @@ def test_cog_write_complex(tmp_vsimem):
     with gdal.Open(tmp_vsimem / "out.tif") as src_ds:
         assert src_ds.GetRasterBand(1).GetOverviewCount() == 1
         assert src_ds.GetRasterBand(1).GetOverview(0).Checksum() != 0
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_cog_create(tmp_vsimem):
+
+    ds = gdal.GetDriverByName("COG").Create(
+        tmp_vsimem / "out.tif", 2, 1, 3, options=["COMPRESS=LZW", "PREDICTOR=YES"]
+    )
+    assert ds.GetDriver().ShortName == "COG"
+    assert ds.RasterXSize == 2
+    assert ds.RasterYSize == 1
+    assert ds.RasterCount == 3
+    assert ds.GetCloseReportsProgress()
+    ds.GetRasterBand(1).Fill(1)
+
+    def my_progress(pct, msg, tab_pct):
+        assert pct >= tab_pct[0]
+        tab_pct[0] = pct
+        return True
+
+    tab_pct = [0]
+    assert ds.Close(callback=my_progress, callback_data=tab_pct) == gdal.CE_None
+
+    assert tab_pct[0] == 1.0
+
+    with gdal.Open(tmp_vsimem / "out.tif") as src_ds:
+        assert src_ds.RasterXSize == 2
+        assert src_ds.RasterYSize == 1
+        assert src_ds.RasterCount == 3
+        assert src_ds.GetRasterBand(1).Checksum() == 2
+        assert src_ds.GetMetadataItem("LAYOUT", "IMAGE_STRUCTURE") == "COG"
+        assert src_ds.GetMetadataItem("COMPRESSION", "IMAGE_STRUCTURE") == "LZW"
+        assert src_ds.GetMetadataItem("PREDICTOR", "IMAGE_STRUCTURE") == "2"
+
+    with pytest.raises(Exception, match="Attempt to create 0x0 dataset is illegal"):
+        gdal.GetDriverByName("COG").Create(tmp_vsimem / "out.tif", 0, 0)

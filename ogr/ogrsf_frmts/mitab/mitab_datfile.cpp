@@ -57,8 +57,8 @@ TABDATFile::TABDATFile(const char *pszEncoding)
       m_pasFieldDef(nullptr), m_poRecordBlock(nullptr), m_nBlockSize(0),
       m_nRecordSize(-1), m_nCurRecordId(-1), m_bCurRecordDeletedFlag(FALSE),
       m_numRecords(-1), m_nFirstRecordPtr(0), m_bWriteHeaderInitialized(FALSE),
-      m_bWriteEOF(FALSE), m_bUpdated(FALSE),
-      m_osEncoding(pszEncoding), m_szBuffer{}
+      m_bWriteEOF(FALSE), m_bUpdated(FALSE), m_osEncoding(pszEncoding),
+      m_szBuffer{}
 {
 }
 
@@ -309,7 +309,7 @@ int TABDATFile::Close()
 }
 
 /************************************************************************/
-/*                            SyncToDisk()                             */
+/*                             SyncToDisk()                             */
 /************************************************************************/
 
 int TABDATFile::SyncToDisk()
@@ -571,7 +571,7 @@ int TABDATFile::CommitRecordToFile()
     {
         m_bWriteEOF = FALSE;
         char cEOF = 26;
-        if (VSIFSeekL(m_fp, 0L, SEEK_END) == 0)
+        if (VSIFSeekL(m_fp, 0, SEEK_END) == 0)
             VSIFWriteL(&cEOF, 1, 1, m_fp);
     }
 

@@ -23,7 +23,7 @@
 #endif
 
 /************************************************************************/
-/*            GDALVectorInfoAlgorithm::GDALVectorInfoAlgorithm()        */
+/*          GDALVectorInfoAlgorithm::GDALVectorInfoAlgorithm()          */
 /************************************************************************/
 
 GDALVectorInfoAlgorithm::GDALVectorInfoAlgorithm(bool standaloneStep)
@@ -38,11 +38,11 @@ GDALVectorInfoAlgorithm::GDALVectorInfoAlgorithm(bool standaloneStep)
     AddInputFormatsArg(&m_inputFormats)
         .AddMetadataItem(GAAMDI_REQUIRED_CAPABILITIES, {GDAL_DCAP_VECTOR})
         .SetHiddenForCLI(!standaloneStep);
+
     auto &datasetArg =
-        AddInputDatasetArg(&m_inputDataset, GDAL_OF_VECTOR,
-                           /* positionalAndRequired = */ standaloneStep)
-            .AddAlias("dataset")
-            .SetHiddenForCLI(!standaloneStep);
+        AddInputDatasetArg(&m_inputDataset, GDAL_OF_VECTOR).AddAlias("dataset");
+    if (!standaloneStep)
+        datasetArg.SetHidden();
     auto &layerArg = AddLayerNameArg(&m_layerNames)
                          .SetMutualExclusionGroup("layer-sql")
                          .AddAlias("layer");
@@ -76,21 +76,10 @@ GDALVectorInfoAlgorithm::GDALVectorInfoAlgorithm(bool standaloneStep)
         .SetReadFromFileAtSyntaxAllowed()
         .SetMetaVar("<WHERE>|@<filename>")
         .SetRemoveSQLCommentsEnabled();
+    AddArg("fid", 0, _("Feature identifier"), &m_fid)
+        .SetMetaVar("FID")
+        .SetMutualExclusionGroup("layer-sql");
     AddArg("dialect", 0, _("SQL dialect"), &m_dialect);
-    AddArg(GDAL_ARG_NAME_UPDATE, 0, _("Open the dataset in update mode"),
-           &m_update)
-        .SetHiddenForCLI(!standaloneStep)
-        .AddAction(
-            [this]()
-            {
-                if (m_update)
-                {
-                    ReportError(CE_Warning, CPLE_AppDefined,
-                                "Option 'update' is deprecated since GDAL 3.12 "
-                                "and will be removed in GDAL 3.13. Use 'gdal "
-                                "vector sql --update' instead.");
-                }
-            });
     AddOutputStringArg(&m_output);
     AddStdoutArg(&m_stdout);
 
@@ -147,6 +136,11 @@ bool GDALVectorInfoAlgorithm::RunStep(GDALPipelineStepRunContext &)
     {
         aosOptions.AddString("-where");
         aosOptions.AddString(m_where.c_str());
+    }
+    if (m_fid >= 0)
+    {
+        aosOptions.AddString("-fid");
+        aosOptions.AddString(CPLSPrintf("%d", m_fid));
     }
     if (!m_dialect.empty())
     {

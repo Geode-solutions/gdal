@@ -51,7 +51,7 @@ const size_t ESTIMATE_OBJECT_SIZE =
     JSON_OBJECT_DEF_HASH_ENTRIES * ESTIMATE_OBJECT_ELT_SIZE;
 
 /************************************************************************/
-/*                     OGRJSONCollectionStreamingParser()                */
+/*                  OGRJSONCollectionStreamingParser()                  */
 /************************************************************************/
 
 OGRJSONCollectionStreamingParser::OGRJSONCollectionStreamingParser(
@@ -62,7 +62,7 @@ OGRJSONCollectionStreamingParser::OGRJSONCollectionStreamingParser(
 }
 
 /************************************************************************/
-/*                   ~OGRJSONCollectionStreamingParser()                */
+/*                 ~OGRJSONCollectionStreamingParser()                  */
 /************************************************************************/
 
 OGRJSONCollectionStreamingParser::~OGRJSONCollectionStreamingParser()
@@ -328,7 +328,7 @@ void OGRJSONCollectionStreamingParser::StartArrayMember()
 }
 
 /************************************************************************/
-/*                               EndArray()                             */
+/*                              EndArray()                              */
 /************************************************************************/
 
 void OGRJSONCollectionStreamingParser::EndArray()
@@ -357,7 +357,7 @@ void OGRJSONCollectionStreamingParser::EndArray()
 }
 
 /************************************************************************/
-/*                              String()                                */
+/*                               String()                               */
 /************************************************************************/
 
 void OGRJSONCollectionStreamingParser::String(std::string_view sValue)
@@ -392,16 +392,17 @@ void OGRJSONCollectionStreamingParser::String(std::string_view sValue)
             AppendObject(json_object_new_string_len(
                 sValue.data(), static_cast<int>(sValue.size())));
         else
-            CPLError(
-                CE_Failure, CPLE_NotSupported,
+            EmitException(
                 "OGRJSONCollectionStreamingParser::String(): too large string");
     }
 }
 
 /************************************************************************/
-/*                              Number()                                */
+/*                               Number()                               */
 /************************************************************************/
 
+// recent libc++ std::from_chars() involve unsigned integer overflow
+CPL_NOSANITIZE_UNSIGNED_INT_OVERFLOW
 void OGRJSONCollectionStreamingParser::Number(std::string_view sValue)
 {
     if (m_nMaxObjectSize > 0 && m_nCurObjMemEstimate > m_nMaxObjectSize)
@@ -462,8 +463,8 @@ void OGRJSONCollectionStreamingParser::Number(std::string_view sValue)
             }
             else
             {
-                CPLError(CE_Failure, CPLE_AppDefined, "Unrecognized number: %s",
-                         std::string(sValue).c_str());
+                EmitException(
+                    ("Unrecognized number: " + std::string(sValue)).c_str());
             }
         }
         else
@@ -478,8 +479,8 @@ void OGRJSONCollectionStreamingParser::Number(std::string_view sValue)
             }
             else
             {
-                CPLError(CE_Failure, CPLE_AppDefined, "Unrecognized number: %s",
-                         std::string(sValue).c_str());
+                EmitException(
+                    ("Unrecognized number: " + std::string(sValue)).c_str());
             }
         }
     }
@@ -519,7 +520,7 @@ void OGRJSONCollectionStreamingParser::Boolean(bool bVal)
 }
 
 /************************************************************************/
-/*                               Null()                                 */
+/*                                Null()                                */
 /************************************************************************/
 
 void OGRJSONCollectionStreamingParser::Null()
